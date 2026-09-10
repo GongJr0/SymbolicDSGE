@@ -265,14 +265,23 @@ def test_selecting_a_field_the_producer_does_not_emit_is_rejected() -> None:
 def test_a_non_two_dimensional_source_field_cannot_be_selected(
     solved: SolvedModel,
 ) -> None:
-    """Filters emit rank-3 covariance fields that no transform can consume."""
+    """Filters emit rank-3 covariance fields that no transform can consume.
+
+    The step factories refuse these outright, so the field is swapped in behind
+    them to reach the pipeline's own check, which is what a hand-built step
+    bypassing the factories meets.
+    """
+    step = standardize_step("out", source="filter", field="innov")
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
         reference_filter_step("filter"),
-        standardize_step("out", source="filter", field="P_pred"),
+        dataclasses.replace(
+            step,
+            source_args=(dataclasses.replace(step.source_args[0], field="P_pred"),),
+        ),
     ]
 
-    with pytest.raises(ValueError, match="must be 2D"):
+    with pytest.raises(ValueError, match="cannot be read as a source"):
         _plan(steps, reference=solved)
 
 
@@ -297,6 +306,29 @@ def test_a_postproc_step_has_no_per_replication_layout() -> None:
 
     with pytest.raises(NotImplementedError, match="Output-layout resolution"):
         resolve_output_specs([step], [[]], cast(SolvedModel, object()), None)
+
+
+def test_the_planner_still_sizes_only_two_dimensional_sources(
+    solved: SolvedModel,
+) -> None:
+    """Both gates above the planner reject these, so it is called directly.
+
+    The shape rule lives here as well because the planner is what turns a
+    source into rows and columns, and it should not depend on a caller having
+    been screened.
+    """
+    step = standardize_step("out", source="filter", field="innov")
+    steps = [
+        simulation_step("sim", target="reference", T=T, observables=True),
+        reference_filter_step("filter"),
+        dataclasses.replace(
+            step,
+            source_args=(dataclasses.replace(step.source_args[0], field="P_pred"),),
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="must be 2D"):
+        resolve_output_specs(steps, [[], [0], [1]], solved, None)
 
 
 def test_a_negative_field_dimension_is_rejected() -> None:

@@ -140,10 +140,18 @@ class PipelineSpec(TypedDict):
 
 
 class MCDataGenResultMeta(TypedDict):
-    step_name: str
+    n_rep: int
+    n_retained: int
     var_names: Sequence[str]
     shock_names: Sequence[str]
     observable_names: Sequence[str]
+    shapes: Mapping[str, Sequence[int]]
+
+
+class MCFilterResultMeta(TypedDict):
+    n_rep: int
+    n_retained: int
+    filter_mode: str
     shapes: Mapping[str, Sequence[int]]
 
 
@@ -213,11 +221,9 @@ class MCRunMeta(TypedDict):
 
 
 class MCTransformResultMeta(TypedDict):
-    step_name: str
     shape: list[int]
 
 
 class MCPostprocResultMeta(TypedDict):
-    step_name: str
     shape: list[int] | None
     summary: Any

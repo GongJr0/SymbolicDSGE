@@ -22,13 +22,13 @@ from numpy import float64, ndarray
 from ..core.shock_generators import Shock, ShockParameters
 
 #: Bundle format version. Bump on every manifest change.
-SDSGE_FORMAT_VERSION = 4
+SDSGE_FORMAT_VERSION = 5
 
 #: The version at which the format last broke. A reader rejects bundles older
 #: than this, and each bundle records its own so a reader can tell a version it
 #: predates from a version that postdates it: a bump that breaks nothing
 #: leaves this alone and stays readable by older versions.
-SDSGE_LAST_BREAKING_VERSION = 4
+SDSGE_LAST_BREAKING_VERSION = 5
 
 MemberKind = Literal[
     "model_config",
@@ -46,6 +46,8 @@ MemberKind = Literal[
     "mc_result_meta",
     "mc_datagen_steps",
     "mc_datagen_trace",
+    "mc_filter_steps",
+    "mc_filter_trace",
     "mc_test_steps",
     "mc_test_traces",
     "mc_regression_steps",

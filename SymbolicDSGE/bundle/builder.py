@@ -41,8 +41,9 @@ from ..monte_carlo.core import MCPipeline
 from ..monte_carlo.mc_constructs import MCPipelineResult, MCStep
 from ..monte_carlo.serialize import (
     json_safe,
-    serialize_datagen_result,
     serialize_run_meta,
+    serialize_datagen_result,
+    serialize_filter_results,
     serialize_test_results,
     serialize_regression_results,
     serialize_transform_results,
@@ -81,12 +82,12 @@ _MC_RAW_MODEL_DATA = "montecarlo/data/{ref}.parquet"
 _MC_RESULT_META = "montecarlo/result/meta.json"
 
 _MC_DATAGEN_STEPS = "montecarlo/result/datagen/datagen_steps.json"
-_MC_DATAGEN_PARQUET = "montecarlo/result/datagen/datagen_traces.parquet"
-_MC_DATAGEN_CSV = "montecarlo/result/datagen/datagen_traces.csv"
-
-_MC_DATAGEN_STEPS = "montecarlo/result/datagen/datagen_steps.json"
 _MC_DATAGEN_PARQUET = "montecarlo/result/datagen/{ref}_{field}.parquet"
 _MC_DATAGEN_CSV = "montecarlo/result/datagen/{ref}_{field}.csv"
+
+_MC_FILTER_STEPS = "montecarlo/result/filters/filter_steps.json"
+_MC_FILTER_PARQUET = "montecarlo/result/filters/{ref}_{field}.parquet"
+_MC_FILTER_CSV = "montecarlo/result/filters/{ref}_{field}.csv"
 
 _MC_TEST_STEPS = "montecarlo/result/tests/test_steps.json"
 _MC_TEST_PARQUET = "montecarlo/result/tests/test_traces.parquet"
@@ -325,14 +326,14 @@ class BundleBuilder:
             datagen = serialize_datagen_result(
                 result.datagen_outputs, pipeline.per_rep_steps[0].name
             )
+            filters = serialize_filter_results(result.filter_outputs)
             tests = serialize_test_results(result.test_summaries)
             regressions = serialize_regression_results(result.regression_summaries)
-            transforms = serialize_transform_results(
-                result.transform_outputs, result.n_rep
-            )
+            transforms = serialize_transform_results(result.transform_outputs)
             postprocs = serialize_postproc_results(result.postproc)
 
             self._add_step_metas(_MC_DATAGEN_STEPS, "mc_datagen_steps", datagen)
+            self._add_step_metas(_MC_FILTER_STEPS, "mc_filter_steps", filters)
             self._add_step_metas(_MC_TEST_STEPS, "mc_test_steps", tests)
             self._add_step_metas(
                 _MC_REGRESSION_STEPS, "mc_regression_steps", regressions
@@ -345,6 +346,13 @@ class BundleBuilder:
                 _MC_DATAGEN_CSV,
                 "mc_datagen_trace",
                 datagen,
+                as_parquet,
+            )
+            self._add_trace_arrays(
+                _MC_FILTER_PARQUET,
+                _MC_FILTER_CSV,
+                "mc_filter_trace",
+                filters,
                 as_parquet,
             )
             self._add_trace_block(

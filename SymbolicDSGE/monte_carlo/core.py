@@ -37,6 +37,7 @@ from .postproc import Artifact, normalize_artifacts
 from .mc_constructs import (
     DYNAMIC_SOURCE_FIELDS,
     FILTER_RAW_SOURCE_FIELDS,
+    FILTER_SOURCE_FIELDS,
     MC_DATA_SOURCE_FIELDS,
     MCDataGenResult,
     MCFilterResult,
@@ -335,10 +336,11 @@ class MCPipeline:
             elif s.op_type is OpType.FILTER:
                 filters.append(s)
 
+        datagen_result = _compile_datagen(datagen, prep, n_rep)
         test_summaries = _compile_tests(tests, prep, n_rep)
         regression_summaries = _compile_regressions(regressions, prep, n_rep)
         payload_columns = _resolve_payloads(transforms, prep)
-        filter_outputs = _compile_filters(filters, prep)
+        filter_outputs = _compile_filters(filters, prep, n_rep)
 
         postprocs, postproc_wall_times = self._run_postproc(
             self.postproc_steps,
@@ -403,7 +405,7 @@ class MCPipeline:
         result = MCPipelineResult(
             n_rep=n_rep,
             meta=meta,
-            datagen_outputs=_compile_datagen(datagen, prep),
+            datagen_outputs=datagen_result,
             filter_outputs=filter_outputs,
             n_successful=int(
                 np.count_nonzero(prep.allocation.failure_status_by_rep == 0)
@@ -538,8 +540,16 @@ def _validate_source_producer(
         expected = OpType.DATAGEN
     elif selector.field in DYNAMIC_SOURCE_FIELDS:
         expected = OpType.TRANSFORM
-    elif selector.field in FILTER_RAW_SOURCE_FIELDS:
+    elif selector.field in FILTER_SOURCE_FIELDS:
         expected = OpType.FILTER
+    elif selector.field in FILTER_RAW_SOURCE_FIELDS:
+        # Produced and retained, but not shaped like anything a consumer can be
+        # fed. The step factories say so too; this catches a hand-built step.
+        raise ValueError(
+            f"Step {consumer.name!r} reads filter output {selector.field!r}, "
+            f"which cannot be read as a source: it is not two dimensional per "
+            f"replication."
+        )
     else:
         raise ValueError(
             f"Step {consumer.name!r} has unknown source field {selector.field!r}."
@@ -627,7 +637,9 @@ def _datagen_names(
     )
 
 
-def _compile_datagen(step: MCStep, lowered: LoweredMCRun) -> MCDataGenResult:
+def _compile_datagen(
+    step: MCStep, lowered: LoweredMCRun, n_rep: int
+) -> MCDataGenResult:
     """Read the one datagen step's retained fields out of its arena.
 
     A pipeline has exactly one datagen, so this returns the container rather
@@ -657,6 +669,9 @@ def _compile_datagen(step: MCStep, lowered: LoweredMCRun) -> MCDataGenResult:
     )
 
     return MCDataGenResult(
+        n_rep=n_rep,
+        n_retained=n_retained,
+        retained_reps=arena.retained_reps,
         var_names=var_names,
         X=read("states", len(var_names)),
         shock_names=shock_names,
@@ -667,8 +682,7 @@ def _compile_datagen(step: MCStep, lowered: LoweredMCRun) -> MCDataGenResult:
 
 
 def _compile_filters(
-    filter_steps: Sequence[MCStep],
-    lowered: LoweredMCRun,
+    filter_steps: Sequence[MCStep], lowered: LoweredMCRun, n_rep: int
 ) -> dict[str, MCFilterResult]:
     """Read each filter step's retained fields out of its arena.
 
@@ -719,6 +733,9 @@ def _compile_filters(
             x2_filt = None
 
         summaries[name] = MCFilterResult(
+            n_rep=n_rep,
+            n_retained=arena.retained_reps.size,
+            retained_reps=arena.retained_reps,
             filter_mode=mode,
             x_pred=x_pred,
             x_filt=x_filt,

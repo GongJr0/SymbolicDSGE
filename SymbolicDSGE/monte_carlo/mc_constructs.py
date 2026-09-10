@@ -159,7 +159,7 @@ def _compile_source_args(
     source_field = str(field)
     known_fields = (
         *MC_DATA_SOURCE_FIELDS,
-        *FILTER_RAW_SOURCE_FIELDS,
+        *FILTER_SOURCE_FIELDS,
         *DYNAMIC_SOURCE_FIELDS,
     )
     if source_field in known_fields:
@@ -170,6 +170,14 @@ def _compile_source_args(
             columns=columns,
             burn_in=burn_in,
             drop_initial=bool(drop_initial),
+        )
+
+    if source_field in FILTER_RAW_SOURCE_FIELDS:
+        raise ValueError(
+            f"Filter output {source_field!r} cannot be read as a source. A "
+            f"source is staged row by column, and {source_field!r} is not two "
+            f"dimensional per replication. Readable filter fields: "
+            f"{list(FILTER_SOURCE_FIELDS)}."
         )
 
     raise ValueError(f"Unknown MC source field: {source_field!r}.")
@@ -260,6 +268,10 @@ class MCMeta:
 
 @dataclass(frozen=True, eq=False, repr=False)
 class MCDataGenResult:
+    n_rep: int
+    n_retained: int
+    retained_reps: NDI
+
     var_names: Sequence[str]
     X: NDF  # (n_retained, T, n_var)
     shock_names: Sequence[str]
@@ -275,9 +287,9 @@ class MCDataGenResult:
     def replication(self, idx: int) -> SimResult:
         """Return a :class:`~SymbolicDSGE.core.sim_result.SimResult` for a single replication."""
 
-        if idx < 0 or idx >= self.X.shape[0]:
+        if idx < 0 or idx >= self.n_retained:
             raise IndexError(
-                f"Replication index {idx} out of bounds for {self.X.shape[0]} replications."
+                f"Replication index {idx} out of bounds for {self.n_retained} retained replications."
             )
 
         return SimResult(
@@ -346,6 +358,10 @@ class MCDataGenResult:
 
 @dataclass(frozen=True, eq=False, repr=False)
 class MCFilterResult:
+    n_rep: int
+    n_retained: int
+    retained_reps: NDI
+
     filter_mode: str
     # Shared
     x_pred: NDF
@@ -369,12 +385,16 @@ class MCFilterResult:
     _x2_filt: NDF | None = None
 
     def replication(self, idx: int) -> FilterResult | UnscentedFilterResult:
-        """Return a :class:`FilterResult` or :class:`UnscentedFilterResult` for
-        a single replication."""
+        """Return one retained replication's filter output as a single-run result.
 
-        if idx < 0 or idx >= self.x_pred.shape[0]:
+        ``idx`` counts the retained replications, which are stored compactly,
+        so it is not the replication's index in the run. ``retained_reps[idx]``
+        is that index; the two coincide only when the run retained everything.
+        """
+        if idx < 0 or idx >= self.n_retained:
             raise IndexError(
-                f"Replication index {idx} out of bounds for {self.x_pred.shape[0]} replications."
+                f"Replication index {idx} out of bounds for {self.n_retained} "
+                f"retained replications."
             )
 
         if self.filter_mode == "unscented":

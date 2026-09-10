@@ -28,6 +28,10 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 T = 8
 N_REP = 4
 
+#: A run that keeps a strict subset, so the two counts cannot be confused.
+PARTIAL_N_REP = 8
+PARTIAL_N_RETAIN = 3
+
 FilterMode = Literal["linear", "extended", "unscented"]
 
 #: Every array field the linear and extended layouts open a buffer for, paired
@@ -60,7 +64,7 @@ def second_order() -> SolvedModel:
 
 
 def _observations(solved: SolvedModel, n_rep: int = N_REP) -> np.ndarray:
-    """Distinct data per replication, so a rep reading another's row shows up."""
+    """Distinct data per replication, so a rep reading another's shows up."""
     rng = np.random.default_rng(20260908)
     n_obs = len(solved.compiled.observable_names)
     return rng.normal(scale=0.01, size=(n_rep, T, n_obs))
@@ -223,7 +227,7 @@ def test_the_unscented_layout_reserves_nothing_for_shocks(
 
 
 # --------------------------------------------------------------------------
-# Values: each replication's row is that replication's filter, not a neighbour's
+# Values: each retained replication carries its own filter, not a neighbour's
 # --------------------------------------------------------------------------
 
 
@@ -306,20 +310,37 @@ def test_a_replication_of_an_unscented_run_carries_the_pruned_state(
     np.testing.assert_array_equal(one.x2_pred, filt.x2_pred[1])
 
 
-@pytest.mark.parametrize("idx", [-1, N_REP])
-def test_a_replication_outside_the_retained_rows_is_refused(
-    linear: SolvedModel, idx: int
+@pytest.mark.parametrize("idx", [-1, PARTIAL_N_RETAIN, PARTIAL_N_REP])
+def test_oob_index_retained_is_refused(linear: SolvedModel, idx: int) -> None:
+    """The bound is what was retained, not the run's replication count.
+
+    Retention is partial so the counts differ. ``PARTIAL_N_RETAIN`` is the
+    discriminating case: a replication the run produced and did not keep, which
+    a bound on ``n_rep`` would let through.
+    """
+    n_rep, n_retain = PARTIAL_N_REP, PARTIAL_N_RETAIN
+    y = _observations(linear, n_rep=n_rep)
+
+    filt = _run(linear, y, n_rep=n_rep, n_retain=n_retain).filter_outputs["filt"]
+
+    with pytest.raises(IndexError, match="retained replications"):
+        filt.replication(idx)
+
+
+def test_retention_indices_match_the_run_when_everything_is_kept(
+    linear: SolvedModel,
 ) -> None:
+    """Retaining everything makes ``retained_reps`` the identity"""
     y = _observations(linear)
 
     filt = _run(linear, y).filter_outputs["filt"]
 
-    with pytest.raises(IndexError, match="out of bounds"):
-        filt.replication(idx)
+    for rep in range(N_REP):
+        np.testing.assert_array_equal(filt.replication(rep).x_filt, filt.x_filt[rep])
 
 
 # --------------------------------------------------------------------------
-# Retention, which decides how many rows there are to read at all
+# Retention, which decides how many replications there are to read at all
 # --------------------------------------------------------------------------
 
 
@@ -327,7 +348,7 @@ def test_partial_retention_reports_only_the_rows_it_kept(
     linear: SolvedModel,
 ) -> None:
     """The leading axis counts retained replications, not run replications."""
-    n_rep, n_retain = 8, 3
+    n_rep, n_retain = PARTIAL_N_REP, PARTIAL_N_RETAIN
     y = _observations(linear, n_rep=n_rep)
 
     result = _run(linear, y, n_rep=n_rep, n_retain=n_retain)
@@ -338,41 +359,29 @@ def test_partial_retention_reports_only_the_rows_it_kept(
     assert result.meta.n_retained_by_step["filt"] == n_retain
 
 
-def test_retained_rows_hold_the_replications_they_were_sampled_from(
+def test_each_retained_entry_holds_the_replication_it_was_sampled_from(
     linear: SolvedModel,
 ) -> None:
-    """Rows are compact, so row ``i`` is the filter for ``retained_reps[i]``."""
-    n_rep, n_retain = 8, 3
+    """Storage is compact, so entry ``i`` is the filter for ``retained_reps[i]``."""
+    n_rep, n_retain = PARTIAL_N_REP, PARTIAL_N_RETAIN
     y = _observations(linear, n_rep=n_rep)
 
-    lowered = MCPipeline(
-        [
-            raw_model_data_step(
-                "data",
-                observables=y,
-                observable_names=tuple(linear.compiled.observable_names),
-            ),
-            reference_filter_step("filt", n_retain),
-        ]
-    )
-    result = lowered.run(linear, n_rep=n_rep, verbosity=0)
-    filt = result.filter_outputs["filt"]
+    filt = _run(linear, y, n_rep=n_rep, n_retain=n_retain).filter_outputs["filt"]
 
     # Which replications get sampled is the allocator's rule, so it is asked
-    # rather than restated here. What is asserted is that a row holds the
-    # filter for the replication that rule named.
+    # rather than restated here, and what the result reports has to agree.
     retained_reps, _ = resolve_retention(n_retain, n_rep)
-    for row, rep in enumerate(retained_reps):
-        expected = linear.kalman(y=y[rep])
+    np.testing.assert_array_equal(filt.retained_reps, retained_reps)
+    for idx, rep in enumerate(retained_reps):
         np.testing.assert_allclose(
-            filt.x_filt[row], expected.x_filt, rtol=1e-9, atol=1e-12
+            filt.x_filt[idx], linear.kalman(y=y[rep]).x_filt, rtol=1e-9, atol=1e-12
         )
 
 
 def test_retaining_nothing_still_reports_the_planned_shapes(
     linear: SolvedModel,
 ) -> None:
-    """An empty run has no rows to read, and the axes still have to be right."""
+    """An empty run retained nothing, and the axes still have to be right."""
     comp = linear.compiled
     y = _observations(linear)
 

@@ -20,14 +20,15 @@ from typing import Any, cast
 import numpy as np
 from numpy.typing import NDArray
 
-from .mc_constructs import MCDataGenResult, MCPipelineResult
-from .postproc import Artifact, Summary, Raw
+from .mc_constructs import MCDataGenResult, MCFilterResult, MCPipelineResult
+from .postproc import Artifact
 from .._ckernels.monte_carlo._arenas import resolve_retention
 from .._diag_tests.result import MCTestResult
 from ..regression.result import MCRegressionResult
 from .spec import (
     MCFailureSpec,
     MCDataGenResultMeta,
+    MCFilterResultMeta,
     MCPostprocResultMeta,
     MCRegressionResultMeta,
     MCRunMeta,
@@ -215,11 +216,16 @@ def serialize_datagen_result(
     because that is the shape the member writers take. Arrays are handed over as
     the run's own, and the meta records the shape each one unflattens to.
     """
-    fields: dict[str, NDArray[Any]] = {"states": datagen.X, "shocks": datagen.eps}
+    fields: dict[str, NDArray[Any]] = {
+        "retained_reps": datagen.retained_reps,
+        "states": datagen.X,
+        "shocks": datagen.eps,
+    }
     if datagen.y.shape[-1]:
         fields["observables"] = datagen.y
     meta = MCDataGenResultMeta(
-        step_name=step_name,
+        n_rep=int(datagen.n_rep),
+        n_retained=int(datagen.n_retained),
         var_names=list(datagen.var_names),
         shock_names=list(datagen.shock_names),
         observable_names=list(datagen.observable_names),
@@ -228,9 +234,46 @@ def serialize_datagen_result(
     return {step_name: (meta, fields)}
 
 
+def serialize_filter_results(
+    filters: Mapping[str, MCFilterResult],
+) -> dict[str, tuple[MCFilterResultMeta, dict[str, NDArray[Any]]]]:
+    out: dict[str, tuple[MCFilterResultMeta, dict[str, NDArray[Any]]]] = {}
+    for name, result in filters.items():
+        fields: dict[str, NDArray[Any]] = {
+            "retained_reps": result.retained_reps,
+            "x_pred": result.x_pred,
+            "x_filt": result.x_filt,
+            "y_pred": result.y_pred,
+            "y_filt": result.y_filt,
+            "P_pred": result.P_pred,
+            "P_filt": result.P_filt,
+            "S": result.S,
+            "innov": result.innov,
+            "std_innov": result.std_innov,
+            "loglik": result.loglik,
+        }
+        if result.filter_mode == "unscented":
+            # Write through the property to narrow the type.
+            # Populate private fields to restore exact behavior on load
+            fields["_x1_pred"] = result.x1_pred
+            fields["_x1_filt"] = result.x1_filt
+            fields["_x2_pred"] = result.x2_pred
+            fields["_x2_filt"] = result.x2_filt
+        if result.eps_hat is not None:
+            fields["eps_hat"] = result.eps_hat
+
+        meta = MCFilterResultMeta(
+            n_rep=int(result.n_rep),
+            n_retained=int(result.n_retained),
+            filter_mode=result.filter_mode,
+            shapes={name: list(arr.shape) for name, arr in fields.items()},
+        )
+        out[name] = (meta, fields)
+    return out
+
+
 def serialize_transform_results(
     transforms: Mapping[str, NDF],
-    n_rep: int,
 ) -> dict[str, tuple[MCTransformResultMeta, dict[str, NDArray[Any]]]]:
     """Each transform's ``(meta, traces)`` halves.
 
@@ -243,11 +286,9 @@ def serialize_transform_results(
         return {}
     out: dict[str, tuple[MCTransformResultMeta, dict[str, NDArray[Any]]]] = {}
     for name, arr in transforms.items():
-        retained_reps, _ = resolve_retention(int(arr.shape[0]), n_rep)
-        meta = MCTransformResultMeta(step_name=name, shape=list(arr.shape))
+        meta = MCTransformResultMeta(shape=list(arr.shape))
         traces: dict[str, NDArray[Any]] = {
             "value": arr,
-            "retained_reps": retained_reps,
         }
         out[name] = (meta, traces)
     return out
@@ -267,7 +308,6 @@ def serialize_postproc_results(
         summary = artifact["summary"]
         value = np.asarray(raw.value) if raw is not None else None
         meta = MCPostprocResultMeta(
-            step_name=name,
             shape=list(value.shape) if value is not None else None,
             summary=_summary_value(summary.value) if summary is not None else None,
         )

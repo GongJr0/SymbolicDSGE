@@ -232,20 +232,25 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     3532  28-08-2026 12:30   manifest.json
-     2134  28-08-2026 12:30   model/reference.yaml
-     2134  28-08-2026 12:30   model/dgp.yaml
-      629  28-08-2026 12:30   estimation/spec.json
-     1939  28-08-2026 12:30   estimation/observed.parquet
-    18972  28-08-2026 12:30   estimation/posterior.parquet
-      585  28-08-2026 12:30   estimation/result.json
-     1018  28-08-2026 12:30   montecarlo/pipeline.json
-      565  28-08-2026 12:30   montecarlo/result/meta.json
-      176  28-08-2026 12:30   montecarlo/result/tests/test_steps.json
-    11413  28-08-2026 12:30   montecarlo/result/tests/test_traces.parquet
-     1282  28-08-2026 12:30   data/auxiliary_series.parquet
+     5196  09-10-2026 06:11   manifest.json
+     2134  09-10-2026 06:11   model/reference.yaml
+     2134  09-10-2026 06:11   model/dgp.yaml
+      630  09-10-2026 06:11   estimation/spec.json
+     1891  09-10-2026 06:11   estimation/observed.parquet
+    18906  09-10-2026 06:11   estimation/posterior.parquet
+      585  09-10-2026 06:11   estimation/result.json
+     1239  09-10-2026 06:11   montecarlo/pipeline.json
+      567  09-10-2026 06:11   montecarlo/result/meta.json
+      553  09-10-2026 06:11   montecarlo/result/datagen/datagen_steps.json
+      176  09-10-2026 06:11   montecarlo/result/tests/test_steps.json
+     3377  09-10-2026 06:11   montecarlo/result/datagen/datagen_retained_reps.parquet
+  7122646  09-10-2026 06:11   montecarlo/result/datagen/datagen_states.parquet
+  4273014  09-10-2026 06:11   montecarlo/result/datagen/datagen_shocks.parquet
+  4189809  09-10-2026 06:11   montecarlo/result/datagen/datagen_observables.parquet
+    11421  09-10-2026 06:11   montecarlo/result/tests/test_traces.parquet
+     1282  09-10-2026 06:11   data/auxiliary_series.parquet
 ---------                     -------
-    44379                     12 files
+ 15635560                     17 files
 ```
 
 For a structured view, decompile it:

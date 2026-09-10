@@ -1125,7 +1125,15 @@ def _empty_datagen() -> MCDataGenResult:
     rather than offered by the container.
     """
     empty = np.empty((0, 0, 0), dtype=np.float64)
-    return MCDataGenResult(var_names=(), X=empty, shock_names=(), eps=empty)
+    return MCDataGenResult(
+        n_rep=0,
+        n_retained=0,
+        retained_reps=np.empty((0,), dtype=np.int64),
+        var_names=(),
+        X=empty,
+        shock_names=(),
+        eps=empty,
+    )
 
 
 def test_ui_backend_serializes_detailed_mc_summaries() -> None:

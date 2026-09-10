@@ -69,7 +69,15 @@ def _empty_datagen() -> MCDataGenResult:
     rather than offered by the container.
     """
     empty = np.empty((0, 0, 0), dtype=np.float64)
-    return MCDataGenResult(var_names=(), X=empty, shock_names=(), eps=empty)
+    return MCDataGenResult(
+        n_rep=0,
+        n_retained=0,
+        retained_reps=np.empty((0,), dtype=np.int64),
+        var_names=(),
+        X=empty,
+        shock_names=(),
+        eps=empty,
+    )
 
 
 def _postproc_result(postproc: dict[str, Artifact]) -> MCPipelineResult:
@@ -129,18 +137,16 @@ def test_regression_omits_absent_standard_errors() -> None:
     assert "se_trace" not in without  # absent, never a null column
 
 
-def test_transform_shape_rides_the_meta_and_indices_the_traces() -> None:
+def test_transform_shape_rides_the_meta_and_carries_only_its_payload() -> None:
     result = _run(n_rep=6)
-    meta, traces = serialize_transform_results(result.transform_outputs, result.n_rep)[
-        "std"
-    ]
+    meta, traces = serialize_transform_results(result.transform_outputs)["std"]
 
     payload = result.transform_outputs["std"]
     assert meta["shape"] == list(payload.shape)
     assert traces["value"] is payload
-    # The arenas that held them are gone, so the indices come back from the
-    # retained row count and n_rep.
-    assert traces["retained_reps"].tolist() == list(range(6))
+    # A transform is a bare array with no container to hold an index map, so the
+    # member carries the payload and nothing beside it.
+    assert set(traces) == {"value"}
 
 
 def test_postproc_slots_are_independent() -> None:

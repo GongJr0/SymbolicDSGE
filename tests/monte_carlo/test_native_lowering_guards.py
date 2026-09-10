@@ -20,6 +20,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,
     ljung_box_test_step,
     log_diff_step,
+    passthrough_step,
     raw_model_data_step,
     reference_filter_step,
     simulation_step,
@@ -308,6 +309,38 @@ def test_filter_x0_must_cover_every_state(solved: SolvedModel) -> None:
     # The state resolver owns the length check now, so the message is its own.
     with pytest.raises(ValueError, match="must be a complete list/array"):
         _lower(steps, reference=solved)
+
+
+@pytest.mark.parametrize("field", ["P_pred", "P_filt", "S", "loglik"])
+def test_a_filter_field_that_cannot_be_staged_is_refused_at_authoring(
+    field: str,
+) -> None:
+    """The run produces and retains these, but no consumer can read them.
+
+    Rejecting at the factory puts the error where the selector was written,
+    rather than at lowering where the planner sizes the input arena.
+    """
+    with pytest.raises(ValueError, match="cannot be read as a source"):
+        passthrough_step("keep", source="filter", field=field, columns=None)
+
+
+def test_an_unrecognized_source_field_is_still_refused_as_unknown() -> None:
+    """A field the result never had reads as a typo, not as a shape problem."""
+    with pytest.raises(ValueError, match="Unknown MC source field"):
+        passthrough_step("keep", source="filter", field="x_smooth", columns=None)
+
+
+def test_a_readable_filter_field_still_authors_and_lowers(
+    solved: SolvedModel,
+) -> None:
+    """The curated list has to still admit what the binding can actually stage."""
+    steps = [
+        simulation_step("sim", target="reference", T=T, observables=True),
+        reference_filter_step("filter"),
+        passthrough_step("keep", source="filter", field="innov", columns=None),
+    ]
+
+    _lower(steps, reference=solved)
 
 
 def test_the_observation_binding_must_match_the_source_layout() -> None:
