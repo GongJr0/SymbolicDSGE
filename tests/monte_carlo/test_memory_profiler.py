@@ -8,6 +8,7 @@ import pytest
 from SymbolicDSGE import DSGESolver, ModelParser, Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
 from SymbolicDSGE.monte_carlo.allocation import ArenaSize, StepBufferPlan
 from SymbolicDSGE.monte_carlo.builder import run_pipeline
 from SymbolicDSGE.monte_carlo.mc_constructs import MCStep, OpType
@@ -104,7 +105,7 @@ def test_planned_bytes_match_the_allocation_exactly(solved: SolvedModel) -> None
         ]
     )
     report = pipeline.validate_memory_requirements(reference=solved, n_rep=8, n_jobs=3)
-    lowered = pipeline.lower_native(reference=solved, n_rep=8, n_jobs=3)
+    lowered = lower_native_run(pipeline, reference=solved, n_rep=8, n_jobs=3)
 
     assert report.shock_bytes == 0
     assert report.planned_bytes == _allocated_bytes(lowered.allocation)
@@ -181,7 +182,7 @@ def test_fallback_shocks_are_counted_outside_the_arenas(solved: SolvedModel) -> 
 
     assert report.shock_bytes == 32 * T * solved.compiled.n_exog * 8
     assert report.planned_bytes > _allocated_bytes(
-        pipeline.lower_native(reference=solved, n_rep=32, n_jobs=1).allocation
+        lower_native_run(pipeline, reference=solved, n_rep=32, n_jobs=1).allocation
     )
 
 

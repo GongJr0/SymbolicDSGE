@@ -46,6 +46,7 @@ from ..monte_carlo.spec import (
 from ..monte_carlo.mc_constructs import (
     MCDataGenResult,
     MCFailure,
+    MCFilterResult,
     MCMeta,
     MCPipelineResult,
     failed_postproc_names,
@@ -347,7 +348,13 @@ def _float_trace(cols: Mapping[str, NDArray[Any]], key: str, rows: int) -> NDF:
 
 
 def _int_trace(cols: Mapping[str, NDArray[Any]], key: str, rows: int) -> NDI:
-    """One integer column. Integers are never null, so absence is corruption."""
+    """One integer column. Integers are never null, so absence is corruption.
+
+    Except at zero rows: a step that retained nothing has no values to write, so
+    the writer emits no member for it and absence is what the run recorded.
+    """
+    if rows == 0:
+        return np.empty((0,), dtype=np.int64)
     return np.asarray(cols[key], dtype=np.int64)[:rows]
 
 
@@ -446,6 +453,70 @@ def _load_mc_transforms(archive: BundleArchive, manifest: Manifest) -> dict[str,
     }
 
 
+#: The filter fields every mode records, in the order the result declares them.
+#: Absent from a step's ``shapes`` means the run never produced it, which is how
+#: the writer says "not requested" and how the pruned-state block is spelled.
+_FILTER_FIELDS = (
+    "x_pred",
+    "x_filt",
+    "P_pred",
+    "P_filt",
+    "y_pred",
+    "y_filt",
+    "S",
+    "innov",
+    "std_innov",
+    "loglik",
+)
+_FILTER_OPTIONAL_FIELDS = (
+    "eps_hat",
+    "_x1_pred",
+    "_x2_pred",
+    "_x1_filt",
+    "_x2_filt",
+)
+
+
+def _load_mc_filters(
+    archive: BundleArchive, manifest: Manifest
+) -> dict[str, MCFilterResult]:
+    """Each filter step's arrays, rebuilt at the shapes its meta recorded."""
+
+    metas = _mc_json(archive, manifest, "mc_filter_steps")
+    if not metas:
+        return {}
+    columns = _mc_array_columns(archive, manifest, "mc_filter_trace")
+    out: dict[str, MCFilterResult] = {}
+    for name, meta in metas.items():
+        shapes = meta["shapes"]
+        fields = {
+            key: _mc_array(
+                columns.get((name, key), {}),
+                f"{name}.{key}",
+                tuple(int(size) for size in shapes[key]),
+            )
+            for key in (*_FILTER_FIELDS, *_FILTER_OPTIONAL_FIELDS)
+            if key in shapes
+        }
+        missing = [key for key in _FILTER_FIELDS if key not in fields]
+        if missing:
+            raise ValueError(
+                f"Filter step {name!r} is missing required fields {missing!r}."
+            )
+        out[name] = MCFilterResult(
+            n_rep=int(meta["n_rep"]),
+            n_retained=int(meta["n_retained"]),
+            retained_reps=_int_trace(
+                columns.get((name, "retained_reps"), {}),
+                f"{name}.retained_reps",
+                int(meta["n_retained"]),
+            ),
+            filter_mode=str(meta["filter_mode"]),
+            **fields,
+        )
+    return out
+
+
 def _load_mc_postprocs(
     archive: BundleArchive, manifest: Manifest
 ) -> dict[str, Artifact]:
@@ -498,7 +569,15 @@ def _load_mc_datagen(archive: BundleArchive, manifest: Manifest) -> MCDataGenRes
     metas = _mc_json(archive, manifest, "mc_datagen_steps")
     if not metas:
         empty = np.empty((0, 0, 0), dtype=np.float64)
-        return MCDataGenResult(var_names=(), X=empty, shock_names=(), eps=empty)
+        return MCDataGenResult(
+            n_rep=0,
+            n_retained=0,
+            retained_reps=np.empty((0,), dtype=np.int64),
+            var_names=(),
+            X=empty,
+            shock_names=(),
+            eps=empty,
+        )
 
     name, meta = next(iter(metas.items()))
     columns = _mc_array_columns(archive, manifest, "mc_datagen_trace")
@@ -510,6 +589,13 @@ def _load_mc_datagen(archive: BundleArchive, manifest: Manifest) -> MCDataGenRes
 
     states = field("states")
     return MCDataGenResult(
+        n_rep=int(meta["n_rep"]),
+        n_retained=int(meta["n_retained"]),
+        retained_reps=_int_trace(
+            columns.get((name, "retained_reps"), {}),
+            f"{name}.retained_reps",
+            int(meta["n_retained"]),
+        ),
         var_names=tuple(meta["var_names"]),
         X=states,
         shock_names=tuple(meta["shock_names"]),
@@ -556,6 +642,7 @@ def _load_mc_result(
         n_rep=int(run["n_rep"]),
         n_successful=int(run["n_successful"]),
         datagen_outputs=_load_mc_datagen(archive, manifest),
+        filter_outputs=_load_mc_filters(archive, manifest),
         test_summaries=_load_mc_tests(archive, manifest),
         transform_outputs=_load_mc_transforms(archive, manifest),
         regression_summaries=_load_mc_regressions(archive, manifest),

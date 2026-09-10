@@ -11,10 +11,6 @@
 #include "layout.h"
 
 #include "../core/core.h"
-#include "../kalman/kalman.h"
-#include "core_steps.h"
-#include "regression.h"
-#include "transforms.h"
 
 /* from core_steps.c */
 arena_offset sdsge_passthrough_arena_offset(const i64 n, const i64 p) {
@@ -138,16 +134,17 @@ arena_size sdsge_simulate_order2_output_arena_size(const i64 n_var,
 
 arena_offset sdsge_filter_linear_input_arena_offset(const i64 n, const i64 m,
                                                     const i64 k, const i64 T) {
-  arena_offset off = make_offset(9, 0);
+  arena_offset off = make_offset(10, 0);
   off.foffset[0] = n * n;                  // A(n, n)
   off.foffset[1] = off.foffset[0] + n * k; // B(n, k)
   off.foffset[2] = off.foffset[1] + m * n; // C(m, n)
   off.foffset[3] = off.foffset[2] + m;     // d(m)
   off.foffset[4] = off.foffset[3] + k * k; // Q(k, k)
   off.foffset[5] = off.foffset[4] + m * m; // R(m, m)
-  off.foffset[6] = off.foffset[5] + T * m; // y(T, m)
-  off.foffset[7] = off.foffset[6] + n;     // x0(n)
-  off.foffset[8] = off.foffset[7] + n * n; // P0(n, n)
+  off.foffset[6] = off.foffset[5] + n;     // steady_state(n)
+  off.foffset[7] = off.foffset[6] + T * m; // y(T, m)
+  off.foffset[8] = off.foffset[7] + n;     // x0(n)
+  off.foffset[9] = off.foffset[8] + n * n; // P0(n, n)
   return off;
 }
 
@@ -187,15 +184,16 @@ arena_size sdsge_filter_linear_output_arena_size(const i64 n, const i64 m,
 arena_offset sdsge_filter_extended_input_arena_offset(const i64 n, const i64 m,
                                                       const i64 k, const i64 T,
                                                       const i64 n_par) {
-  arena_offset off = make_offset(8, 0);
+  arena_offset off = make_offset(9, 0);
   off.foffset[0] = n * n;                  // A(n, n)
   off.foffset[1] = off.foffset[0] + n * k; // B(n, k)
   off.foffset[2] = off.foffset[1] + n_par; // params(n_par)
   off.foffset[3] = off.foffset[2] + k * k; // Q(k, k)
   off.foffset[4] = off.foffset[3] + m * m; // R(m, m)
-  off.foffset[5] = off.foffset[4] + T * m; // y(T, m)
-  off.foffset[6] = off.foffset[5] + n;     // x0(n)
-  off.foffset[7] = off.foffset[6] + n * n; // P0(n, n)
+  off.foffset[5] = off.foffset[4] + n;     // steady_state(n)
+  off.foffset[6] = off.foffset[5] + T * m; // y(T, m)
+  off.foffset[7] = off.foffset[6] + n;     // x0(n)
+  off.foffset[8] = off.foffset[7] + n * n; // P0(n, n)
   return off;
 }
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Sequence, cast
 
 import numpy as np
-from numpy.typing import ArrayLike
 
 from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 from SymbolicDSGE.kalman.resolvers import (
@@ -86,7 +85,6 @@ def lower_filter_step(
 
     if mode == "linear":
         C, d = reference._build_C_d_from_obs(canonical_names)
-        x0 = _filter_x0(step.kwargs.get("x0"), n_var)
         before_y = (
             _flat_f64(reference.policy.A),
             _flat_f64(reference.policy.B),
@@ -94,6 +92,7 @@ def lower_filter_step(
             _flat_f64(d),
             _flat_f64(Q),
             _flat_f64(R),
+            _flat_f64(reference.policy.steady_state),
         )
         binding = _filter_y_binding(
             source_layout, T, source_columns, input_offsets[len(before_y)], n_obs
@@ -109,10 +108,14 @@ def lower_filter_step(
                     step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
                 ),
             ),
-            _filter_bindings(before_y, binding, (x0, P0), input_offsets),
+            _filter_bindings(
+                before_y,
+                binding,
+                (reference._initial_state(step.kwargs.get("x0")), P0),
+                input_offsets,
+            ),
         )
     if mode == "extended":
-        x0 = _filter_x0(step.kwargs.get("x0"), n_var)
         params = _model_params(reference)
         before_y = (
             _flat_f64(reference.policy.A),
@@ -120,6 +123,7 @@ def lower_filter_step(
             params,
             _flat_f64(Q),
             _flat_f64(R),
+            _flat_f64(reference.policy.steady_state),
         )
         binding = _filter_y_binding(
             source_layout, T, source_columns, input_offsets[len(before_y)], n_obs
@@ -138,7 +142,12 @@ def lower_filter_step(
                     step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
                 ),
             ),
-            _filter_bindings(before_y, binding, (x0, P0), input_offsets),
+            _filter_bindings(
+                before_y,
+                binding,
+                (reference._initial_state(step.kwargs.get("x0")), P0),
+                input_offsets,
+            ),
         )
 
     else:  # mode == "unscented"
@@ -241,15 +250,6 @@ def _filter_source_columns(
     if missing:
         raise ValueError(f"DATAGEN output is missing filter observables: {missing!r}.")
     return np.asarray([source_index[name] for name in canonical_names], dtype=np.int64)
-
-
-def _filter_x0(value: ArrayLike | None, n_var: int) -> NDF:
-    if value is None:
-        return np.zeros(n_var, dtype=np.float64)
-    x0 = _flat_f64(np.asarray(value, dtype=np.float64))
-    if x0.size != n_var:
-        raise ValueError(f"Filter x0 must have length {n_var}.")
-    return x0
 
 
 def _filter_y_binding(

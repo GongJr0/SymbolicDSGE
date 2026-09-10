@@ -14,12 +14,11 @@ from numba import njit
 import numpy as np
 from numpy import (
     float64,
-    eye,
     zeros,
 )
 from numpy.typing import NDArray
 
-from typing import Tuple, NamedTuple
+from typing import Tuple
 
 NDF = NDArray[float64]
 
@@ -41,15 +40,8 @@ class FilterResult:
 
     loglik: float64
 
-    #: ``(n_var,)``: the offset this layer added to ``x_pred``/``x_filt``, so a
-    #: caller can tell which convention it was handed and recover the other.
-    #: Zero when no ``steady_state`` was supplied and the series are gaps. NaN
-    #: when the series are levels but the offset was not applied here: the
-    #: unscented kernel forms levels itself, because its measurement is
-    #: evaluated at them, so there is no constant for this layer to report.
-    constant: NDF
-
     eps_hat: NDF | None = None
+    status: int = 0
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -58,102 +50,6 @@ class UnscentedFilterResult(FilterResult):
     x2_pred: NDF
     x1_filt: NDF
     x2_filt: NDF
-
-    loglik: float64
-
-
-class FilterRawResult(NamedTuple):
-    x_pred: NDF
-    x_filt: NDF
-    P_pred: NDF
-    P_filt: NDF
-    y_pred: NDF
-    y_filt: NDF
-    innov: NDF
-    std_innov: NDF
-    S: NDF
-    eps_hat: NDF | None
-    loglik: float64
-    status: int
-
-
-class UnscentedFilterRawResult(NamedTuple):
-    x_pred: NDF
-    x_filt: NDF
-    P_pred: NDF
-    P_filt: NDF
-    y_pred: NDF
-    y_filt: NDF
-    innov: NDF
-    std_innov: NDF
-    S: NDF
-    eps_hat: NDF | None
-    loglik: float64
-    x1_pred: NDF
-    x2_pred: NDF
-    x1_filt: NDF
-    x2_filt: NDF
-    status: int
-
-
-def _filter_result_from_raw(
-    raw: FilterRawResult, steady_state: NDF | None = None
-) -> FilterResult:
-    """Pack a raw run, adding ``steady_state`` to the state series if given.
-
-    The recursion runs in gaps and the constant is applied once here, which is
-    where Dynare applies it too (``store_smoother_results.m``). Only the state
-    series move: the observation series already carry their own constant
-    through ``d``.
-    """
-    n_var = raw.x_pred.shape[1]
-    if steady_state is None:
-        constant = np.zeros(n_var, dtype=float64)
-        x_pred, x_filt = raw.x_pred, raw.x_filt
-    else:
-        constant = np.asarray(steady_state, dtype=float64).reshape(n_var)
-        x_pred = raw.x_pred + constant
-        x_filt = raw.x_filt + constant
-    return FilterResult(
-        constant=constant,
-        x_pred=x_pred,
-        x_filt=x_filt,
-        P_pred=raw.P_pred,
-        P_filt=raw.P_filt,
-        y_pred=raw.y_pred,
-        y_filt=raw.y_filt,
-        innov=raw.innov,
-        std_innov=raw.std_innov,
-        S=raw.S,
-        eps_hat=raw.eps_hat,
-        loglik=raw.loglik,
-    )
-
-
-def _unscented_filter_result_from_raw(
-    raw: UnscentedFilterRawResult,
-) -> UnscentedFilterResult:
-    # The kernel already reports levels, so no constant was applied here and
-    # there is none to hand back. NaN says that, where a zero would claim the
-    # series are gaps and a None would break the field's type.
-    return UnscentedFilterResult(
-        constant=np.full(raw.x_pred.shape[1], np.nan, dtype=float64),
-        x_pred=raw.x_pred,
-        x_filt=raw.x_filt,
-        x1_pred=raw.x1_pred,
-        x2_pred=raw.x2_pred,
-        x1_filt=raw.x1_filt,
-        x2_filt=raw.x2_filt,
-        P_pred=raw.P_pred,
-        P_filt=raw.P_filt,
-        y_pred=raw.y_pred,
-        y_filt=raw.y_filt,
-        innov=raw.innov,
-        std_innov=raw.std_innov,
-        S=raw.S,
-        eps_hat=raw.eps_hat,
-        loglik=raw.loglik,
-    )
 
 
 def _shape_validate(
@@ -244,13 +140,14 @@ class KalmanFilter:
     _shape_validate = staticmethod(_shape_validate)
 
     @staticmethod
-    def run_raw(
+    def run(
         A: NDF,
         B: NDF,
         C: NDF,
         d: NDF,
         Q: NDF,
         R: NDF,
+        steady_state: NDF,
         y: NDF,
         x0: NDF | None = None,
         P0: NDF | None = None,
@@ -260,7 +157,7 @@ class KalmanFilter:
         jitter: float = 0.0,
         _store_history: bool = True,
         _raise_on_error: bool = True,
-    ) -> FilterRawResult:
+    ) -> FilterResult:
 
         T, m = y.shape  # T: time steps, m: obs dim
         n = A.shape[0]  # n: state dim
@@ -288,6 +185,7 @@ class KalmanFilter:
             d,
             Q,
             R,
+            steady_state,
             y,
             x_prev,
             P_prev,
@@ -314,8 +212,7 @@ class KalmanFilter:
             loglik,
         ) = out
 
-        return FilterRawResult(
-            status=err,
+        return FilterResult(
             x_pred=x_pred,
             x_filt=x_filt,
             P_pred=P_pred,
@@ -327,54 +224,11 @@ class KalmanFilter:
             S=S,
             eps_hat=eps_hat if (return_shocks and _store_history) else None,
             loglik=loglik,
+            status=err,
         )
 
     @staticmethod
-    def run(
-        A: NDF,
-        B: NDF,
-        C: NDF,
-        d: NDF,
-        Q: NDF,
-        R: NDF,
-        y: NDF,
-        x0: NDF | None = None,
-        P0: NDF | None = None,
-        return_shocks: bool = False,
-        symmetrize: bool = True,
-        joseph_cov: bool = False,
-        jitter: float = 0.0,
-        _store_history: bool = True,
-        steady_state: NDF | None = None,
-    ) -> FilterResult:
-        """Linear Kalman filter, packed.
-
-        ``steady_state`` is optional and additive: supply it and the state
-        series come back in levels with the offset recorded on the result;
-        omit it and they stay gaps, which is what the recursion produces.
-        """
-        return _filter_result_from_raw(
-            KalmanFilter.run_raw(
-                A=A,
-                B=B,
-                C=C,
-                d=d,
-                Q=Q,
-                R=R,
-                y=y,
-                x0=x0,
-                P0=P0,
-                return_shocks=return_shocks,
-                symmetrize=symmetrize,
-                joseph_cov=joseph_cov,
-                jitter=jitter,
-                _store_history=_store_history,
-            ),
-            steady_state,
-        )
-
-    @staticmethod
-    def run_unscented_raw(
+    def run_unscented(
         meas_addr: int,
         hx: NDF,
         gx: NDF,
@@ -401,7 +255,7 @@ class KalmanFilter:
         jitter: float = 0.0,
         _store_history: bool = True,
         _raise_on_error: bool = True,
-    ) -> UnscentedFilterRawResult:
+    ) -> UnscentedFilterResult:
         if meas_addr == 0:
             raise ValueError("meas_addr must be a nonzero measurement cfunc address.")
 
@@ -529,9 +383,7 @@ class KalmanFilter:
             S,
             loglik,
         ) = out
-
-        return UnscentedFilterRawResult(
-            status=err,
+        return UnscentedFilterResult(
             x_pred=x_pred,
             x_filt=x_filt,
             P_pred=P_pred,
@@ -541,74 +393,16 @@ class KalmanFilter:
             innov=v,
             std_innov=u,
             S=S,
-            eps_hat=None,
-            loglik=loglik,
             x1_pred=x1_pred,
             x2_pred=x2_pred,
             x1_filt=x1_filt,
             x2_filt=x2_filt,
+            loglik=loglik,
+            status=err,
         )
 
     @staticmethod
-    def run_unscented(
-        meas_addr: int,
-        hx: NDF,
-        gx: NDF,
-        bu: NDF,
-        hxx: NDF,
-        gxx: NDF,
-        hxu: NDF,
-        gxu: NDF,
-        huu: NDF,
-        guu: NDF,
-        hss: NDF,
-        gss: NDF,
-        steady_state: NDF,
-        calib_params: NDF,
-        Q: NDF,
-        R: NDF,
-        y: NDF,
-        z0: NDF,
-        P0: NDF,
-        alpha: float = 1.0,
-        beta: float = 2.0,
-        kappa: float = 1.0,
-        symmetrize: bool = True,
-        jitter: float = 0.0,
-        _store_history: bool = True,
-    ) -> UnscentedFilterResult:
-        return _unscented_filter_result_from_raw(
-            KalmanFilter.run_unscented_raw(
-                meas_addr=meas_addr,
-                hx=hx,
-                gx=gx,
-                bu=bu,
-                hxx=hxx,
-                gxx=gxx,
-                hxu=hxu,
-                gxu=gxu,
-                huu=huu,
-                guu=guu,
-                hss=hss,
-                gss=gss,
-                steady_state=steady_state,
-                calib_params=calib_params,
-                Q=Q,
-                R=R,
-                y=y,
-                z0=z0,
-                P0=P0,
-                alpha=alpha,
-                beta=beta,
-                kappa=kappa,
-                symmetrize=symmetrize,
-                jitter=jitter,
-                _store_history=_store_history,
-            )
-        )
-
-    @staticmethod
-    def run_extended_raw(
+    def run_extended(
         meas_addr: int,
         jac_addr: int,
         A: NDF,
@@ -616,6 +410,7 @@ class KalmanFilter:
         calib_params: NDF,
         Q: NDF,
         R: NDF,
+        steady_state: NDF,
         y: NDF,
         x0: NDF | None = None,
         P0: NDF | None = None,
@@ -626,7 +421,7 @@ class KalmanFilter:
         compute_y_filt: bool = True,
         _store_history: bool = True,
         _raise_on_error: bool = True,
-    ) -> FilterRawResult:
+    ) -> FilterResult:
         """
         Extended Kalman Filter with a linear transition and nonlinear measurement:
 
@@ -709,6 +504,7 @@ class KalmanFilter:
             calib_params,
             Q,
             R,
+            steady_state,
             y,
             x0,
             P0,
@@ -737,8 +533,7 @@ class KalmanFilter:
             loglik,
         ) = out
 
-        return FilterRawResult(
-            status=err,
+        return FilterResult(
             x_pred=x_pred,
             x_filt=x_filt,
             P_pred=P_pred,
@@ -750,52 +545,5 @@ class KalmanFilter:
             S=S,
             eps_hat=eps_hat if (return_shocks and _store_history) else None,
             loglik=loglik,
-        )
-
-    @staticmethod
-    def run_extended(
-        meas_addr: int,
-        jac_addr: int,
-        A: NDF,
-        B: NDF,
-        calib_params: NDF,
-        Q: NDF,
-        R: NDF,
-        y: NDF,
-        x0: NDF | None = None,
-        P0: NDF | None = None,
-        return_shocks: bool = False,
-        symmetrize: bool = True,
-        joseph_cov: bool = False,
-        jitter: float = 0.0,
-        compute_y_filt: bool = True,
-        _store_history: bool = True,
-        steady_state: NDF | None = None,
-    ) -> FilterResult:
-        """Extended Kalman filter, packed.
-
-        ``steady_state`` is optional and additive: supply it and the state
-        series come back in levels with the offset recorded on the result;
-        omit it and they stay gaps, which is what the recursion produces.
-        """
-        return _filter_result_from_raw(
-            KalmanFilter.run_extended_raw(
-                meas_addr=meas_addr,
-                jac_addr=jac_addr,
-                A=A,
-                B=B,
-                calib_params=calib_params,
-                Q=Q,
-                R=R,
-                y=y,
-                x0=x0,
-                P0=P0,
-                return_shocks=return_shocks,
-                symmetrize=symmetrize,
-                joseph_cov=joseph_cov,
-                jitter=jitter,
-                compute_y_filt=compute_y_filt,
-                _store_history=_store_history,
-            ),
-            steady_state,
+            status=err,
         )

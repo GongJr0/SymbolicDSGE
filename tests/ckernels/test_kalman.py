@@ -50,7 +50,10 @@ def _make_system(n: int, m: int, k: int, T: int, seed: int):
     P0 = 0.5 * (P0 + P0.T)
     y = rng.standard_normal((T, m))
     x0 = rng.standard_normal(n)
-    return tuple(_c(z) for z in (A, B, C, d, Q, R, y, x0, P0))
+    # Nonzero and unequal per state, so a shift applied to the wrong series or
+    # the wrong axis shows up rather than cancelling.
+    ss = rng.standard_normal(n)
+    return tuple(_c(z) for z in (A, B, C, d, Q, R, ss, y, x0, P0))
 
 
 _MEAS_SIG = types.void(
@@ -82,7 +85,7 @@ def test_kalman_matches_oracle(
     return_shocks: bool,
     store_history: bool,
 ) -> None:
-    A, B, C, d, Q, R, y, x0, P0 = _make_system(
+    A, B, C, d, Q, R, ss, y, x0, P0 = _make_system(
         n, m, k, T, seed=n * 1000 + m * 100 + k * 10 + T
     )
     args = (
@@ -94,6 +97,7 @@ def test_kalman_matches_oracle(
         d,
         Q,
         R,
+        ss,
         y,
         x0,
         P0,
@@ -136,6 +140,7 @@ def test_kalman_non_pd_returns_error_code() -> None:
         _c([0.0]),
         _c([[1.0]]),
         _c([[-10.0]]),  # negative "covariance" -> non-PD innovation covariance
+        _c([0.0]),
         _c(rng.standard_normal((T, m))),
         _c([0.0]),
         _c([[1.0]]),

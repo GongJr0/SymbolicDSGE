@@ -104,18 +104,19 @@ void kf_build_shock_projection(const f64 *B, const f64 *C, const f64 *Q,
 
 /* Model + data inputs. All matrices C-contiguous, row-major, f64. */
 typedef struct {
-  i64 n;             /* state dimension */
-  i64 m;             /* observation dimension */
-  i64 k;             /* shock dimension */
-  i64 T;             /* number of time steps */
-  const f64 *A;      /* (n, n) state transition */
-  const f64 *B;      /* (n, k) shock loading */
-  const f64 *C;      /* (m, n) observation */
-  const f64 *d;      /* (m,)   observation intercept */
-  const f64 *Q;      /* (k, k) shock covariance */
-  const f64 *R;      /* (m, m) measurement covariance */
-  const f64 *y;      /* (T, m) observations */
-  const f64 *x0;     /* (n,)   initial state mean */
+  i64 n;                   /* state dimension */
+  i64 m;                   /* observation dimension */
+  i64 k;                   /* shock dimension */
+  i64 T;                   /* number of time steps */
+  const f64 *A;            /* (n, n) state transition */
+  const f64 *B;            /* (n, k) shock loading */
+  const f64 *C;            /* (m, n) observation */
+  const f64 *d;            /* (m,)   observation intercept */
+  const f64 *Q;            /* (k, k) shock covariance */
+  const f64 *R;            /* (m, m) measurement covariance */
+  const f64 *steady_state; /* (n,) steady state of model variables */
+  const f64 *y;            /* (T, m) observations */
+  const f64 *x0;           /* (n,)   initial state mean */
   const f64 *P0;     /* (n, n) initial state covariance (pre-symmetrized) */
   int symmetrize;    /* symmetrize P/S each step (0/1) */
   int joseph_cov;    /* use Joseph form for P update (0/1) */
@@ -137,8 +138,8 @@ typedef struct {
   f64 *loglik;            /* scalar out */
 } kf_outputs;
 
-/* Run the linear Kalman filter. Returns KF_OK, KF_ERR_MATRIX_CONDITION (non-PD
- * innovation covariance) */
+/* Run the linear Kalman filter. Returns KF_OK, KF_ERR_MATRIX_CONDITION
+ * (non-PD innovation covariance) */
 arena_size kf_arena_size(const i64 n, const i64 m, const i64 k);
 int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
                 kf_outputs *out);
@@ -153,7 +154,7 @@ typedef struct {
   meas_fn jac;
   const f64 *A, *B;
   const f64 *calib_params;
-  const f64 *Q, *R, *y;
+  const f64 *Q, *R, *steady_state, *y;
   const f64 *x0; /* (n,)   initial state mean */
   const f64 *P0; /* (n, n) initial state covariance (pre-symmetrized) */
   i64 T, n, m, k, n_par;
@@ -171,8 +172,8 @@ typedef struct {
   f64 *loglik;            /* scalar out */
 } ekf_outputs;
 
-/* Run the extended Kalman filter: linear transition, nonlinear measurement via
- * the meas/jac cfunc pointers (relinearized each step). Returns KF_OK,
+/* Run the extended Kalman filter: linear transition, nonlinear measurement
+ * via the meas/jac cfunc pointers (relinearized each step). Returns KF_OK,
  * KF_ERR_MATRIX_CONDITION (non-PD innovation covariance) */
 arena_size ekf_arena_size(const i64 n, const i64 m, const i64 k);
 int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,

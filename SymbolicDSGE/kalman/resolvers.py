@@ -41,6 +41,7 @@ class LinearRunArgs(TypedDict):
     d: NDF
     Q: NDF
     R: NDF
+    steady_state: NDF
     y: NDF
     x0: NDF
     P0: NDF
@@ -58,6 +59,7 @@ class ExtendedRunArgs(TypedDict):
     calib_params: NDF
     Q: NDF
     R: NDF
+    steady_state: NDF
     y: NDF
     x0: NDF
     P0: NDF
@@ -99,7 +101,7 @@ def resolve_linear_args(
     y: NDF | pd.DataFrame,
     observables: Sequence[str] | None = None,
     *,
-    x0: NDF | None = None,
+    x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
     P0: NDF | None = None,
     R: NDF | None = None,
     jitter: Float64Like | None = None,
@@ -118,8 +120,9 @@ def resolve_linear_args(
         d=d,
         Q=_shock_covariance(model.compiled),
         R=_build_R(model, R, obs),
+        steady_state=model.policy.steady_state,
         y=y_canonical,
-        x0=_default_x0(A) if x0 is None else x0,
+        x0=model._initial_state(x0),
         P0=_build_P0(model, FilterMode.LINEAR, P0),
         return_shocks=bool(return_shocks),
         symmetrize=bool(symmetrize),
@@ -133,7 +136,7 @@ def resolve_extended_args(
     y: NDF | pd.DataFrame,
     observables: Sequence[str] | None = None,
     *,
-    x0: NDF | None = None,
+    x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
     P0: NDF | None = None,
     R: NDF | None = None,
     jitter: Float64Like | None = None,
@@ -152,8 +155,9 @@ def resolve_extended_args(
         calib_params=_calib_params(model),
         Q=_shock_covariance(model.compiled),
         R=_build_R(model, R, obs),
+        steady_state=model.policy.steady_state,
         y=y_canonical,
-        x0=_default_x0(A) if x0 is None else x0,
+        x0=model._initial_state(x0),
         P0=_build_P0(model, FilterMode.EXTENDED, P0),
         return_shocks=bool(return_shocks),
         symmetrize=bool(symmetrize),
@@ -167,7 +171,7 @@ def resolve_unscented_args(
     y: NDF | pd.DataFrame,
     observables: Sequence[str] | None = None,
     *,
-    x0: NDF | None = None,
+    x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
     P0: NDF | None = None,
     R: NDF | None = None,
     jitter: Float64Like | None = None,
@@ -212,10 +216,6 @@ def resolve_unscented_args(
 
 def _jitter(jitter: Float64Like | None) -> float:
     return 0.0 if jitter is None else float(jitter)
-
-
-def _default_x0(A: NDF) -> NDF:
-    return np.zeros((A.shape[0],), dtype=float64)
 
 
 def _calib_params(model: SolvedModel) -> NDF:
@@ -389,24 +389,14 @@ def _build_P0(model: SolvedModel, filter_mode: FilterMode | str, P0: NDF | None)
     return _build_default_P0(model, mode)
 
 
-def _build_unscented_z0(model: SolvedModel, x0: NDF | None) -> NDF:
+def _build_unscented_z0(
+    model: SolvedModel,
+    x0: dict[str, float | float64] | list[float | float64] | NDF | None,
+) -> NDF:
     n_state = model.compiled.n_state
-    n_var = model.compiled.n_var
-    if x0 is None:
-        x0_state = np.zeros((n_state,), dtype=float64)
-    else:
-        raw = asarray(x0, dtype=float64)
-        if raw.ndim != 1:
-            raise ValueError("x0 must be a 1D array.")
-        if raw.shape[0] == n_state:
-            x0_state = raw.copy()
-        elif raw.shape[0] == n_var:
-            x0_state = raw[:n_state].copy()
-        else:
-            raise ValueError(
-                f"x0 must have length {n_state} or {n_var}, got {raw.shape[0]}."
-            )
-
+    # ``_initial_state`` validates the input and always returns the full
+    # ``n_var`` vector, so the state block is a slice and there is nothing left
+    # to reject here.
     z0 = np.zeros((2 * n_state,), dtype=float64)
-    z0[:n_state] = x0_state
+    z0[:n_state] = model._initial_state(x0)[:n_state]
     return z0

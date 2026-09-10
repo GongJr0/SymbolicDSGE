@@ -84,9 +84,9 @@ __Fields and Properties:__
 |:---------|:--------:|----------------:|
 | kind | `#!python Literal["ols", "ridge", "lasso", "elastic_net"]` | Regression method. |
 | variables | `#!python list[str]` | Shared variable ordering across replications. |
-| coef_trace | `#!python ndarray` | Coefficients stacked by replication. Shape `(n_rep, k)`. |
+| coef_trace | `#!python ndarray` | Coefficients stacked by retained replication. Shape `(n_retained, k)`. |
 | coefficients | `#!python ndarray` | Alias for `coef_trace`. |
-| status_trace | `#!python tuple[RegressionStatus, ...]` | Solver status for each replication. |
+| status_trace | `#!python tuple[RegressionStatus, ...]` | Solver status for each retained replication. |
 | n_rep | `#!python int` | Total number of replications. |
 | n_retained | `#!python int` | Number of replications whose output the step's arena kept. |
 | retained_reps | `#!python ndarray` | Indices of retained replications relative to the complete run. |
@@ -132,7 +132,7 @@ __OLS-Only Aggregate Diagnostics:__
 
 __Transform Output:__
 
-`MCPipelineResult.transform_outputs` maps each transform step name to its output stacked across retained replications, shaped `(n_retained, *output_shape)`. A transform writing `(T, p)` per replication appears as `(n_retained, T, p)`. The mapping is empty (`{}`) when the pipeline has no transform steps. Retention follows the step's `n_retain`, and the producing step's `retained_reps` records which replications the rows came from.
+`MCPipelineResult.transform_outputs` maps each transform step name to its output stacked across retained replications, shaped `(n_retained, *output_shape)`. A transform writing `(T, p)` per replication appears as `(n_retained, T, p)`. The mapping is empty (`{}`) when the pipeline has no transform steps. Retention follows the step's `n_retain`.
 
 These are the same arrays post-loop ops receive under the `payload.<name>` trace keys below, so a value read here needs no post-processing step to reach it.
 

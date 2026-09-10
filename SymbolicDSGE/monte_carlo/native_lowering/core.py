@@ -52,7 +52,7 @@ def lower_native_run(
     pipeline: MCPipeline,
     *,
     reference: SolvedModel,
-    dgp: SolvedModel | None,
+    dgp: SolvedModel | None = None,
     n_rep: int,
     n_jobs: int | None = None,
     check_memory_availability: bool = True,

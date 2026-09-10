@@ -190,13 +190,13 @@ SolvedModel.kalman(
     filter_mode: Literal['linear', 'extended', 'unscented'] = 'linear',
     *,
     observables: list[str] | None = None, # (1)!
-    x0: ndarray | None = None, # (2)!
+    x0: dict[str, float | float64] | list[float | float64] | NDF | None = None, # (2)!
     jitter: float | None = None, # (3)!
     symmetrize: bool = False,
     joseph_cov: bool = False, 
     return_shocks: bool = False,
+    P0: ndarray | None = None,
     R: ndarray | None = None,
-    _debug: bool = False
 ) -> FilterResult | UnscentedFilterResult
 ```
 
@@ -210,7 +210,7 @@ Run a Kalman Filter application on the observables specified.
     When a DataFrame is used as `y`, column names will be used to align and order observables' names and position. However, for `ndarray` inputs, the method assumes names in `observables` and columns of `y` are position-aligned.
 
 ???+ info "State Units and Timing"
-    This public path returns state histories in levels. Linear and extended results record the added steady-state vector in `FilterResult.constant`; unscented results form levels in the kernel and record `NaN` there.
+    This public path returns state histories in levels. 
 
     For linear and extended filters, `x0` and `P0` are the prior mean and covariance of the first observed state. For the unscented filter, they describe the state and covariance before the first observation.
 
@@ -221,14 +221,13 @@ __Inputs:__
 | y | observations to filter. |
 | filter_mode | `"linear"` for affine measurements, `"extended"` (EKF) for nonlinear measurements, or `"unscented"` (UKF), which runs against the model's second-order solution. `"unscented"` does not support `return_shocks`. Returns an `UnscentedFilterResult` instead of a `FilterResult`. |
 | observables | Name of corresponding model measurements. |
-| x0 | Initial state vector. It is the prior for the first observation in linear and extended modes, and the state before the first observation in unscented mode. |
+| x0 | Initial state vector in levels. It is the prior for the first observation in linear and extended modes, and the state before the first observation in unscented mode. |
 | jitter | Jitter term added to matrices when Cholesky fails. |
 | symmetrize | Symmetrize covariances at each filter pass if `True`. |
 | joseph_cov | Use Joseph form for covariance update if `True`. `filter_mode == "unscented"` has it's own update mechanism and will raise when this parameter is `True`. |
 | return_shocks | Include the estimated shocks in the return object if `True`. |
 | P0 | Initial state covariance override. `None` uses the stationary state-space covariance. Supply a full `(n_var, n_var)` matrix in compiled variable order; for unscented mode its state block is embedded automatically. |
 | R | Constant measurement-error covariance override. If omitted, `R` is taken from the `KalmanConfig` (a fixed calibrated matrix, or rebuilt from named `R` parameters). |
-| _debug | Print debug information about filter inputs if `True`. |
 
 __Returns:__
 

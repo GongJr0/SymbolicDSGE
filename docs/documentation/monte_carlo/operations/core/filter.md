@@ -11,7 +11,7 @@ reference_filter_step(
     *,
     filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     observables: list[str] | None = None,
-    x0: ndarray | None = None,
+    x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
     P0: ndarray | None = None,
     R: ndarray | None = None,
     jitter: float | None = None,
@@ -33,7 +33,7 @@ __Inputs:__
 | filter_mode | `"linear"` | Filter mode: `"linear"`, `"extended"`, or `"unscented"`. |
 | n_retain | `-1` | Number of observations to retain from the filtered path. `-1` retains all replications. |
 | observables | `None` | Observable names passed to `reference.kalman(...)`. |
-| x0 | `None` | Initial state override. It is the prior for the first observation in linear and extended modes, and the state before the first observation in unscented mode. |
+| x0 | `None` | Initial state override in levels. It is the prior for the first observation in linear and extended modes, and the state before the first observation in unscented mode. |
 | P0 | `None` | Initial state covariance override with the same timing as `x0`. `None` uses the `P0` matrix from the reference model's `KalmanConfig`. |
 | R | `None` | Measurement error covariance override. |
 | jitter | `None` | Filter jitter override. |

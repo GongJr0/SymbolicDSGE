@@ -1,7 +1,7 @@
 # type: ignore
 from __future__ import annotations
 
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -10,6 +10,7 @@ from sympy import Symbol
 
 import SymbolicDSGE.kalman.resolvers as resolvers
 from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
+from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.core.compiled_model import _shock_covariance
 from SymbolicDSGE.kalman.resolvers import (
     FilterMode,
@@ -70,6 +71,10 @@ def _make_stub_model(
         config=config,
         observable_names=observable_names,
         var_names=var_names,
+        # Declaration order matches canonical order here, so `_initial_state`
+        # only has the level-to-gap conversion left to do.
+        layout=SimpleNamespace(declared_names=tuple(var_names), generated_names=()),
+        idx={name: i for i, name in enumerate(var_names)},
         n_var=3,
         n_state=2,
         n_ctrl=1,
@@ -128,10 +133,13 @@ def _make_stub_model(
         ),
     )
     model._build_C_d_from_obs = build_measurement
+    # Bound rather than stubbed: the resolvers hand x0 to this, and a fake
+    # would stop these tests from seeing the level-to-gap conversion at all.
+    model._initial_state = MethodType(SolvedModel._initial_state, model)
     return model
 
 
-def test_resolve_linear_args_is_a_complete_run_raw_argument_set():
+def test_resolve_linear_args_is_a_complete_run_argument_set():
     model = _make_stub_model()
     y = np.array([[10.0, 1.0], [20.0, 2.0]], dtype=FLOAT)
 
@@ -156,6 +164,7 @@ def test_resolve_linear_args_is_a_complete_run_raw_argument_set():
     assert np.array_equal(args["R"], np.array([[4.0, 0.6], [0.6, 9.0]], dtype=FLOAT))
     assert np.array_equal(args["x0"], np.zeros((3,), dtype=FLOAT))
     assert np.array_equal(args["P0"], np.eye(3, dtype=FLOAT))
+    assert np.array_equal(args["steady_state"], model.policy.steady_state)
     assert args["jitter"] == pytest.approx(0.125)
     assert args["symmetrize"] is True
     assert args["joseph_cov"] is False
@@ -187,15 +196,18 @@ def test_resolve_unscented_args_embeds_x0_and_defaults_the_sigma_point_weights()
         model,
         np.array([[1.0], [2.0]], dtype=FLOAT),
         ["ObsA"],
-        x0=np.array([0.2, 0.3, 99.0], dtype=FLOAT),
+        # x0 arrives in levels, so it is given as the steady state plus a
+        # known deviation and the deviation is what has to come back out.
+        x0=np.array([1.0, 2.0, 3.0], dtype=FLOAT)
+        + np.array([0.2, 0.3, 99.0], dtype=FLOAT),
         jitter=0.25,
         symmetrize=False,
     )
 
     assert args["meas_addr"] == MEAS_ADDR
-    # The full-length x0 is truncated to the state block and embedded; the
+    # Converted to deviations, truncated to the state block and embedded; the
     # second-order block starts at zero.
-    assert np.array_equal(args["z0"], np.array([0.2, 0.3, 0.0, 0.0], dtype=FLOAT))
+    assert np.allclose(args["z0"], np.array([0.2, 0.3, 0.0, 0.0], dtype=FLOAT))
     assert np.array_equal(args["hx"], model.policy.p)
     assert np.array_equal(args["gx"], model.policy.f)
     assert np.array_equal(args["bu"], model.policy.B)
@@ -218,7 +230,7 @@ def test_resolve_unscented_args_rejects_a_first_order_policy_and_a_bad_x0():
             ["ObsA"],
         )
 
-    with pytest.raises(ValueError, match="x0 must have length"):
+    with pytest.raises(ValueError, match="must be a complete list/array"):
         resolve_unscented_args(
             _make_stub_model(),
             np.array([[1.0], [2.0]], dtype=FLOAT),
@@ -435,13 +447,12 @@ def _levels_rbc_solved(order: int):
 
 
 def test_solved_model_filter_reports_levels_at_both_orders():
-    """The public filter path is in levels whatever the order, and says so.
+    """The public filter path is in levels whatever the order.
 
-    ``constant`` is what distinguishes the two routes: the linear filter runs in
-    gaps and this layer adds the expansion point, so it reports what it added.
-    The unscented kernel forms levels itself, because its measurement is
-    evaluated at them, so there is nothing left for this layer to add and it
-    reports NaN rather than claiming zero.
+    A solved model knows its expansion point and hands it to the kernel, so
+    both routes report the same units: the linear kernel adds it to the series
+    the recursion produces, and the unscented kernel forms levels itself
+    because its measurement is evaluated at them.
     """
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
 
@@ -449,7 +460,6 @@ def test_solved_model_filter_reports_levels_at_both_orders():
     lin = solved1.kalman(y=y1, filter_mode="linear", observables=["c_obs"])
     ss1 = np.asarray(solved1.policy.steady_state, dtype=FLOAT)
 
-    np.testing.assert_allclose(lin.constant, ss1, rtol=0, atol=0)
     assert np.any(ss1 != 0.0)
     # Levels, not gaps: the filtered consumption sits at its steady state, not
     # near zero.
@@ -459,19 +469,19 @@ def test_solved_model_filter_reports_levels_at_both_orders():
     solved2, y2 = _levels_rbc_solved(2)
     ukf = solved2.kalman(y=y2, filter_mode="unscented", observables=["c_obs"])
 
-    assert np.all(np.isnan(ukf.constant))
     ss2 = np.asarray(solved2.policy.steady_state, dtype=FLOAT)
     assert abs(float(np.mean(ukf.x_filt[:, c])) - ss2[c]) < 0.5 * abs(ss2[c])
 
 
-def test_filter_classes_leave_the_constant_to_the_caller():
-    """Reaching the filter directly keeps the recursion's own units.
+def test_filter_classes_shift_only_the_state_series():
+    """``steady_state`` moves the state series and nothing else.
 
-    Omitting ``steady_state`` returns gaps with a zero constant; supplying it
-    shifts the state series and records the shift. Nothing else moves.
+    The recursion runs in gaps either way, so the expansion point is an offset
+    on the reported states. The observation series carry their own constant
+    through ``d``, and the likelihood is a function of the innovations, so
+    neither moves with it.
     """
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
-    from SymbolicDSGE import DSGESolver
     from SymbolicDSGE.kalman.filter import KalmanFilter
 
     solved, y = _levels_rbc_solved(1)
@@ -490,15 +500,15 @@ def test_filter_classes_leave_the_constant_to_the_caller():
         x0=np.zeros(n_var, dtype=FLOAT),
         P0=0.1 * np.eye(n_var, dtype=FLOAT),
     )
-    gaps = KalmanFilter.run(**args)
-    levels = KalmanFilter.run(**args, steady_state=pol.steady_state)
+    ss = np.asarray(pol.steady_state, dtype=FLOAT)
+    assert np.any(ss != 0.0)
 
-    np.testing.assert_allclose(gaps.constant, np.zeros(n_var), rtol=0, atol=0)
-    np.testing.assert_allclose(levels.constant, pol.steady_state, rtol=0, atol=0)
-    np.testing.assert_allclose(
-        levels.x_filt, gaps.x_filt + pol.steady_state, rtol=0, atol=0
-    )
-    # The observation series carry their own constant through d, so they do not
-    # move with this one.
+    gaps = KalmanFilter.run(**args, steady_state=np.zeros(n_var, dtype=FLOAT))
+    levels = KalmanFilter.run(**args, steady_state=ss)
+
+    np.testing.assert_allclose(levels.x_pred, gaps.x_pred + ss, rtol=0, atol=0)
+    np.testing.assert_allclose(levels.x_filt, gaps.x_filt + ss, rtol=0, atol=0)
     np.testing.assert_allclose(levels.y_pred, gaps.y_pred, rtol=0, atol=0)
+    np.testing.assert_allclose(levels.y_filt, gaps.y_filt, rtol=0, atol=0)
+    np.testing.assert_allclose(levels.P_filt, gaps.P_filt, rtol=0, atol=0)
     np.testing.assert_allclose(levels.loglik, gaps.loglik, rtol=0, atol=0)

@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 import sympy as sp
 
-from SymbolicDSGE.kalman.filter import FilterRawResult
+from SymbolicDSGE.kalman.filter import FilterResult
 from SymbolicDSGE.regression.sr.config import TemplateConfig
 from SymbolicDSGE.regression.sr.model_defaults import PySRParams
 from SymbolicDSGE.regression.sr.model_parametrizer import ModelParametrizer
@@ -23,12 +23,12 @@ class _BuiltinParametrizer(ModelParametrizer):
         self.add_built_in_ops(["sqrt"])
 
 
-def _make_filter_result() -> FilterRawResult:
+def _make_filter_result() -> FilterResult:
     x_pred = np.array([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]], dtype=np.float64)
     zeros_state = np.zeros((3, 2, 2), dtype=np.float64)
     y_pred = np.array([[4.0, 40.0], [5.0, 50.0], [6.0, 60.0]], dtype=np.float64)
     innov = np.array([[7.0, 70.0], [8.0, 80.0], [9.0, 90.0]], dtype=np.float64)
-    return FilterRawResult(
+    return FilterResult(
         status=0,
         x_pred=x_pred,
         x_filt=x_pred.copy(),
@@ -61,7 +61,7 @@ def _make_interface(
     if obs_is_affine is None:
         obs_is_affine = {"pi": True, "y": True}
 
-    def _kalman_raw(**kwargs):
+    def kalman(**kwargs):
         calls["kwargs"] = kwargs
         return filter_result
 
@@ -71,7 +71,7 @@ def _make_interface(
         TemplateConfig(include_expression=include_expression),
     )
     model = SimpleNamespace(
-        _kalman_raw=_kalman_raw,
+        kalman=kalman,
         compiled=SimpleNamespace(
             idx={"pi_state": 0, "x": 1},
             observable_names=["pi", "y"],

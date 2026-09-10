@@ -51,3 +51,16 @@ def solved_post82(
     solver_post82: DSGESolver, compiled_post82: CompiledModel
 ) -> SolvedModel:
     return solver_post82.solve(compiled_post82)
+
+
+@pytest.fixture(scope="module")
+def solved_rbc(rbc_second_order_test_model_path) -> SolvedModel:
+    """A first-order solve of a model whose steady state is far from zero.
+
+    ``solved_test`` and ``solved_post82`` both sit at a zero ``ss``.
+    Above fixtures cannot test behavir dependent on linearization around a non-zero fixed point.
+    KF/EKF parity is the specific case this fixture is intended to test.
+    """
+    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
+    solver = DSGESolver(model, kalman)
+    return solver.solve(solver.compile(), order=1)

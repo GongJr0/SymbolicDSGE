@@ -28,7 +28,6 @@ __Fields:__
 | innov | `#!python np.ndarray` | Innovations (measurement residuals). Shape `(T, m)`. |
 | std_innov | `#!python np.ndarray` | Innovations standardized by their covariance. Shape `(T, m)`. |
 | S | `#!python np.ndarray` | Innovation covariance. Shape `(T, m, m)`. |
-| constant | `#!python np.ndarray` | State offset added to report levels. Zero indicates gaps; `NaN` indicates that the unscented kernel formed levels itself. |
 | loglik | `#!python float` | Total log-likelihood of observed data under the filter. |
 | eps_hat | `#!python np.ndarray | None` | Estimated shocks (`None` unless `return_shocks=True`). |
 
@@ -49,6 +48,7 @@ KalmanFilter.run(
     d: np.ndarray[float64 | complex128],
     Q: np.ndarray[float64 | complex128],
     R: np.ndarray[float64 | complex128],
+    steady_state: np.ndarray[float64],
     y: np.ndarray[float64 | complex128],
     x0: np.ndarray[float64] | None = None,
     P0: np.ndarray[float64] | None = None,
@@ -56,7 +56,6 @@ KalmanFilter.run(
     symmetrize: bool = True,
     joseph_cov: bool = False, 
     jitter: float = 0.0,
-    steady_state: np.ndarray[float64] | None = None,
 ) -> FilterResult
 ```
 
@@ -72,6 +71,7 @@ __Inputs:__
 | d | Observation intercept. |
 | Q | Shock covariance matrix. |
 | R | Observation-noise covariance matrix. |
+| steady_state | Steady state vector to be injected into measurements in-recursion, and `x_<pred/filt>` after the recursion. |
 | y | Observed data over time. |
 | x0 | Prior state mean for the first observation. Defaults to zero. |
 | P0 | Prior state covariance for the first observation. Defaults to a large diagonal. |
@@ -79,19 +79,19 @@ __Inputs:__
 | symmetrize | Symmetrize covariance matrices each step if `#!python True`. |
 | joseph_cov | Use the Joseph covariance update if `#!python True`. Set it to `#!python False` for the simplified update, which is faster but less numerically robust. |
 | jitter | Jitter term added to $S_t$ when Cholesky factorization fails. |
-| steady_state | Optional state offset. When supplied, `x_pred` and `x_filt` are returned in levels and recorded as `FilterResult.constant`; otherwise they are gaps. |
 
 &nbsp;
 
 ```python
 KalmanFilter.run_extended(
+    meas_addr: int, 
+    jac_addr: int, 
     A: np.ndarray[float64 | complex128],
     B: np.ndarray[float64 | complex128],
-    h: Callable[..., np.ndarray],
-    H_jac: Callable[..., np.ndarray],
     calib_params: np.ndarray[float64],
     Q: np.ndarray[float64 | complex128],
     R: np.ndarray[float64 | complex128],
+    steady_state: np.ndarray[float64],
     y: np.ndarray[float64 | complex128],
     x0: np.ndarray[float64] | None = None,
     P0: np.ndarray[float64] | None = None,
@@ -100,13 +100,12 @@ KalmanFilter.run_extended(
     joseph_cov: bool = False, 
     jitter: float = 0.0,
     compute_y_filt: bool = True,
-    steady_state: np.ndarray[float64] | None = None,
 ) -> FilterResult
 ```
 
 Apply an extended Kalman Filter with linear transition and nonlinear measurement function. `#!python h` and `#!python H_jac` are evaluated at each predicted state and receive unpacked state values plus `#!python calib_params`.
 
-`x0` and `P0` are the prior mean and covariance for the first observation. The optional `steady_state` argument has the same level reporting behavior as `KalmanFilter.run(...)`.
+`x0` and `P0` are the prior mean and covariance for the first observation. The `steady_state` argument has the same level reporting behavior as `KalmanFilter.run(...)`.
 
 ???+ note "Jitter"
     Though its default is 0.0, running the method with a small jitter is strongly recommended. Using 1e-8 (or similar) can prevent fallback to matrix inversion when Cholesky fails. (Inversion much slower in comparison)
@@ -124,18 +123,22 @@ KalmanFilter.run_unscented(
     meas_addr: int,
     hx: np.ndarray[float64 | complex128],
     gx: np.ndarray[float64 | complex128],
-    bx: np.ndarray[float64 | complex128],
+    bu: np.ndarray[float64 | complex128],
     hxx: np.ndarray[float64 | complex128],
     gxx: np.ndarray[float64 | complex128],
     hss: np.ndarray[float64 | complex128],
     gss: np.ndarray[float64 | complex128],
+    hxu: np.ndarray[float64 | complex128],
+    gxu: np.ndarray[float64 | complex128],
+    huu: np.ndarray[float64 | complex128],
+    guu: np.ndarray[float64 | complex128],
     steady_state: np.ndarray[float64 | complex128],
     calib_params: np.ndarray[float64 | complex128],
     Q: np.ndarray[float64 | complex128],
     R: np.ndarray[float64 | complex128],
     y: np.ndarray[float64 | complex128],
     z0: np.ndarray[float64 | complex128], # (1)!
-    P0: np.ndarray[float64 | complex128], # (2)!
+    P0: np.ndarray[float64 | complex128] | None, # (2)!
     alpha: float = 1.0,
     beta: float = 2.0,
     kappa: float = 1.0,

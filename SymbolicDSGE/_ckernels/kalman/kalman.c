@@ -324,8 +324,15 @@ int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
 
     if (in->store_history) {
       sdsge_matvec_plus_vec(in->C, x_filt_buf, in->d, y_filt_buf, m, n);
+
       memcpy(out->x_pred + t * n, x_pred_buf, (size_t)n * sizeof(f64));
       memcpy(out->x_filt + t * n, x_filt_buf, (size_t)n * sizeof(f64));
+
+      for (i64 i = 0; i < n; ++i) {
+        out->x_pred[n * t + i] += in->steady_state[i];
+        out->x_filt[n * t + i] += in->steady_state[i];
+      }
+
       memcpy(out->P_pred + t * n * n, P_pred_buf,
              (size_t)(n * n) * sizeof(f64));
       memcpy(out->P_filt + t * n * n, P_filt_buf,
@@ -345,18 +352,20 @@ int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
   }
 
   *out->loglik = loglik;
+
   return status;
 }
 
 arena_size ekf_arena_size(const i64 n, const i64 m, const i64 k) {
   return make_sizer(
-      2 * n + 6 * m    /* vectors + triangular-solve scratch */
-          + 6 * n * n  /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
-          + 2 * m * m  /* S_buf, L */
-          + 4 * n * m  /* PCt, K, temp_nm, H_buf */
-          + m * n      /* temp_mn */
-          + n * k      /* temp_nk */
-          + 2 * k * m, /* M, temp_km */
+      2 * n + 6 * m   /* vectors + triangular-solve scratch */
+          + 6 * n * n /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
+          + 2 * m * m /* S_buf, L */
+          + 4 * n * m /* PCt, K, temp_nm, H_buf */
+          + m * n     /* temp_mn */
+          + n * k     /* temp_nk */
+          + 2 * k * m /* M, temp_km */
+          + n,        /* x_lvl holds x in levels for the measurement */
       0);
 }
 
@@ -388,6 +397,7 @@ int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
   f64 *temp_nk = temp_mn + m * n;
   f64 *M = temp_nk + n * k;
   f64 *temp_km = M + k * m;
+  f64 *x_lvl = temp_km + k * m;
 
   kf_build_bqbt(in->B, in->Q, temp_nk, BQBT, n, k);
 
@@ -407,8 +417,12 @@ int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
   for (i64 t = 0; t < T; ++t) {
     /* Nonlinear measurement + relinearization at the predicted state:
      * y_pred := h(x_pred, params);  H_buf := dh/dx(x_pred, params), (m, n). */
-    in->meas(x_pred_buf, in->calib_params, y_pred_buf);
-    in->jac(x_pred_buf, in->calib_params, H_buf);
+    for (i64 i = 0; i < n; ++i) {
+      x_lvl[i] = x_pred_buf[i] + in->steady_state[i];
+    }
+
+    in->meas(x_lvl, in->calib_params, y_pred_buf);
+    in->jac(x_lvl, in->calib_params, H_buf);
 
     kf_row_minus_vec(in->y, t, y_pred_buf, v_buf, m);
     kf_measurement_cov(H_buf, P_pred_buf, in->R, temp_mn, S_buf, n, m);
@@ -450,19 +464,36 @@ int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
     if (in->store_history) {
       memcpy(out->x_pred + t * n, x_pred_buf, (size_t)n * sizeof(f64));
       memcpy(out->x_filt + t * n, x_filt_buf, (size_t)n * sizeof(f64));
+
+      for (i64 i = 0; i < n; ++i) {
+        out->x_pred[n * t + i] += in->steady_state[i];
+        out->x_filt[n * t + i] += in->steady_state[i];
+      }
+
       memcpy(out->P_pred + t * n * n, P_pred_buf,
              (size_t)(n * n) * sizeof(f64));
       memcpy(out->P_filt + t * n * n, P_filt_buf,
              (size_t)(n * n) * sizeof(f64));
       memcpy(out->y_pred + t * m, y_pred_buf, (size_t)m * sizeof(f64));
-      if (in->compute_y_filt)
-        in->meas(x_filt_buf, in->calib_params, out->y_filt + t * m);
+
+      if (in->compute_y_filt) {
+        if (in->steady_state != NULL) {
+          for (i64 i = 0; i < n; ++i) {
+            x_lvl[i] = x_filt_buf[i] + in->steady_state[i];
+          }
+          in->meas(x_lvl, in->calib_params, out->y_filt + t * m);
+        } else {
+          in->meas(x_filt_buf, in->calib_params, out->y_filt + t * m);
+        }
+      }
+
       memcpy(out->innov + t * m, v_buf, (size_t)m * sizeof(f64));
       memcpy(out->std_innov + t * m, u_buf, (size_t)m * sizeof(f64));
       memcpy(out->S + t * m * m, S_buf, (size_t)(m * m) * sizeof(f64));
     }
 
-    /* Carry the posterior forward: the next period opens on this prediction. */
+    /* Carry the posterior forward: the next period opens on this prediction.
+     */
     sdsge_matvec(in->A, x_filt_buf, x_pred_buf, n, n);
     kf_predict_cov(in->A, P_filt_buf, BQBT, temp_nn, P_pred_buf, n);
     if (in->symmetrize)
@@ -701,9 +732,9 @@ i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
   memcpy(z_prev, in->z0, (size_t)nz * sizeof(f64));
   memcpy(P_prev, in->P0, (size_t)(nz * nz) * sizeof(f64));
 
-  /* Q is fixed for the run, so its factor is taken once. The augmented root is
-   * block diagonal and only its state block moves, so the innovation block is
-   * written here and never again. */
+  /* Q is fixed for the run, so its factor is taken once. The augmented root
+   * is block diagonal and only its state block moves, so the innovation block
+   * is written here and never again. */
   if (ne > 0 && ukf_chol_auto(in->Q, in->jitter, Q_chol, ne) != SDSGE_OK)
     return KF_ERR_MATRIX_CONDITION;
   sdsge_zero_mat(A_chol, na, na);
@@ -774,11 +805,11 @@ i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
                       sdsge_dot(innov, S_inv_v, no));
 
     if (in->store_history) {
-      /* The variable vector is an output, not a state: it is never carried and
-       * never initialized, so it is filtered by its own gain against the same
-       * innovation rather than re-derived from z_filt. Deriving it there would
-       * drop this period's shock, which no longer exists once the sigma set has
-       * been marginalized down to the pruned state. */
+      /* The variable vector is an output, not a state: it is never carried
+       * and never initialized, so it is filtered by its own gain against the
+       * same innovation rather than re-derived from z_filt. Deriving it there
+       * would drop this period's shock, which no longer exists once the sigma
+       * set has been marginalized down to the pruned state. */
       ukf_weighted_mean(sigma_v, w0_m, wi, n_sig, nv, vars_pred);
       ukf_weighted_cross(sigma_v, vars_pred, sigma_y, y_pred, w0_c, wi, n_sig,
                          nv, no, Pvy);
