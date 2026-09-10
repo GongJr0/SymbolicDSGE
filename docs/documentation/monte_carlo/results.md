@@ -6,6 +6,121 @@ tags:
 
 ```python
 @dataclass(frozen=True)
+class MCDataGenResult(
+    n_rep: int,
+    n_retained: int,
+    retained_reps: ndarray,
+    var_names: Sequence[str],
+    X: ndarray,
+    shock_names: Sequence[str],
+    eps: ndarray,
+    observable_names: Sequence[str] = (),
+    y: ndarray = np.empty((0, 0, 0)),
+    _regimes: ndarray | None = None,
+    _diagnostics: Sequence[OccBinDiagnostics] | None = None,
+)
+```
+
+`MCDataGenResult` stacks the `SimResult` a datagen step produces on each replication into one container, adding a leading replication axis to every path. A pipeline has exactly one datagen step, so `MCPipelineResult.datagen_outputs` holds the container itself rather than a mapping.
+
+__Fields and Properties:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| n_rep | `#!python int` | Total number of replications. |
+| n_retained | `#!python int` | Number of replications whose output the step's arena kept. |
+| retained_reps | `#!python ndarray` | Replication indices behind each row of the stacked paths, so a row can be mapped back to its replication. |
+| var_names | `#!python Sequence[str]` | Names of the state-path columns, in compiled canonical order. |
+| X | `#!python ndarray` | Full state paths. Shape `(n_retained, T, n_var)`. |
+| shock_names | `#!python Sequence[str]` | Names of the shock columns, in canonical order. |
+| eps | `#!python ndarray` | Shock paths. Shape `(n_retained, T, n_shock)`. |
+| observable_names | `#!python Sequence[str]` | Names of the observable-path columns, in observable order. Empty when the step produced no observables. |
+| y | `#!python ndarray` | Observable paths. Shape `(n_retained, T, n_obs)`. |
+| states | `#!python dict[str, ndarray]` | State paths keyed by `var_names`. Each value is a `(n_retained, T)` column view of `X`. |
+| shocks | `#!python dict[str, ndarray]` | Shock paths keyed by `shock_names`. Each value is a `(n_retained, T)` column view of `eps`. |
+| observables | `#!python dict[str, ndarray]` | Observable paths keyed by `observable_names`. Each value is a `(n_retained, T)` column view of `y`. |
+| regimes | `#!python ndarray` | Accepted regime guess per period, per replication. Shape `(n_retained, T, H)`, where `H` is the longest check-ahead horizon any period used and column 0 is the regime realized at that date. |
+| diagnostics | `#!python Sequence[OccBinDiagnostics]` | Each replication's per-period convergence record behind `regimes`. |
+| `replication(idx)` | `#!python SimResult` | One retained replication's paths as a single-run result. |
+
+???+ note "Retained indexing"
+    `idx` counts the retained replications, which are stored compactly, so it is not the replication's index in the run. `retained_reps[idx]` is that index; the two coincide only when the run retained everything.
+
+???+ note "Fields the step never produced"
+    A datagen step declares what it writes: raw data may carry any of states, shocks and observables, and a simulation omits observables when it was built without them. An undeclared field still reports a block, filled with `NaN` at the width its names imply.
+
+???+ warning "Piecewise Simulation"
+    Datagen steps for MC pipelines currently do not support piecewise simulation. A OccBin model will use the reference regime (state where no constraint binds) for all periods. `regimes` and `diagnostics` currently raise `AttributeError` on access to reflect that.
+
+&nbsp;
+
+```python
+@dataclass(frozen=True)
+class MCFilterResult(
+    n_rep: int,
+    n_retained: int,
+    retained_reps: ndarray,
+    filter_mode: str,
+    x_pred: ndarray,
+    x_filt: ndarray,
+    P_pred: ndarray,
+    P_filt: ndarray,
+    y_pred: ndarray,
+    y_filt: ndarray,
+    S: ndarray,
+    innov: ndarray,
+    std_innov: ndarray,
+    loglik: ndarray,
+    eps_hat: ndarray | None = None,
+    _x1_pred: ndarray | None = None,
+    _x2_pred: ndarray | None = None,
+    _x1_filt: ndarray | None = None,
+    _x2_filt: ndarray | None = None,
+)
+```
+
+`MCFilterResult` stacks the `FilterResult` or `UnscentedFilterResult` a filter step produces on each replication into one container, adding a leading replication axis to every history. `MCPipelineResult.filter_outputs` maps each filter step name to one.
+
+__Fields and Properties:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| n_rep | `#!python int` | Total number of replications. |
+| n_retained | `#!python int` | Number of replications whose output the step's arena kept. |
+| retained_reps | `#!python ndarray` | Replication indices behind each row of the stacked histories. |
+| filter_mode | `#!python str` | Kernel the step ran: `"linear"`, `"extended"` or `"unscented"`. |
+| x_pred | `#!python ndarray` | Predicted $x$ states over time. Shape `(n_retained, T, n_var)`. |
+| x_filt | `#!python ndarray` | Filtered $x$ states over time. Shape `(n_retained, T, n_var)`. |
+| P_pred | `#!python ndarray` | Predicted state covariance $P$ over time. Shape `(n_retained, T, n_var, n_var)`. |
+| P_filt | `#!python ndarray` | Filtered state covariance $P$ over time. Shape `(n_retained, T, n_var, n_var)`. |
+| y_pred | `#!python ndarray` | Predicted observables over time. Shape `(n_retained, T, n_obs)`. |
+| y_filt | `#!python ndarray` | Filtered observables over time. Shape `(n_retained, T, n_obs)`. |
+| S | `#!python ndarray` | Innovation covariance over time. Shape `(n_retained, T, n_obs, n_obs)`. |
+| innov | `#!python ndarray` | Observable innovations $y_t - y_{t\mid t-1}$. Shape `(n_retained, T, n_obs)`. |
+| std_innov | `#!python ndarray` | Innovations standardized by their covariance. Shape `(n_retained, T, n_obs)`. |
+| loglik | `#!python ndarray` | Per-replication log likelihood ($\boldsymbol{\ell}$) of measurements. Shape `(n_retained,)`. |
+| eps_hat | `#!python ndarray \| None` | Conditional estimates of structural shocks given observed data, shape `(n_retained, T, n_shock)`. `None` when the step ran without `return_shocks`. |
+| `replication(idx)` | `#!python FilterResult \| UnscentedFilterResult` | One retained replication's filter output as a single-run result. |
+
+__Unscented-Only Fields:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| x1_pred | `#!python ndarray` | First-order component of the predicted state over time. Shape `(n_retained, T, n_state)`. |
+| x2_pred | `#!python ndarray` | Second-order component of the predicted state over time. Shape `(n_retained, T, n_state)`. |
+| x1_filt | `#!python ndarray` | First-order component of the filtered state over time. Shape `(n_retained, T, n_state)`. |
+| x2_filt | `#!python ndarray` | Second-order component of the filtered state over time. Shape `(n_retained, T, n_state)`. |
+
+???+ note "Retained indexing"
+    `idx` counts the retained replications, which are stored compactly, so it is not the replication's index in the run. `retained_reps[idx]` is that index; the two coincide only when the run retained everything.
+
+???+ note "Unscented shapes and fields"
+    An unscented step tracks a pruned state, so its covariance histories carry the stacked first- and second-order state: `P_pred` and `P_filt` are shaped `(n_retained, T, 2 * n_state, 2 * n_state)`. Shock recovery is not supported for the UKF, so `eps_hat` is `None`. The four pruned-state fields are only recorded under `filter_mode="unscented"`; reading one off a linear or extended result raises `AttributeError`.
+
+&nbsp;
+
+```python
+@dataclass(frozen=True)
 class MCTestResult(
     test_name: str,
     dist: ReferenceDistribution,
