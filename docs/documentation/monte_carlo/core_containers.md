@@ -139,12 +139,14 @@ class MCPipelineResult(
     meta: MCMeta,
     n_rep: int,
     n_successful: int,
-    test_summaries: Mapping[str, MCTestResult],
+    datagen_outputs: MCDataGenResult,
+    filter_outputs: Mapping[str, MCFilterResult] = {},
     transform_outputs: Mapping[str, ndarray] = {},
+    test_summaries: Mapping[str, MCTestResult] = {},
     regression_summaries: Mapping[str, MCRegressionResult] = {},
     failures: tuple[MCFailure, ...] = (),
     postproc: Mapping[str, Artifact] = {},
-    run_config: dict[str, Any] = {},
+    run_config: Mapping[str, Any] = {},
 )
 ```
 
@@ -157,10 +159,12 @@ __Fields and Properties:__
 | meta | `#!python MCMeta` | Run metadata and performance counters. |
 | n_rep | `#!python int` | Requested replication count. |
 | n_successful | `#!python int` | Number of completed replications. |
-| test_summaries | `#!python Mapping[str, MCTestResult]` | Per-test aggregate result containers. |
+| datagen_outputs | `#!python MCDataGenResult` | The single datagen step's retained states, shocks and observables. A field the step never produced is reported as a `NaN` block rather than omitted. |
+| filter_outputs | `#!python Mapping[str, MCFilterResult]` | Per-filter retained output, keyed by step name. |
 | transform_outputs | `#!python Mapping[str, ndarray]` | Retained transform output stacked across replications, keyed by step name, each shaped `(n_retained, *output_shape)`. |
-| failures | `#!python tuple[MCFailure, ...]` | Failures collected when `fail_fast=False`. |
+| test_summaries | `#!python Mapping[str, MCTestResult]` | Per-test aggregate result containers. |
 | regression_summaries | `#!python Mapping[str, MCRegressionResult]` | Per-regression aggregate result containers. |
+| failures | `#!python tuple[MCFailure, ...]` | Failures collected when `fail_fast=False`. |
 | postproc | `#!python Mapping[str, Artifact]` | Post-loop artifacts keyed by step name. Values are `Artifact` instances holding optional `Raw` and `Summary` data. |
 | succeeded | `#!python bool` | `True` when no per-replication or post-loop failures were collected. |
 | statistic_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's statistic trace. |
