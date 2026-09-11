@@ -127,5 +127,9 @@ class HalfCauchy(Distribution):
         return float64(np.nan)
 
     @property
+    def std(self) -> float64:
+        return float64(np.nan)
+
+    @property
     def mode(self) -> float64:
         return float64(0.0)

@@ -125,10 +125,6 @@ class HalfNormal(Distribution[float64, VecF64]):
         return self.__class__.__name__
 
     @property
-    def rng(self) -> np.random.Generator:
-        return self._rng(self._random_state)
-
-    @property
     def support(self) -> Support:
         return Support(
             float64(0.0),
@@ -148,7 +144,3 @@ class HalfNormal(Distribution[float64, VecF64]):
     @property
     def mode(self) -> float64:
         return self._mode
-
-    @property
-    def std(self) -> float64:
-        return self._std

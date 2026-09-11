@@ -12,6 +12,36 @@ T = TypeVar("T", float64, NDArray[float64])
 
 
 class TransformMethod(StrEnum):
+    """Transformation methods for :class:`Prior` objects.
+
+    Attributes
+    ----------
+    IDENTITY : Literal["identity"]
+        Identity transformation, mapping from (-inf, inf) to (-inf, inf).
+    LOG : Literal["log"]
+        Log transformation, mapping from (0, inf) to (-inf, inf).
+    SOFTPLUS : Literal["softplus"]
+        Softplus transformation, mapping from (0, inf) to (-inf, inf).
+    LOGIT : Literal["logit"]
+        Logit transformation, mapping from (0, 1) to (-inf, inf).
+    PROBIT : Literal["probit"]
+        Probit transformation, mapping from (0, 1) to (-inf, inf).
+    TANH : Literal["tanh"]
+        Tanh transformation, mapping from (-1, 1) to (-inf, inf).
+    AFFINE_LOGIT : Literal["affine_logit"]
+        Affine logit transformation, mapping from (low, high) to (-inf, inf).
+    AFFINE_PROBIT : Literal["affine_probit"]
+        Affine probit transformation, mapping from (low, high) to (-inf, inf).
+    LOWER_BOUNDED : Literal["lower_bounded"]
+        Lower bounded transformation, mapping from (low, inf) to (-inf, inf).
+    UPPER_BOUNDED : Literal["upper_bounded"]
+        Upper bounded transformation, mapping from (-inf, high) to (-inf, inf).
+    CHOLESKY_CORR : Literal["cholesky_corr"]
+        Transform specific to :class:`LKJCholesky` distribution;
+        maps a lower triangular Cholesky factor of a correlation matrix to an unconstrained space.
+
+    """
+
     IDENTITY = "identity"  # (-inf, inf)
     LOG = "log"  # (0, inf)  via y=log(x)
     SOFTPLUS = "softplus"  # (0, inf)  via x=softplus(y)  (sampler-friendly alternative)
@@ -27,11 +57,6 @@ class TransformMethod(StrEnum):
         "upper_bounded"  # (-inf, high) via x=high-exp(y) (or high-softplus(y))
     )
 
-    SIMPLEX = (
-        "simplex"  # weights on simplex (sum=1, each>0) via softmax / stick-breaking
-    )
-
-    CHOLESKY_COV = "cholesky_cov"  # SPD covariance via unconstrained -> L -> Sigma=LL'
     CHOLESKY_CORR = "cholesky_corr"  # correlation matrix (LKJ) via unconstrained -> corr Cholesky factor
 
 

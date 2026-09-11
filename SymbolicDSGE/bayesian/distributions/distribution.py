@@ -26,6 +26,36 @@ T = TypeVar("T", float64, NDArray[float64])
 
 
 class DistributionFamily(StrEnum):
+    """Distributions for :class:`Prior` objects.
+    Each member has a corresponding :class:`Distribution` implementation.
+
+    Attributes
+    ----------
+    NORMAL : Literal["normal"]
+        Normal distribution.
+    LOGNORMAL : Literal["log_normal"]
+        Log-normal distribution.
+    HALFNORMAL : Literal["half_normal"]
+        Half-normal distribution.
+    TRUNCNORMAL : Literal["trunc_normal"]
+        Truncated normal distribution.
+    HALFCAUCHY : Literal["half_cauchy"]
+        Half-Cauchy distribution.
+    BETA : Literal["beta"]
+        Beta distribution.
+    GAMMA : Literal["gamma"]
+        Gamma distribution.
+    INVGAMMA : Literal["inv_gamma"]
+        Inverse gamma distribution.
+    UNIFORM : Literal["uniform"]
+        Uniform distribution.
+    LKJCHOL : Literal["lkj_chol"]
+        LKJ distribution of the lower Cholesky factor of a correlation matrix.
+        Must be paired with a :class:`CholeskyCorrTransform` ("cholesky_corr" in :class:`TransformMethod`
+        or `make_prior(...,transform="cholesky_corr")`) to produce a valid correlation matrix.
+
+    """
+
     NORMAL = "normal"
     LOGNORMAL = "log_normal"
     HALFNORMAL = "half_normal"
@@ -268,6 +298,15 @@ class Distribution(ABC, Generic[EventT, BatchT]):
     def var(self) -> EventT:
         """The variance of the distribution."""
         pass
+
+    @property
+    def std(self) -> EventT:
+        """The standard deviation of the distribution, the root of :attr:`var`.
+
+        Families without a defined variance report the absence here the same
+        way they report it on :attr:`var`.
+        """
+        return cast(EventT, np.sqrt(self.var))
 
     @property
     @abstractmethod

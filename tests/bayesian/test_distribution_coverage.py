@@ -326,11 +326,10 @@ def test_halfnormal_and_lognormal_property_and_vector_branches():
     assert halfnorm_rvs.py_func(float64(1.4), (3,), np.random.default_rng(1)).shape == (
         3,
     )
-    assert isinstance(half.rng, np.random.Generator)
     assert half.mean > 0.0
     assert half.var > 0.0
     assert half.mode == pytest.approx(0.0)
-    assert half.std == pytest.approx(1.4)
+    assert half.std == pytest.approx(1.4 * np.sqrt(1.0 - 2.0 / np.pi))
 
     logn = LogNormal(np.log(1.8), 0.45, 123)
     assert lognorm_logpdf_scalar.py_func(

@@ -19,6 +19,36 @@ NDI = NDArray[np.int64]
 
 @dataclass(frozen=True)
 class OptimizationResult:
+    """Point estimate optimization result container.
+
+    Attributes
+    ----------
+    x : NDArray[np.float64]
+        Optimal parameter vector in the unconstrained space.
+    theta : dict[str, float64]
+        Optimal parameter vector in the constrained space, keyed by parameter names.
+    success : bool
+        Whether the optimization was successful.
+    message : str
+        Error/success message from the optimizer.
+    fun : float64
+        Objective function value at the optimum.
+    nfev : int
+        Number of function evaluations performed by the optimizer.
+    nit : int | None
+        Number of iterations performed by the optimizer. None if not applicable.
+    optimizer_config : dict[str, Any]
+        Configuration to reproduce the optimization run (optimizer method, bounds, options).
+    vcov : NDArray[float64] | None
+        Covariance matrix of the unconstrained parameters at the optimum, derived from the finite-difference Hessian.
+        In unconstrained space; directly passable to MCMC as the proposal covariance.
+    se : dict[str, float64] | None
+        Standard errors of the constrained parameters, computed if covariance was requested.
+    cov_status : int
+        Status of the covariance computation: 0 if successful, otherwise indicates why it was not computed.
+
+    """
+
     x: NDF
     theta: dict[str, float64]
     success: bool
@@ -44,6 +74,14 @@ class OptimizationResult:
     cov_status: int = field(default=0, kw_only=True)
 
     def common_spec(self) -> OptimizationResultSpec:
+        """Base spec for JSON-serialization of MLE and MAP result containers.
+
+        Returns
+        -------
+        OptimizationResultSpec
+            Shared components of point estimate results.
+
+        """
         return OptimizationResultSpec(
             x=self.x.tolist(),
             theta={k: float(v) for k, v in self.theta.items()},

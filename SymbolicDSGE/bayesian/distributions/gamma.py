@@ -82,10 +82,40 @@ class Gamma(Distribution[float64, VecF64]):
 
     @staticmethod
     def to_shape(mean: float, std: float) -> float64:
+        """Convert mean and std to the shape parameter of the gamma distribution.
+
+        Parameters
+        ----------
+        mean : float
+            Mean of the gamma distribution.
+        std : float
+            Standard deviation of the gamma distribution.
+
+        Returns
+        -------
+        float64
+            Shape parameter of the gamma distribution.
+
+        """
         return float64(mean / std) ** 2
 
     @staticmethod
     def to_scale(mean: float, std: float) -> float64:
+        """Convert mean and std to the scale parameter of the gamma distribution.
+
+        Parameters
+        ----------
+        mean : float
+            Mean of the gamma distribution.
+        std : float
+            Standard deviation of the gamma distribution.
+
+        Returns
+        -------
+        float64
+            Scale parameter of the gamma distribution.
+
+        """
         return float64(std**2 / mean)
 
     @overload

@@ -206,6 +206,22 @@ def bounded(
     *,
     domain: Literal["support", "maps_to"] = "support",
 ) -> Callable:
+    """Bound-check the decorated function against the specified domain of the object.
+
+    Parameters
+    ----------
+    func : Callable | None
+        Function returning numeric scalar or array.
+    domain : Literal["support", "maps_to"]
+        Which domain of the object to check against.
+
+    Returns
+    -------
+    Callable
+        Decorated function that checks if the input is within the specified domain before executing.
+
+    """
+
     def _decorate(fn: Callable) -> Callable:
         @wraps(fn)
         def wrapper(self: object, x: FLOAT_VEC_SCA) -> FLOAT_VEC_SCA:

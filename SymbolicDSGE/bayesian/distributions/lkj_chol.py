@@ -277,6 +277,18 @@ class LKJChol(Distribution[MatF64, MatF64]):
         raise NotImplementedError("Variance is not defined for LKJChol.")
 
     @property
+    def std(self) -> MatF64:
+        """Not defined for this family.
+
+        Raises
+        ------
+        NotImplementedError
+            Always. Standard deviation has no scalar definition over Cholesky
+            factors of correlation matrices.
+        """
+        raise NotImplementedError("Standard deviation is not defined for LKJChol.")
+
+    @property
     def mode(self) -> MatF64:
         """Not defined for this family.
 

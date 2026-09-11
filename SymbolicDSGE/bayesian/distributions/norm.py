@@ -117,10 +117,6 @@ class Normal(Distribution[float64, VecF64]):
         return self.__class__.__name__
 
     @property
-    def rng(self) -> np.random.Generator:
-        return self._rng(self._random_state)
-
-    @property
     def support(self) -> Support:
         return Support(
             float64(-np.inf),

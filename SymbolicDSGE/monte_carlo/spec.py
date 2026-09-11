@@ -134,6 +134,20 @@ class PostprocSpec(TypedDict):
 
 
 class PipelineSpec(TypedDict):
+    """Serializable spec for a :class:`MCPipeline` graph.
+
+    Attributes
+    ----------
+    nodes : list[NodeSpec]
+        Graph nodes, each a step with its own parameters and sources.
+    edges : list[EdgeSpec]
+        Graph edges, each a source-target pair of node ``id``s.
+    postprocs : list[PostprocSpec]
+        Post-loop ops, run once over the assembled traces. Kept separate from the
+        per-rep DAG (``nodes``/``edges``).
+
+    """
+
     nodes: list[NodeSpec]
     edges: list[EdgeSpec]
     #: Post-loop ops, run once over the assembled traces. Kept separate from the

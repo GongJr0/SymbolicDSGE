@@ -74,11 +74,41 @@ class InvGamma(Distribution[float64, VecF64]):
 
     @staticmethod
     def to_shape(mean: float, std: float) -> float64:
+        """Convert mean and std to shape parameter a of the inverse gamma distribution.
+
+        Parameters
+        ----------
+        mean : float
+            Mean of the inverse gamma distribution.
+        std : float
+            Standard deviation of the inverse gamma distribution.
+
+        Returns
+        -------
+        float64
+            Shape parameter a of the inverse gamma distribution.
+
+        """
         ratio = float64(mean / std)
         return float64(2.0 + ratio**2)
 
     @classmethod
     def to_scale(cls, mean: float, std: float) -> float64:
+        """Convert mean and std to scale parameter beta of the inverse gamma distribution.
+
+        Parameters
+        ----------
+        mean : float
+            Mean of the inverse gamma distribution.
+        std : float
+            Standard deviation of the inverse gamma distribution.
+
+        Returns
+        -------
+        float64
+            Scale parameter beta of the inverse gamma distribution.
+
+        """
         shape = cls.to_shape(mean, std)
         return float64(mean) * float64(shape - 1.0)
 

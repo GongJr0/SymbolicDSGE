@@ -44,12 +44,45 @@ def _clamp_unit(bounds: tuple[NDF, NDF]) -> tuple[NDF, NDF]:
 
 
 def r2(y: NDF, y_hat: NDF) -> float64:
+    """R-squared of a regression, computed as 1 - SSR/SST.
+
+    Parameters
+    ----------
+    y : NDF
+        Target vector with shape (n,).
+    y_hat : NDF
+        Predicted vector with shape (n,).
+
+    Returns
+    -------
+    float64
+        R-squared value, or 0 if the total sum of squares is zero (constant target).
+
+    """
     ssr = ((y - y_hat) ** 2).sum()
     sst = ((y - y.mean()) ** 2).sum()
     return float64(1 - ssr / sst) if sst > 0 else float64(0.0)
 
 
 def r2_adj(r2_value: float64, n: int, k: int) -> float64:
+    """Adjusted R-squared of a regression, computed as 1 - (1 - R^2) * (n - 1) / (n - k - 1).
+
+    Parameters
+    ----------
+    r2_value : float64
+        R-squared value of the regression.
+    n : int
+        Number of observations.
+    k : int
+        Number of design columns (including intercept, if present).
+
+    Returns
+    -------
+    float64
+        Adjusted R-squared value, or 0 if the number of observations is less
+        than or equal to the number of design columns plus one.
+
+    """
     if n <= k + 1:
         return float64(0.0)
     return float64(1 - (1 - r2_value) * (n - 1) / (n - k - 1))
