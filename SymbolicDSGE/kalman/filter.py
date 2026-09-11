@@ -599,59 +599,69 @@ class KalmanFilter:
     ) -> FilterResult:
         """Extended Kalman Filter with a linear transition and nonlinear measurement.
 
+        The state evolves linearly while the measurement does not::
+
             x_t = A x_{t-1} + B eps_t,     eps_t ~ N(0, Q)
             y_t = h(x_t, t) + v_t,         v_t   ~ N(0, R)
 
-        The transition step is standard linear KF. The update step linearizes the
-        nonlinear measurement mapping around the predicted state:
+        The prediction step is the standard linear recursion. The update step
+        linearizes the measurement around the predicted state, taking
+        ``H_t = dh/dx`` evaluated at ``x_{t|t-1}``.
 
-            H_t = ∂h/∂x evaluated at x_{t|t-1}
+        Parameters
+        ----------
+        meas_addr : int
+            Address of the compiled measurement cfunc. Evaluates ``h`` at a single
+            state, returning a vector of length ``m``.
+        jac_addr : int
+            Address of the compiled measurement Jacobian cfunc. Returns ``H_t`` with
+            shape ``(m, n)``.
+        A : NDF
+            State transition matrix, shape ``(n, n)``.
+        B : NDF
+            Shock loading matrix, shape ``(n, k)``.
+        calib_params : NDF
+            Calibration parameter vector passed to both cfuncs.
+        Q : NDF
+            Shock covariance matrix, shape ``(k, k)``. Process noise lives in shock
+            space, so ``Q`` is ``(k, k)`` against a ``(n, k)`` loading.
+        R : NDF
+            Measurement-noise covariance matrix, shape ``(m, m)``.
+        steady_state : NDF
+            Steady-state vector of the state variables.
+        y : NDF
+            Observations in declared order, shape ``(T, m)``.
+        x0 : NDF | None
+            Initial state mean ``x_{0|0}``, shape ``(n,)``. None starts from zeros.
+        P0 : NDF | None
+            Initial state covariance ``P_{0|0}``, shape ``(n, n)``. None starts from
+            ``1e2 * I_n``.
+        return_shocks : bool
+            Whether to compute shock estimates (:attr:`FilterResult.eps_hat`) using the
+            same formula as the linear filter. Interpretable only where the
+            innovation-to-shock mapping is meaningful under the measurement design.
+        symmetrize : bool
+            Whether to symmetrize the covariance matrices at each step via ``(M + M.T)/2``.
+        joseph_cov : bool
+            Whether to use the Joseph form of the covariance update.
+        jitter : float
+            Diagonal jitter added to ``S_t``, and only when its Cholesky factorization
+            fails. Set to 0.0 to disable.
+        compute_y_filt : bool
+            Whether to evaluate ``y_filt[t] = h(x_filt[t], t)``. When False, ``y_filt``
+            is left as zeros with shape ``(T, m)``.
+        _store_history : bool
+            Whether to store the full history of the filter. If False, the filter
+            operates in likelihood-only mode.
+        _raise_on_error : bool
+            Whether to raise if the recursion fails. If False, a result carrying a
+            nonzero ``status`` is returned instead.
 
-        Notes
-        -----
-            - `h(x, t)` must return shape (m,)
-            - `H_jac(x, t)` must return shape (m, n)
-            - Process noise is in "shock space": Q is (k, k), B is (n, k)
-
-        :param A: State transition matrix with shape (n, n).
-        :type A: NDF
-
-        :param B: Shock loading matrix with shape (n, k).
-        :type B: NDF
-
-        :param h: Nonlinear measurement function. Accepts (x, t) and returns y_pred with shape (m,).
-        :type h: Callable[[NDF, int], NDF]
-
-        :param H_jac: Measurement Jacobian function. Accepts (x, t) and returns H_t = ∂h/∂x with shape (m, n).
-        :type H_jac: Callable[[NDF, int], NDF]
-
-        :param Q: Shock covariance matrix with shape (k, k).
-        :type Q: NDF
-
-        :param R: Measurement-noise covariance matrix with shape (m, m).
-        :type R: NDF
-
-        :param y: Observations array with shape (T, m).
-        :type y: NDF
-
-        :param x0: Optional initial state mean x_{0|0} with shape (n,). Defaults to zeros.
-        :type x0: NDF | None
-
-        :param P0: Optional initial state covariance P_{0|0} with shape (n, n). Defaults to 1e2 * I_n.
-        :type P0: NDF | None
-
-        :param return_shocks: If True, compute eps_hat (shock estimates) using the same formula as the linear KF.
-                              Interpretable only if the innovation-to-shock mapping is meaningful under your measurement design.
-        :type return_shocks: bool
-
-        :param symmetrize: If True, symmetrize P and S matrices at each step via (M+M.T)/2.
-        :type symmetrize: bool
-
-        :param jitter: Diagonal jitter added to S_t only if Cholesky factorization fails. Set to 0.0 to disable.
-        :type jitter: float
-
-        :param compute_y_filt: If True, compute y_filt[t] = h(x_filt[t], t). If False, leave y_filt as zeros with shape (T, m).
-        :type compute_y_filt: bool
+        Returns
+        -------
+        FilterResult
+            Predicted and filtered states, their covariances, measurements,
+            innovations and the log likelihood.
         """
         _, m = y.shape
         n = A.shape[0]

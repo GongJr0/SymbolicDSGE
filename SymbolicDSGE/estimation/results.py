@@ -335,8 +335,7 @@ class MCMCResult:
         Parameters
         ----------
         grid_points : int
-            Number of points in the grid for evaluating the KDE. Default is 1000.
-
+            Number of points in the grid for evaluating the KDE.
         """
         from scipy.stats import gaussian_kde
         import matplotlib.pyplot as plt

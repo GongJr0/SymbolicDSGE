@@ -97,7 +97,7 @@ include = ["SymbolicDSGE*"]
 "SymbolicDSGE._ckernels" = ["**/*.pyx", "**/*.pxd", "**/*.pyi", "**/*.c", "**/*.h"]
 
 [tool.ruff]
-include = ["SymbolicDSGE/**/*.py", "SymbolicDSGE/**/*.pyi"]
+include = ["SymbolicDSGE/**/*.py"]
 extend-exclude = ["SymbolicDSGE/regression/sr"]
 
 [tool.ruff.lint]

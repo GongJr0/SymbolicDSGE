@@ -745,8 +745,7 @@ class MCPipelineResult:
         Parameters
         ----------
         print_func : Callable[[str], None]
-            Function to use for printing the report. Defaults to the built-in ``print`` function.
-
+            Function to use for printing the report.
         """
         report_mc_performance(self.meta, print_func=print_func)
 
@@ -760,8 +759,7 @@ class MCPipelineResult:
         Parameters
         ----------
         print_func : Callable[[str], None]
-            Function to use for printing the report. Defaults to the built-in ``print`` function.
-
+            Function to use for printing the report.
         """
         report_mc_step_performance(self.meta, print_func=print_func)
 
