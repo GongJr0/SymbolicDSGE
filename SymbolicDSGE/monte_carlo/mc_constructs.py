@@ -74,6 +74,13 @@ ARRAY_SOURCE_FIELDS: tuple[str, ...] = (
 
 
 class OpType(StrEnum):
+    """Operation role a pipeline step fills.
+
+    Determines when a step runs and what contract it is held to: ``DATAGEN``,
+    ``TRANSFORM``, ``FILTER``, ``TEST`` and ``REGRESSION`` run per replication,
+    ``POSTPROC`` runs once after the loop.
+    """
+
     DATAGEN = "datagen"
     TRANSFORM = "transform"
     FILTER = "filter"
@@ -84,6 +91,38 @@ class OpType(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SourceArgs:
+    """Compiled source selector used by transforms, tests and regressions.
+
+    Factories build it from the public ``source`` and ``field`` arguments, and the
+    native lowering layer resolves it to concrete buffer offsets before the run
+    starts. Source fields are tied to the producer type: data steps expose
+    ``states`` and ``observables``, transform steps expose ``payload``, and filter
+    steps expose their raw filter fields. Array consumers expect the selected field
+    to resolve to a two-dimensional numeric array.
+
+    Attributes
+    ----------
+    arg : str
+        Role the selected array fills, such as ``"sample"``, ``"y"`` or ``"X"``.
+    source_step : str
+        Producer step name, after pipeline binding.
+    field : str
+        Field read from the producer, such as ``"observables"``, ``"std_innov"``
+        or ``"payload"``.
+    columns : ColumnSelector
+        Author-supplied column selector, normalized to a tuple of ints or a slice
+        at construction.
+    column_selector : Sequence[int] | slice
+        Normalized selector. Derived from ``columns``, not set directly.
+    row_start : int
+        First selected row. Derived from ``burn_in`` and ``drop_initial``, not set
+        directly.
+    burn_in : int
+        Number of leading rows to drop.
+    drop_initial : bool
+        If True and ``burn_in`` is zero, start at row 1.
+    """
+
     arg: str
     source_step: str
     field: str
@@ -112,6 +151,27 @@ class SourceArgs:
 
 @dataclass(frozen=True)
 class MCStep:
+    """A single step in a Monte Carlo pipeline, including its name, type, and source arguments.
+
+    Attributes
+    ----------
+    name : str
+        Name of the step, used for identification and referencing in the pipeline.
+    op_type : OpType
+        :class:`OpType` indicating the type of operation (e.g., ``DATAGEN``,
+        ``FILTER``, ``TEST``, etc.).
+    func : Callable[..., Any] | None
+        Callable for a custom operation, or ``None`` for built-in operations.
+    kwargs : Mapping[str, Any]
+        Mapping of keyword arguments to pass to the operation function.
+    source_args : tuple[SourceArgs, ...]
+        Tuple of :class:`SourceArgs` specifying the sources of data for this step.
+    step_type : str | None
+        Kind specifier of the step.
+    n_retain : int
+        Number of replications to retain after this step; -1 means retain all.
+    """
+
     name: str
     op_type: OpType
     func: Callable[..., Any] | None = None
@@ -197,6 +257,22 @@ def _normalize_columns(value: ColumnSelector) -> CompiledColumnSelector:
 
 @dataclass(frozen=True, slots=True)
 class MCFailure:
+    """One collected replication failure from a run made with fail-fast disabled.
+
+    Post-loop failures are recorded with ``rep_idx`` of -1.
+
+    Attributes
+    ----------
+    rep_idx : int
+        Replication index that failed, or -1 for a post-loop step.
+    step_name : str
+        Step executing when the failure occurred.
+    error_type : str
+        Exception type name.
+    message : str
+        Exception message.
+    """
+
     rep_idx: int
     step_name: str
     error_type: str
@@ -205,6 +281,32 @@ class MCFailure:
 
 @dataclass(frozen=True)
 class MCMeta:
+    """Run accounting and performance counters for a Monte Carlo run.
+
+    Attributes
+    ----------
+    n_rep : int
+        Requested replication count.
+    n_retained_by_step : Mapping[str, int]
+        Replications whose output was retained, by producer step.
+    elapsed_s : float
+        Wall time for the replication loop alone, excluding post-loop aggregation
+        and postproc.
+    step_elapsed_s : Mapping[str, float]
+        Accumulated worker seconds by per-replication step. Populated only when the
+        run is started at the highest verbosity.
+    step_counts : Mapping[str, int]
+        Attempted calls by per-replication step.
+    step_failures : Mapping[str, int]
+        Collected failures by per-replication step.
+    postproc_elapsed_s : Mapping[str, float]
+        Wall time by post-loop step.
+    failed_steps : dict[str, int]
+        Collected per-replication failures by step.
+    failed_postprocs : set[str]
+        Post-loop steps that failed.
+    """
+
     n_rep: int
 
     n_retained_by_step: Mapping[str, int]
@@ -225,10 +327,15 @@ class MCMeta:
 
     @property
     def it_s(self) -> float:
+        """Replications attempted per replication loop second."""
         return _iterations_per_second(self.n_rep, self.elapsed_s)
 
     @property
     def step_it_s(self) -> Mapping[str, float]:
+        """Exclusive per-step throughput against accumulated worker seconds.
+
+        Alias for ``step_worker_it_s``.
+        """
         return self.step_worker_it_s
 
     @property
@@ -268,6 +375,41 @@ class MCMeta:
 
 @dataclass(frozen=True, eq=False, repr=False)
 class MCDataGenResult:
+    """Stacked datagen output across the replications a run retained.
+
+    Stacks the simulation result a datagen step produces on each replication into
+    one container, adding a leading replication axis to every path. A pipeline has
+    exactly one datagen step, so the pipeline result holds this container directly
+    rather than a mapping.
+
+    A datagen step declares what it writes, and a field it never produced still
+    reports a block filled with NaN at the width its names imply, rather than being
+    omitted.
+
+    Attributes
+    ----------
+    n_rep : int
+        Total number of replications.
+    n_retained : int
+        Number of replications whose output the step's arena kept.
+    retained_reps : NDI
+        Replication indices behind each row of the stacked paths, so a row can be
+        mapped back to its replication.
+    var_names : Sequence[str]
+        Names of the state-path columns, in compiled canonical order.
+    X : NDF
+        Full state paths, shape ``(n_retained, T, n_var)``.
+    shock_names : Sequence[str]
+        Names of the shock columns, in canonical order.
+    eps : NDF
+        Shock paths, shape ``(n_retained, T, n_shock)``.
+    observable_names : Sequence[str]
+        Names of the observable-path columns, in observable order. Empty when the
+        step produced no observables.
+    y : NDF
+        Observable paths, shape ``(n_retained, T, n_obs)``.
+    """
+
     n_rep: int
     n_retained: int
     retained_reps: NDI
@@ -286,7 +428,6 @@ class MCDataGenResult:
 
     def replication(self, idx: int) -> SimResult:
         """Return a :class:`~SymbolicDSGE.core.sim_result.SimResult` for a single replication."""
-
         if idx < 0 or idx >= self.n_retained:
             raise IndexError(
                 f"Replication index {idx} out of bounds for {self.n_retained} retained replications."
@@ -308,21 +449,24 @@ class MCDataGenResult:
     @cached_property
     def states(self) -> dict[str, NDF]:
         """Each model variable's path, as a column view of ``X``.
-        returns (n_retained, T) views per variable, keyed by variable name.
+
+        Returns ``(n_retained, T)`` views per variable, keyed by variable name.
         """
         return {name: self.X[:, :, i] for i, name in enumerate(self.var_names)}
 
     @cached_property
     def shocks(self) -> dict[str, NDF]:
         """Each shock's path, as a column view of ``eps``.
-        returns (n_retained, T) views per shock, keyed by shock name.
+
+        Returns ``(n_retained, T)`` views per shock, keyed by shock name.
         """
         return {name: self.eps[:, :, i] for i, name in enumerate(self.shock_names)}
 
     @cached_property
     def observables(self) -> dict[str, NDF]:
         """Each observable's path, as a column view of ``y``.
-        returns (n_retained, T) views per observable, keyed by observable name.
+
+        Returns ``(n_retained, T)`` views per observable, keyed by observable name.
         """
         return {name: self.y[:, :, i] for i, name in enumerate(self.observable_names)}
 
@@ -358,6 +502,59 @@ class MCDataGenResult:
 
 @dataclass(frozen=True, eq=False, repr=False)
 class MCFilterResult:
+    """Stacked filter output across the replications a run retained.
+
+    Stacks the filter result a filter step produces on each replication into one
+    container, adding a leading replication axis to every history. The pipeline
+    result maps each filter step name to one of these.
+
+    Attributes
+    ----------
+    n_rep : int
+        Total number of replications.
+    n_retained : int
+        Number of replications whose output the step's arena kept.
+    retained_reps : NDI
+        Replication indices behind each row of the stacked histories.
+    filter_mode : str
+        Kernel the step ran: ``"linear"``, ``"extended"`` or ``"unscented"``.
+    x_pred : NDF
+        Predicted states over time, shape ``(n_retained, T, n_var)``.
+    x_filt : NDF
+        Filtered states over time, shape ``(n_retained, T, n_var)``.
+    P_pred : NDF
+        Predicted state covariance over time, shape ``(n_retained, T, n_var, n_var)``.
+    P_filt : NDF
+        Filtered state covariance over time, shape ``(n_retained, T, n_var, n_var)``.
+    y_pred : NDF
+        Predicted observables over time, shape ``(n_retained, T, n_obs)``.
+    y_filt : NDF
+        Filtered observables over time, shape ``(n_retained, T, n_obs)``.
+    S : NDF
+        Innovation covariance over time, shape ``(n_retained, T, n_obs, n_obs)``.
+    innov : NDF
+        Observable innovations, shape ``(n_retained, T, n_obs)``.
+    std_innov : NDF
+        Innovations standardized by their covariance, shape ``(n_retained, T, n_obs)``.
+    loglik : NDF
+        Per-replication log likelihood of the measurements, shape ``(n_retained,)``.
+    eps_hat : NDF | None
+        Conditional estimates of the structural shocks given observed data, shape
+        ``(n_retained, T, n_shock)``. None when the step ran without shock recovery.
+    x1_pred : NDF
+        First-order component of the predicted state, shape
+        ``(n_retained, T, n_state)``. Unscented filter steps only.
+    x2_pred : NDF
+        Second-order component of the predicted state, shape
+        ``(n_retained, T, n_state)``. Unscented filter steps only.
+    x1_filt : NDF
+        First-order component of the filtered state, shape
+        ``(n_retained, T, n_state)``. Unscented filter steps only.
+    x2_filt : NDF
+        Second-order component of the filtered state, shape
+        ``(n_retained, T, n_state)``. Unscented filter steps only.
+    """
+
     n_rep: int
     n_retained: int
     retained_reps: NDI
@@ -431,24 +628,44 @@ class MCFilterResult:
 
     @cached_property
     def x1_pred(self) -> NDF:
+        """First-order component of the predicted state over time.
+
+        Shape ``(n_retained, T, n_state)``. Unscented filter steps only; raises for
+        any other filter mode.
+        """
         if self._x1_pred is None:
             raise AttributeError("x1_pred is only available for unscented filters.")
         return self._x1_pred
 
     @cached_property
     def x2_pred(self) -> NDF:
+        """Second-order component of the predicted state over time.
+
+        Shape ``(n_retained, T, n_state)``. Unscented filter steps only; raises for
+        any other filter mode.
+        """
         if self._x2_pred is None:
             raise AttributeError("x2_pred is only available for unscented filters.")
         return self._x2_pred
 
     @cached_property
     def x1_filt(self) -> NDF:
+        """First-order component of the filtered state over time.
+
+        Shape ``(n_retained, T, n_state)``. Unscented filter steps only; raises for
+        any other filter mode.
+        """
         if self._x1_filt is None:
             raise AttributeError("x1_filt is only available for unscented filters.")
         return self._x1_filt
 
     @cached_property
     def x2_filt(self) -> NDF:
+        """Second-order component of the filtered state over time.
+
+        Shape ``(n_retained, T, n_state)``. Unscented filter steps only; raises for
+        any other filter mode.
+        """
         if self._x2_filt is None:
             raise AttributeError("x2_filt is only available for unscented filters.")
         return self._x2_filt
@@ -456,6 +673,47 @@ class MCFilterResult:
 
 @dataclass(frozen=True)
 class MCPipelineResult:
+    """Result container for a Monte Carlo run, including all retained per-replication and post-loop outputs.
+
+    Attributes
+    ----------
+    meta : MCMeta
+        Metadata about the run, including timing and failure counts.
+    n_rep : int
+        Total number of replications attempted.
+    n_successful : int
+        Successful replications (retained after filtering).
+    datagen_outputs : MCDataGenResult
+        MCDataGenResult containing the retained replications' simulated states,
+        shocks, and observables.
+    filter_outputs : Mapping[str, MCFilterResult]
+        MCFilterResult per filter step, containing the retained replications' filter
+        outputs.
+    transform_outputs : Mapping[str, NDF]
+        Mapping of step name to transformed data (NDF) for each transform step.
+    test_summaries : Mapping[str, MCTestResult]
+        MCTestResult per test step, containing the retained replications' test
+        statistics and p-values.
+    regression_summaries : Mapping[str, MCRegressionResult]
+        MCRegressionResult per regression step, containing the retained
+        replications' regression coefficients and statistics.
+    failures : tuple[MCFailure, ...]
+        MCFailure instances for any failed replications or post-loop steps.
+    postproc : Mapping[str, Artifact]
+        Post-loop step artifacts, keyed by step name, containing raw and summary
+        outputs.
+    run_config : Mapping[str, Any]
+        Configuration to reproduce this run, given deterministic steps and the same
+        inputs in model/data sources.
+    succeeded
+    statistic_traces
+    pval_traces
+    test_status_traces
+    rejection_traces
+    coefficient_traces
+    regression_status_traces
+    """
+
     meta: MCMeta
     n_rep: int
     n_successful: int
@@ -482,6 +740,14 @@ class MCPipelineResult:
         *,
         print_func: Callable[[str], None] = print,
     ) -> None:
+        """Repost overall Monte Carlo performance metrics, including throughput and failure counts.
+
+        Parameters
+        ----------
+        print_func : Callable[[str], None]
+            Function to use for printing the report. Defaults to the built-in ``print`` function.
+
+        """
         report_mc_performance(self.meta, print_func=print_func)
 
     def report_step_performance(
@@ -489,10 +755,19 @@ class MCPipelineResult:
         *,
         print_func: Callable[[str], None] = print,
     ) -> None:
+        """Report per-step performance metrics, including throughput and failure counts.
+
+        Parameters
+        ----------
+        print_func : Callable[[str], None]
+            Function to use for printing the report. Defaults to the built-in ``print`` function.
+
+        """
         report_mc_step_performance(self.meta, print_func=print_func)
 
     @property
     def statistic_traces(self) -> Mapping[str, NDF]:
+        """Traces of the retained replications' test statistics for each test step."""
         return {
             name: summary.statistic_trace
             for name, summary in self.test_summaries.items()
@@ -500,18 +775,21 @@ class MCPipelineResult:
 
     @property
     def pval_traces(self) -> Mapping[str, NDF]:
+        """P-value traces of the retained replications' test statistics for each test step."""
         return {
             name: summary.pval_trace for name, summary in self.test_summaries.items()
         }
 
     @property
     def test_status_traces(self) -> Mapping[str, tuple[TestStatus, ...]]:
+        """Test status traces of the retained replications' test statistics for each test step."""
         return {
             name: summary.status_trace for name, summary in self.test_summaries.items()
         }
 
     @property
     def rejection_traces(self) -> Mapping[str, NDB]:
+        """Boolean rejection traces of the retained replications' test statistics for each test step, based on the significance level."""
         return {
             name: np.asarray(summary.pval_trace < summary.alpha, dtype=bool)
             for name, summary in self.test_summaries.items()
@@ -519,6 +797,7 @@ class MCPipelineResult:
 
     @property
     def coefficient_traces(self) -> Mapping[str, NDF]:
+        """Regression coefficient traces of the retained replications' regression results for each regression step."""
         return {
             name: summary.coef_trace
             for name, summary in self.regression_summaries.items()
@@ -528,6 +807,7 @@ class MCPipelineResult:
     def regression_status_traces(
         self,
     ) -> Mapping[str, tuple[RegressionStatus, ...]]:
+        """Regression status traces of the retained replications' regression results for each regression step."""
         return {
             name: summary.status_trace
             for name, summary in self.regression_summaries.items()

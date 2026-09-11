@@ -742,6 +742,23 @@ class CustomFunc:
 
     Wrapping an already-wrapped instance copies its validated state across
     (idempotent) so chained wrappings don't re-validate.
+
+    Parameters
+    ----------
+    func : Callable[..., Any] | CustomFunc
+        Function to wrap and validate. Passing an already-wrapped instance copies
+        its validated state across rather than re-validating.
+    safe_modules : Mapping[str, Any]
+        Module aliases the wrapped function may reference, by the name it uses.
+    denied_attributes : Mapping[str, frozenset[str]]
+        Attributes barred on each allowed module, keyed by the module's alias.
+    extra_value_types : tuple[type, ...]
+        Additional global value types accepted when snapshotting captured globals.
+    extra_globals : tuple[Any, ...]
+        Additional global values accepted verbatim when snapshotting.
+    namespace_kind : str
+        Label identifying the subclass namespace, recorded on the instance and
+        checked by the pipeline when it decides where an op may run.
     """
 
     __slots__ = (
@@ -1012,6 +1029,12 @@ class NumbaCustomFunc(NumpyCustomFunc):
     Numba determines whether the function body is valid when :meth:`cfunc` is
     called. Compilation failures are warned and re-raised with Numba's original
     diagnostic so users can correct their function directly.
+
+    Parameters
+    ----------
+    func : Callable[..., Any] | CustomFunc
+        Numerical function to wrap and validate against the numpy namespace.
+        Passing an already-wrapped instance copies its validated state across.
     """
 
     __slots__ = ("_compiled", "_callback")
@@ -1027,6 +1050,23 @@ class NumbaCustomFunc(NumpyCustomFunc):
 
     @classmethod
     def from_source(cls, source: str) -> "NumbaCustomFunc":
+        """Build a wrapped callable from a source string.
+
+        Parameters
+        ----------
+        source : str
+            Source text of a top-level ``def`` function. The function must accept
+            exactly two positional arguments (the input and output arrays) and
+            return an integer status code.
+
+        Returns
+        -------
+        "NumbaCustomFunc"
+            Wrapped callable with the source and captured globals snapshotted for
+            audit. The returned instance is not yet compiled; call :meth:`cfunc`
+            to obtain the native callback.
+
+        """
         instance = cast("NumbaCustomFunc", cls._from_source(source, **_NUMPY_NAMESPACE))
         _validate_numba_transform_signature(instance._func, instance.name)
         instance._compiled = None
@@ -1119,6 +1159,11 @@ class PandasCustomFunc(CustomFunc):
     The looser post-loop (``OpType.POSTPROC``) contract — a summary op may build
     a DataFrame. Pandas is referenced (``import`` stays banned, like ``np``); a
     pandas-enabled op outside the post-loop phase is rejected by the pipeline.
+
+    Parameters
+    ----------
+    func : Callable[..., Any] | CustomFunc
+        Function to wrap and validate against the pandas-enabled namespace.
     """
 
     __slots__ = ()
@@ -1128,6 +1173,18 @@ class PandasCustomFunc(CustomFunc):
 
     @classmethod
     def from_source(cls, source: str) -> "PandasCustomFunc":
+        """Build a pandas-enabled wrapper from source text.
+
+        Parameters
+        ----------
+        source : str
+            Source text of a single function definition.
+
+        Returns
+        -------
+        PandasCustomFunc
+            Wrapper validated against the pandas-enabled namespace.
+        """
         return cast("PandasCustomFunc", cls._from_source(source, **_pandas_namespace()))
 
 

@@ -16,15 +16,17 @@ from ..._ckernels.core import simulate_linear_states_into
 
 
 class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
-    """A model solved to first order: one time-invariant rule."""
+    """A model solved to first order: one time-invariant rule.
+
+    Parameters
+    ----------
+    compiled : CompiledModel
+        The compiled model, containing the linearized equations and other metadata.
+    policy : FirstOrderSolution
+        The first-order decision rule solution.
+    """
 
     def __init__(self, compiled: CompiledModel, policy: FirstOrderSolution) -> None:
-        """Initialize a first-order solved model.
-
-        Args:
-            model: The solved model.
-            solution: The first-order solution.
-        """
         super().__init__(compiled, policy)
 
     def _simulate_state_matrix(

@@ -18,15 +18,17 @@ NDI = NDArray[int64]
 
 
 class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
-    """A model whose policy is path dependent, one rule per date and regime."""
+    """A model whose policy is path dependent, one rule per date and regime.
+
+    Parameters
+    ----------
+    compiled : CompiledModel
+        The compiled model, containing the linearized equations and other metadata.
+    policy : PiecewiseSolution
+        The piecewise decision rule solution, carrying one rule per date and regime.
+    """
 
     def __init__(self, compiled: CompiledModel, policy: PiecewiseSolution) -> None:
-        """Initialize a piecewise solved model.
-
-        Args:
-            model: The solved model.
-            solution: The piecewise solution.
-        """
         super().__init__(compiled, policy)
 
     def _simulate_state_matrix(
@@ -245,7 +247,6 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             by name.
 
         """
-
         return FirstOrderSolvedModel(self.compiled, self.policy.ref).sim(
             T, shocks, shock_scale, x0=x0, observables=observables
         )

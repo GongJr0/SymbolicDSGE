@@ -67,7 +67,8 @@ class VariableLayout:
 
     ``shock_names`` is ordered names of the shock columns.
 
-    ``shock_idx`` is that order as a lookup."""
+    ``shock_idx`` is that order as a lookup.
+    """
 
     n_var: int
     n_declared: int
@@ -117,21 +118,50 @@ class ConstraintFunc:
     @property
     def address(self) -> int:
         """Entry point of
-        ``void (*)(const double *cur, const double *par, double *err)``."""
+        ``void (*)(const double *cur, const double *par, double *err)``.
+        """
         return int(self.cfunc.address)
 
     @property
     def n_constraint(self) -> int:
+        """Number of regime conditions."""
         return len(self.names)
 
     @property
     def n_cond(self) -> int:
+        """Number of constraints. (bind + relax) per condition."""
         return 2 * len(self.names)
 
     def bind_slot(self, name: str) -> int:
+        """Index getter for the binding slot of a named regime condition.
+
+        Parameters
+        ----------
+        name : str
+            Name of the regime condition, which must be in ``names``.
+
+        Returns
+        -------
+        int
+            Index of the binding slot for the named regime condition.
+
+        """
         return 2 * self.names.index(name)
 
     def relax_slot(self, name: str) -> int:
+        """Index getter for the relaxing slot of a named regime condition.
+
+        Parameters
+        ----------
+        name : str
+            Name of the regime condition, which must be in ``names``.
+
+        Returns
+        -------
+        int
+            Index of the relaxing slot for the named regime condition.
+
+        """
         return 2 * self.names.index(name) + 1
 
     def bit(self, name: str) -> int:
@@ -184,11 +214,13 @@ class RegimePencilFunc:
 
     @property
     def masks(self) -> tuple[int, ...]:
+        """Bitmask keys of the regimes that have a regime pencil."""
         return tuple(sorted(self.cfuncs))
 
     def address(self, mask: int) -> int:
         """Entry point of
-        ``void (*)(const double *cur, const double *par, double *out)``."""
+        ``void (*)(const double *cur, const double *par, double *out)``.
+        """
         return int(self.cfuncs[mask].address)
 
     def n_row(self, mask: int) -> int:
@@ -197,13 +229,62 @@ class RegimePencilFunc:
 
     def n_out(self, mask: int) -> int:
         """Length of ``out``: the three date blocks, the shock block, then the
-        constants, ``n_row * (3 * n_var + n_exog + 1)``."""
+        constants, ``n_row * (3 * n_var + n_exog + 1)``.
+        """
         n_row = self.n_row(mask)
         return n_row * (3 * self.n_var + self.n_exog + 1)
 
 
 @dataclass(frozen=True, repr=False)
 class CompiledModel:
+    """Compiled, numericly-evaluable representation of a DSGE model.
+
+    Attributes
+    ----------
+    config : ModelConfig
+        Symbolic model configuration, including calibration and solver settings.
+    kalman : KalmanConfig | None
+        Kalman configuration, if the model has a Kalman filter; otherwise ``None``.
+    cur_syms : list[Symbol]
+        Post-compile generated time-t model variables, in canonical order, as sympy
+        symbols.
+    layout : VariableLayout
+        :class:`VariableLayout` object describing the model's variable structure and
+        indexing.
+    var_names : list[str]
+        Names of all compiled variables, in canonical order.
+    idx : dict[str, int]
+        Index mapping variable names to their canonical positions.
+    objective_eqs : list[Expr]
+        Expressions of the model's residual equations, in canonical order.
+    calib_params : list[str]
+        Calibration parameter names, in canonical order.
+    observable_names : list[str]
+        Names of the model's observables, in canonical order.
+    observable_eqs : list[Expr]
+        Observable equations, in canonical order.
+    measurement_jacobian_eqs : list[Expr]
+        Jacobian expressions of the observables with respect to the model's
+        variables, in row-major order.
+    constraint_names : tuple[str, ...]
+        Constraint names, in declaration order, for regime conditions.
+    constraint_exprs : list[Boolean]
+        Expressions of the regime constraints, in declaration order.
+    regimes : dict[int, RegimeBlock]
+        Regime blocks, keyed by the bitmask of their binding constraints, containing
+        replaced rows and their Jacobians.
+    n_var
+    n_state
+    n_ctrl
+    n_exog
+    n_declared
+    n_generated
+    n_par
+    n_obs
+    shock_names
+    shock_idx
+    """
+
     config: ModelConfig
     kalman: KalmanConfig | None
 
@@ -234,34 +315,42 @@ class CompiledModel:
 
     @property
     def n_var(self) -> int:
+        """Number of compiled variables, including generated ones."""
         return self.layout.n_var
 
     @property
     def n_state(self) -> int:
+        """Number of state variables, which are the ones that occur at ``t-1`` in the model's equations."""
         return self.layout.n_state
 
     @property
     def n_ctrl(self) -> int:
+        """Number of control variables, which are the ones that occur at ``t`` or ``t+1`` in the model's equations."""
         return self.layout.n_ctrl
 
     @property
     def n_exog(self) -> int:
+        """Number of exogenous shocks in the model, which is the width of the shock matrix and of ``B``."""
         return self.layout.n_exog
 
     @property
     def n_declared(self) -> int:
+        """Number of declared model variables, excluding any generated ones."""
         return self.layout.n_declared
 
     @property
     def n_generated(self) -> int:
+        """Number of generated variables, which are the ones minted by the compiler to fill in missing lags or leads."""
         return self.layout.n_generated
 
     @property
     def n_par(self) -> int:
+        """Number of calibration parameters in the model, which is the length of the parameter vector."""
         return len(self.calib_params)
 
     @property
     def n_obs(self) -> int:
+        """Number of observables in the model, which is the length of the observable vector."""
         return len(self.observable_names)
 
     @property
@@ -371,6 +460,14 @@ class CompiledModel:
         )
 
     def construct_regime_pencil_func(self) -> RegimePencilFunc | None:
+        """Build the native (C callable) functions that evaluate the model's regime pencil rows at a given state and parameter vector.
+
+        Returns
+        -------
+        RegimePencilFunc | None
+            :class:`RegimePencilFunc` containing the regime pencil functions, or ``None`` if the model has no regimes.
+
+        """
         return self._regime_pencil_func
 
     @cached_property
@@ -392,6 +489,14 @@ class CompiledModel:
         )
 
     def construct_constraint_func(self) -> ConstraintFunc:
+        """Build the native (C callable) function that evaluates the model's regime conditions at a given state and parameter vector.
+
+        Returns
+        -------
+        ConstraintFunc
+            :class:`ConstraintFunc` containing the regime condition function.
+
+        """
         return self._constraint_func
 
     @cached_property
@@ -401,6 +506,14 @@ class CompiledModel:
         return build_cfunc(self.objective_eqs, ResidualLayout.from_compiled(self))
 
     def construct_objective_cfunc(self) -> Any:
+        """Built a native (C callable) function that evaluates the model's residuals at a given state and parameter vector.
+
+        Returns
+        -------
+        Any
+            Function as a ``numba`` ``@cfunc`` (C ABI); used by native kernels to evaluate the model's residuals.
+
+        """
         return self._objective_cfunc
 
     @cached_property
@@ -412,6 +525,14 @@ class CompiledModel:
         )
 
     def construct_objective_cfunc_bicomplex(self) -> Any:
+        """Build a native (C callable) function that evaluates the model's residuals using bicomplex numbers for second-order Hessian computation.
+
+        Returns
+        -------
+        Any
+            ``numba`` ``@cfunc`` (C ABI) that evaluates the model's residuals using bicomplex numbers, used for second-order Hessian computation.
+
+        """
         return self._objective_cfunc_bicomplex
 
     def _coerce_param_vector(self, par: Mapping[Any, Any] | Any) -> ND:
@@ -435,6 +556,24 @@ class CompiledModel:
         observables: Sequence[str],
         ss: NDF,
     ) -> tuple[NDF, NDF]:
+        """Build C and d matrices for the affine measurement equation ``y = C x + d + v``, evaluated at the given parameter vector and steady state.
+
+        Parameters
+        ----------
+        params : Mapping[Any, Any] | Any
+            Model parameters, either as a mapping from parameter names to values or as an ordered vector.
+        observables : Sequence[str]
+            Obserbable names to include in the measurement equation, in the order they should appear in the output matrices.
+        ss : NDF
+            Steady state vector of the model's variables, evaluated at the given parameter vector.
+
+        Returns
+        -------
+        tuple[NDF, NDF]
+            C : Measurement matrix mapping state variables to observables.
+            d : Constant vector for the affine measurement equation.
+
+        """
         param_vec = self._coerce_param_vector(params)
         if param_vec.shape[0] != self.n_par:
             raise ValueError(
@@ -475,6 +614,19 @@ class CompiledModel:
         self,
         observables: Sequence[str] | None = None,
     ) -> Any:
+        """Build a native (C callable) function that evaluates the model's measurement equations at a given state and parameter vector, for the specified observables.
+
+        Parameters
+        ----------
+        observables : Sequence[str] | None
+            List of observable names to include in the measurement function. If ``None``, all observables are included.
+
+        Returns
+        -------
+        Any
+            ``numba`` ``@cfunc`` (C ABI) that evaluates the model's measurement equations for the specified observables.
+
+        """
         obs = self._normalize_observables(observables)
         cache = self._measurement_cfunc_cache
         if obs in cache:
@@ -493,6 +645,19 @@ class CompiledModel:
         self,
         observables: Sequence[str] | None = None,
     ) -> Any:
+        """Build a native (C callable) function that evaluates the Jacobian of the model's measurement equations with respect to the model's variables, for the specified observables.
+
+        Parameters
+        ----------
+        observables : Sequence[str] | None
+            List of observable names to include in the Jacobian function. If ``None``, all observables are included.
+
+        Returns
+        -------
+        Any
+            ``numba`` ``@cfunc`` (C ABI) that evaluates the Jacobian of the model's measurement equations for the specified observables.
+
+        """
         obs = self._normalize_observables(observables)
         cache = self._measurement_jacobian_cfunc_cache
         if obs in cache:
@@ -517,6 +682,14 @@ class CompiledModel:
         return cache[obs]
 
     def to_dict(self) -> dict[str, Any]:
+        """``dataclasses.asdict`` representation of the compiled model.
+
+        Returns
+        -------
+        dict[str, Any]
+            asdict output of the compiled model dataclass.
+
+        """
         return asdict(self)
 
     def __repr__(self) -> str:
@@ -530,9 +703,11 @@ def _shock_covariance(
     shocks: Sequence[str] | None = None,
     corr: NDF | None = None,
 ) -> NDF:
-    """``Q`` for a compiled model, at its own calibration unless ``params`` says
-    otherwise. ``shocks`` subsets it; ``corr`` supplies an already-materialized
-    correlation matrix."""
+    """``Q`` for a compiled model, at its own calibration unless ``params`` says otherwise.
+
+    ``shocks`` subsets it; ``corr`` supplies an already-materialized correlation
+    matrix.
+    """
     calib = compiled.config.calibration
     return make_Q(
         compiled.config.shocks,

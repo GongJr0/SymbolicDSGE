@@ -57,6 +57,31 @@ def r2_adj(r2_value: float64, n: int, k: int) -> float64:
 
 @dataclass(frozen=True)
 class RegressionResult:
+    """Shared result abstraction for standard linear regression outputs.
+
+    Concrete result types inherit the common fitted-data diagnostics here and add
+    their own method-specific quantities. Expects a one-dimensional response vector
+    and a two-dimensional design matrix; a multivariate response should be
+    represented as separate result objects.
+
+    Attributes
+    ----------
+    variables : list[str]
+        Names of the design columns represented in ``coefficients``.
+    coefficients : NDF
+        Estimated coefficient vector, shape ``(k,)``.
+    y : NDF
+        Response vector, shape ``(n,)``.
+    X : NDF
+        Design matrix used by the regression, shape ``(n, k)``.
+    n : int
+        Number of observations.
+    k : int
+        Number of design columns.
+    status : RegressionStatus
+        Solver status for the fit.
+    """
+
     variables: list[str]
     coefficients: NDF
 
@@ -98,47 +123,106 @@ class RegressionResult:
 
     @cached_property
     def y_hat(self) -> NDF:
+        """Fitted response vector."""
         return np.asarray(self.X @ self.coefficients, dtype=np.float64)
 
     @property
     def x(self) -> NDF:
+        """Alias for ``X``, the design matrix."""
         return self.X
 
     @cached_property
     def residuals(self) -> NDF:
+        """Response residuals, ``y - y_hat``."""
         return np.asarray(self.y - self.y_hat, dtype=np.float64)
 
     @cached_property
     def ssr(self) -> float64:
+        """Sum of squared residuals."""
         return float64((self.residuals**2).sum())
 
     @cached_property
     def sst(self) -> float64:
+        """Total sum of squares around the sample mean of ``y``."""
         centered = self.y - self.y.mean()
         return float64((centered**2).sum())
 
     @cached_property
     def mse(self) -> float64:
+        """Mean squared error, ``ssr / n``."""
         return float64(self.ssr / self.n)
 
     @cached_property
     def rmse(self) -> float64:
+        """Root mean squared error."""
         return float64(np.sqrt(self.mse))
 
     @cached_property
     def r2(self) -> float64:
+        """R-squared of the regression, computed as 1 - SSR/SST.
+
+        Returns
+        -------
+        float64
+            Value of R-squared
+
+        """
         return r2(self.y, self.y_hat)
 
     @cached_property
     def r2_adj(self) -> float64:
+        """Adjusted coefficient of determination."""
         return r2_adj(self.r2, self.n, self.k)
 
     def to_dict(self) -> dict:
+        """Convert the regression result to a dictionary representation.
+
+        Returns
+        -------
+        dict
+            :func:`dataclasses.asdict` representation of the regression result, including all fields and their values.
+
+        """
         return asdict(self)
 
 
 @dataclass(frozen=True)
 class MCRegressionResult:
+    """Aggregate regression output across the replications a Monte Carlo run retained.
+
+    Stacks each replication's fit into per-replication traces and derives the
+    across-replication summaries from them. The OLS-only traces (standard errors,
+    t-statistics, p-values and the F-test quantities) are available when the step
+    ran ordinary least squares and raise otherwise.
+
+    Monte Carlo standard errors here describe the spread of a statistic across
+    replications. They are not per-fit standard errors; those are ``se_trace``.
+
+    Attributes
+    ----------
+    kind : str
+        Regression method the step ran: ``"ols"``, ``"ridge"``, ``"lasso"`` or
+        ``"elastic_net"``.
+    variables : Sequence[str]
+        Shared variable ordering across replications.
+    coef_trace : NDF
+        Coefficients stacked by retained replication, shape ``(n_retained, k)``.
+    ssr_trace : NDF
+        Per-replication sum of squared residuals.
+    sst_trace : NDF
+        Per-replication total sum of squares.
+    n_retained : int
+        Number of replications whose output the step's arena kept.
+    retained_reps : NDArray[np.int_]
+        Indices of the retained replications relative to the complete run.
+    n_rep : int
+        Total number of replications.
+    n : int
+        Shared number of observations per replication.
+    k : int
+        Shared number of design columns.
+    """
+
     kind: str
     variables: Sequence[str]
     coef_trace: NDF
@@ -157,10 +241,12 @@ class MCRegressionResult:
 
     @property
     def coefficients(self) -> NDF:
+        """Alias for ``coef_trace``."""
         return self.coef_trace
 
     @cached_property
     def se_trace(self) -> NDF:
+        """Per-replication coefficient standard errors. Ordinary least squares only."""
         if self.kind == "ols" and self._se_trace is not None:
             return self._se_trace
         else:
@@ -172,18 +258,22 @@ class MCRegressionResult:
 
     @cached_property
     def t_stat_trace(self) -> NDF:
+        """Per-replication coefficient t-statistics. Ordinary least squares only."""
         return np.asarray(self.coef_trace / self.se_trace, dtype=np.float64)
 
     @cached_property
     def mse_trace(self) -> NDF:
+        """Per-replication mean squared error."""
         return np.asarray(self.ssr_trace / self.n, dtype=np.float64)
 
     @cached_property
     def rmse_trace(self) -> NDF:
+        """Per-replication root mean squared error."""
         return np.asarray(np.sqrt(self.mse_trace), dtype=np.float64)
 
     @cached_property
     def r2_trace(self) -> NDF:
+        """Per-replication coefficient of determination."""
         out = np.zeros(self.n_retained, dtype=np.float64)
         mask = self.sst_trace > 0
         out[mask] = 1 - self.ssr_trace[mask] / self.sst_trace[mask]
@@ -191,6 +281,7 @@ class MCRegressionResult:
 
     @cached_property
     def r2_adj_trace(self) -> NDF:
+        """Per-replication adjusted coefficient of determination."""
         if self.n <= self.k + 1:
             return np.zeros(self.n_retained, dtype=np.float64)
         return np.asarray(
@@ -200,16 +291,30 @@ class MCRegressionResult:
 
     @cached_property
     def partial_r2_trace(self) -> NDF:
+        """Per-replication partial R-squared values. Ordinary least squares only."""
         t2 = self.t_stat_trace**2
         return np.asarray(t2 / (t2 + self.n - self.k), dtype=np.float64)
 
     @cached_property
     def pval_trace(self) -> NDF:
+        """Trace of p-values for each coefficient, when applicable.
+
+        For OLS this is a two-sided Student-t test with ``n - k`` degrees of
+        freedom. Significance does not apply to non-OLS regressions, so the
+        trace is filled with NaNs in those cases.
+
+        Returns
+        -------
+        NDF
+            Trace of p-values for each coefficient, with shape (n_retained, k).
+
+        """
         df = self.n - self.k
         return np.asarray(2 * (1 - t.cdf(abs(self.t_stat_trace), df)), dtype=float64)
 
     @cached_property
     def F_stat_trace(self) -> NDF:
+        """Per-replication regression F-statistic. Ordinary least squares only."""
         if self.kind != "ols":
             return np.full(self.n_retained, np.nan, dtype=np.float64)
         dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
@@ -219,6 +324,7 @@ class MCRegressionResult:
 
     @cached_property
     def F_pval_trace(self) -> NDF:
+        """Per-replication F-test p-value. Ordinary least squares only."""
         if self.kind != "ols":
             return np.full(self.n_retained, np.nan, dtype=np.float64)
         dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
@@ -227,6 +333,7 @@ class MCRegressionResult:
 
     @cached_property
     def status_trace(self) -> tuple[RegressionStatus, ...]:
+        """Solver status for each retained replication."""
         return tuple(RegressionStatus(status) for status in self._raw_status)
 
     def _mc_se(self, trace: NDF) -> NDF:
@@ -239,28 +346,42 @@ class MCRegressionResult:
 
     @cached_property
     def mean_coef(self) -> NDF:
+        """Mean coefficient across retained replications, shape ``(k,)``."""
         return np.asarray(self.coef_trace.mean(axis=0), dtype=np.float64)
 
     @cached_property
     def coef_se(self) -> NDF:
-        """Spread of :attr:`mean_coef` across replications, not a per-fit
-        standard error. The per-fit ones are :attr:`se_trace`."""
+        """Spread of :attr:`mean_coef` across replications.
+
+        Not a per-fit standard error; the per-fit ones are :attr:`se_trace`.
+        """
         return self._mc_se(self.coef_trace)
 
     @cached_property
     def mean_t_stat(self) -> NDF:
+        """Mean t-statistic across retained replications. Ordinary least squares only."""
         return np.asarray(self.t_stat_trace.mean(axis=0), dtype=np.float64)
 
     @cached_property
     def t_stat_se(self) -> NDF:
+        """Monte Carlo standard error of ``mean_t_stat``."""
         return self._mc_se(self.t_stat_trace)
 
     @cached_property
     def mean_pval(self) -> NDF:
+        """Mean p-values per coefficient across the retained replications. For non-OLS regressions, this is a mean of NaNs.
+
+        Returns
+        -------
+        NDF
+            Array of mean p-values for each coefficient, with shape (k,).
+
+        """
         return np.asarray(self.pval_trace.mean(axis=0), dtype=np.float64)
 
     @cached_property
     def pval_se(self) -> NDF:
+        """Monte Carlo standard error of ``mean_pval``."""
         return self._mc_se(self.pval_trace)
 
     def rejection_rate(self, alpha: FloatScalar = 0.05) -> NDF:
@@ -268,6 +389,18 @@ class MCRegressionResult:
         return np.asarray((self.pval_trace < alpha).mean(axis=0), dtype=np.float64)
 
     def rejection_rate_se(self, alpha: FloatScalar = 0.05) -> NDF:
+        """Binomial standard error of the rejection rate, per coefficient.
+
+        Parameters
+        ----------
+        alpha : float
+            Significance level the rejection rate was computed at.
+
+        Returns
+        -------
+        NDF
+            Standard error per coefficient, shape ``(k,)``.
+        """
         p = self.rejection_rate(alpha)
         return np.asarray(np.sqrt(p * (1 - p) / self.n_retained), dtype=np.float64)
 
@@ -362,8 +495,10 @@ class MCRegressionResult:
         return pd.DataFrame({"ci_low": low, "ci_high": high}, index=index)
 
     def trace_frame(self, alpha: FloatScalar = 0.05) -> DataFrame:
-        """The retained replications in long form, one row per replication and
-        coefficient."""
+        """The retained replications in long form.
+
+        One row per replication and coefficient.
+        """
         import pandas as pd
 
         index = pd.MultiIndex.from_product(
@@ -388,6 +523,18 @@ class MCRegressionResult:
         )
 
     def F_test(self, alpha: FloatScalar = 0.05) -> MCTestResult:
+        """Aggregate F-test across the retained replications.
+
+        Parameters
+        ----------
+        alpha : float
+            Significance level for the rejection decision.
+
+        Returns
+        -------
+        MCTestResult
+            Aggregate test container over the per-replication F-statistics.
+        """
         dfn, dfd = _f_test_degrees_of_freedom(self.n, self.k, self.variables)
         return MCTestResult(
             test_name="F-test",
@@ -413,6 +560,13 @@ class MCRegressionResult:
         )
 
     def to_spec(self) -> MCRegressionResultSpec:
+        """Project this result to a serializable spec.
+
+        Returns
+        -------
+        MCRegressionResultSpec
+            Metadata and traces in the form a bundle stores.
+        """
         meta = MCRegressionResultMeta(
             kind=self.kind,
             variables=list(self.variables),
@@ -433,6 +587,18 @@ class MCRegressionResult:
 
     @classmethod
     def from_spec(cls, spec: MCRegressionResultSpec) -> MCRegressionResult:
+        """Rebuild a result from a serialized spec.
+
+        Parameters
+        ----------
+        spec : MCRegressionResultSpec
+            Spec produced by :meth:`to_spec`.
+
+        Returns
+        -------
+        MCRegressionResult
+            Equivalent result container.
+        """
         meta = spec.meta
         return cls(
             kind=meta["kind"],

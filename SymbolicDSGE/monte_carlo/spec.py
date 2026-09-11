@@ -121,9 +121,11 @@ class EdgeSpec(TypedDict):
 
 
 class PostprocSpec(TypedDict):
-    """A post-loop op: a named, typed, parameterized terminal reduction over the
-    assembled across-rep traces. Deliberately *not* a graph node. It has no
-    ``id`` and no edges; its inputs are trace keys carried in ``params``.
+    """A post-loop op: a named, typed, parameterized terminal reduction.
+
+    Runs over the assembled across-rep traces. Deliberately *not* a graph node.
+    It has no ``id`` and no edges; its inputs are trace keys carried in
+    ``params``.
     """
 
     name: str
@@ -156,6 +158,27 @@ class MCFilterResultMeta(TypedDict):
 
 
 class MCTestResultMeta(TypedDict):
+    """Reference-distribution and accounting metadata for a serialized test result.
+
+    Attributes
+    ----------
+    test_name : str
+        Name of the test the step ran.
+    dist : str
+        Reference distribution the p-values were read against.
+    df : Any
+        Degrees of freedom of the reference distribution, in whatever shape the
+        test reports them.
+    pval_method : str
+        How the p-value was derived from the statistic.
+    alpha : float
+        Significance level recorded with the run.
+    n_retained : int
+        Number of replications whose output the step's arena kept.
+    n_rep : int
+        Total number of replications.
+    """
+
     test_name: str
     dist: str
     df: Any
@@ -167,6 +190,18 @@ class MCTestResultMeta(TypedDict):
 
 @dataclass(slots=True)
 class MCTestResultSpec:
+    """Serializable form of a Monte Carlo test result.
+
+    Attributes
+    ----------
+    meta : MCTestResultMeta
+        Reference-distribution and accounting metadata.
+    statistic_trace : NDF
+        Test statistic per retained replication.
+    retained_reps : NDI
+        Indices of the retained replications relative to the complete run.
+    """
+
     meta: MCTestResultMeta
     statistic_trace: NDF
     _raw_status: NDI
@@ -174,6 +209,24 @@ class MCTestResultSpec:
 
 
 class MCRegressionResultMeta(TypedDict):
+    """Shape and accounting metadata for a serialized regression result.
+
+    Attributes
+    ----------
+    kind : str
+        Regression method the step ran.
+    variables : Sequence[str]
+        Shared variable ordering across replications.
+    n_retained : int
+        Number of replications whose output the step's arena kept.
+    n_rep : int
+        Total number of replications.
+    n : int
+        Shared number of observations per replication.
+    k : int
+        Shared number of design columns.
+    """
+
     kind: str
     variables: Sequence[str]
     n_retained: int
@@ -184,6 +237,22 @@ class MCRegressionResultMeta(TypedDict):
 
 @dataclass(slots=True)
 class MCRegressionResultSpec:
+    """Serializable form of a Monte Carlo regression result.
+
+    Attributes
+    ----------
+    meta : MCRegressionResultMeta
+        Shape and accounting metadata.
+    coef_trace : NDF
+        Coefficients stacked by retained replication.
+    ssr_trace : NDF
+        Per-replication sum of squared residuals.
+    sst_trace : NDF
+        Per-replication total sum of squares.
+    retained_reps : NDI
+        Indices of the retained replications relative to the complete run.
+    """
+
     meta: MCRegressionResultMeta
     coef_trace: NDF
     ssr_trace: NDF

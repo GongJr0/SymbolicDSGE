@@ -24,6 +24,23 @@ ShockDrawFn = Callable[
 
 
 class ShockParameters(TypedDict):
+    """Parameters for a shock generator specification.
+
+    Attributes
+    ----------
+    dist : ShockDistribution
+        Distribution to draw shocks from. Can be a string identifier ("norm", "t", "uni").
+    multivar : bool
+        Whether the distribution is multivariate.
+    seed : int | None
+        Random seed for reproducibility. If None, a random seed is used.
+    dist_args : list[Any]
+        Positional arguments for the distribution.
+    dist_kwargs : dict[str, Any]
+        Keyword arguments for the distribution.
+
+    """
+
     dist: ShockDistribution
     multivar: bool
     seed: int | None
@@ -41,13 +58,15 @@ def abstract_shock_array(
     """
     Generate an array of shocks based on a specified distribution.
 
-    Parameters:
+    Parameters
+    ----------
     T (int): The number of time periods.
     dist: A scipy.stats distribution object (e.g., norm, t, uniform).
     *dist_args: Positional arguments for the distribution.
     **dist_kwargs: Keyword arguments for the distribution.
 
-    Returns:
+    Returns
+    -------
     np.ndarray: An array of shocks of length T.
     """
     state = random.RandomState(seed)
@@ -145,12 +164,15 @@ def normal_shock_array(
     """
     Generate an array of normally distributed shocks.
 
-    Parameters:
+    Parameters
+    ----------
     T (int): The number of time periods.
     seed (int): Seed for the random number generator.
     mu (float | float64): Mean of the normal distribution.
     sigma (float | float64): Standard deviation of the normal distribution.
-    Returns:
+
+    Returns
+    -------
     np.ndarray: An array of normally distributed shocks of length T.
     """
     return _draw_normal(T, seed, mu, sigma)
@@ -165,17 +187,18 @@ def normal_multivariate_shock_array(
     """
     Generate an array of multivariate normally distributed shocks.
 
-    Parameters:
+    Parameters
+    ----------
     T (int): The number of time periods.
     k (int): The number of variables (dimensions).
     seed (int): Seed for the random number generator.
     mu (float | float64): Mean of the normal distribution.
     sigma (float | float64): Standard deviation of the normal distribution.
 
-    Returns:
+    Returns
+    -------
     np.ndarray: An array of shape (T, k) of multivariate normally distributed shocks.
     """
-
     return _draw_normal_mv(T, seed, asarray(mus, dtype=float64), asarray(cov_mat))
 
 
@@ -189,14 +212,16 @@ def t_shock_array(
     """
     Generate an array of t-distributed shocks.
 
-    Parameters:
+    Parameters
+    ----------
     T (int): The number of time periods.
     seed (int): Seed for the random number generator.
     df (float): Degrees of freedom for the t-distribution.
     loc (float | float64): Location parameter of the t-distribution.
     scale (float | float64): Scale parameter of the t-distribution.
 
-    Returns:
+    Returns
+    -------
     np.ndarray: An array of t-distributed shocks of length T.
     """
     return _draw_t(T, seed, df, loc, scale)
@@ -212,7 +237,8 @@ def t_multivariate_shock_array(
     """
     Generate an array of multivariate t-distributed shocks.
 
-    Parameters:
+    Parameters
+    ----------
     T (int): The number of time periods.
     k (int): The number of variables (dimensions).
     seed (int): Seed for the random number generator.
@@ -220,7 +246,8 @@ def t_multivariate_shock_array(
     loc (float | float64): Location parameter of the t-distribution.
     scale (float | float64): Scale parameter of the t-distribution.
 
-    Returns:
+    Returns
+    -------
     np.ndarray: An array of shape (T, k) of multivariate t-distributed shocks.
     """
     return _draw_t_mv(T, seed, df, asarray(locs, dtype=float64), asarray(cov_mat))
@@ -232,13 +259,15 @@ def uniform_shock_array(
     """
     Generate an array of uniformly distributed shocks.
 
-    Parameters:
+    Parameters
+    ----------
     T (int): The number of time periods.
     seed (int): Seed for the random number generator.
     low (float): Lower bound of the uniform distribution.
     high (float): Upper bound of the uniform distribution.
 
-    Returns:
+    Returns
+    -------
     np.ndarray: An array of uniformly distributed shocks of length T.
     """
     return _draw_uniform(T, seed, loc, scale)
@@ -251,20 +280,22 @@ def uniform_multivariate_shock_array(
     locs: list[float | float64],
     cov_mat: list[list[float | float64]],
 ) -> ndarray:
-    """
-    [NOT IMPLEMENTED]
+    """Not implemented.
 
     Generate an array of multivariate uniformly distributed shocks.
     Rectangular uniform distributions implicitly indicate cov_ij = 0 for i != j.
 
 
-    Parameters:
+    Parameters
+    ----------
     T (int): The number of time periods.
     k (int): The number of variables (dimensions).
     seed (int): Seed for the random number generator.
     locs (list[float | float64]): List of means for each dimension.
     cov_mat (list[list[float | float64]]): Covariance matrix for the distribution.
-    Returns:
+
+    Returns
+    -------
     np.ndarray: An array of shape (T, k) of multivariate uniformly distributed shocks.
     """
     raise NotImplementedError(
@@ -279,15 +310,16 @@ def shock_placement(
     """
     Place shocks in a time series array based on a shock specification.
 
-    Parameters:
+    Parameters
+    ----------
     T (int): The number of time periods.
     shock_spec (dict): A dictionary where keys are time indices (0-based) and
                        values are shock scales (shock = scale * var_sigma at simulation time).
 
-    Returns:
+    Returns
+    -------
     np.ndarray: An array of shocks of length T with specified shocks placed.
     """
-
     if shock_arr is not None:
         shocks = shock_arr
     else:
@@ -305,6 +337,42 @@ ShockSpecMulti = dict[tuple[int, int], float]
 
 
 class Shock:
+    """Shock generator specification for a simulation run.
+
+    Parameters
+    ----------
+    dist : ShockDistribution | rv_generic | multi_rv_generic | None
+        Distribution to draw shocks from. Can be a string identifier ("norm", "t",
+        "uni") or a scipy.stats distribution object. Alternatively, a custom class
+        implementing ``rvs`` can be passed in. If None, no distribution is specified.
+    multivar : bool
+        Boolean indicating whether the distribution is multivariate.
+    seed : int | None
+        Random seed for reproducibility. If None, a random seed is used.
+    dist_args : tuple
+        Positional arguments for the distribution.
+    dist_kwargs : dict | None
+        Optional keyword arguments for the distribution.
+    shock_arr : ndarray | None
+        Optional pre-generated shock array. If provided, this array will be used
+        instead of generating new shocks.
+
+    Attributes
+    ----------
+    dist : ShockDistribution | rv_generic | multi_rv_generic | None
+        The configured distribution.
+    multivar : bool
+        Whether the distribution is multivariate.
+    seed : int | None
+        The configured random seed.
+    dist_args : tuple
+        The configured positional arguments.
+    dist_kwargs : dict | None
+        The configured keyword arguments.
+    shock_arr : ndarray | None
+        The pre-generated shock array, when one was supplied.
+    """
+
     def __init__(
         self,
         dist: ShockDistribution | rv_generic | multi_rv_generic | None = None,
@@ -447,6 +515,21 @@ class Shock:
         shock_spec: ShockSpecUni | ShockSpecMulti,
         T: int,
     ) -> ndarray:
+        """Place shocks in a time series array based on a shock specification.
+
+        Parameters
+        ----------
+        shock_spec : ShockSpecUni | ShockSpecMulti
+            A dictionary specifying the shocks to place. For univariate shocks, keys are time indices (0-based) and values are shock scales.
+            For multivariate shocks, keys are tuples of (time index, shock dimension index) and values are shock scales.
+        T : int
+            The number of time periods.
+
+        Returns
+        -------
+        ndarray
+            An array of shocks of length T (for univariate) or shape (T, k) (for multivariate) with specified shocks placed.
+        """
         if self.shock_arr is not None:
             assert self.shock_arr.shape[0] == T, "shock_arr length must match T."
 

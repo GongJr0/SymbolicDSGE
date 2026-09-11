@@ -56,6 +56,35 @@ def _coerce_ss_seed(
 
 
 class EstimatorParams(TypedDict):
+    """Estimator parameters for serialization.
+
+    Attributes
+    ----------
+    observables : Sequence[str] | None
+        Selected observables for the estimation. If ``None``, all observables are used.
+    filter_mode : str
+        Kalman filter mode. One of "linear", "extended", or "unscented".
+    P0 : Sequence[Sequence[float]] | None
+        Initial state covariance matrix. If ``None``, the stationary covariance is used.
+    R : Sequence[Sequence[float]] | None
+        Observation noise covariance matrix. If ``None``, the kalman config is consulted. Raises when both are ``None``.
+    estimated_params : Sequence[str] | None
+        List of parameter names to estimate. If ``None``, all parameters are estimated.
+    priors : Mapping[str, PriorSpec] | None
+        Mapping of parameter names to their prior specifications. If ``None``, no priors are used.
+    ss_seed : Sequence[float] | Mapping[str, float] | None
+        Steady-state seed values. Can be a sequence in declaration order or a mapping (with variable names as keys).
+    x0 : Sequence[float] | None
+        Kalman filter initial state vector. If ``None``, the steady-state is used.
+    jitter : float
+        Jitter to add to a matrix when cholesky decomposition fails. If zero, no jitter is added.
+    symmetrize : bool
+        Whether to symmetrize the covariance matrices in the Kalman kernels.
+    joseph_cov : bool
+        Whether to use Joseph form for the covariance update in the Kalman filter.
+
+    """
+
     observables: Sequence[str] | None
     filter_mode: str
     P0: Sequence[Sequence[float]] | None
@@ -71,11 +100,57 @@ class EstimatorParams(TypedDict):
 
 @dataclass
 class EstimatorSpec:
+    """Estimator specification (meta + data) for serialization.
+
+    Attributes
+    ----------
+    y : Sequence[Sequence[float]]
+        Observed data to estimate against.
+    params : EstimatorParams
+        JSON-format parameters for the :class:`Estimator`.
+
+    """
+
     y: Sequence[Sequence[float]]
     params: EstimatorParams
 
 
 class OptimizationResultSpec(TypedDict):
+    """Point estimate optimization result metadata for serialization.
+
+    Attributes
+    ----------
+    x : Sequence[float]
+        Optimized parameter values in the order of ``param_names``.
+    theta : Sequence[float]
+        Optimized parameter values as a mapping from parameter names to values.
+    success : bool
+        Whether the optimization converged successfully.
+    message : str
+        Error message or success message from the optimizer.
+    fun : float
+        Objective function value at the optimum.
+    nfev : int
+        Number of function evaluations performed by the optimizer.
+    nit : int | None
+        Number of iternations if applicable for the method used.
+    vcov : Sequence[Sequence[float]] | None
+        Covariance (Hessian) of the objective funtion at the optimum. Computed when opted-in.
+    cov_status : int
+        Covariance solve status code. Non-zero is a failure.
+    se : Mapping[str, float] | None
+        Standard errors of the estimated parameters, computed from the covariance matrix.
+    optimizer_config : dict[str, Any]
+        Routine configuration to reproduce this run.
+    loglik : float
+        Log-likelihood at the optimum. Only present for MLE results.
+    logpost : float
+        Log-posterior at the optimum. Only present for MAP results.
+    logprior : float
+        Log-prior at the optimum. Only present for MAP results.
+
+    """
+
     x: Sequence[float]
     theta: Mapping[str, float]
     success: bool
@@ -92,10 +167,32 @@ class OptimizationResultSpec(TypedDict):
 
 
 class MLEResultSpec(OptimizationResultSpec):
+    """Serializable form of a maximum likelihood estimation result.
+
+    Extends the shared optimization spec with the achieved likelihood.
+
+    Attributes
+    ----------
+    loglik : float
+        Log likelihood at the reported optimum.
+    """
+
     loglik: float
 
 
 class MAPResultSpec(OptimizationResultSpec):
+    """Serializable form of a maximum a posteriori estimation result.
+
+    Extends the shared optimization spec with the posterior decomposition.
+
+    Attributes
+    ----------
+    logpost : float
+        Log posterior at the reported optimum.
+    logprior : float
+        Log prior at the reported optimum.
+    """
+
     logpost: float
     logprior: float
 
@@ -118,6 +215,21 @@ class MCMCResultMeta(TypedDict):
 
 @dataclass
 class MCMCResultSpec:
+    """Posterior sampling result spec for serialization.
+
+    Attributes
+    ----------
+    samples : Sequence[Sequence[float]]
+        Posterior samples in bundle-ready ND array form.
+    logpost_trace : Sequence[float]
+        Log-posterior trace for the samples.
+    logjac_trace : Sequence[float]
+        Log-Jacobian trace for the samples.
+    meta : MCMCResultMeta
+        Inline JSON metadata for the MCMC run, including parameter names, sampler config, and trace lengths.
+
+    """
+
     samples: Sequence[Sequence[float]]
     logpost_trace: Sequence[float]
     logjac_trace: Sequence[float]

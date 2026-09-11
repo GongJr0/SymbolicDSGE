@@ -36,6 +36,8 @@ class TransformMethod(StrEnum):
 
 
 class Transform(ABC):
+    """Base class for transformations applied to prior distributions in any a priori routine."""
+
     @abstractmethod
     def __repr__(self) -> str: ...
 
@@ -58,6 +60,19 @@ class Transform(ABC):
 
     @abstractmethod
     def forward(self, x: T) -> T:
+        """Forward transformation from parameter space to unconstrained space.
+
+        Parameters
+        ----------
+        x : T
+            Parameter value(s) in the constrained space to be transformed.
+
+        Returns
+        -------
+        T
+            Parameter value(s) in the unconstrained space after applying the transformation.
+
+        """
         pass
 
     @overload
@@ -67,6 +82,19 @@ class Transform(ABC):
 
     @abstractmethod
     def inverse(self, y: T) -> T:
+        """Inverse transformation from unconstrained space back to parameter space.
+
+        Parameters
+        ----------
+        y : T
+            Parameter value(s) in the unconstrained space to be transformed back.
+
+        Returns
+        -------
+        T
+            Parameter value(s) in the constrained space after applying the inverse transformation.
+
+        """
         pass
 
     @overload
@@ -76,6 +104,19 @@ class Transform(ABC):
 
     @abstractmethod
     def grad_forward(self, x: T) -> T:
+        """Gradient of the forward transformation with respect to the input parameter(s).
+
+        Parameters
+        ----------
+        x : T
+            Parameter value(s) in the constrained space at which to evaluate the gradient.
+
+        Returns
+        -------
+        T
+            Gradient of the forward transformation evaluated at the given parameter value(s).
+
+        """
         pass
 
     @overload
@@ -85,6 +126,19 @@ class Transform(ABC):
 
     @abstractmethod
     def grad_inverse(self, y: T) -> T:
+        """Gradient of the inverse transformation with respect to the input parameter(s).
+
+        Parameters
+        ----------
+        y : T
+            Parameter value(s) in the unconstrained space at which to evaluate the gradient.
+
+        Returns
+        -------
+        T
+            Gradient of the inverse transformation evaluated at the given parameter value(s).
+
+        """
         pass
 
     @overload
@@ -94,6 +148,19 @@ class Transform(ABC):
 
     @abstractmethod
     def log_det_abs_jacobian_forward(self, x: T) -> T:
+        """Log absolute determinant of the Jacobian of the forward transformation, evaluated at the given parameter value(s).
+
+        Parameters
+        ----------
+        x : T
+            Parameter value(s) in the constrained space at which to evaluate the log determinant of the Jacobian.
+
+        Returns
+        -------
+        T
+            Log absolute determinant of the Jacobian of the forward transformation evaluated at the given parameter value(s).
+
+        """
         pass
 
     @overload
@@ -103,6 +170,19 @@ class Transform(ABC):
 
     @abstractmethod
     def log_det_abs_jacobian_inverse(self, y: T) -> T:
+        """Log absolute determinant of the Jacobian of the inverse transformation, evaluated at the given parameter value(s).
+
+        Parameters
+        ----------
+        y : T
+            Parameter value(s) in the unconstrained space at which to evaluate the log determinant of the Jacobian.
+
+        Returns
+        -------
+        T
+            Log absolute determinant of the Jacobian of the inverse transformation evaluated at the given parameter value(s).
+
+        """
         pass
 
     @overload
@@ -114,6 +194,19 @@ class Transform(ABC):
 
     @abstractmethod
     def grad_log_det_abs_jacobian_inverse(self, y: T) -> T:
+        """Gradient of `log(det(abs(Jacobian)))` of the inverse transformation, evaluated at the given parameter value(s).
+
+        Parameters
+        ----------
+        y : T
+            Parameter value(s) in the unconstrained space at which to evaluate the gradient of the log determinant of the Jacobian.
+
+        Returns
+        -------
+        T
+            Gradient of the log absolute determinant of the Jacobian of the inverse transformation evaluated at the given parameter value(s).
+
+        """
         pass
 
     @overload
@@ -192,6 +285,19 @@ class Transform(ABC):
     def safe_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def safe_forward(self, x: T) -> T:
+        """Forward transformation from parameter space to unconstrained space, with adjustments for boundary values.
+
+        Parameters
+        ----------
+        x : T
+            Parameter value(s) in the constrained space to be transformed.
+
+        Returns
+        -------
+        T
+            Parameter value(s) in the unconstrained space after applying the transformation, with adjustments for boundary values.
+
+        """
         x = self._get_adjusted_forward(x)
         return self.forward(x)
 
@@ -201,6 +307,19 @@ class Transform(ABC):
     def safe_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def safe_inverse(self, y: T) -> T:
+        """Inverse transformation from unconstrained space back to parameter space, with adjustments for boundary values.
+
+        Parameters
+        ----------
+        y : T
+            Parameter value(s) in the unconstrained space to be transformed back.
+
+        Returns
+        -------
+        T
+            Parameter value(s) in the constrained space after applying the inverse transformation, with adjustments for boundary values.
+
+        """
         y = self._get_adjusted_inverse(y)
         return self.inverse(y)
 
@@ -210,6 +329,19 @@ class Transform(ABC):
     def safe_grad_forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def safe_grad_forward(self, x: T) -> T:
+        """Gradient of the forward transformation with respect to the input parameter(s), with adjustments for boundary values.
+
+        Parameters
+        ----------
+        x : T
+            Parameter value(s) in the constrained space at which to evaluate the gradient, with adjustments for boundary values.
+
+        Returns
+        -------
+        T
+            Gradient of the forward transformation evaluated at the given parameter value(s), with adjustments for boundary values.
+
+        """
         x = self._get_adjusted_forward(x)
         return self.grad_forward(x)
 
@@ -219,6 +351,19 @@ class Transform(ABC):
     def safe_grad_inverse(self, y: NDArray[float64]) -> NDArray[float64]: ...
 
     def safe_grad_inverse(self, y: T) -> T:
+        """Gradient of the inverse transformation with respect to the input parameter(s), with adjustments for boundary values.
+
+        Parameters
+        ----------
+        y : T
+            Parameter value(s) in the unconstrained space at which to evaluate the gradient, with adjustments for boundary values.
+
+        Returns
+        -------
+        T
+            Gradient of the inverse transformation evaluated at the given parameter value(s), with adjustments for boundary values.
+
+        """
         y = self._get_adjusted_inverse(y)
         return self.grad_inverse(y)
 
@@ -230,6 +375,19 @@ class Transform(ABC):
     ) -> NDArray[float64]: ...
 
     def safe_log_det_abs_jacobian_forward(self, x: T) -> T:
+        """Log absolute determinant of the Jacobian of the forward transformation, evaluated at the given parameter value(s), with adjustments for boundary values.
+
+        Parameters
+        ----------
+        x : T
+            Parameter value(s) in the constrained space at which to evaluate the log determinant of the Jacobian, with adjustments for boundary values.
+
+        Returns
+        -------
+        T
+            Log absolute determinant of the Jacobian of the forward transformation evaluated at the given parameter value(s), with adjustments for boundary values.
+
+        """
         x = self._get_adjusted_forward(x)
         return self.log_det_abs_jacobian_forward(x)
 
@@ -241,19 +399,35 @@ class Transform(ABC):
     ) -> NDArray[float64]: ...
 
     def safe_log_det_abs_jacobian_inverse(self, y: T) -> T:
+        """Log absolute determinant of the Jacobian of the inverse transformation, evaluated at the given parameter value(s), with adjustments for boundary values.
+
+        Parameters
+        ----------
+        y : T
+            Parameter value(s) in the unconstrained space at which to evaluate the log determinant of the Jacobian, with adjustments for boundary values.
+
+        Returns
+        -------
+        T
+            Log absolute determinant of the Jacobian of the inverse transformation evaluated at the given parameter value(s), with adjustments for boundary values.
+
+        """
         y = self._get_adjusted_inverse(y)
         return self.log_det_abs_jacobian_inverse(y)
 
     @property
     @abstractmethod
     def support(self) -> Support:
+        """Support of the parameter space for this transformation."""
         pass
 
     @property
     @abstractmethod
     def maps_to(self) -> Support:
+        """Support of the unconstrained space that this transformation maps to."""
         pass
 
     @property
     def eps(self) -> float64:
+        """Additive epsilon used to adjust parameter values at the boundaries of the support to avoid numerical issues."""
         return float64(1e-8)

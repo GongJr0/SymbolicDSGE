@@ -109,7 +109,7 @@ def _fill_mean_ax0(x: NDF) -> NDF:
 
 
 def _fill_centered_ax0(x: NDF, mean: NDF) -> NDF:
-    """x with its column means subtracted."""
+    """X with its column means subtracted."""
     return fill_centered_ax0(
         np.ascontiguousarray(x, dtype=float64),
         np.ascontiguousarray(mean, dtype=float64),
@@ -148,7 +148,6 @@ def wald_mean_hac(
     TestResult
          Wald test result containing the test statistic, degrees of freedom, and p-value method.
     """
-
     g_arr = np.ascontiguousarray(g, dtype=float64)
     target_arr = np.ascontiguousarray(target, dtype=float64)
     n = g_arr.shape[0]
@@ -209,7 +208,6 @@ def wald_covariance_hac(
     alpha:
         Significance level for the test, used for p-value calculation. Default is 0.05.
     """
-
     g_arr = np.ascontiguousarray(g, dtype=float64)
     target_arr = np.ascontiguousarray(target, dtype=float64)
 
@@ -288,7 +286,6 @@ def wald_second_moment_hac(
     alpha:
         Significance level for the test, used for p-value calculation. Default is 0.05.
     """
-
     g_arr = np.ascontiguousarray(g, dtype=float64)
     target_arr = np.ascontiguousarray(target, dtype=float64)
 

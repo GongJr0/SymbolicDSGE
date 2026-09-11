@@ -12,6 +12,8 @@ class RegressionStatus(IntEnum):
 
 
 class RegressionKind(StrEnum):
+    """Regression method a fit or a Monte Carlo regression step ran."""
+
     OLS = "ols"
     RIDGE = "ridge"
     RIDGE_GS = "ridge_gs"

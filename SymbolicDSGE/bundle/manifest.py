@@ -131,6 +131,19 @@ class SimSpec:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> SimSpec:
+        """Construct a :class:`SimSpec` from the manifest's JSON form.
+
+        Parameters
+        ----------
+        data : Mapping[str, Any]
+            dict-form representation of a :class:`SimSpec` as stored in the manifest.
+
+        Returns
+        -------
+        SimSpec
+            A new :class:`SimSpec` instance populated with the data from the manifest.
+
+        """
         return cls(
             T=int(data.get("T", 0)),
             x0=data.get("x0", None),
@@ -181,6 +194,15 @@ class Member:
             self.format = format_for_path(self.path)
 
     def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable mapping for the manifest.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary with keys ``path``, ``kind``, ``format``, and optionally
+            ``role``, ``columns``, and ``options``.
+
+        """
         out: dict[str, Any] = {
             "path": self.path,
             "kind": self.kind,
@@ -196,6 +218,20 @@ class Member:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Member:
+        """Construct a :class:`Member` from a manifest entry.
+
+        Parameters
+        ----------
+        data : Mapping[str, Any]
+            JSON-format dictionary representing a bundle member, typically extracted from the manifest
+            of a loaded ``.sdsge`` bundle.
+
+        Returns
+        -------
+        Member
+            Member instance populated with the data from the manifest entry, including path, kind, format,
+
+        """
         return cls(
             path=str(data["path"]),
             kind=str(data["kind"]),
@@ -221,15 +257,51 @@ class Manifest:
     checksums: dict[str, str] = field(default_factory=dict)
 
     def members_by_kind(self, kind: str) -> list[Member]:
+        """Select all members of a given kind from the manifest.
+
+        Parameters
+        ----------
+        kind : str
+            A string-value :type:`MemberKind`
+
+        Returns
+        -------
+        list[Member]
+            List of :class:`Member` instances from the manifest that match the specified kind.
+
+        """
         return [m for m in self.members if m.kind == kind]
 
     def model_member(self, role: str) -> Member | None:
+        """Get the model config member with a given role if it exists.
+
+        Parameters
+        ----------
+        role : str
+            The role of the model. ("reference" or "dgp")
+
+        Returns
+        -------
+        Member | None
+            The :class:`Member` instance representing the model configuration with the specified role,
+            or None if no such member exists in the manifest.
+
+        """
         for member in self.members:
             if member.kind == "model_config" and member.role == role:
                 return member
         return None
 
     def to_dict(self) -> dict[str, Any]:
+        """Convert a bundle manifest to a JSON-serializable mapping.
+
+        Returns
+        -------
+        dict[str, Any]
+            JSON-serializable dictionary representing the manifest, including versioning information,
+            creation metadata, member list, simulation specifications, and checksums.
+
+        """
         out: dict[str, Any] = {
             "sdsge_version": int(self.sdsge_version),
             "last_breaking_version": int(self.last_breaking_version),
@@ -246,6 +318,19 @@ class Manifest:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Manifest:
+        """Construct a :class:`Manifest` from a JSON-serializable mapping.
+
+        Parameters
+        ----------
+        data : Mapping[str, Any]
+            JSON-format dictionary representing a bundle manifest, typically extracted from the ``manifest.json`` file of a loaded ``.sdsge`` bundle.
+
+        Returns
+        -------
+        Manifest
+            Manifest instance populated with the data from the JSON mapping, including versioning information, creation metadata, member list, simulation specifications, and checksums.
+
+        """
         version = int(data.get("sdsge_version", SDSGE_FORMAT_VERSION))
         if version < SDSGE_LAST_BREAKING_VERSION:
             raise ValueError(
@@ -282,8 +367,34 @@ class Manifest:
         )
 
     def to_json(self, *, indent: int | None = 2) -> str:
+        """Convert the manifest to a JSON string.
+
+        Parameters
+        ----------
+        indent : int | None
+            Level of indentation for pretty-printing the JSON output. If None, the most compact representation is used.
+
+        Returns
+        -------
+        str
+            JSON-formatted string representation of the manifest, suitable for writing to a file or transmitting over a network.
+
+        """
         return json.dumps(self.to_dict(), indent=indent)
 
     @classmethod
     def from_json(cls, text: str) -> Manifest:
+        """Construct a :class:`Manifest` from a JSON string.
+
+        Parameters
+        ----------
+        text : str
+            JSON-formatted string representing a bundle manifest, typically read from the ``manifest.json`` file of a loaded ``.sdsge`` bundle.
+
+        Returns
+        -------
+        Manifest
+            Manifest instance populated with the data from the JSON string, including versioning information, creation metadata, member list, simulation specifications, and checksums.
+
+        """
         return cls.from_dict(json.loads(text))

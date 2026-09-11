@@ -132,6 +132,7 @@ def _trace_keys(spec: PipelineSpec) -> list[str]:
 
 def available_traces(pipeline: MCPipeline) -> dict[str, list[str]]:
     """The trace keys each per-rep step in the pipeline will emit.
+
     Lists the available traces a POSTPROC may refer to.
     """
     return {step.name: trace_keys_for_step(step) for step in pipeline.per_rep_steps}

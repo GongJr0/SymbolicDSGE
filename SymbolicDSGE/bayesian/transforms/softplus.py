@@ -18,8 +18,7 @@ from ..._ckernels.transforms import (
 
 
 class SoftplusTransform(Transform):
-    """
-    Maps x in (0, +inf) <-> y in (-inf, +inf)
+    """Map x in (0, +inf) <-> y in (-inf, +inf).
 
     forward:  y = inv_softplus(x) = log(exp(x) - 1)
     inverse:  x = softplus(y)     = log(1 + exp(y))

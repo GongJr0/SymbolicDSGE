@@ -33,8 +33,11 @@ class MCEdgeSpec(BaseModel):
 
 
 class MCPostprocSpec(BaseModel):
-    """A post-loop op. Not a graph node -- no ``id``/edges; it references producers
-    by trace key in ``params`` and runs once over the assembled traces."""
+    """A post-loop op.
+
+    Not a graph node -- no ``id``/edges; it references producers by trace key in
+    ``params`` and runs once over the assembled traces.
+    """
 
     step_type: PostprocStepKind
     name: str = Field(min_length=1)

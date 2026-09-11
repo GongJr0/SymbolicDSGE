@@ -16,6 +16,19 @@ _VAR_FUNC: TypeAlias = FunctionClass | UndefinedFunction
 
 
 class LinearizationMethod(StrEnum):
+    """Linearization methods for transforming variables in a symbolic model.
+
+    Attributes
+    ----------
+    LOG : Literal["log"]
+        Log-linearization
+    TAYLOR : Literal["taylor"]
+        First-order Taylor expansion linearization
+    NONE : Literal["none"]
+        No linearization; the variable is used as-is in the linearized model.
+
+    """
+
     LOG = "log"
     TAYLOR = "taylor"
     NONE = "none"
@@ -339,6 +352,19 @@ class Linearizer:
 
 
 def linearize_model(conf: ModelConfig) -> ModelConfig:
+    """Apply symbolic linearization to a :class:`ModelConfig`, returning a new :class:`ModelConfig` with linearized equations.
+
+    Parameters
+    ----------
+    conf : ModelConfig
+        Initial model configuration to be linearized.
+
+    Returns
+    -------
+    ModelConfig
+        Linearized model configuration with updated equations and a flag indicating that it has been symbolically linearized.
+
+    """
     if conf.symbolically_linearized:
         raise ValueError("ModelConfig is already symbolically linearized.")
 

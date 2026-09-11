@@ -132,9 +132,11 @@ def get_dims(compiled: CompiledModel, estimated_params: list[str], y: NDF) -> Py
 
 @dataclass(frozen=True, slots=True)
 class PyScalarScatter:
-    """Mirror of ``sdsge_scalar_scatter``: one estimated scalar's theta->params
-    scatter. ``transform_params`` is a ``np.float64`` array of length
-    ``SDSGE_N_TRANSFORM_PARAMS``."""
+    """Mirror of ``sdsge_scalar_scatter``: one estimated scalar's theta->params scatter.
+
+    ``transform_params`` is a ``np.float64`` array of length
+    ``SDSGE_N_TRANSFORM_PARAMS``.
+    """
 
     theta_idx: int
     param_slot: int
@@ -163,7 +165,8 @@ def build_scalar_scatter(
 
     Two boundary invariants are asserted here because the native path has no
     fallback: every estimated scalar is a calibrated parameter (so its slot
-    exists), and its transform packs to a native code (never ``None``)."""
+    exists), and its transform packs to a native code (never ``None``).
+    """
     scatter: list[PyScalarScatter] = []
     for name in param_names:
         if name in matrix_member_names:
@@ -199,17 +202,20 @@ class PyParamMap:
     (``n_scalars`` = ``len(scalars)``). ``base_params`` and every slot index
     (``scalars`` ``param_slot``, and the cov specs' ``std_slots``/``pair_slot``)
     are in ``calib_params`` order, so ``params`` doubles as the residual argument
-    vector with no gather step."""
+    vector with no gather step.
+    """
 
     base_params: NDF  # n_par, calib_params order
     scalars: list[PyScalarScatter]  # n_scalars
 
 
 def build_calib_index(compiled: CompiledModel) -> dict[str, int]:
-    """Name -> slot in ``calib_params`` order. The single origin of the calib
-    ordering shared by ``base_params``, the scalar scatter's ``param_slot``, and
-    the cov specs' ``std_slots``/``pair_slot``; build once at the composer and
-    thread it into each builder."""
+    """Name -> slot in ``calib_params`` order.
+
+    The single origin of the calib ordering shared by ``base_params``, the scalar
+    scatter's ``param_slot``, and the cov specs' ``std_slots``/``pair_slot``; build
+    once at the composer and thread it into each builder.
+    """
     return {str(p): i for i, p in enumerate(compiled.calib_params)}
 
 
@@ -228,7 +234,8 @@ def build_param_map(
     eval time) and the scalar scatter's ``param_slot`` share one ``calib_index``
     so the calib ordering has a single origin. Pass ``calib_index`` from the
     composer when other builders (the cov specs) need the same map; it defaults
-    to :func:`build_calib_index`. Both outputs are in ``calib_params`` order."""
+    to :func:`build_calib_index`. Both outputs are in ``calib_params`` order.
+    """
     if calib_index is None:
         calib_index = build_calib_index(compiled)
     base_dict = extract_base_params(compiled)
@@ -254,7 +261,8 @@ class PyCovSpec:
     diagonal param slots; the correlation comes either from a CPC block
     (``corr_from_block`` with ``block_theta_off``/``block_theta_len`` into theta)
     or from the ``pair_i``/``pair_j``/``pair_slot`` triples
-    (``n_pairs`` = ``len(pair_i)``)."""
+    (``n_pairs`` = ``len(pair_i)``).
+    """
 
     is_constant: bool
     constant: NDF | None  # K*K, or None
@@ -285,7 +293,8 @@ def _assemble_cov_spec(
     ``constant_fn`` materializes it once at base calibration. Otherwise rebuilt
     per eval: ``corr_from_block`` reads the CPC block's theta slice; else the
     correlation is assembled from the ``pair_*`` triples. ``std_slots`` and
-    ``pair_slot`` index the calib-order ``params`` via ``calib_index``."""
+    ``pair_slot`` index the calib-order ``params`` via ``calib_index``.
+    """
     empty_i = np.empty(0, dtype=np.int64)
 
     std_estimated = any(name in param_index for name in std_names)
@@ -348,7 +357,8 @@ def _build_q_spec(
     Members are the shocks in ``shocks`` order; each std is
     ``shock_std[shock]`` and each off-diagonal correlation is the ``shock_corr``
     symbol for that shock pair (absent pairs stay zero). A ``Q_corr`` CPC block
-    takes the ``corr_from_block`` regime."""
+    takes the ``corr_from_block`` regime.
+    """
     calib = compiled.config.calibration
     shock_std = calib.shock_std
     shock_corr = calib.shock_corr
@@ -388,7 +398,8 @@ def _build_r_spec(
     std map) is loop-invariant, so it is materialized once. Otherwise members are
     the active ``observables``; each std is ``R_std_param_map[obs]`` and each
     off-diagonal correlation is the ``R_corr_param_map`` name for that observable
-    pair. An ``R_corr`` CPC block takes the ``corr_from_block`` regime."""
+    pair. An ``R_corr`` CPC block takes the ``corr_from_block`` regime.
+    """
     n_obs = len(observables)
     obs_list = list(observables)
     if R_override is not None:
@@ -456,7 +467,8 @@ class PyObjCommon:
     ``zgges`` is absent because the composer pulls it from the scipy cython_lapack
     capsule, not from Python. The scratch fields on the C struct (``params``,
     ``Q``, ``R``, ``corr_q``, ``corr_r``, ``std_q``, ``std_r``) and the
-    ``bk_violations`` output are composer-owned and omitted here."""
+    ``bk_violations`` output are composer-owned and omitted here.
+    """
 
     dims: PyDims
 
@@ -505,7 +517,8 @@ def build_obj_common(
     objective cfunc, ``bc_residual`` only for the unscented (second-order) path,
     ``meas``/``jac`` off the prepared run. ``ss_seed`` is resolved to canonical
     variable order by the solver's authority. Scratch buffers and the
-    ``bk_violations`` output are the composer's job, not here."""
+    ``bk_violations`` output are the composer's job, not here.
+    """
     y = prepared.y_reordered
     calib_index = build_calib_index(compiled)
     base_dict = extract_base_params(compiled)
@@ -567,28 +580,37 @@ def build_obj_common(
 
 @dataclass(frozen=True, slots=True)
 class PyLinearContext:
-    """Mirror of ``sdsge_linear_ctx``. The ``solve1`` buffers and the ``C``/``d``
-    measurement-linearization outputs are composer-allocated scratch, so this
-    wrapper adds no Python-provided fields beyond ``base``."""
+    """Mirror of ``sdsge_linear_ctx``.
+
+    The ``solve1`` buffers and the ``C``/``d`` measurement-linearization outputs are
+    composer-allocated scratch, so this wrapper adds no Python-provided fields
+    beyond ``base``.
+    """
 
     base: PyObjCommon
 
 
 @dataclass(frozen=True, slots=True)
 class PyExtendedContext:
-    """Mirror of ``sdsge_extended_ctx``. ``solve1`` is composer-allocated scratch;
-    no Python-provided fields beyond ``base``."""
+    """Mirror of ``sdsge_extended_ctx``.
+
+    ``solve1`` is composer-allocated scratch; no Python-provided fields beyond
+    ``base``.
+    """
 
     base: PyObjCommon
 
 
 @dataclass(frozen=True, slots=True)
 class PyUnscentedContext:
-    """Mirror of ``sdsge_unscented_ctx``. ``solve1``/``solve2`` are
-    composer-allocated scratch. ``z0`` is the Python-provided initial augmented
-    state ``[x0_state; 0]`` of shape ``(2*n_state,)`` (the user's first-order
-    ``x0``, given as ``n_state`` or full ``n_var`` and sliced to the state block;
-    the tail is zeroed). ``alpha``/``beta``/``kappa`` are the UKF tuning scalars."""
+    """Mirror of ``sdsge_unscented_ctx``.
+
+    ``solve1``/``solve2`` are composer-allocated scratch. ``z0`` is the Python-
+    provided initial augmented state ``[x0_state; 0]`` of shape ``(2*n_state,)``
+    (the user's first-order ``x0``, given as ``n_state`` or full ``n_var`` and
+    sliced to the state block; the tail is zeroed). ``alpha``/``beta``/``kappa`` are
+    the UKF tuning scalars.
+    """
 
     base: PyObjCommon
     z0: NDF  # 2*n_state
@@ -598,23 +620,28 @@ class PyUnscentedContext:
 
 
 def build_linear_context(base: PyObjCommon) -> PyLinearContext:
-    """Wrap the base inputs for the linear filter. The ``solve1`` buffers and the
-    ``C``/``d`` measurement linearization are composer-allocated scratch, so there
-    is nothing to add beyond ``base``."""
+    """Wrap the base inputs for the linear filter.
+
+    The ``solve1`` buffers and the ``C``/``d`` measurement linearization are
+    composer-allocated scratch, so there is nothing to add beyond ``base``.
+    """
     return PyLinearContext(base=base)
 
 
 def build_extended_context(base: PyObjCommon) -> PyExtendedContext:
-    """Wrap the base inputs for the extended (EKF) filter. ``solve1`` is
-    composer-allocated scratch; nothing to add beyond ``base``."""
+    """Wrap the base inputs for the extended (EKF) filter.
+
+    ``solve1`` is composer-allocated scratch; nothing to add beyond ``base``.
+    """
     return PyExtendedContext(base=base)
 
 
 def _unscented_z0(compiled: CompiledModel, x0: NDF | None) -> NDF:
-    """Initial augmented state ``[x0_state; 0]`` of shape ``(2*n_state,)``,
-    mirroring the Kalman resolvers' unscented ``z0``. ``x0`` is accepted as the
-    ``n_state`` block or the full ``n_var`` vector (sliced to the state block);
-    the tail is zeroed."""
+    """Initial augmented state ``[x0_state; 0]`` of shape ``(2*n_state,)``, mirroring the Kalman resolvers' unscented ``z0``.
+
+    ``x0`` is accepted as the ``n_state`` block or the full ``n_var`` vector (sliced
+    to the state block); the tail is zeroed.
+    """
     n_state = compiled.n_state
     n_var = compiled.n_var
     if x0 is None:
@@ -645,10 +672,12 @@ def build_unscented_context(
     beta: float = 2.0,
     kappa: float = 1.0,
 ) -> PyUnscentedContext:
-    """Wrap the base inputs for the unscented filter. ``solve1``/``solve2`` are
-    composer-allocated scratch; ``z0`` is ``[x0_state; 0]`` (2*n_state) and
-    ``alpha``/``beta``/``kappa`` are the UKF tuning scalars (defaults match the
-    Kalman resolvers, the only source of these today)."""
+    """Wrap the base inputs for the unscented filter.
+
+    ``solve1``/``solve2`` are composer-allocated scratch; ``z0`` is ``[x0_state;
+    0]`` (2*n_state) and ``alpha``/``beta``/``kappa`` are the UKF tuning scalars
+    (defaults match the Kalman resolvers, the only source of these today).
+    """
     return PyUnscentedContext(
         base=base,
         z0=_unscented_z0(compiled, x0),
@@ -721,12 +750,14 @@ def _build_R(
     *,
     R_override: NDF | None = None,
 ) -> NDF:
-    """Assemble the measurement covariance for a likelihood eval, mirroring
-    :func:`build_Q`. Priority: a user-supplied ``R_override`` wins (validated to
-    the observable count); else, if the config carries parser-generated
-    std/correlation maps, R is rebuilt from the current ``params`` every eval
-    exactly as Q is; else a fixed ``kalman.R`` (a directly-configured constant
-    with no named params) is sliced to the observables as-is."""
+    """Assemble the measurement covariance for a likelihood eval, mirroring :func:`build_Q`.
+
+    Priority: a user-supplied ``R_override`` wins (validated to the observable
+    count); else, if the config carries parser-generated std/correlation maps, R is
+    rebuilt from the current ``params`` every eval exactly as Q is; else a fixed
+    ``kalman.R`` (a directly-configured constant with no named params) is sliced to
+    the observables as-is.
+    """
     if R_override is not None:
         R = asarray(R_override, dtype=float64)
         m = len(observables)

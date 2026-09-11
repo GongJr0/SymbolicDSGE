@@ -127,6 +127,17 @@ class InlineList(list):
 
 @dataclass(frozen=True)
 class ParsedConfig:
+    """YAML configuration parsed into a model and (if present) Kalman config.
+
+    Attributes
+    ----------
+    model : ModelConfig
+        Parsed model configuration.
+    kalman : KalmanConfig | None
+        Parsed Kalman configuration, or ``None`` if the config has no Kalman block.
+
+    """
+
     model: ModelConfig
     kalman: KalmanConfig | None
 
@@ -135,6 +146,19 @@ class ParsedConfig:
 
 
 class ModelParser:
+    """Parse a model configuration from YAML into a :class:`ModelConfig` object.
+
+    Parameters
+    ----------
+    config_path : str | Path
+        Path to the YAML configuration file.
+
+    Attributes
+    ----------
+    config_path : str | Path
+        Path the configuration was read from.
+    """
+
     def __init__(self, config_path: str | Path) -> None:
         self.config_path = Path(config_path)
         self.raw_data, self.parsed = self.from_yaml()
@@ -149,9 +173,28 @@ class ModelParser:
         self.validate_ss_seed(conf)
 
     def get(self) -> ModelConfig:
+        """Return the parsed model config, without the Kalman block.
+
+        Returns
+        -------
+        ModelConfig
+            Configuration object holding symbolic model equations, variables, parameters, shocks, and calibration.
+
+        """
         return self.parsed.model
 
     def get_all(self) -> ParsedConfig:
+        """Return the parsed model and (if present) Kalman config.
+
+        Returns
+        -------
+        ParsedConfig
+            object with ``model`` and ``kalman`` attributes, the latter of which
+            is ``None`` if the config has no Kalman block. Supports unpacking and splatting.
+            (e.g. ``model, kalman = parser.get_all()`` or ``*parser.get_all()``)
+
+
+        """
         return self.parsed
 
     @classmethod
@@ -264,6 +307,14 @@ class ModelParser:
 
     @classmethod
     def validate_constraints(cls, conf: ModelConfig) -> None:
+        """Validate the constraints specified on a model configuration.
+
+        Parameters
+        ----------
+        conf : ModelConfig
+            The configuration object containing the model equations and constraints.
+
+        """
         if not conf.equations.constraint:
             return
 
@@ -299,6 +350,14 @@ class ModelParser:
 
     @classmethod
     def validate_regimes(cls, conf: ModelConfig) -> None:
+        """Validate the regimes specified on a model configuration.
+
+        Parameters
+        ----------
+        conf : ModelConfig
+            The configuration object containing the model equations and regimes.
+
+        """
         constraints = conf.equations.constraint
         regimes = conf.equations.regime
         if not constraints and not regimes:
@@ -373,6 +432,14 @@ class ModelParser:
 
     @classmethod
     def validate_ss_seed(cls, conf: ModelConfig) -> None:
+        """Validate the steady-state seed expressions for model variables.
+
+        Parameters
+        ----------
+        conf : ModelConfig
+            The configuration object containing the model variables and their steady-state seed expressions.
+
+        """
         params = set(conf.parameters)
         for var, expr in conf.variables.ss_seed.items():
             if expr is None:
@@ -390,6 +457,14 @@ class ModelParser:
                 )
 
     def from_yaml(self) -> tuple[dict, ParsedConfig]:
+        """Parse a YAML configuration file into a :class:`ParsedConfig` object.
+
+        Returns
+        -------
+        tuple[dict, ParsedConfig]
+            Object containing model and (if present) Kalman configuration. The first element is the raw YAML data as a dictionary, and the second element is the parsed configuration.
+
+        """
         data = _load_yaml(self.config_path)
         _validate_schema(data)
 
@@ -483,6 +558,23 @@ class ModelParser:
         digits: int = 3,
         output_path: str | Path | None = None,
     ) -> StringIO:
+        """Update a model config calibration with the ones stored in the ``new_config``.
+
+        Parameters
+        ----------
+        new_config : ModelConfig
+            Configuration object containing the new calibration parameters to update.
+        digits : int
+            Precision for rounding the calibration parameters when writing to YAML.
+        output_path : str | Path | None
+            YAML file path to write the updated configuration. If None, the updated configuration is not written to a file.
+
+        Returns
+        -------
+        StringIO
+            In-memory string buffer containing the updated YAML configuration.
+
+        """
         text = self.to_yaml(new_config, digits=digits)
         if output_path:
             with open(output_path, "w", encoding="utf-8") as f:
@@ -1036,7 +1128,6 @@ def _check_deprecated(data: dict[str, Any]) -> None:
 
 def _raise_if_not_unique(values: Sequence[Any], preamble: str) -> None:
     """Raise if any value appears more than once in the sequence."""
-
     unique = set(values)
     if len(unique) != len(values):
         duplicates = sorted(

@@ -27,8 +27,7 @@ def assemble_transition(
     n_state: int,
     n_control: int,
 ) -> _F64:
-    """A <- the first-order transition from (p, f). The shock loading is the
-    pencil stage's own output, not assembled from these."""
+    """A <- the first-order transition from (p, f)."""
 
 def simulate_linear_states_into(
     A: _F64,
@@ -38,8 +37,11 @@ def simulate_linear_states_into(
     out: _F64,
     steady_state: _F64 | None = ...,
 ) -> None:
-    """out[(T, n)] <- linear state recursion. ``x0`` and the recursion are
-    deviations; ``steady_state`` denominates the written rows in levels."""
+    """out[(T, n)] <- linear state recursion.
+
+    ``x0`` and the recursion are deviations;
+    ``steady_state`` denominates the written rows in levels.
+    """
 
 def affine_observations_into(
     states: _F64,
@@ -65,9 +67,11 @@ def simulate_second_order_pruned(
     shock_mat: _F64,
     steady_state: _F64 | None = ...,
 ) -> _F64:
-    """Pruned second order simulation. Returns the stacked variable path. ``bu``
-    spans every variable: a control responds to an innovation contemporaneously.
-    ``steady_state`` denominates the returned rows in levels."""
+    """Pruned second order simulation, returns the stacked variable path.
+
+    ``bu`` spans every variable: a control responds to an innovation contemporaneously.
+    ``steady_state`` denominates the returned rows in levels.
+    """
 
 def klein_postprocess(
     s: _C128,
@@ -87,18 +91,20 @@ def klein_preprocess(
     n_eq: int,
     n_exog: int,
 ) -> tuple[_F64, _F64, _F64, _F64]:
-    """Complex-step (a, b, c, d) from a residual @cfunc address, so the system
-    reads ``a y' = b y + c y_prev + d eps``. ``d`` is (n_eq, n_exog), the rest
-    (n_eq, n_var)."""
+    """Complex-step (a, b, c, d) from a residual @cfunc address.
+
+    The system reads ``a y' = b y + c y_prev + d eps``.
+    ``d`` is (n_eq, n_exog), the rest (n_eq, n_var).
+    """
 
 def pencil_dim(incidence: _I8, n_var: int) -> int:
-    """Pencil size ``ndynamic + n_both`` from an incidence. Not bounded by
-    n_var: a mixed lag/lead variable needs a companion row."""
+    """Pencil size ``ndynamic + n_both`` from an incidence."""
 
 def klein_qz(a: _F64 | _C128, b: _F64 | _C128) -> tuple[_C128, _C128, _C128]:
-    """Ordered generalized Schur (QZ) with the Klein 'ouc' ordering via LAPACK
-    zgges. Returns (s, t, z) == scipy.linalg.ordqz(a, b, sort='ouc',
-    output='complex')[0, 1, 5]."""
+    """Ordered generalized Schur (QZ) with the Klein 'ouc' ordering via LAPACK zgges.
+
+    Returns (s, t, z) == scipy.linalg.ordqz(a, b, sort='ouc', output='complex')[0, 1, 5].
+    """
 
 def steady_state_newton(
     residual_addr: int,
@@ -108,9 +114,11 @@ def steady_state_newton(
     max_iter: int = ...,
     tol: float = ...,
 ) -> tuple[_F64, int]:
-    """Newton solve of F(ss, ss, ss) = 0 at a zero innovation from a residual
-    @cfunc address; returns (ss, iters). Jacobian a - b - c via klein_preproc,
-    step via f64 LU."""
+    """Newton solve of F(ss, ss, ss) = 0 at a zero innovation from a residual @cfunc address.
+
+    returns (ss, iters). Jacobian a - b - c via klein_preproc,
+    step via f64 LU.
+    """
 
 def klein_solve1(
     residual_addr: int,
@@ -125,7 +133,8 @@ def klein_solve1(
     Fuses steady_state_newton, klein_preprocess, klein_qz, klein_postprocess and
     assemble_transition into one GIL release. ``f``/``p`` are real; the Schur
     form's imaginary parts are roundoff on a real pencil. ``stab`` is reported,
-    not raised on."""
+    not raised on.
+    """
 
 def sgu_klein_solve2(
     residual_addr: int,
@@ -159,7 +168,8 @@ def sgu_klein_solve2(
     klein_solve1 plus bicomplex_hessian and second_order in one GIL release. The
     pencil and the residual Hessian stay native. ``Q`` is the (n_exog, n_exog)
     shock covariance, which the risk correction integrates against. ``stab`` is
-    reported, not raised on."""
+    reported, not raised on.
+    """
 
 def second_order(
     a: _F64,
@@ -172,7 +182,8 @@ def second_order(
     n_state: int,
 ) -> tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64]:
     """Second-order policy tensors (gxx, hxx, gxu, hxu, guu, huu, gss, hss) --
-    native twin of core.second_order.solve_second_order."""
+    native twin of core.second_order.solve_second_order.
+    """
 
 def residual_eval(
     residual_addr: int,
@@ -184,7 +195,8 @@ def residual_eval(
     n_eq: int,
 ) -> _C128:
     """Complex residual vector (n_eq,) from a residual @cfunc address at a single
-    (fwd, cur, prev, eps, par) point."""
+    (fwd, cur, prev, eps, par) point.
+    """
 
 def measurement_eval(
     meas_addr: int,
@@ -192,8 +204,10 @@ def measurement_eval(
     par: _F64,
     n_obs: int,
 ) -> _F64:
-    """Measurement vector (n_obs,) from a measurement @cfunc address at a single
-    (vars, par) point. Native twin of the old numba observable funcs."""
+    """Measurement vector (n_obs,) from a measurement @cfunc address at a single (vars, par) point.
+
+    Native twin of the old numba observable funcs.
+    """
 
 def jacobian_eval(
     jac_addr: int,
@@ -203,7 +217,8 @@ def jacobian_eval(
     n_var: int,
 ) -> _F64:
     """Observable jacobian (n_obs, n_var) from a jacobian @cfunc address at a
-    single (vars, par) point."""
+    single (vars, par) point.
+    """
 
 def measurement_path(
     meas_addr: int,
@@ -212,7 +227,8 @@ def measurement_path(
     n_obs: int,
 ) -> _F64:
     """Measurement matrix (T, n_obs) from a measurement @cfunc over a (T, n_var)
-    state path."""
+    state path.
+    """
 
 def bicomplex_hessian(
     residual_addr: int,
@@ -225,7 +241,8 @@ def bicomplex_hessian(
     ``z = (lag, cur, lead, eps)`` with ``nz = 3*n_var + n_exog``.
 
     Spanning every date and the innovations is what lets the chain rule contract
-    it to state space in one step."""
+    it to state space in one step.
+    """
 
 # --- bicomplex (bc256) primitives -------------------------------------------
 # A bc256 crosses the boundary as the 4-tuple (real, i, j, ij).

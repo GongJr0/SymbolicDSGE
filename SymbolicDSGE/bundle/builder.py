@@ -140,7 +140,14 @@ def _library_version() -> str:
 
 
 class BundleBuilder:
-    """Collect bundle members, then :meth:`write` (or :meth:`build`) the archive."""
+    """Collect bundle members, then :meth:`write` (or :meth:`build`) the archive.
+
+    Parameters
+    ----------
+    created_by : str | None
+        Optional string to record in the bundle manifest as the creator. If not
+        provided, the library version is used.
+    """
 
     def __init__(self, *, created_by: str | None = None) -> None:
         self._created_by = created_by or _library_version()
@@ -184,9 +191,12 @@ class BundleBuilder:
         *,
         as_parquet: bool = True,
     ) -> BundleBuilder:
-        """Add a raw observable file. CSV input is converted to Parquet by
-        default (``as_parquet``); pass ``as_parquet=False`` to store the CSV
-        verbatim (still a valid, format-agnostic member)."""
+        """Add a raw observable file.
+
+        CSV input is converted to Parquet by default (``as_parquet``); pass
+        ``as_parquet=False`` to store the CSV verbatim (still a valid, format-
+        agnostic member).
+        """
         if as_parquet:
             self._add(
                 Member(path=f"data/{name}.parquet", kind="raw_data"),
@@ -537,6 +547,14 @@ class BundleBuilder:
     # Emit
 
     def manifest(self) -> Manifest:
+        """Return the manifest for the current bundle state, with checksums of all members.
+
+        Returns
+        -------
+        Manifest
+            Object containing bundle metadata and checksums of all members.
+
+        """
         return Manifest(
             created_by=self._created_by,
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -549,9 +567,30 @@ class BundleBuilder:
         )
 
     def build(self) -> tuple[Manifest, dict[str, bytes]]:
+        """Build the bundle, to an in-memory mapping of member paths to their bytes, along with the manifest.
+
+        Returns
+        -------
+        tuple[Manifest, dict[str, bytes]]
+            Mapping of member paths to their bytes, along with the manifest containing metadata and checksums.
+
+        """
         return self.manifest(), dict(self._files)
 
     def write(self, path: str | Path) -> Path:
+        """Write a bundle to disk at ``path``, returning the path for convenience.
+
+        Parameters
+        ----------
+        path : str | Path
+            The file path where the bundle will be written.
+
+        Returns
+        -------
+        Path
+            The path where the bundle was written.
+
+        """
         write_bundle(path, self.manifest(), self._files)
         return Path(path)
 

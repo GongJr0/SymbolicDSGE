@@ -66,6 +66,7 @@ NDI = NDArray[np.int64]
 @dataclass
 class LoadedEstimation:
     """Estimation artifacts recovered from a bundle.
+
     ``estimator`` is the bundled :class:`Estimator` instance.
     ``result``, if present, is the run result bundled with the estimator.
     """
@@ -481,7 +482,6 @@ def _load_mc_filters(
     archive: BundleArchive, manifest: Manifest
 ) -> dict[str, MCFilterResult]:
     """Each filter step's arrays, rebuilt at the shapes its meta recorded."""
-
     metas = _mc_json(archive, manifest, "mc_filter_steps")
     if not metas:
         return {}

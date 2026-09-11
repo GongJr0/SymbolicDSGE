@@ -25,6 +25,60 @@ NDF = NDArray[float64]
 
 @dataclass(frozen=True, slots=True)
 class FilterResult:
+    """Filter outputs and the state/observable descriptors that go with them.
+
+    Returned by :meth:`KalmanFilter.run` and by ``SolvedModel.kalman`` for the linear
+    and extended filter modes. :class:`UnscentedFilterResult` extends it with the
+    first- and second-order components of the unscented state estimate.
+
+    State paths are reported in levels: the solved steady state is added to
+    ``x_pred`` and ``x_filt`` before they are returned. Measurements are in levels
+    throughout the recursion, as comparison against observed data requires.
+
+    Linear and extended filtering read ``x0`` and ``P0`` as the prior mean and
+    covariance for the first observed state. Unscented filtering reads them as the
+    state and covariance before the first observation.
+
+    Attributes
+    ----------
+    x_pred : NDF
+        Predicted states over time, before each date's observation is incorporated.
+    x_filt : NDF
+        Filtered states over time, after each date's observation is incorporated.
+    P_pred : NDF
+        Predicted state covariance over time, matching ``x_pred``.
+    P_filt : NDF
+        Filtered state covariance over time, matching ``x_filt``.
+    y_pred : NDF
+        Predicted observables over time.
+    y_filt : NDF
+        Filtered observables over time.
+    innov : NDF
+        Observable innovations, the pre-update difference between the observation
+        and its prediction.
+    std_innov : NDF
+        Innovations standardized by their covariance ``S``.
+    S : NDF
+        Innovation covariance over time.
+    loglik : float64
+        Log likelihood of the measurements.
+    eps_hat : NDF | None
+        Conditional estimates of the structural shocks given the observed data.
+        Present when the run was made with shock recovery requested, otherwise
+        ``None``. Never available for the unscented filter.
+    status : int
+        Error code from the recursion. Zero on success; a nonzero value is set
+        instead of raising when the run suppressed errors.
+    x1_pred : NDF
+        First-order component of the predicted state. Unscented filter only.
+    x2_pred : NDF
+        Second-order component of the predicted state. Unscented filter only.
+    x1_filt : NDF
+        First-order component of the filtered state. Unscented filter only.
+    x2_filt : NDF
+        Second-order component of the filtered state. Unscented filter only.
+    """
+
     x_pred: NDF
     x_filt: NDF
 
@@ -137,6 +191,13 @@ def _initalize_P0_unscented(
 
 # Static & Parametrized Kalman Filter (written to act with SolvedModel object attributes)
 class KalmanFilter:
+    """Kalman filter recursions over a solved model's state space.
+
+    A namespace of static methods; nothing is stored on an instance. :meth:`run`
+    drives the linear and extended recursions, :meth:`run_unscented` the unscented
+    one against a second-order solution.
+    """
+
     _shape_validate = staticmethod(_shape_validate)
 
     @staticmethod
@@ -158,7 +219,51 @@ class KalmanFilter:
         _store_history: bool = True,
         _raise_on_error: bool = True,
     ) -> FilterResult:
+        """Linear Gaussian Kalman filter run.
 
+        Parameters
+        ----------
+        A : NDF
+            State transition matrix. (SolvedModel.policy.A)
+        B : NDF
+            Shock loading matrix. (SolvedModel.policy.B)
+        C : NDF
+            Linear measurement coefficient matrix.
+        d : NDF
+            Linear measurement constant vector.
+        Q : NDF
+            Shock covariance matrix.
+        R : NDF
+            Measurement-noise covariance matrix.
+        steady_state : NDF
+            Steady-state vector of the state variables.
+        y : NDF
+            Observations in declared order. Shape (T, m) where T is the number of periods and m is the number of observed variables.
+        x0 : NDF | None
+            State vector at t-1 to initialize the filter.
+        P0 : NDF | None
+            State covariance matrix at t-1 to initialize the filter.
+        return_shocks : bool
+            Whether to compute shock estimates (:attr:`FilterResult.eps_hat`).
+        symmetrize : bool
+            Whether to symmetrize the covariance matrices at each step via (M + M.T)/2.
+        joseph_cov : bool
+            Whether to use the Joseph form of the covariance update.
+        jitter : float
+            Jitter to add when a cholesky decomposition fails. Set to 0.0 to disable.
+        _store_history : bool
+            Whether to store the full history of the filter. If False, the filter operates in likelihood-only mode.
+        _raise_on_error : bool
+            Whether to raise an exception if the filter encounters an error. If False, the filter will return a FilterResult with a nonzero :attr:`status` code.
+
+        Returns
+        -------
+        FilterResult
+            The result container of linear and extended Kalman filters.
+            Contains predicted and filtered states, state covariances, measurements;
+            innovations and standardized innovations; innovation covariances; log-likelihood; and shock estimates if requested.
+
+        """
         T, m = y.shape  # T: time steps, m: obs dim
         n = A.shape[0]  # n: state dim
         k = B.shape[1]  # k: shock dim
@@ -256,6 +361,76 @@ class KalmanFilter:
         _store_history: bool = True,
         _raise_on_error: bool = True,
     ) -> UnscentedFilterResult:
+        """Unscented Kalman filter run against a second-order model solution.
+
+        The policy tensors and ``steady_state`` come from an ``order=2`` solve. The
+        measurement is propagated through the sigma points via ``meas_addr``, so no
+        observation Jacobian is required. Shock recovery is not supported.
+
+        Parameters
+        ----------
+        meas_addr : int
+            Address of the compiled measurement cfunc, applied to each sigma point.
+        hx : NDF
+            First-order state transition tensor.
+        gx : NDF
+            First-order control policy tensor.
+        bu : NDF
+            Shock loading tensor.
+        hxx : NDF
+            Second-order state transition tensor in the state.
+        gxx : NDF
+            Second-order control policy tensor in the state.
+        hxu : NDF
+            Second-order state transition cross term in state and shock.
+        gxu : NDF
+            Second-order control policy cross term in state and shock.
+        huu : NDF
+            Second-order state transition tensor in the shock.
+        guu : NDF
+            Second-order control policy tensor in the shock.
+        hss : NDF
+            Risk correction term of the state transition.
+        gss : NDF
+            Risk correction term of the control policy.
+        steady_state : NDF
+            Steady-state vector of the state variables.
+        calib_params : NDF
+            Calibration parameter vector passed to the measurement cfunc.
+        Q : NDF
+            Shock covariance matrix.
+        R : NDF
+            Measurement-noise covariance matrix.
+        y : NDF
+            Observations in declared order, shape ``(T, m)``.
+        z0 : NDF
+            Augmented initial state of length ``2 * n_state``, describing the state
+            before the first observation.
+        P0 : NDF | None
+            Covariance of the augmented state, shape ``(2 * n_state, 2 * n_state)``.
+        alpha : float
+            Sigma-point spread parameter.
+        beta : float
+            Sigma-point prior-knowledge parameter.
+        kappa : float
+            Secondary sigma-point scaling parameter.
+        symmetrize : bool
+            Whether to symmetrize the covariance matrices at each step via ``(M + M.T)/2``.
+        jitter : float
+            Jitter to add when a cholesky decomposition fails. Set to 0.0 to disable.
+        _store_history : bool
+            Whether to store the full history of the filter. If False, the filter
+            operates in likelihood-only mode.
+        _raise_on_error : bool
+            Whether to raise if the recursion fails. If False, a result carrying a
+            nonzero ``status`` is returned instead.
+
+        Returns
+        -------
+        UnscentedFilterResult
+            Filter outputs, extending :class:`FilterResult` with the first- and
+            second-order components of the state estimate.
+        """
         if meas_addr == 0:
             raise ValueError("meas_addr must be a nonzero measurement cfunc address.")
 
@@ -422,8 +597,7 @@ class KalmanFilter:
         _store_history: bool = True,
         _raise_on_error: bool = True,
     ) -> FilterResult:
-        """
-        Extended Kalman Filter with a linear transition and nonlinear measurement:
+        """Extended Kalman Filter with a linear transition and nonlinear measurement.
 
             x_t = A x_{t-1} + B eps_t,     eps_t ~ N(0, Q)
             y_t = h(x_t, t) + v_t,         v_t   ~ N(0, R)
@@ -433,7 +607,8 @@ class KalmanFilter:
 
             H_t = ∂h/∂x evaluated at x_{t|t-1}
 
-        Notes:
+        Notes
+        -----
             - `h(x, t)` must return shape (m,)
             - `H_jac(x, t)` must return shape (m, n)
             - Process noise is in "shock space": Q is (k, k), B is (n, k)
@@ -478,7 +653,6 @@ class KalmanFilter:
         :param compute_y_filt: If True, compute y_filt[t] = h(x_filt[t], t). If False, leave y_filt as zeros with shape (T, m).
         :type compute_y_filt: bool
         """
-
         _, m = y.shape
         n = A.shape[0]
         k = B.shape[1]

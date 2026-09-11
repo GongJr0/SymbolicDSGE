@@ -9,6 +9,21 @@ from ..core.config import SymbolGetterDict, PairGetterDict
 
 @dataclass(frozen=True)
 class KalmanConfig:
+    """Kalman filter configuration holding a symbolic or scalar representation of the measurement noise covariance matrix.
+
+    Attributes
+    ----------
+    R : NDArray | None
+        Numerical(-ized) measurement noise covariance matrix.
+    R_param_names : list[str] | None
+        Parameter names used in the symbolic R representation.
+    R_std_param_map : SymbolGetterDict[str] | None
+        Standard deviation parameter map for the symbolic R representation.
+    R_corr_param_map : PairGetterDict[str | None] | None
+        Correlation parameter map for the symbolic R representation. A pair mapped to ``None`` indicates zero correlation.
+
+    """
+
     R: NDArray | None
     R_param_names: list[str] | None = None
     R_std_param_map: SymbolGetterDict[str] | None = None

@@ -347,6 +347,31 @@ def lasso(
     max_iter: int = 1000,
     tol: float | float64 = float64(1e-10),
 ) -> LassoResult:
+    """Fit an L1-penalized (lasso) regression at a fixed penalty weight.
+
+    Parameters
+    ----------
+    X : NDF
+        Design matrix, shape ``(n, k)``.
+    y : NDF
+        Response vector, shape ``(n,)``.
+    alpha : float
+        Non-negative L1 penalty weight.
+    variables : list[str] | None
+        Optional names for the design columns. Defaults to ``x0``, ``x1``, ...
+    intercept : bool
+        If True, include an unpenalized intercept column in the design.
+    max_iter : int
+        Maximum coordinate-descent iterations.
+    tol : float64
+        Coordinate-descent convergence tolerance.
+
+    Returns
+    -------
+    LassoResult
+        Fit with the common diagnostics plus L1 sparsity diagnostics. Path fields
+        are left None.
+    """
     if alpha < 0:
         raise ValueError("alpha must be non-negative.")
 
@@ -400,6 +425,37 @@ def lasso_gs(
     max_iter: int = 1000,
     tol: float | float64 = float64(1e-10),
 ) -> LassoResult:
+    """Select a lasso penalty over a logarithmic alpha grid.
+
+    Evaluates the grid using the LARS-Lasso path and keeps the coefficient vector
+    with the lowest residual loss.
+
+    Parameters
+    ----------
+    X : NDF
+        Design matrix, shape ``(n, k)``.
+    y : NDF
+        Response vector, shape ``(n,)``.
+    start : float
+        Positive lower endpoint for the alpha grid.
+    stop : float
+        Positive upper endpoint for the alpha grid.
+    num : int
+        Number of grid points.
+    variables : list[str] | None
+        Optional names for the design columns. Defaults to ``x0``, ``x1``, ...
+    intercept : bool
+        If True, include an unpenalized intercept column in the design.
+    max_iter : int
+        Maximum coordinate-descent iterations.
+    tol : float64
+        Coordinate-descent convergence tolerance.
+
+    Returns
+    -------
+    LassoResult
+        Fit at the selected penalty, with the path fields populated.
+    """
     if start <= 0 or stop <= 0:
         raise ValueError("start and stop must be positive.")
     if num <= 0:

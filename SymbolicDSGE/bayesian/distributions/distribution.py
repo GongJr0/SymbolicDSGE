@@ -1,3 +1,5 @@
+from sympy.core import parameters
+
 from ..support import Support
 
 from abc import ABC, abstractmethod
@@ -102,6 +104,8 @@ def _std_norm_cdf_scalar(x: float64) -> float64:
 
 
 class Distribution(ABC, Generic[EventT, BatchT]):
+    """Distribution base class for all prior families. Any a priori routine uses this as the distribution of the {dist, transform} prior pair."""
+
     @abstractmethod
     def __repr__(self) -> str: ...
 
@@ -125,6 +129,19 @@ class Distribution(ABC, Generic[EventT, BatchT]):
     def pdf(self, x: BatchT) -> VecF64: ...
 
     def pdf(self, x: EventT | BatchT) -> float64 | VecF64:
+        """Probability density function (PDF) of the distribution evaluated at x.
+
+        Parameters
+        ----------
+        x : EventT | BatchT
+            Value(s) at which to evaluate the PDF. Can be a single event or a batch of events.
+
+        Returns
+        -------
+        float64 | VecF64
+            Density of the distribution evaluated at the given value(s).
+
+        """
         return float64(np.exp(self.logpdf(x)))
 
     @overload
@@ -133,7 +150,21 @@ class Distribution(ABC, Generic[EventT, BatchT]):
     def logpdf(self, x: BatchT) -> VecF64: ...
 
     @abstractmethod
-    def logpdf(self, x: EventT | BatchT) -> float64 | VecF64: ...
+    def logpdf(self, x: EventT | BatchT) -> float64 | VecF64:
+        """Log density (log PDF) of the distribution evaluated at x.
+
+        Parameters
+        ----------
+        x : EventT | BatchT
+            Value(s) at which to evaluate the log density. Can be a single event or a batch of events.
+
+        Returns
+        -------
+        float64 | VecF64
+            Log density of the distribution evaluated at the given value(s).
+
+        """
+        pass
 
     @overload
     def grad_logpdf(self, x: EventT) -> float64 | MatF64: ...
@@ -141,7 +172,21 @@ class Distribution(ABC, Generic[EventT, BatchT]):
     def grad_logpdf(self, x: BatchT) -> VecF64: ...
 
     @abstractmethod
-    def grad_logpdf(self, x: EventT | BatchT) -> float64 | VecF64: ...
+    def grad_logpdf(self, x: EventT | BatchT) -> float64 | VecF64:
+        """Gradient of the log density (log PDF) of the distribution evaluated at x.
+
+        Parameters
+        ----------
+        x : EventT | BatchT
+            Value(s) at which to evaluate the gradient of the log density. Can be a single event or a batch of events.
+
+        Returns
+        -------
+        float64 | VecF64
+            Gradient of the log density of the distribution evaluated at the given value(s).
+
+        """
+        pass
 
     @overload
     def cdf(self, x: EventT) -> float64 | MatF64: ...
@@ -149,7 +194,21 @@ class Distribution(ABC, Generic[EventT, BatchT]):
     def cdf(self, x: BatchT) -> VecF64: ...
 
     @abstractmethod
-    def cdf(self, x: EventT | BatchT) -> float64 | VecF64: ...
+    def cdf(self, x: EventT | BatchT) -> float64 | VecF64:
+        """Cumulative distribution function (CDF) of the distribution evaluated at x.
+
+        Parameters
+        ----------
+        x : EventT | BatchT
+            Value(s) at which to evaluate the CDF. Can be a single event or a batch of events.
+
+        Returns
+        -------
+        float64 | VecF64
+            Cumulative probability of the distribution evaluated at the given value(s).
+
+        """
+        pass
 
     @overload
     def ppf(self, q: EventT) -> float64 | MatF64: ...
@@ -157,28 +216,79 @@ class Distribution(ABC, Generic[EventT, BatchT]):
     def ppf(self, q: BatchT) -> VecF64: ...
 
     @abstractmethod
-    def ppf(self, q: EventT | BatchT) -> float64 | VecF64: ...
+    def ppf(self, q: EventT | BatchT) -> float64 | VecF64:
+        """Percent-point function (inverse of CDF) of the distribution evaluated at q.
+
+        Parameters
+        ----------
+        q : EventT | BatchT
+            Quantile(s) at which to evaluate the inverse CDF. Can be a single quantile or a batch of quantiles.
+
+        Returns
+        -------
+        float64 | VecF64
+            Value(s) corresponding to the given quantile(s) of the distribution.
+
+        """
+        pass
 
     @abstractmethod
-    def rvs(self, size: Size, random_state: RandomState = None) -> BatchT: ...
+    def rvs(self, size: Size, random_state: RandomState = None) -> BatchT:
+        """Sample random variates from the distribution.
+
+        Parameters
+        ----------
+        size : Size
+            Shape of the output array. Can be an integer for a single dimension or a tuple for multiple dimensions.
+        random_state : RandomState
+            Random state or seed for reproducibility of the samples. If None, a default random state is used.
+
+        Returns
+        -------
+        BatchT
+            Samples drawn from the distribution with the specified shape.
+
+        """
+        pass
 
     @property
     @abstractmethod
-    def support(self) -> Support: ...
+    def support(self) -> Support:
+        """Support of the distribution, defining the valid range of values."""
+        pass
 
     @property
     @abstractmethod
-    def mean(self) -> EventT: ...
+    def mean(self) -> EventT:
+        """The mean (expected value) of the distribution."""
+        pass
 
     @property
     @abstractmethod
-    def var(self) -> EventT: ...
+    def var(self) -> EventT:
+        """The variance of the distribution."""
+        pass
 
     @property
     @abstractmethod
-    def mode(self) -> EventT: ...
+    def mode(self) -> EventT:
+        """The mode (most probable value) of the distribution."""
+        pass
 
     def is_valid(self, x: EventT | BatchT) -> bool:
+        """Evaluate whether the given value(s) are within the support of the distribution.
+
+        Parameters
+        ----------
+        x : EventT | BatchT
+            Value(s) to check for validity against the distribution's support. Can be a single event or a batch of events.
+
+        Returns
+        -------
+        bool
+            Validity of the given value(s) with respect to the distribution's support. True if all values are within the support, False otherwise.
+
+        """
         return bool(self.support.contains(x))
 
     def _rng(self, random_state: RandomState) -> np.random.Generator:

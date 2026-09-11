@@ -49,11 +49,68 @@ NDF = NDArray[np.float64]
 
 
 class Estimator:
-    """
-    Estimation interface exposing three public methods:
+    """Estimation interface exposing three public methods.
+
     - maximum likelihood estimation (`mle`)
     - maximum a posteriori estimation (`map`)
     - adaptive random-walk Metropolis MCMC (`mcmc`)
+
+    Parameters
+    ----------
+    compiled : CompiledModel
+        Compiled model object containing the target model's information and configuration.
+    y : NDF | pd.DataFrame
+        Observed data for the estimation procedure. Array in declared observable order or a DataFrame with columns matching the observable names.
+    observables : Sequence[str] | None
+        Declared observable names in the order they appear in (array) data. If none, all observables in the model are used in the order they were declared in the config.
+    filter_mode : str
+        Filter mode to use for the estimation procedure. One of 'linear', 'extended', or 'unscented'.
+    estimated_params : Sequence[str] | None
+        Names of the parameters to be estimated. If none, all parameters in the model are estimated.
+    priors : Mapping[str, Prior] | None
+        Mapping of parameter names to their prior distributions. If none, no priors are used.
+        "map" and "mcmc" require priors to be specified for all estimated parameters.
+        When priors are specified, estimated_params must match the names of the priors or be omitted.
+    ss_seed : Sequence[float] | NDF | Mapping[str, float] | None
+        Initial guess for the Newton steady state solver.
+    x0 : NDF | None
+        Initial state vector for the Kalman filter. Array only; unlike ``ss_seed`` a
+        name-to-value mapping is not accepted here.
+    jitter : float | float64 | None
+        Jitter to add when a cholesky decomposition fails in the Kalman filter. If none, no jitter is added.
+    symmetrize : bool
+        Whether to symmetrize the covariance matrices in the Kalman filter.
+    joseph_cov : bool
+        Whether to use the Joseph form of the covariance update in the Kalman filter.
+    R : NDF | None
+        Observation covariance matrix. If none, the model's Kalman configuration must provide a symbolic or scalar R.
+    P0 : NDF | None
+        Initial state covariance matrix for the Kalman filter. If none, the model's stationary state covariance is used.
+
+    Attributes
+    ----------
+    compiled : CompiledModel
+        The compiled model being estimated.
+    y : NDF | pd.DataFrame
+        The observed data.
+    observables : Sequence[str] | None
+        The resolved observable names.
+    estimated_params : Sequence[str] | None
+        The parameter names under estimation.
+    priors : Mapping[str, Prior] | None
+        The configured priors.
+    ss_seed : Sequence[float] | NDF | Mapping[str, float] | None
+        The steady-state solver seed.
+    x0 : NDF | None
+        The filter's initial state vector.
+    R : NDF | None
+        The observation covariance override.
+    P0 : NDF | None
+        The initial state covariance override.
+    kalman : KalmanConfig | None
+        The compiled model's filter configuration.
+    param_names : list[str]
+        Estimated parameter names in theta order.
     """
 
     @property
@@ -248,9 +305,11 @@ class Estimator:
         return std_members, corr_members
 
     def _active_observable_names(self) -> set[str] | None:
-        """Observable labels actually in the R matrix, or ``None`` if unavailable
-        (then no filtering is applied). Correlations/variances of unobserved
-        variables never enter R, so they are not SPD-relevant."""
+        """Observable labels actually in the R matrix, or ``None`` if unavailable (then no filtering is applied).
+
+        Correlations/variances of unobserved variables never enter R, so they are
+        not SPD-relevant.
+        """
         obs = getattr(self._prepared_filter, "observables", None)
         if obs is None:
             return None
@@ -321,7 +380,8 @@ class Estimator:
 
     def _corr_pairs_by_name(self) -> dict[str, tuple[str, frozenset[str]]]:
         """Map each named correlation parameter to ``(matrix_key, {var_a, var_b})``,
-        for the joint-SPD safety gate on standalone scalar correlations."""
+        for the joint-SPD safety gate on standalone scalar correlations.
+        """
         out: dict[str, tuple[str, frozenset[str]]] = {}
         observed = self._active_observable_names()
         active_shocks = self._active_shock_names()
@@ -497,12 +557,13 @@ class Estimator:
         std_param_map: SymbolGetterDict[str],
         corr_param_map: PairGetterDict[str | None],
     ) -> MatrixPriorBlock:
-        """Resolve the named std/correlation parameters for one matrix into a
-        partial :class:`_MatrixPriorBlock` (``theta_slice`` empty, ``prior``
-        ``None``). Validates a unique named variance per diagonal and that no
-        parameter name is reused. Missing off-diagonal pairs are simply absent
-        from ``positions``/``member_names``; the caller derives and reports them
-        against the expected dense set."""
+        """Resolve the named std/correlation parameters for one matrix into a partial :class:`_MatrixPriorBlock` (``theta_slice`` empty, ``prior`` ``None``).
+
+        Validates a unique named variance per diagonal and that no parameter name is
+        reused. Missing off-diagonal pairs are simply absent from
+        ``positions``/``member_names``; the caller derives and reports them against
+        the expected dense set.
+        """
         dim = len(labels)
         used_names: set[str] = set()
         member_names: list[str] = []
@@ -671,6 +732,14 @@ class Estimator:
         return corr, np.asarray(Lcorr, dtype=float64)
 
     def to_spec(self) -> EstimatorSpec:
+        """Produce a bundle-format spec from an :class:`Estimator` instance, suitable for serialization and later reconstruction.
+
+        Returns
+        -------
+        EstimatorSpec
+            Bundle-ready spec class.
+
+        """
         priors = {name: prior.to_spec() for name, prior in (self.priors or {}).items()}
 
         params = EstimatorParams(
@@ -699,6 +768,21 @@ class Estimator:
 
     @classmethod
     def from_spec(cls, spec: EstimatorSpec, compiled: CompiledModel) -> "Estimator":
+        """Build an :class:`Estimator` instance from a bundle-format spec and a compiled model.
+
+        Parameters
+        ----------
+        spec : EstimatorSpec
+            Spec class containing the serialized estimator configuration and data.
+        compiled : CompiledModel
+            Compiled model object containing the target model's information and configuration.
+
+        Returns
+        -------
+        "Estimator"
+            Live :class:`Estimator` instance reconstructed from the spec and compiled model.
+
+        """
         params = spec.params
         y = np.asarray(spec.y, dtype=float64)
         R = np.asarray(params["R"], dtype=float64) if params["R"] is not None else None
@@ -734,6 +818,14 @@ class Estimator:
         )
 
     def theta0(self) -> NDF:
+        """Convert the model's base calibration to the unconstrained theta vector.
+
+        Returns
+        -------
+        NDF
+            Array of unconstrained initial parameter values corresponding to the model's base calibration.
+
+        """
         constrained = asarray(
             [self._base_params[name] for name in self.param_names],
             dtype=float64,
@@ -792,6 +884,19 @@ class Estimator:
             )
 
     def params_to_theta(self, params: Mapping[str, float] | NDF) -> NDF:
+        """Convert a parameter mapping or array to the unconstrained theta vector.
+
+        Parameters
+        ----------
+        params : Mapping[str, float] | NDF
+            Mapping of {name: value} or array of parameter values in the order of ``self.param_names``.
+
+        Returns
+        -------
+        NDF
+            Array of unconstrained parameter values corresponding to the provided parameters.
+
+        """
         if isinstance(params, Mapping):
             missing = [name for name in self.param_names if name not in params]
             if missing:
@@ -857,14 +962,61 @@ class Estimator:
         return full
 
     def loglik(self, theta: NDF) -> float64:
+        """Log-likelihood of the data given the model and parameters.
+
+        Parameters
+        ----------
+        theta : NDF
+            Parameter vector in the unconstrained space, corresponding to the estimated parameters of the model.
+
+        Returns
+        -------
+        float64
+            Log-likelihood value of the data given the model and parameters.
+
+        """
         ctx, mode = self._build_native_context()
         return loglik(ctx, mode, theta)
 
     def logprior(self, theta: NDF, include_logjac: bool = False) -> float64:
+        """Log-prior of the parameters given the specified priors.
+
+        Parameters
+        ----------
+        theta : NDF
+            Parameter vector in the unconstrained space, corresponding to the estimated parameters of the model.
+        include_logjac : bool
+            Whether to include the log-Jacobian term from the parameter transforms in the log-prior calculation.
+            MAP estimation does not sample a distribution, therefore the change RV jacobian term should not be included.
+            MCMC sampling does apply prior transformations on distributions, therefore the change RV jacobian term should be included.
+
+        Returns
+        -------
+        float64
+            Log-prior value of the parameters given the specified priors, optionally including the log-Jacobian term.
+
+        """
         ctx, _ = self._build_native_context()
         return logprior(ctx, theta, include_logjac)
 
     def logpost(self, theta: NDF, include_logjac: bool = False) -> float64:
+        """Log-posterior of the parameters given the data, model, and priors.
+
+        Parameters
+        ----------
+        theta : NDF
+            Parameter vector in the unconstrained space, corresponding to the estimated parameters of the model.
+        include_logjac : bool
+            Whether to include the log-Jacobian term from the parameter transforms in the log-posterior calculation.
+            MAP estimation does not sample a distribution, therefore the change RV jacobian term should not be included.
+            MCMC sampling does apply prior transformations on distributions, therefore the change RV jacobian term should be included.
+
+        Returns
+        -------
+        float64
+            Log-posterior value of the parameters given the data, model, and priors, optionally including the log-Jacobian term.
+
+        """
         ctx, mode = self._build_native_context()
         return logpost(ctx, mode, theta, include_logjac)
 
@@ -1049,6 +1201,47 @@ class Estimator:
         cov_fd_step_scale: float = 1.0,
         cov_fd_absolute_floor: float = 0.1,
     ) -> MLEResult:
+        """Maximum likelihood estimation of the model parameters given the data and model configuration.
+
+        Parameters
+        ----------
+        theta0 : NDF | Mapping[str, float] | None
+            Initial guess for the parameter vector. If None, uses the model calibration.
+        bounds : Sequence[tuple[float | None, float | None]] | None
+            Bounds to restrict the parameter search space. Each tuple corresponds to a parameter in the order of ``self.param_names``.
+        method : Literal["L-BFGS-B", "Nelder-Mead"]
+            Optimization method to use for the estimation. "L-BFGS-B" is a quasi-Newton method suitable for large problems, while "Nelder-Mead" is a derivative-free method.
+        m : int
+            L-BFGS-B memory parameter. The number of previous gradients and updates to store for approximating the inverse Hessian matrix. Larger values may improve convergence but increase memory usage.
+        maxiter : int
+            Maximum number of iterations for the optimization algorithm. The optimization will stop if this limit is reached.
+        maxfun : int
+            Maximum number of function evaluations for the optimization algorithm. The optimization will stop if this limit is reached.
+        maxls : int
+            Maximum number of line search steps for the optimization algorithm. The optimization will stop if this limit is reached.
+        factr : float
+            L-BFGS-B convergence criterion. The optimization will stop when the change in the objective function is less than ``factr * machine_epsilon``.
+        pgtol : float
+            L-BFGS-B convergence criterion. The optimization will stop when the projected gradient is less than ``pgtol``.
+        fd_step : float
+            Step size for finite difference approximation of gradients. If 0.0, the algorithm will choose an appropriate step size automatically.
+        xatol : float
+            Nelder-Mead convergence criterion. The optimization will stop when the change in the parameter vector is less than ``xatol``.
+        fatol : float
+            Nelder-Mead convergence criterion. The optimization will stop when the change in the objective function is less than ``fatol``.
+        cov : bool
+            Whether to compute the covariance matrix of the estimated parameters. If True, the covariance matrix will be computed using the inverse Hessian at the optimum.
+        cov_fd_step_scale : float
+            Scale factor for the finite difference step size used in covariance matrix estimation. A larger value may improve numerical stability but may also introduce bias.
+        cov_fd_absolute_floor : float
+            Absolute floor for the finite difference step size used in covariance matrix estimation. This prevents the step size from becoming too small and causing numerical issues.
+
+        Returns
+        -------
+        MLEResult
+            Result object containing the estimated parameters, covariance matrix, and optimization details.
+
+        """
         if self.priors is not None:
             warnings.warn(
                 "MLE will ignore any provided priors. Use MAP or MCMC for prior-informed estimation.",
@@ -1099,6 +1292,49 @@ class Estimator:
         cov_fd_step_scale: float = 1.0,
         cov_fd_absolute_floor: float = 0.1,
     ) -> MAPResult:
+        """Maximum a posteriori estimation of the model parameters given the data, model configuration, and specified priors.
+
+        Parameters
+        ----------
+        theta0 : NDF | Mapping[str, float] | None
+            Initial guess for the parameter vector. If None, uses the model calibration.
+        bounds : Sequence[tuple[float | None, float | None]] | None
+            Bounds to restrict the parameter search space. Each tuple corresponds to a parameter in the order of ``self.param_names``.
+        method : Literal["L-BFGS-B", "Nelder-Mead"]
+            Optimization method to use for the estimation. "L-BFGS-B" is a quasi-Newton method suitable for large problems, while "Nelder-Mead" is a derivative-free method.
+        jacobian : bool
+            Whether to include the log-Jacobian term from the parameter transforms in the log-posterior calculation. This is should be ``True`` if you MAP results and/or covariance will later feed an MCMC run, and ``False`` if you are only interested in the MAP point estimate.
+        m : int
+            L-BFGS-B memory parameter. The number of previous gradients and updates to store for approximating the inverse Hessian matrix. Larger values may improve convergence but increase memory usage.
+        maxiter : int
+            Maximum number of iterations for the optimization algorithm. The optimization will stop if this limit is reached.
+        maxfun : int
+            Maximum number of function evaluations for the optimization algorithm. The optimization will stop if this limit is reached.
+        maxls : int
+            Maximum number of line search steps for the optimization algorithm. The optimization will stop if this limit is reached.
+        factr : float
+            L-BFGS-B convergence criterion. The optimization will stop when the change in the objective function is less than ``factr * machine_epsilon``.
+        pgtol : float
+            L-BFGS-B convergence criterion. The optimization will stop when the projected gradient is less than ``pgtol``.
+        fd_step : float
+            Step size for finite difference approximation of gradients. If 0.0, the algorithm will choose an appropriate step size automatically.
+        xatol : float
+            Nelder-Mead convergence criterion. The optimization will stop when the change in the parameter vector is less than ``xatol``.
+        fatol : float
+            Nelder-Mead convergence criterion. The optimization will stop when the change in the objective function is less than ``fatol``.
+        cov : bool
+            Whether to compute the covariance matrix of the estimated parameters. If True, the covariance matrix will be computed using the inverse Hessian at the optimum.
+        cov_fd_step_scale : float
+            Scale factor for the finite difference step size used in covariance matrix estimation. A larger value may improve numerical stability but may also introduce bias.
+        cov_fd_absolute_floor : float
+            Absolute floor for the finite difference step size used in covariance matrix estimation. This prevents the step size from becoming too small and causing numerical issues.
+
+        Returns
+        -------
+        MAPResult
+            MAP result object containing the estimated parameters, covariance matrix, log-prior, and optimization details.
+
+        """
         if self.priors is None:
             raise ValueError("MAP requires priors. No priors were provided.")
         self._warn_if_should_warn_transforms()
@@ -1145,6 +1381,47 @@ class Estimator:
         cov_fd_step_scale: float = 1.0,
         cov_fd_absolute_floor: float = 0.1,
     ) -> MCMCResult:
+        """Markov Chain Monte Carlo sampling of the posterior distribution over the estimated parameters.
+
+        Parameters
+        ----------
+        n_draws : int
+            Number of MCMC draws to generate (after burn-in and thinning).
+        burn_in : int
+            Number of initial draws to discard as burn-in.
+        thin : int
+            Thinning factor: keep every ``thin``-th draw after burn-in.
+        theta0 : NDF | Mapping[str, float] | None
+            Initial guess for the unconstrained parameter vector. If None, uses the model calibration.
+        random_state : int | None
+            Seed for the random number generator. If None, uses a random seed.
+        adapt : bool
+            Whether to adapt the proposal covariance, ``True`` corresponds to Haario et al. (2001) adaptive MCMC;
+            ``False`` is a regular Random Walk Metropolis-Hastings sampler with fixed proposal covariance.
+        adapt_start : int
+            When to start adapting the proposal covariance. Must be less than ``n_draws``.
+        proposal_scale : float
+            Scaling factor for the proposal covariance.
+        adapt_epsilon : float
+            Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
+        compute_map : bool
+            Whether to compute the MAP estimate to use it as initial guess and the hessian point for the (initial or fixed) proposal covariance.
+        map_options : dict[str, Any] | None
+            Keyword arguments to pass when calling :meth:`map` to compute the MAP estimate. ``None`` uses the default options.
+            Refer to :meth:`map` for the available options.
+        proposal_cov : NDF | None
+            Direct, user-specified proposal covariance matrix. Cannot be used when ``compute_map=True``.
+        cov_fd_step_scale : float
+            Scale of the finite difference approximation step used to compute the Hessian for the proposal covariance. Used when solving for the proposal covariance from the MAP estimate. Ignored if ``proposal_cov`` is provided.
+        cov_fd_absolute_floor : float
+            Absolute floor for the finite difference approximation step used to compute the Hessian for the proposal covariance. Used when solving for the proposal covariance from the MAP estimate. Ignored if ``proposal_cov`` is provided.
+
+        Returns
+        -------
+        MCMCResult
+            Results of the MCMC sampling, including the samples, acceptance rate, and other diagnostics.
+
+        """
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
         self._warn_if_should_warn_transforms()

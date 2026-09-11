@@ -18,8 +18,7 @@ from ..._ckernels.transforms import (
 
 
 class TanhTransform(Transform):
-    """
-    Maps x in (-1, 1) <-> y in (-inf, +inf)
+    """Map x in (-1, 1) <-> y in (-inf, +inf).
 
     forward:  y = atanh(x)
     inverse:  x = tanh(y)

@@ -79,6 +79,20 @@ def _at_boundary_vectorized(
 
 @dataclass(frozen=True)
 class Support:
+    """Support of distributions and transforms.
+
+    Attributes
+    ----------
+    low : float64
+        Lower bound of the support.
+    high : float64
+        Upper bound of the support.
+    low_inclusive : bool
+        Whether the lower bound is inclusive.
+    high_inclusive : bool
+        Whether the upper bound is inclusive.
+
+    """
 
     low: float64
     high: float64
@@ -86,6 +100,19 @@ class Support:
     high_inclusive: bool = True
 
     def contains(self, x: FLOAT_VEC_SCA) -> bool:
+        """Check if a value or array is within the support.
+
+        Parameters
+        ----------
+        x : FLOAT_VEC_SCA
+            Value(s) to check for inclusion in the support.
+
+        Returns
+        -------
+        bool
+            Whether the value(s) are within the support, considering inclusivity of bounds.
+
+        """
         if isinstance(x, (float64, float)):
             x = float64(x)
             return _contains_scalar(
@@ -97,6 +124,21 @@ class Support:
         )
 
     def at_boundary(self, x: FLOAT_VEC_SCA, bound: Literal["high", "low"]) -> bool:
+        """Check if a value or array is at the specified boundary of the support.
+
+        Parameters
+        ----------
+        x : FLOAT_VEC_SCA
+            Value(s) to check for being at the boundary.
+        bound : Literal["high", "low"]
+            Which boundary to check against. "high" for the upper bound, "low" for the lower bound.
+
+        Returns
+        -------
+        bool
+            Whether the value(s) are at the specified boundary, considering inclusivity of bounds.
+
+        """
         lim = self.low if bound == "low" else self.high
         if isinstance(x, (float64, float)):
             x = float64(x)
@@ -105,6 +147,19 @@ class Support:
         return _at_boundary_vectorized(x, bound, lim)
 
     def contains_support(self, other: "Support") -> bool:
+        """Check if this support fully contains another support.
+
+        Parameters
+        ----------
+        other : "Support"
+            Support to check for containment within this support.
+
+        Returns
+        -------
+        bool
+            Whether this support fully contains the other support, considering inclusivity of bounds.
+
+        """
         # Ignore inclusivity, eps injection should handle boundary cases
         high_check = self.high >= other.high
         low_check = self.low <= other.low
@@ -112,6 +167,7 @@ class Support:
 
     @property
     def is_finite(self) -> bool:
+        """Whether both bounds of the support are finite."""
         return bool(np.isfinite(self.low) and np.isfinite(self.high))
 
     def __eq__(self, other: object) -> bool:

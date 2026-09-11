@@ -135,6 +135,27 @@ def _one(eta: float64, K: int, rng: np.random.Generator) -> MatF64:
 
 
 class LKJChol(Distribution[MatF64, MatF64]):
+    """LKJ distribution on Cholesky factors of correlation matrices.
+
+    The density is over the factor ``L`` rather than the correlation matrix
+    itself, so a prior built on it pairs with the Cholesky correlation transform.
+    ``K`` must carry a valid positive dimension before the distribution is used.
+
+    Several of the scalar summaries the base class defines are undefined for a
+    matrix-valued family and raise instead: ``cdf``, ``ppf``, ``mean``, ``var``
+    and ``mode``.
+
+    Parameters
+    ----------
+    eta : float
+        LKJ shape parameter, strictly positive. Values above one concentrate mass
+        toward the identity.
+    K : int
+        Correlation dimension.
+    random_state : RandomState
+        Seed or generator used when sampling.
+    """
+
     def __init__(self, eta: float, K: int, random_state: RandomState) -> None:
         eta = float64(eta)
         if eta <= 0:
@@ -180,10 +201,11 @@ class LKJChol(Distribution[MatF64, MatF64]):
         return float64(logC + log_kernel)
 
     def logpdf_from_R(self, R: MatF64) -> float64:
-        """
-        Convenience wrapper: accept correlation matrix R, compute L=chol(R), evaluate logpdf(L).
-        This is NOT a statement that this equals log p(R) under LKJ on R; it's just evaluation
-        of the Cholesky-form density at chol(R).
+        """Evaluate the Cholesky-form density at ``chol(R)``.
+
+        Accepts a correlation matrix ``R``, computes ``L = chol(R)`` and
+        evaluates ``logpdf(L)``. This is not a statement that the result equals
+        ``log p(R)`` under LKJ on ``R``.
         """
         R = np.asarray(R, dtype=float64)
         if R.ndim != 2 or R.shape[0] != R.shape[1]:
@@ -209,21 +231,61 @@ class LKJChol(Distribution[MatF64, MatF64]):
         return G
 
     def cdf(self, x: MatF64) -> MatF64:
+        """Not defined for this family.
+
+        Raises
+        ------
+        NotImplementedError
+            Always. Cumulative distribution function has no scalar definition over Cholesky factors of
+            correlation matrices.
+        """
         raise NotImplementedError("CDF is not defined for LKJChol.")
 
     def ppf(self, q: MatF64) -> MatF64:
+        """Not defined for this family.
+
+        Raises
+        ------
+        NotImplementedError
+            Always. Percent-point function has no scalar definition over Cholesky factors of
+            correlation matrices.
+        """
         raise NotImplementedError("PPF is not defined for LKJChol.")
 
     @property
     def mean(self) -> MatF64:
+        """Not defined for this family.
+
+        Raises
+        ------
+        NotImplementedError
+            Always. Mean has no scalar definition over Cholesky factors of
+            correlation matrices.
+        """
         raise NotImplementedError("Mean is not defined for LKJChol.")
 
     @property
     def var(self) -> MatF64:
+        """Not defined for this family.
+
+        Raises
+        ------
+        NotImplementedError
+            Always. Variance has no scalar definition over Cholesky factors of
+            correlation matrices.
+        """
         raise NotImplementedError("Variance is not defined for LKJChol.")
 
     @property
     def mode(self) -> MatF64:
+        """Not defined for this family.
+
+        Raises
+        ------
+        NotImplementedError
+            Always. Mode has no scalar definition over Cholesky factors of
+            correlation matrices.
+        """
         raise NotImplementedError("Mode is not defined for LKJChol.")
 
     def rvs(self, size: Size = 1, random_state: RandomState = None) -> MatF64:

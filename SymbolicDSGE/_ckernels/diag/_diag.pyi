@@ -74,7 +74,7 @@ def fill_mean_ax0(x: _F64) -> _F64:
     """Column means of x over axis 0. Returns mean(p)."""
 
 def fill_centered_ax0(x: _F64, mean: _F64) -> _F64:
-    """x with its column means subtracted. Returns centered(n, p)."""
+    """X with its column means subtracted. Returns centered(n, p)."""
 
 def hac_estimator_matmul(r: _F64, kernel_id: int, L: int) -> _F64:
     """HAC long-run covariance (full estimator). Returns the (p, p) matrix."""
