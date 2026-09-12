@@ -1,3 +1,10 @@
+"""LKJ distribution on Cholesky factors of correlation matrices.
+
+The LKJ distribution allows sampling dense correlation blocks, ensuring positive definiteness and unit diagonals.
+The distribution guarantees a valid correlation structure, making block estimation of shock and measurement error covariance matrices
+more accessible and efficient.
+"""
+
 from .distribution import Distribution, DistributionFamily, Size, RandomState, MatF64
 from ..support import Support
 
@@ -11,6 +18,20 @@ from functools import lru_cache, wraps
 
 
 class LKJParams(TypedDict):
+    """Parameters for the LKJ distribution on Cholesky factors of correlation matrices.
+
+    Attributes
+    ----------
+    eta : float
+        LKJ shape parameter, strictly positive. Values above one concentrate
+        mass toward the identity.
+    K : int
+        Size of the correlation matrix. Must be a positive integer.
+    random_state : RandomState
+        Random state for reproducibility of random variates.
+
+    """
+
     eta: float
     K: int
     random_state: RandomState

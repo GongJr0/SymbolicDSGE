@@ -1,3 +1,5 @@
+"""Support specification for distributions and transforms."""
+
 from dataclasses import dataclass
 from typing import Union, Literal, Callable, cast
 from numpy import float64
@@ -190,12 +192,16 @@ class Support:
 
 
 class OutOfSupportError(ValueError):
+    """Raised when a value or array is outside the defined support of a distribution or transform."""
+
     def __init__(self, value: float64 | NDArray[float64], support: Support) -> None:
         message = f"Value(s) {value} out of support {support} for this transform."
         super().__init__(message)
 
 
 class UnsetSupportError(ValueError):
+    """Raised when a bounded operation is attempted on an object without a defined support."""
+
     def __init__(self) -> None:
         msg = "A bounded operation was defined on a object without a support function. Please make a bug report if you encounter this error."
         super().__init__(msg)

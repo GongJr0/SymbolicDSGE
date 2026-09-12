@@ -1,3 +1,10 @@
+"""The Beta distribution.
+
+Beta distributions are used to model variables with support on the unit interval.
+The distribution is highly relevant on a priori DSGE work for parameters like autocorrelation coefficients,
+discount factors, and many more parameters that naturally live on the unit interval.
+"""
+
 from .distribution import (
     Distribution,
     DistributionFamily,
@@ -22,6 +29,19 @@ from typing import TypedDict, overload
 
 
 class BetaParams(TypedDict):
+    """Parameters for the Beta distribution.
+
+    Attributes
+    ----------
+    a : float
+        Alpha parameter of the Beta distribution.
+    b : float
+        Beta parameter of the Beta distribution.
+    random_state : RandomState
+        Random state for reproducibility of random variates.
+
+    """
+
     a: float
     b: float
     random_state: RandomState

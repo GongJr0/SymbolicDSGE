@@ -1,3 +1,9 @@
+"""Log-Normal distribution for Bayesian estimation of DSGE models.
+
+Log-Normal distributions are used to model positive parameters with right-skewness.
+Gamma and Inverse-Gamma are alternatives of the same nature.
+"""
+
 from .distribution import Distribution, DistributionFamily, RandomState, Size, VecF64
 from ..support import OutOfSupportError, Support
 
@@ -9,6 +15,19 @@ from typing import TypedDict, overload, cast
 
 
 class LogNormalParams(TypedDict):
+    """Parameters for the Log-Normal distribution.
+
+    Attributes
+    ----------
+    mean : float
+        Mean of the underlying normal distribution.
+    std : float
+        Standard deviation of the underlying normal distribution.
+    random_state : RandomState
+        Random state for reproducibility of random variates.
+
+    """
+
     mean: float  # Mean of the underlying normal distribution
     std: float  # Standard deviation of the underlying normal distribution
     random_state: RandomState

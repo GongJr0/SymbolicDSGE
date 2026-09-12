@@ -1,3 +1,5 @@
+"""Symbolic representation of a parsed DSGE model configuration."""
+
 from dataclasses import dataclass, asdict
 from typing import AbstractSet, Any, Mapping, TypeAlias, TypeVar, Dict, Sequence
 from collections import UserDict
@@ -80,10 +82,20 @@ class RegimeGetterDict(_NormalizedKeyDict[frozenset[str], Regime]):
 
 @dataclass
 class Base:
+    """Base class implementing basic dataclass functionality for model configuration components."""
+
     def __getitem__(self, key: str) -> Any:
         return getattr(self, key)
 
     def to_dict(self) -> dict[str, Any]:
+        """:func:`dataclasses.asdict` passthrough.
+
+        Returns
+        -------
+        dict[str, Any]
+            Output of :func:`dataclasses.asdict` on the dataclass instance.
+
+        """
         return asdict(self)
 
     def serialize(self, filepath: str) -> None:

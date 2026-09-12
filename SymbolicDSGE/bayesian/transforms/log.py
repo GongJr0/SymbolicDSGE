@@ -1,3 +1,9 @@
+"""Log transform for :class:`Prior` specifications in Bayesian DSGE models.
+
+Log transforms map positive supports to unconstrained sampling space.
+They pair with any positive support distribution.
+"""
+
 from .transform import Transform, TransformMethod
 from ..support import Support, OutOfSupportError
 from typing import overload

@@ -1,3 +1,5 @@
+"""Shock generator and Array-shock handlers for DSGE simulations."""
+
 from scipy.stats import (
     norm,
     multivariate_normal as mnorm,

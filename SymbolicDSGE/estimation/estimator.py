@@ -1,3 +1,5 @@
+"""Estimator interface for DSGE model estimations, including likelihood and bayesian methods."""
+
 from __future__ import annotations
 
 import warnings

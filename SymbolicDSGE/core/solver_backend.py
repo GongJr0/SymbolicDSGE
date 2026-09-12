@@ -1,3 +1,5 @@
+"""Backend native entry points and data structures for the solver."""
+
 from __future__ import annotations
 
 from collections.abc import Generator

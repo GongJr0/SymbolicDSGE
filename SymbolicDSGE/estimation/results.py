@@ -1,3 +1,5 @@
+"""Optimization and MCMC result containers for DSGE model estimation."""
+
 from dataclasses import dataclass, field, field
 from typing import TYPE_CHECKING, Any
 

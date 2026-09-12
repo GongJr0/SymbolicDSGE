@@ -1,3 +1,5 @@
+"""Native passthroughs for the Kalman filter recursions, including linear, extended, and unscented implementations."""
+
 from .._ckernels.kalman import (
     stationary_covariance,
     kalman_hot_loop,

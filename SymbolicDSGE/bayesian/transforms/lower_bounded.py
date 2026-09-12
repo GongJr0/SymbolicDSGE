@@ -1,3 +1,9 @@
+"""Lower bounded transform for :class:`Prior` specifications in Bayesian DSGE estimation.
+
+Lower bounded transforms are used to map distributions with lower finite support to unconstrained sampling space.
+Distributions such as Half-Normal and Half-Cauchy with [a, +inf) are naturally paired with this transform.
+"""
+
 from .transform import Transform, TransformMethod
 from ..support import Support
 from typing import overload

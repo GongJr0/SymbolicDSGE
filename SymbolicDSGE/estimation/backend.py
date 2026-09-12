@@ -1,3 +1,5 @@
+"""Backend native entry points and estimation kernels."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -64,6 +66,31 @@ class MatrixPriorBlock(NamedTuple):
 
 @dataclass(frozen=True)
 class PreparedFilterRun:
+    """Composed filter run inputs, ready for native evaluation.
+
+    Attributes
+    ----------
+    observables : list[str]
+        List of observables in the order they are passed to the filter.
+    y_reordered : NDArray[float64]
+        Observed data, reordered to match ``observables``.
+    mode : str
+        Filter mode; one of "linear", "extended", or "unscented".
+    meas_addr : int
+        Pointer to the measurement evaluation callable (``numba.cfunc`` address).
+    jac_addr : int
+        Pointer to the measurement jacobian evaluation callable (``numba.cfunc`` address).
+    P0 : NDArray[float64] | None
+        State covariance initialization matrix, or None if not provided.
+    kf_jitter : float64
+        Jitter to add to covariance matrices when cholesky decomposition fails.
+    kf_sym : bool
+        Whether to symmetrize covariance matrices in the Kalman kernels.
+    kf_joseph_cov : bool
+        Whether to use the Joseph form for covariance updates in the Kalman filter.
+
+    """
+
     observables: list[str]
     y_reordered: NDF
     mode: str

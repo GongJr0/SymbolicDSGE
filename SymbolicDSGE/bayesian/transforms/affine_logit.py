@@ -1,3 +1,9 @@
+"""Affine logit transform for :class:`Prior` specifications in Bayesian DSGE estimation.
+
+Affine logit transforms are used to map distributions with scalar finite supports
+to unconstrained spaces for sampling.
+"""
+
 from .transform import Transform, TransformMethod
 from ..support import Support
 from typing import overload

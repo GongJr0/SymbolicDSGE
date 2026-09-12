@@ -1,3 +1,5 @@
+"""Base :class:`SolvedModel` interface for perturbation and piecewise solutions."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

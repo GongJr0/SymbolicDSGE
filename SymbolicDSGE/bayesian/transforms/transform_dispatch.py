@@ -1,3 +1,5 @@
+"""Transform dispatch module."""
+
 from .transform import TransformMethod, Transform
 from .identity import Identity
 from .log import LogTransform
@@ -27,6 +29,19 @@ TRANSFORM_METHOD_DISPATCH: dict[TransformMethod, type[Transform]] = {
 
 
 def get_transform(method: str | None) -> type[Transform]:
+    """Get the transform class corresponding to the given method.
+
+    Parameters
+    ----------
+    method : str | None
+        Method name of the transform. If None, returns the Identity transform.
+
+    Returns
+    -------
+    type[Transform]
+        :class:`Transform` subclass corresponding to the given method.
+
+    """
     if method is None:
         return Identity
     if method not in TRANSFORM_METHOD_DISPATCH:

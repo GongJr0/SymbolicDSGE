@@ -1,3 +1,5 @@
+"""Mirror of the native prior program, packing the prior distribution and transform arguments into flat arrays for the kernel to read."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

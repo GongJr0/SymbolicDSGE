@@ -1,3 +1,5 @@
+"""Half-Cauchy distribution for Bayesian estimation of DSGE models."""
+
 from .distribution import Distribution, DistributionFamily, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
 
@@ -9,6 +11,18 @@ from typing import TypedDict, overload
 
 
 class HalfCauchyParams(TypedDict):
+    """Parameters for the Half-Cauchy distribution.
+
+    Attributes
+    ----------
+    gamma : float
+        Gamma parameter of the Half-Cauchy distribution,
+        which controls the scale of the distribution.
+    random_state : RandomState
+        Random state for reproducibility of random variates.
+
+    """
+
     gamma: float
     random_state: RandomState
 

@@ -1,3 +1,8 @@
+"""Upper bounded transform for :class:`Prior` specifications in Bayesian DSGE estimation.
+
+Upper bounded transforms map scalar upper bounded distributions to unconstrained sampling space.
+"""
+
 from .transform import Transform, TransformMethod
 from ..support import Support
 from typing import overload

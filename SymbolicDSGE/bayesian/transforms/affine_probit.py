@@ -1,3 +1,8 @@
+"""Affine Probit transform for :class:`Prior` specifications in Bayesian DSGE estimation.
+
+Affine Probit transforms are used to map distributions with finite support to unconstrained space for sampling.
+"""
+
 from .transform import Transform, TransformMethod
 from ..support import Support
 from typing import overload

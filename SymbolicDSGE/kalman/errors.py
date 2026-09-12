@@ -1,3 +1,5 @@
+"""Error types raised by the Kalman filter implementation."""
+
 from numpy import float64
 from enum import IntEnum
 import numpy as np
@@ -5,18 +7,24 @@ from typing import Any
 
 
 class ShapeMismatchError(Exception):
+    """Raised on unexpected matrix shapes in the Kalman filter implementation."""
+
     def __init__(self, *args: Any) -> None:
         message = f"Matrix '{args[0]}' has incompatible shape. Expected: {args[1]}, got: {args[2]}."
         super().__init__(message)
 
 
 class MatrixConditionError(Exception):
+    """Raised when a matrix is ill-conditioned in the Kalman filter implementation."""
+
     def __init__(self) -> None:
         message = f"Matrix(s) is ill-conditioned."
         super().__init__(message)
 
 
 class MemoryAllocationError(Exception):
+    """Raised when a native memory allocation fails."""
+
     def __init__(self) -> None:
         message = "Memory allocation failed. (Possibly due to insufficient memory.)"
         super().__init__(message)
@@ -33,6 +41,19 @@ class ErrorCode(IntEnum):
 
 
 def get_error_constructor(code: ErrorCode) -> type[Exception]:
+    """Map an error code to the corresponding exception class.
+
+    Parameters
+    ----------
+    code : ErrorCode
+        Native error code returned by the Kalman filter implementation.
+
+    Returns
+    -------
+    type[Exception]
+        Python error wrapper class corresponding to the given error code.
+
+    """
     if code == ErrorCode.SHAPE_MISMATCH:
         return ShapeMismatchError
     elif code == ErrorCode.MATRIX_CONDITION:

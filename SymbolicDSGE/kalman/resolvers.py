@@ -29,6 +29,19 @@ Float64Like = float | float64 | int | int64
 
 
 class FilterMode(StrEnum):
+    """Filtering mode for the Kalman filter implementation.
+
+    Attributes
+    ----------
+    LINEAR : Literal["linear"]
+        Linear Gaussian Kalman filter.
+    EXTENDED : Literal["extended"]
+        Linear Gaussian KF with nonlinear measurement function and Jacobian.
+    UNSCENTED : Literal["unscented"]
+        Unscented Kalman filter for second-order policy and nonlinear measurement function.
+
+    """
+
     LINEAR = "linear"
     EXTENDED = "extended"
     UNSCENTED = "unscented"

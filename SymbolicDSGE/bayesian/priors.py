@@ -1,3 +1,9 @@
+"""Prior specifications for Bayesian estimation of DSGE models.
+
+Composed as a {distribution, transform} pair, transforms govern the density of the prior in parameter space
+and the transformation to an unconstrained sampling space. Priors are required for MAP and MCMC esitmation.
+"""
+
 from __future__ import annotations
 import warnings
 
@@ -23,6 +29,22 @@ from typing import overload
 
 
 class PriorDispatch(TypedDict):
+    """Interface for dispatching prior specifications to live :class:`Prior` objects.
+
+    Attributes
+    ----------
+    distribution : Distribution
+        Distribution of the prior in parameter space.
+    parameters : dict[str, Any]
+        Parameters of the distribution, as a TypedDict for each family.
+    transform : TransformMethod
+        Transformation mapping the distribution support to unconstrained sampling space.
+    transform_kwargs : dict[str, Any] | None
+        Transform parameters, as a TypedDict for each transform.
+        None if the transform has no parameters.
+
+    """
+
     distribution: Distribution
     parameters: dict[str, Any]  # TypedDicts for each family
     transform: TransformMethod

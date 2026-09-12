@@ -1,3 +1,9 @@
+"""Identity transform for :class:`Prior` specifications in Bayesian DSGE estimation.
+
+Identity transforms indicate the absence of a transformation. Used for distributions with unconstrained supports,
+such as the Normal distribution. These distributions do not need their draws mapped to-and-from a separate unconstrained space.
+"""
+
 from .transform import Transform, TransformMethod
 from ..support import Support, OutOfSupportError
 from typing import overload

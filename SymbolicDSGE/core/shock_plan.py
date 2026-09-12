@@ -57,6 +57,7 @@ class ShockPlanEntry:
 
     @property
     def width(self) -> int:
+        """Number of columns this entry targets."""
         return len(self.indices)
 
     def unpack(self, seed_offset: int = 0) -> list[tuple[int, NDF]]:

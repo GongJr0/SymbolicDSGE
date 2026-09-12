@@ -33,6 +33,21 @@ def _prior_from_spec(prior: PriorSpec) -> Any:
 
 
 class PriorSpec(TypedDict):
+    """Specification of a prior for serialization.
+
+    Attributes
+    ----------
+    distribution : str
+        Distribution family name.
+    parameters : dict[str, float]
+        Distribution parameters keyed by name.
+    transform : str
+        Transform method name.
+    transform_kwargs : dict[str, float]
+        Transform method keyword arguments keyed by name.
+
+    """
+
     distribution: str
     parameters: dict[str, float]
     transform: str

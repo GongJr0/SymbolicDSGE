@@ -1,3 +1,9 @@
+"""Gamma distribution for Bayesian estimation of DSGE models.
+
+Gamma distributions are a commonly used distribution for positive parameters in DSGE models,
+such as standard deviations of shocks/measurement errors.
+"""
+
 from .distribution import (
     Distribution,
     DistributionFamily,
@@ -20,6 +26,19 @@ from typing import TypedDict, overload
 
 
 class GammaParams(TypedDict):
+    """Parameters for the Gamma distribution.
+
+    Attributes
+    ----------
+    mean : float
+        Mean of the gamma distribution.
+    std : float
+        Standard deviation of the gamma distribution.
+    random_state : RandomState
+        Random state for reproducibility of random variates.
+
+    """
+
     mean: float
     std: float
     random_state: RandomState

@@ -1,3 +1,9 @@
+"""Inverse Gamma distribution for Bayesian estimation of DSGE models.
+
+Inverted Gamma distributions are used to model positive parameters with heavy tails.
+Discount factors are a good example with a support of (0, 1) and often a heavy tail towards 1.
+"""
+
 from .distribution import Distribution, DistributionFamily, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
 
@@ -11,6 +17,19 @@ from typing import TypedDict, overload
 
 
 class InvGammaParams(TypedDict):
+    """Parameters for the Inverse Gamma distribution.
+
+    Attributes
+    ----------
+    mean : float
+        Mean of the inverse gamma distribution.
+    std : float
+        Standard deviation of the inverse gamma distribution.
+    random_state : RandomState
+        Random state for reproducibility of random variates.
+
+    """
+
     mean: float
     std: float
     random_state: RandomState

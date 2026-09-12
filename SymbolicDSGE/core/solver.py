@@ -1,3 +1,5 @@
+"""Solver for DSGE model specifications. Handles compilation, solution, and has estimation shortcuts."""
+
 from __future__ import annotations
 
 import warnings

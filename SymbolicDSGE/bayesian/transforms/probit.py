@@ -1,3 +1,9 @@
+"""Probit transform for :class:`Prior` specifications in Bayesian DSGE estimation.
+
+Probit transforms map distributions on the unit interval to unconstrained sampling space.
+They are a natural complement to Beta and other [0, 1] distributions.
+"""
+
 from .transform import Transform, TransformMethod
 from ..support import Support
 from typing import overload

@@ -1,3 +1,9 @@
+"""Uniform distribution for Bayesian DSGE models.
+
+Uniform distributions provide maximal-entropy on a bounded region.
+They are useful for parameters with known bounds, but no other prior bias.
+"""
+
 from .distribution import Distribution, DistributionFamily, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
 
@@ -9,6 +15,19 @@ from typing import TypedDict, cast, overload
 
 
 class UniformParams(TypedDict):
+    """Parameters for the Uniform distribution.
+
+    Attributes
+    ----------
+    low : float
+        Lower bound of the uniform distribution.
+    high : float
+        Upper bound of the uniform distribution.
+    random_state : RandomState
+        Random state for reproducibility of random variates.
+
+    """
+
     low: float
     high: float
     random_state: RandomState

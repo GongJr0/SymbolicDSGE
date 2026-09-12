@@ -1,3 +1,5 @@
+"""Parser for model and Kalman filter configurations from YAML into :class:`ModelConfig` and :class:`KalmanConfig` objects."""
+
 from __future__ import annotations
 
 import copy
@@ -122,6 +124,8 @@ def _list_representer(dumper: yaml.Dumper, data: list[Any]) -> yaml.Node:
 
 
 class InlineList(list):
+    """Indicatoes a list should be rendered inline in YAML."""
+
     pass
 
 

@@ -1,3 +1,5 @@
+"""Compiled, numericly-evaluable representation of a DSGE model."""
+
 from sympy import Symbol, Expr
 
 import numpy as np

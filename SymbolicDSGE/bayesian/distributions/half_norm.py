@@ -1,3 +1,9 @@
+"""Half-Normal distribution for Bayesian estimation of DSGE models.
+
+Half-Normal distributions can be used to model non-negative parameters with Gaussian-like semantics.
+The distribution is one of the choices for standard deviation or autocorrelation coefficient parameters in DSGE models.
+"""
+
 from .distribution import Distribution, DistributionFamily, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
 from typing import TypedDict, overload, Callable, cast
@@ -8,12 +14,23 @@ from scipy.special import erf, erfinv
 from numba import njit
 
 
-class HalfNormalParameters(TypedDict):
+class HalfNormalParams(TypedDict):
+    """Parameters for the Half-Normal distribution.
+
+    Attributes
+    ----------
+    std : float
+        Standard deviation of the Half-Normal distribution. The mean and variance are derived from this parameter.
+    random_state : RandomState
+        Random state for reproducibility of random variates.
+
+    """
+
     std: float
     random_state: RandomState
 
 
-HALFNORM_DEFAULTS = HalfNormalParameters(
+HALFNORM_DEFAULTS = HalfNormalParams(
     std=1.0,
     random_state=None,
 )
