@@ -29,7 +29,7 @@ from SymbolicDSGE._diag_tests.result import MCTestResult
 from SymbolicDSGE.regression.result import MCRegressionResult
 
 from .mc_constructs import MCStep, OpType
-from .spec import PipelineSpec
+from .spec import PipelineMeta
 
 from typing import TYPE_CHECKING
 
@@ -116,16 +116,18 @@ def trace_ref_error(ref: str, available: Collection[str]) -> str | None:
     return None
 
 
-def _trace_keys(spec: PipelineSpec) -> list[str]:
-    """Every across-rep trace key the pipeline's producers will emit (in node order).
+def _trace_keys(meta: PipelineMeta) -> list[str]:
+    """Every across-rep trace key the pipeline's producers will emit (in step order).
 
     The set a POSTPROC op may reference; used to populate the GUI trace picker and
-    to validate trace references before a run.
+    to validate trace references before a run. Reads the pipeline as data, since
+    the picker runs while a pipeline is still being authored and may not yet be
+    constructible.
     """
     keys: list[str] = []
-    for node in spec["nodes"]:
+    for step in meta["replication_steps"]:
         keys.extend(
-            trace_keys_for(node["op_type"], node["name"], node["params"].get("kind"))
+            trace_keys_for(step["op_type"], step["name"], step["kwargs"].get("kind"))
         )
     return keys
 
@@ -135,7 +137,7 @@ def available_traces(pipeline: MCPipeline) -> dict[str, list[str]]:
 
     Lists the available traces a POSTPROC may refer to.
     """
-    return {step.name: trace_keys_for_step(step) for step in pipeline.per_rep_steps}
+    return {step.name: trace_keys_for_step(step) for step in pipeline.replication_steps}
 
 
 def traces_from_summaries(

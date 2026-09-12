@@ -1,3 +1,5 @@
+"""Monte Carlo pipeline construction, validation and execution."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,11 +24,9 @@ from .allocation import (
     resolve_output_specs,
 )
 from .defaults import DEFAULT_SIMULATION_OBSERVABLES, DEFAULT_SIMULATION_TARGET
-from .graph import PipelineGraph
 from .memory import MCMemoryProfiler, MCMemoryReport
 from .native_lowering import LoweredMCRun, lower_native_run
 from .spec import PipelineSpec
-from .spec_compile import pipeline_to_spec
 from .traces import (
     is_trace_ref,
     trace_keys_for_step,
@@ -65,13 +65,12 @@ def is_failed(native_run: NativeRunResult) -> bool:
     return native_run.status != 0
 
 
-@dataclass(frozen=True)
 class MCPipeline:
     """A Monte Carlo experiment represented as a pipeline; resolving to a Direct Acyclic Graph (DAG) of steps.
 
     Parameters
     ----------
-    per_rep_steps : Sequence[MCStep]
+    replication_steps : Sequence[MCStep]
         Per-replication step specifications. Must contain exactly one DATAGEN step
         and may contain any number of FILTER, TRANSFORM, TEST, and REGRESSION steps.
     postproc_steps : Sequence[MCStep]
@@ -87,30 +86,20 @@ class MCPipeline:
         The post-loop steps.
     """
 
-    #: Per-replication steps: the dependency DAG, a single DATAGEN root first.
-    per_rep_steps: tuple[MCStep, ...]
-
-    #: Post-loop ops, run once after the loop over the assembled across-rep
-    #: traces. This is a terminal phase, not part of the graph.
-    postproc_steps: tuple[MCStep, ...]
-
-    #: Producer indices for each per-replication step's source arguments.
-    _source_indices: tuple[tuple[int, ...], ...]
-
     def __init__(
         self,
-        per_rep_steps: Sequence[MCStep],
+        replication_steps: Sequence[MCStep],
         postproc_steps: Sequence[MCStep] = (),
     ) -> None:
-        rep_tuple = tuple(per_rep_steps)
+        rep_tuple = tuple(replication_steps)
         postproc_tuple = tuple(postproc_steps)
         self._validate_steps(rep_tuple, postproc_tuple)
         ordered = self._order_steps(rep_tuple)
         source_indices = self._resolve_source_indices(ordered)
         self._validate_postproc_traces(ordered, postproc_tuple)
-        object.__setattr__(self, "per_rep_steps", ordered)
-        object.__setattr__(self, "postproc_steps", postproc_tuple)
-        object.__setattr__(self, "_source_indices", source_indices)
+        self.replication_steps = ordered
+        self.postproc_steps = postproc_tuple
+        self._source_indices = source_indices
 
     @staticmethod
     def _validate_steps(
@@ -227,25 +216,13 @@ class MCPipeline:
                         f"(available: {sorted(available)})."
                     )
 
-    @cached_property
-    def graph(self) -> "PipelineGraph":
-        """The pipeline's dependency DAG, resolved from compiled source args.
-
-        Built once and cached. Owns the graph structure (parents/children/leaves/
-        typed input edges) that serialization and validation read instead of
-        re-deriving it. Lazily imported to keep ``core`` light at import time.
-        """
-        from .graph import PipelineGraph
-
-        return PipelineGraph.from_steps(self.per_rep_steps, self._source_indices)
-
     def _resolve_output_specs(
         self,
         reference: SolvedModel,
         dgp: SolvedModel | None,
     ) -> BufferPlan:
         return resolve_output_specs(
-            self.per_rep_steps, self._source_indices, reference, dgp
+            self.replication_steps, self._source_indices, reference, dgp
         )
 
     def validate_memory_requirements(
@@ -270,22 +247,12 @@ class MCPipeline:
         plan = self._resolve_output_specs(reference, dgp)
         return MCMemoryProfiler(
             plan,
-            self.per_rep_steps,
+            self.replication_steps,
             reference=reference,
             dgp=dgp,
             n_rep=n_rep,
             n_jobs=n_jobs,
         ).validate()
-
-    def to_spec(self) -> "PipelineSpec":
-        """Serialize this pipeline to its graph-form :class:`PipelineSpec`.
-
-        The inverse of :func:`build_pipeline`: lets a pipeline authored with
-        plain library objects be stored in a bundle without touching the spec
-        DTOs. Bulk side-channels (``raw_model_data`` arrays, custom-op blobs) are
-        referenced by key and written as bundle members by the bundle builder.
-        """
-        return pipeline_to_spec(self)
 
     def run(
         self,
@@ -372,8 +339,8 @@ class MCPipeline:
         )
         if fail_fast and is_failed(native_res):
             step_name = (
-                self.per_rep_steps[native_res.halt_step_idx].name
-                if 0 <= native_res.halt_step_idx < len(self.per_rep_steps)
+                self.replication_steps[native_res.halt_step_idx].name
+                if 0 <= native_res.halt_step_idx < len(self.replication_steps)
                 else "<runner>"
             )
             raise RuntimeError(
@@ -389,8 +356,8 @@ class MCPipeline:
         filters = []
         # Ordered first by `_order_steps`, which the filter lowering reads it
         # from too, and there is exactly one.
-        datagen = self.per_rep_steps[0]
-        for s in self.per_rep_steps:
+        datagen = self.replication_steps[0]
+        for s in self.replication_steps:
             if s.op_type is OpType.TEST:
                 tests.append(s.name)
             elif s.op_type is OpType.REGRESSION:
@@ -557,6 +524,19 @@ class MCPipeline:
             if not failed:
                 postproc[step.name] = normalize_artifacts(out)
         return postproc, postproc_elapsed_s
+
+    def to_spec(self) -> PipelineSpec:
+        return PipelineSpec(
+            replication_steps=[s.to_spec() for s in self.replication_steps],
+            postproc_steps=[s.to_spec() for s in self.postproc_steps],
+        )
+
+    @classmethod
+    def from_spec(cls, spec: PipelineSpec) -> "MCPipeline":
+        return cls(
+            replication_steps=[MCStep.from_spec(s) for s in spec.replication_steps],
+            postproc_steps=[MCStep.from_spec(s) for s in spec.postproc_steps],
+        )
 
 
 def _order_transforms(

@@ -40,8 +40,8 @@ MemberKind = Literal[
     "estimation_trace",
     # Monte Carlo: the pipeline and the side-channels it references by key
     "mc_pipeline",
-    "mc_raw_model_data",
-    "mc_custom_op",
+    "mc_data",
+    "mc_func",
     # Monte Carlo: a recorded run, one meta member per step kind beside its bulk
     "mc_result_meta",
     "mc_datagen_steps",

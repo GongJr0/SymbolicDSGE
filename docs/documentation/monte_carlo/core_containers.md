@@ -31,8 +31,21 @@ __Fields:__
 | step_type | `#!python str | None` | Serializable step kind stamped by the factory, for example `"wald"`, `"simulation"`, `"standardize"`, `"transform:custom"`, or `"postproc:custom"`. `None` is reserved for hand-built steps that cannot be projected to a `PipelineSpec`. |
 | n_retain | `#!python int` | Number of replications whose output is retained for this step. `-1` retains all `n_rep` replications. A non-negative value sizes the step's arena to that many rows, filled from an evenly spaced subset of replication indices. It may not exceed `n_rep`. |
 
+__Methods:__
+
+| __Signature__ | __Return Type__ | __Description__ |
+|:--------------|:---------------:|----------------:|
+| `#!python .to_spec()` | `#!python StepSpec` | The step as data, with its callable and its bulk arrays carried beside it. |
+| `#!python MCStep.from_spec(spec)` | `#!python MCStep` | Rebuild a step from the form `to_spec()` records. |
+
 ???+ note "Factory module"
     All step factories live in `SymbolicDSGE.monte_carlo.step_factories`: data generation, filtering, transforms, tests, regressions, and post-processing.
+
+???+ warning "What `to_spec()` refuses"
+    Only what cannot travel as data: a replication step carrying a `func` that is not a custom transform, and a `shocks` entry that is a callable. Everything else projects, including a `None` `step_type`, which no pipeline can run anyway. Post-loop steps are exempt from the `func` rule, since every post-loop kind either names its own callable or ships one.
+
+???+ note "`shocks`"
+    A kwarg named `shocks` holding a mapping is read as one shock spec per name, whichever step carries it. Each entry is either a generator spec, which serializes itself, or a shock path, which travels as nested lists and comes back as an array. `raw_model_data` passes `shocks` as a bare array rather than a mapping, so it rides `StepSpec.arrays` like the other bulk kwargs.
 
 &nbsp;
 
@@ -43,16 +56,13 @@ class SourceArgs(
     source_step: str,
     field: str,
     columns: int | Sequence[int] | slice | ndarray | None = None,
-    column_selector: Sequence[int] | slice = slice(None),
-    row_start: int = 0,
     burn_in: int = 0,
-    drop_initial: bool = False,
 )
 ```
 
 `SourceArgs` is the compiled source selector used by transforms, tests, and regressions. Factories create it from public `source` and `field` arguments, and the native lowering layer resolves it to concrete buffer offsets before the run starts.
 
-__Fields:__
+__Fields and Properties:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
@@ -60,10 +70,18 @@ __Fields:__
 | source_step | `#!python str` | Producer step name after pipeline binding. |
 | field | `#!python str` | Field read from the producer, such as `"observables"`, `"std_innov"`, or `"payload"`. |
 | columns | `#!python int | Sequence[int] | slice | ndarray | None` | Author supplied column selector, normalized to a tuple of ints or a slice at construction. |
-| column_selector | `#!python Sequence[int] | slice` | Normalized selector. Derived from `columns`, not set directly. |
-| row_start | `#!python int` | First selected row. Derived from `burn_in` and `drop_initial`, not set directly. |
 | burn_in | `#!python int` | Number of leading rows to drop. |
-| drop_initial | `#!python bool` | If `True` and `burn_in` is zero, start at row `1`. |
+| column_selector | `#!python Sequence[int] | slice` | Selected columns, with an unset `columns` standing for all of them. |
+
+__Methods:__
+
+| __Signature__ | __Return Type__ | __Description__ |
+|:--------------|:---------------:|----------------:|
+| `#!python .to_spec()` | `#!python SourceSpec` | The selector as plain data, keyed by constructor argument. |
+| `#!python SourceArgs.from_spec(spec)` | `#!python SourceArgs` | Rebuild a selector from the form `to_spec()` records. |
+
+???+ note "Column selectors in a spec"
+    `SourceSpec.columns` is a list of ints for explicit indices. A slice carries no width to resolve against, so it travels as an object of its own `start`, `stop`, and `step`, read back by name. The differing JSON types are what keep the two forms apart.
 
 ???+ warning "Source fields"
     Source fields are tied to the producer type. Data steps expose `states` and `observables`; transform steps expose `payload`; filter steps expose raw filter fields such as `x_pred`, `x_filt`, `y_pred`, `y_filt`, `innov`, `std_innov`, `eps_hat`, `x1_pred`, `x2_pred`, `x1_filt`, and `x2_filt`. Array consumers expect the selected field to resolve to a 2D numeric array.

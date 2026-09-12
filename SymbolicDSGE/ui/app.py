@@ -9,7 +9,6 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 
 from .mc import (
     build_pipeline,
-    compile_custom_resources,
     mc_available_traces,
     mc_custom_op_template,
     run_pipeline,
@@ -101,12 +100,10 @@ def create_app(
         try:
 
             # Compile and catch.
-            pipe = build_pipeline(
-                request.to_core(), resources=compile_custom_resources(request)
-            )
+            pipe = build_pipeline(request)
             return {
                 "valid": True,
-                "steps": [step.name for step in pipe.per_rep_steps],
+                "steps": [step.name for step in pipe.replication_steps],
                 "postprocs": [pp.name for pp in pipe.postproc_steps],
             }
         except (KeyError, TypeError, ValueError) as exc:

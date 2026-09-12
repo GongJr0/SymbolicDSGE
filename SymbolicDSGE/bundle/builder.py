@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast, Sequence
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple, cast, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -38,7 +38,8 @@ from ..core.shock_generators import Shock
 from ..estimation.results import MLEResult, MAPResult
 
 from ..monte_carlo.core import MCPipeline
-from ..monte_carlo.mc_constructs import MCPipelineResult, MCStep
+from ..monte_carlo.spec import PipelineSpec, pipeline_meta
+from ..monte_carlo.mc_constructs import MCPipelineResult, OpType
 from ..monte_carlo.serialize import (
     json_safe,
     serialize_run_meta,
@@ -49,11 +50,9 @@ from ..monte_carlo.serialize import (
     serialize_transform_results,
     serialize_postproc_results,
 )
-from ..monte_carlo.spec_compile import raw_model_data_arrays
 from .container import write_bundle
 from .manifest import Manifest, Member, MemberKind, SimSpec
 from .parquet import (
-    arrays_to_parquet,
     columns_to_parquet,
     csv_to_json,
     to_parquet,
@@ -68,53 +67,78 @@ _MODEL_PATH = "model/{role}.yaml"
 # MLE, MAP, MCMC estimation tab members
 _ESTIMATION_SPEC = "estimation/spec.json"
 _ESTIMATION_RESULT = "estimation/result.json"
-_ESTIMATION_DATA_PARQUET = "estimation/observed.parquet"
-_ESTIMATION_DATA_CSV = "estimation/observed.csv"
-_ESTIMATION_POSTERIOR_PARQUET = "estimation/posterior.parquet"
-_ESTIMATION_POSTERIOR_CSV = "estimation/posterior.csv"
+#: Bulk-member paths take the extension as a field, so one template covers both
+#: encodings. :func:`_encoding` resolves it once per call from ``as_parquet``.
+_ESTIMATION_DATA = "estimation/observed.{ext}"
+_ESTIMATION_POSTERIOR = "estimation/posterior.{ext}"
 
 # Monte Carlo pipeline spec and per-rep custom members
 _MC_PIPELINE = "montecarlo/pipeline.json"
-_MC_CUSTOM_OP = "montecarlo/custom/{ref}.pkl"
-_MC_RAW_MODEL_DATA = "montecarlo/data/{ref}.parquet"
+_MC_FUNC = "montecarlo/func/{ref}.pkl"
 
+_MC_DATA = "montecarlo/data/{ref}.{ext}"
 # Monte Carlo result tab members
 _MC_RESULT_META = "montecarlo/result/meta.json"
 
 _MC_DATAGEN_STEPS = "montecarlo/result/datagen/datagen_steps.json"
-_MC_DATAGEN_PARQUET = "montecarlo/result/datagen/{ref}_{field}.parquet"
-_MC_DATAGEN_CSV = "montecarlo/result/datagen/{ref}_{field}.csv"
+_MC_DATAGEN = "montecarlo/result/datagen/{ref}_{field}.{ext}"
 
 _MC_FILTER_STEPS = "montecarlo/result/filters/filter_steps.json"
-_MC_FILTER_PARQUET = "montecarlo/result/filters/{ref}_{field}.parquet"
-_MC_FILTER_CSV = "montecarlo/result/filters/{ref}_{field}.csv"
+_MC_FILTER = "montecarlo/result/filters/{ref}_{field}.{ext}"
 
 _MC_TEST_STEPS = "montecarlo/result/tests/test_steps.json"
-_MC_TEST_PARQUET = "montecarlo/result/tests/test_traces.parquet"
-_MC_TEST_CSV = "montecarlo/result/tests/test_traces.csv"
+_MC_TEST = "montecarlo/result/tests/test_traces.{ext}"
 
 _MC_REGRESSION_STEPS = "montecarlo/result/regressions/regression_steps.json"
-_MC_REGRESSION_PARQUET = "montecarlo/result/regressions/regression_traces.parquet"
-_MC_REGRESSION_CSV = "montecarlo/result/regressions/regression_traces.csv"
+_MC_REGRESSION = "montecarlo/result/regressions/regression_traces.{ext}"
 
 _MC_TRANSFORM_STEPS = "montecarlo/result/transforms/transform_steps.json"
-_MC_TRANSFORM_PARQUET = "montecarlo/result/transforms/{ref}_{field}.parquet"
-_MC_TRANSFORM_CSV = "montecarlo/result/transforms/{ref}_{field}.csv"
+_MC_TRANSFORM = "montecarlo/result/transforms/{ref}_{field}.{ext}"
 
 _MC_POSTPROC_STEPS = "montecarlo/result/postproc/postproc_steps.json"
-_MC_POSTPROC_PARQUET = "montecarlo/result/postproc/{ref}_{field}.parquet"
-_MC_POSTPROC_CSV = "montecarlo/result/postproc/{ref}_{field}.csv"
+_MC_POSTPROC = "montecarlo/result/postproc/{ref}_{field}.{ext}"
 
 #: Fill for the rows a shorter column contributes to a shared block. Negative so
 #: it can never be read as a rep index; no reader looks past ``n_retained``.
 _PAD = -1
 
 
-def _pad_columns(columns: Mapping[str, NDArray[Any]]) -> dict[str, NDArray[Any]]:
-    """Bring every column up to the tallest one's height, filling with ``_PAD``.
+class _Encoding(NamedTuple):
+    """How one call writes its bulk members: the path extension and the encoder.
+
+    Resolved once from ``as_parquet`` and handed down, so no writer re-decides
+    the format and no path needs a second constant for its other extension.
+    """
+
+    ext: str
+    encode: Callable[[Mapping[str, Any]], bytes]
+
+
+def _encoding(as_parquet: bool) -> _Encoding:
+    """The encoding one ``as_parquet`` flag selects."""
+    if as_parquet:
+        return _Encoding("parquet", columns_to_parquet)
+    return _Encoding("csv", lambda columns: trace_to_csv(dict(columns)))
+
+
+def _fold(arr: NDArray[Any]) -> NDArray[Any]:
+    """One array as the ``(n,)`` or ``(n, k)`` a column block holds.
+
+    Padding is a row operation, so an array has to be folded before it can be
+    padded against its neighbours; the writer would fold it anyway.
+    """
+    return arr if arr.ndim <= 1 else arr.reshape(-1, arr.shape[-1])
+
+
+def _pad_columns(
+    columns: Mapping[str, NDArray[Any]],
+    fill: float = _PAD,
+) -> dict[str, NDArray[Any]]:
+    """Bring every column up to the tallest one's height, filling with ``fill``.
 
     A column block is rectangular, but ``n_retain`` is per step, so two steps in
-    one kind can retain different numbers of replications.
+    one kind can retain different numbers of replications. A float block can fill
+    with NaN instead, which no reader can mistake for a value.
     """
     if not columns:
         return {}
@@ -127,7 +151,7 @@ def _pad_columns(columns: Mapping[str, NDArray[Any]]) -> dict[str, NDArray[Any]]
         if rows == height:
             out[name] = arr
             continue
-        pad = np.full((height - rows, *arr.shape[1:]), _PAD, dtype=arr.dtype)
+        pad = np.full((height - rows, *arr.shape[1:]), fill, dtype=arr.dtype)
         out[name] = np.concatenate([arr, pad])
     return out
 
@@ -232,25 +256,15 @@ class BundleBuilder:
             if spec.params["observables"] is None
             else list(spec.params["observables"])
         )
-        if as_parquet:
-            dpath = _ESTIMATION_DATA_PARQUET
-            ppath = _ESTIMATION_POSTERIOR_PARQUET
+        encoding = _encoding(as_parquet)
+        dpath = _ESTIMATION_DATA.format(ext=encoding.ext)
+        ppath = _ESTIMATION_POSTERIOR.format(ext=encoding.ext)
+        posterior_bytes = encoding.encode
 
-            def observed_bytes(y: Any) -> bytes:
+        def observed_bytes(y: Any) -> bytes:
+            if as_parquet:
                 return columns_to_parquet({"y": y})
-
-            def posterior_bytes(columns: Mapping[str, Any]) -> bytes:
-                return columns_to_parquet(columns)
-
-        else:
-            dpath = _ESTIMATION_DATA_CSV
-            ppath = _ESTIMATION_POSTERIOR_CSV
-
-            def observed_bytes(y: Any) -> bytes:
-                return _observed_to_csv(y, observable_names)
-
-            def posterior_bytes(columns: Mapping[str, Any]) -> bytes:
-                return trace_to_csv(dict(columns))
+            return _observed_to_csv(y, observable_names)
 
         self._add(
             Member(path=_ESTIMATION_SPEC, kind="estimation_spec"),
@@ -321,74 +335,15 @@ class BundleBuilder:
         members, as Parquet or, with ``as_parquet=False``, as CSV. The loader
         reads either.
         """
-        self._add(
-            Member(path=_MC_PIPELINE, kind="mc_pipeline"),
-            json.dumps(pipeline.to_spec(), indent=2).encode("utf-8"),
-        )
-        self._add_mc_resources(pipeline)
+        encoding = _encoding(as_parquet)
+        ps = pipeline.to_spec()
+        self._add_mc_manifest(ps)
+        self._add_mc_pipeline_traces(ps, encoding)
+        self._add_mc_funcs(ps)
+
         if result is not None:
-            self._add(
-                Member(path=_MC_RESULT_META, kind="mc_result_meta"),
-                json.dumps(json_safe(serialize_run_meta(result)), indent=2).encode(
-                    "utf-8"
-                ),
-            )
-            datagen = serialize_datagen_result(
-                result.datagen_outputs, pipeline.per_rep_steps[0].name
-            )
-            filters = serialize_filter_results(result.filter_outputs)
-            tests = serialize_test_results(result.test_summaries)
-            regressions = serialize_regression_results(result.regression_summaries)
-            transforms = serialize_transform_results(result.transform_outputs)
-            postprocs = serialize_postproc_results(result.postproc)
+            self._add_mc_results(result, pipeline, encoding)
 
-            self._add_step_metas(_MC_DATAGEN_STEPS, "mc_datagen_steps", datagen)
-            self._add_step_metas(_MC_FILTER_STEPS, "mc_filter_steps", filters)
-            self._add_step_metas(_MC_TEST_STEPS, "mc_test_steps", tests)
-            self._add_step_metas(
-                _MC_REGRESSION_STEPS, "mc_regression_steps", regressions
-            )
-            self._add_step_metas(_MC_TRANSFORM_STEPS, "mc_transform_steps", transforms)
-            self._add_step_metas(_MC_POSTPROC_STEPS, "mc_postproc_steps", postprocs)
-
-            self._add_trace_arrays(
-                _MC_DATAGEN_PARQUET,
-                _MC_DATAGEN_CSV,
-                "mc_datagen_trace",
-                datagen,
-                as_parquet,
-            )
-            self._add_trace_arrays(
-                _MC_FILTER_PARQUET,
-                _MC_FILTER_CSV,
-                "mc_filter_trace",
-                filters,
-                as_parquet,
-            )
-            self._add_trace_block(
-                _MC_TEST_PARQUET, _MC_TEST_CSV, "mc_test_traces", tests, as_parquet
-            )
-            self._add_trace_block(
-                _MC_REGRESSION_PARQUET,
-                _MC_REGRESSION_CSV,
-                "mc_regression_traces",
-                regressions,
-                as_parquet,
-            )
-            self._add_trace_arrays(
-                _MC_TRANSFORM_PARQUET,
-                _MC_TRANSFORM_CSV,
-                "mc_transform_trace",
-                transforms,
-                as_parquet,
-            )
-            self._add_trace_arrays(
-                _MC_POSTPROC_PARQUET,
-                _MC_POSTPROC_CSV,
-                "mc_postproc_raw",
-                postprocs,
-                as_parquet,
-            )
         return self
 
     def _add_step_metas(
@@ -412,13 +367,15 @@ class BundleBuilder:
 
     def _add_trace_block(
         self,
-        parquet_path: str,
-        csv_path: str,
+        path: str,
         kind: MemberKind,
         steps: Mapping[str, tuple[Any, Mapping[str, NDArray[Any]]]],
-        as_parquet: bool,
+        encoding: _Encoding,
     ) -> None:
         """Pack one step kind's traces into a single column block.
+
+        ``path`` is already resolved, since the block is one member and its
+        caller knows what to call it.
 
         Columns are qualified ``{step}.{field}``, which the 2-D expansion extends
         to ``{step}.{field}.{j}``. Steps that retained different numbers of
@@ -434,20 +391,19 @@ class BundleBuilder:
         )
         if not columns:
             return
-        if as_parquet:
-            self._add(Member(path=parquet_path, kind=kind), columns_to_parquet(columns))
-        else:
-            self._add(Member(path=csv_path, kind=kind), trace_to_csv(columns))
+        self._add(Member(path=path, kind=kind), encoding.encode(columns))
 
     def _add_trace_arrays(
         self,
-        parquet_path: str,
-        csv_path: str,
+        path: str,
         kind: MemberKind,
         steps: Mapping[str, tuple[Any, Mapping[str, NDArray[Any]]]],
-        as_parquet: bool,
+        encoding: _Encoding,
     ) -> None:
         """Ship one step kind's traces as a member per array.
+
+        ``path`` is a template, since this writes one member per array and names
+        each from the ``ref`` and ``field`` it is looking at.
 
         These are arbitrary-shape payloads that share no height with each other,
         so none of them pack. An array above 2-D is flattened to ``(-1, last)``
@@ -459,49 +415,149 @@ class BundleBuilder:
                     continue
                 flat = arr if arr.ndim <= 1 else arr.reshape(-1, arr.shape[-1])
                 columns = {f"{name}.{field}": flat}
-                path = (parquet_path if as_parquet else csv_path).format(
-                    ref=name, field=field
-                )
-                data = (
-                    columns_to_parquet(columns) if as_parquet else trace_to_csv(columns)
-                )
                 self._add(
                     Member(
-                        path=path, kind=kind, options={"name": name, "field": field}
+                        path=path.format(ref=name, field=field, ext=encoding.ext),
+                        kind=kind,
+                        options={"name": name, "field": field},
                     ),
-                    data,
+                    encoding.encode(columns),
                 )
 
-    def _add_mc_resources(self, pipeline: MCPipeline) -> None:
-        """Ship the bulk side-channels a live pipeline references by key.
+    def _add_mc_manifest(self, spec: PipelineSpec) -> None:
 
-        ``raw_model_data`` datagens become array members; ``custom`` ops
-        become cloudpickle members (wrapped as :class:`NumpyCustomFunc` first,
-        which enforces the author-side contract and carries the source for audit).
+        self._add(
+            Member(path=_MC_PIPELINE, kind="mc_pipeline"),
+            json.dumps(pipeline_meta(spec), indent=2).encode("utf-8"),
+        )
+
+    def _add_step_arrays(
+        self,
+        path: str,
+        kind: MemberKind,
+        name: str,
+        arrays: Mapping[str, NDArray[Any]],
+        encoding: _Encoding,
+    ) -> None:
+        """Ship one step's bulk array kwargs as a single member.
+
+        The member is already per step, so its columns are the kwarg names as
+        authored. The arrays share neither rank nor height, so each folds to
+        ``(-1, last)`` and the block pads to the tallest; ``options`` carries the
+        original shapes, which is what a reader trims and reshapes against.
         """
-        for step in (*pipeline.per_rep_steps, *pipeline.postproc_steps):
-            if step.step_type == "raw_model_data":
-                arrays = raw_model_data_arrays(step.kwargs)
-                if not arrays:
-                    continue
-                data, _ = arrays_to_parquet(arrays)
+        if not arrays:
+            return
+        shapes = {key: [int(size) for size in arr.shape] for key, arr in arrays.items()}
+        columns = _pad_columns(
+            {
+                key: _fold(np.asarray(arr, dtype=np.float64))
+                for key, arr in arrays.items()
+            },
+            fill=np.nan,
+        )
+        self._add(
+            Member(path=path, kind=kind, options={"name": name, "shapes": shapes}),
+            encoding.encode(columns),
+        )
+
+    def _add_mc_pipeline_traces(self, spec: PipelineSpec, encoding: _Encoding) -> None:
+        """Ship every step's lifted array kwargs, one member per step."""
+        for step in (*spec.replication_steps, *spec.postproc_steps):
+            name = step.meta["name"]
+            self._add_step_arrays(
+                _MC_DATA.format(ref=name, ext=encoding.ext),
+                "mc_data",
+                name,
+                step.arrays,
+                encoding,
+            )
+
+    def _add_mc_funcs(self, spec: PipelineSpec) -> None:
+        """Wrap a custom step's callable in the phase wrapper and cloudpickle it.
+
+        Wrapping enforces the author-side contract (top-level def, safe namespace)
+        and snapshots the source + captured globals, so the receiver can audit the
+        op at load. Post-loop (POSTPROC) ops get the looser pandas namespace; every
+        other phase gets numpy/numba.
+        """
+        import cloudpickle
+        from ..monte_carlo.postproc import is_builtin_postproc
+        from ..monte_carlo.custom_op import (
+            CustomFunc,
+            NumbaCustomFunc,
+            PandasCustomFunc,
+        )
+
+        for step in (*spec.replication_steps, *spec.postproc_steps):
+            if step.func is None:
+                continue
+
+            meta = step.meta
+            if is_builtin_postproc(step.func):
                 self._add(
                     Member(
-                        path=_MC_RAW_MODEL_DATA.format(ref=step.name),
-                        kind="mc_raw_model_data",
-                        options={"ref": step.name},
+                        path=_MC_FUNC.format(ref=meta["name"]),
+                        kind="mc_func",
+                        options={"name": meta["name"]},
                     ),
-                    data,
+                    cloudpickle.dumps(step.func),
                 )
-            elif step.step_type in ("transform:custom", "postproc:custom"):
-                self._add(
-                    Member(
-                        path=_MC_CUSTOM_OP.format(ref=step.name),
-                        kind="mc_custom_op",
-                        options={"ref": step.name},
-                    ),
-                    _custom_op_blob(step),
-                )
+                continue
+
+            fn: CustomFunc
+            if OpType(meta["op_type"]) == OpType.POSTPROC:
+                fn = PandasCustomFunc(step.func)
+            else:
+                fn = NumbaCustomFunc(step.func)
+
+            self._add(
+                Member(
+                    path=_MC_FUNC.format(ref=meta["name"]),
+                    kind="mc_func",
+                    options={"name": meta["name"]},
+                ),
+                cloudpickle.dumps(fn),
+            )
+
+    def _add_mc_results(
+        self, result: MCPipelineResult, pipeline: MCPipeline, encoding: _Encoding
+    ) -> None:
+        self._add(
+            Member(path=_MC_RESULT_META, kind="mc_result_meta"),
+            json.dumps(json_safe(serialize_run_meta(result)), indent=2).encode("utf-8"),
+        )
+        datagen = serialize_datagen_result(
+            result.datagen_outputs, pipeline.replication_steps[0].name
+        )
+        filters = serialize_filter_results(result.filter_outputs)
+        tests = serialize_test_results(result.test_summaries)
+        regressions = serialize_regression_results(result.regression_summaries)
+        transforms = serialize_transform_results(result.transform_outputs)
+        postprocs = serialize_postproc_results(result.postproc)
+
+        self._add_step_metas(_MC_DATAGEN_STEPS, "mc_datagen_steps", datagen)
+        self._add_step_metas(_MC_FILTER_STEPS, "mc_filter_steps", filters)
+        self._add_step_metas(_MC_TEST_STEPS, "mc_test_steps", tests)
+        self._add_step_metas(_MC_REGRESSION_STEPS, "mc_regression_steps", regressions)
+        self._add_step_metas(_MC_TRANSFORM_STEPS, "mc_transform_steps", transforms)
+        self._add_step_metas(_MC_POSTPROC_STEPS, "mc_postproc_steps", postprocs)
+
+        self._add_trace_arrays(_MC_DATAGEN, "mc_datagen_trace", datagen, encoding)
+        self._add_trace_arrays(_MC_FILTER, "mc_filter_trace", filters, encoding)
+        self._add_trace_block(
+            _MC_TEST.format(ext=encoding.ext), "mc_test_traces", tests, encoding
+        )
+        self._add_trace_block(
+            _MC_REGRESSION.format(ext=encoding.ext),
+            "mc_regression_traces",
+            regressions,
+            encoding,
+        )
+        self._add_trace_arrays(
+            _MC_TRANSFORM, "mc_transform_trace", transforms, encoding
+        )
+        self._add_trace_arrays(_MC_POSTPROC, "mc_postproc_raw", postprocs, encoding)
 
     # Simulation prefill
 
@@ -642,53 +698,6 @@ def _prefill_shocks(
                 f"redraw it."
             )
     return lowered
-
-
-def _custom_op_blob(step: MCStep) -> bytes:
-    """Wrap a custom step's callable in the phase wrapper and cloudpickle it.
-
-    Wrapping enforces the author-side contract (top-level def, safe namespace)
-    and snapshots the source + captured globals, so the receiver can audit the
-    op at load. Post-loop (POSTPROC) ops get the looser pandas namespace; every
-    other phase gets numpy. An already-wrapped callable passes through; a pandas
-    wrapper outside the post-loop phase is rejected.
-    """
-    import cloudpickle
-
-    from ..monte_carlo.custom_op import (
-        CustomFunc,
-        CustomOpValidationError,
-        NumpyCustomFunc,
-        PandasCustomFunc,
-    )
-    from ..monte_carlo.mc_constructs import OpType
-
-    if step.func is None:
-        raise ValueError(f"Custom step {step.name!r} has no callable.")
-    wrapper = PandasCustomFunc if step.op_type is OpType.POSTPROC else NumpyCustomFunc
-    if isinstance(step.func, PandasCustomFunc) and wrapper is NumpyCustomFunc:
-        raise CustomOpValidationError(
-            f"{step.name!r}: a PandasCustomFunc is only allowed in a post-loop "
-            f"(POSTPROC) step, not a {step.op_type.value!r} step."
-        )
-    wrapped = step.func if isinstance(step.func, CustomFunc) else wrapper(step.func)
-    return cast(bytes, cloudpickle.dumps(wrapped))
-
-
-def _estimator_observed(
-    estimator: "Estimator",
-) -> tuple[NDArray[Any], list[str] | None]:
-    """Extract the observed matrix + observable names from an estimator's ``y``."""
-    y = estimator.y
-    if hasattr(y, "columns"):  # pandas DataFrame
-        frame = cast(Any, y)
-        return (
-            np.asarray(frame.to_numpy(), dtype=np.float64),
-            [str(column) for column in frame.columns],
-        )
-    matrix = np.asarray(y, dtype=np.float64)
-    names = list(estimator.observables) if estimator.observables else None
-    return matrix, names
 
 
 def _observed_to_csv(
