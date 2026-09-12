@@ -42,7 +42,7 @@ fred = [
     "python-dotenv>=1.2.3",
 ]
 sr = [
-    "pysr>=2.2.0",
+    "pysr>=2.3.0",
 ]
 ui = [
     "fastapi>=0.140.13",
