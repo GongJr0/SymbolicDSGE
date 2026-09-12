@@ -53,7 +53,6 @@ class TemplateFactory:
         :raises MissingExpressionError: If config.include_expression is True but no expression is provided.
         :returns: None
         """
-
         self._config = ConfigValidator._validate_config(config)
         self._variable_names = list(variable_names)
         self._t = t

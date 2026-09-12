@@ -1,3 +1,9 @@
+"""Cholesky factor to correlation block transform for DSGE estimation.
+
+The LKJ distribution samples correlations via their lower-triangular Cholesky factors,
+This transform maps to-and-from unconstrained coordinates for the Cholesky factor of a correlation matrix.
+"""
+
 from __future__ import annotations
 
 from typing import overload
@@ -70,6 +76,7 @@ class CholeskyCorrTransform(Transform):
 
     @property
     def K(self) -> int:
+        """Number of rows/columns in the correlation matrix."""
         return self._K
 
     @overload

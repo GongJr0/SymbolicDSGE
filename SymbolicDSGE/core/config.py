@@ -1,3 +1,5 @@
+"""Symbolic representation of a parsed DSGE model configuration."""
+
 from dataclasses import dataclass, asdict
 from typing import AbstractSet, Any, Mapping, TypeAlias, TypeVar, Dict, Sequence
 from collections import UserDict
@@ -67,6 +69,8 @@ class FunctionGetterDict(_NormalizedKeyDict[Function, V]):
 
 
 class RegimeGetterDict(_NormalizedKeyDict[frozenset[str], Regime]):
+    """Key normalizing dictionary for regimes. Accessors accept a single regime name or a set of names, and normalize to the frozenset of names the underlying dict is keyed by."""
+
     @staticmethod
     def _key(key: Any) -> Any:
         if isinstance(key, str):
@@ -78,10 +82,20 @@ class RegimeGetterDict(_NormalizedKeyDict[frozenset[str], Regime]):
 
 @dataclass
 class Base:
+    """Base class implementing basic dataclass functionality for model configuration components."""
+
     def __getitem__(self, key: str) -> Any:
         return getattr(self, key)
 
     def to_dict(self) -> dict[str, Any]:
+        """:func:`dataclasses.asdict` passthrough.
+
+        Returns
+        -------
+        dict[str, Any]
+            Output of :func:`dataclasses.asdict` on the dataclass instance.
+
+        """
         return asdict(self)
 
     def serialize(self, filepath: str) -> None:
@@ -91,12 +105,48 @@ class Base:
 
 @dataclass
 class Constraint(Base):
+    """Constrants that can bind and relax on separate conditions, allowing for regime switching in the model.
+
+    Attributes
+    ----------
+    bind : Relational | And | Or | Not
+        Binding condition for the constraint. A regime is entered when this is
+        satisfied.
+    relax : Relational | And | Or | Not
+        Relaxing condition for the constraint. A bound regime is exited when this is
+        satisfied.
+    """
+
     bind: Relational | And | Or | Not
     relax: Relational | And | Or | Not
 
 
 @dataclass
 class Equations(Base):
+    """Equations defining the transitions, policy, and observables of the model.
+
+    Attributes
+    ----------
+    model : Dict[str, Eq]
+        The reference state-space model equations. This is the base (and only) set
+        of equations for perturbation models. OccBin takes it as the reference state
+        and any binding constraint replaces the relevant equations.
+    constraint : Dict[str, Constraint] | None
+        Constraints that can bind the model equations. Each constraint can declare a
+        binding and relaxing condition separately.
+    regime : RegimeGetterDict | None
+        Regime to apply when the relevant constraint is binding. The regime is a
+        mapping of model equation names to replacement equations.
+    observable : SymbolGetterDict[Expr]
+        Mapping of observable names to their symbolic expressions in terms of the
+        model's variables.
+    obs_is_affine : SymbolGetterDict[bool]
+        Mapping of observable names to boolean values indicating whether the
+        observable is affine (linear) in the model's variables. This information can
+        be used to optimize computations and simplify analysis of the model's
+        observables.
+    """
+
     model: Dict[str, Eq]
     constraint: Dict[str, Constraint] | None  # {constraint_name: Constraint}
     regime: RegimeGetterDict | None  # {binding_set: Regime}
@@ -106,6 +156,19 @@ class Equations(Base):
 
 @dataclass
 class Calib(Base):
+    """Calibration of the model configuration, including parameter values, shock standard deviations, and shock correlations.
+
+    Attributes
+    ----------
+    parameters : SymbolGetterDict[float64]
+        Mapping of parameter names to their calibrated values.
+    shock_std : SymbolGetterDict[str]
+        Mapping of shock names to their standard deviation parameter names.
+    shock_corr : PairGetterDict[str | None]
+        Mapping of shock name pairs to their correlation parameter names. A pair mapped to ``None`` indicates zero correlation.
+
+    """
+
     parameters: SymbolGetterDict[float64]
     shock_std: SymbolGetterDict[str]
     shock_corr: PairGetterDict[str | None]
@@ -180,6 +243,19 @@ def make_Q(
 
 @dataclass
 class Variables(Base):
+    """Variable specification for a model, including the list of variables, the steady-state seed, and the linearization method.
+
+    Attributes
+    ----------
+    variables : list[Function]
+        List of model variables as :class:`sympy.Function`s of time.
+    ss_seed : FunctionGetterDict[Expr | None]
+        Initial guess for the steady-state Newton solve.
+    linearization : FunctionGetterDict[LinearizationMethod]
+        Linearization method for each variable, as a mapping from variable to
+        :class:`LinearizationMethod`.
+    """
+
     variables: list[Function]
     # None == 0 seed newton.
     ss_seed: FunctionGetterDict[Expr | None]
@@ -188,6 +264,34 @@ class Variables(Base):
 
 @dataclass(repr=False)
 class ModelConfig(Base):
+    """A model configuration parsed into symbolic representations of its variables, parameters, shocks, observables, and equations.
+
+    Attributes
+    ----------
+    name : str
+        Name of the model.
+    variables : Variables
+        :class:`Variables` object containing the model's variables, steady-state
+        seed, and linearization method.
+    parameters : list[Symbol]
+        List of model parameters as :class:`sympy.Symbol`s.
+    shocks : list[Symbol]
+        List of model shocks as :class:`sympy.Symbol`s.
+    observables : list[Symbol]
+        List of model observables as :class:`sympy.Symbol`s.
+    equations : Equations
+        :class:`Equations` object containing the model's equations, constraints,
+        regimes, and observables.
+    calibration : Calib
+        :class:`Calib` object containing the model's calibration parameters, shock
+        standard deviations, and shock correlations.
+    symbolically_linearized : bool
+        Boolean indicating whether the model has been symbolically linearized.
+    source_yaml : str | None
+        Optional string containing the source YAML text from which the model
+        configuration was parsed.
+    """
+
     name: str
     variables: Variables
     parameters: list[Symbol]

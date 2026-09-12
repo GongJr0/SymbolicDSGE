@@ -376,7 +376,8 @@ def _parse_csv_columns(
 
 def _csv_scalar(value: Any) -> str:
     """CSV-side analogue of :func:`_json_scalar`: nulls and non-finite become
-    empty strings, floats round-trip via ``repr`` for full precision."""
+    empty strings, floats round-trip via ``repr`` for full precision.
+    """
     if value is None:
         return ""
     if isinstance(value, (np.floating, float)):

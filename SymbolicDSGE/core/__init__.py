@@ -1,3 +1,5 @@
+"""Core module containing solution, policy, and relevant modeling utilities for DSGE models."""
+
 from .config import ModelConfig
 from .model_parser import ModelParser
 from .solver import DSGESolver

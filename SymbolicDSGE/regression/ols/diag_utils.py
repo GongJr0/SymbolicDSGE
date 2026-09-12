@@ -35,6 +35,25 @@ def se_from_pinv(x: NDF, y: NDF, y_hat: NDF) -> NDF:
 
 
 def se(L: NDF, y: NDF, y_hat: NDF, x: NDF) -> NDF:
+    """Standard errors of the regression coefficients.
+
+    Parameters
+    ----------
+    L : NDF
+        Cholesky factor of the coefficient covariance matrix.
+    y : NDF
+        Target variable array with shape (n,).
+    y_hat : NDF
+        Predicted variable array with shape (n,).
+    x : NDF
+        Regressor array with shape (n, p).
+
+    Returns
+    -------
+    NDF
+        Standard errors of the regression coefficients with shape (p,).
+
+    """
     if L.size == 0:
         return se_from_pinv(x, y, y_hat)
 

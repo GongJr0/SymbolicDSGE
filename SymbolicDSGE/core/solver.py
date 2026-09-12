@@ -1,3 +1,7 @@
+"""Solver for DSGE model specifications. Handles compilation, solution, and has estimation shortcuts."""
+
+from __future__ import annotations
+
 import warnings
 
 import sympy as sp
@@ -10,6 +14,9 @@ from numpy import float64, asarray, ndarray
 from numpy.typing import NDArray
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from ..estimation.results import MCMCResult, OptimizationResult
 
 from .config import ModelConfig
 from .compiled_model import (
@@ -51,6 +58,26 @@ ND = NDArray
 
 
 class DSGESolver:
+    """Solver for DSGE model specifications. Handles compilation, solution, and has estimation shortcuts.
+
+    Parameters
+    ----------
+    model_config : ModelConfig
+        Configuration object defining the DSGE model specification, including
+        variables, equations, and calibration.
+    kalman_config : KalmanConfig | None
+        Optional Kalman filter configuration object.
+
+    Attributes
+    ----------
+    model_config : ModelConfig
+        The model specification the solver compiles and solves.
+    kalman_config : KalmanConfig | None
+        The filter configuration, when one was supplied.
+    t : sympy.Symbol
+        Time index symbol used in the model equations.
+    """
+
     def __init__(
         self, model_config: ModelConfig, kalman_config: KalmanConfig | None = None
     ) -> None:
@@ -65,7 +92,23 @@ class DSGESolver:
         params_order: list[str] | None = None,
         linearize: bool = False,
     ) -> CompiledModel:
+        """Compile a parsed Model config into numerical representation ready for solving.
 
+        Parameters
+        ----------
+        variable_order : Sequence[Function | str] | None
+            Order of the model's declared variables. ``None`` uses the default canonical order (states, controls).
+        params_order : list[str] | None
+            Order of the model's parameters. ``None`` uses the order in which they were declared in the model.
+        linearize : bool
+            If ``True``, linearize the model after solving for the steady state. ``False`` assumes the specification is already linearized.
+
+        Returns
+        -------
+        CompiledModel
+            The compiled model holding attrs and methods necessary for all subsequent operations.
+
+        """
         conf = self.model_config
         if linearize and not conf.symbolically_linearized:
             conf = linearize_model(conf)
@@ -631,12 +674,14 @@ class DSGESolver:
         seed: NDF,
         raise_on_bk_violation: bool = True,
     ) -> SolvedModel[SecondOrderSolution]:
-        """Second-order solve. Runs the Klein first order (which Newton-resolves
-        the steady state from ``seed``), sweeps the bicomplex Hessian at that
-        steady state, and assembles the quadratic blocks over the states, the
-        shocks and their cross plus the risk correction into a
-        :class:`SecondOrderSolution`. Requires the native extension."""
+        """Second-order solve.
 
+        Runs the Klein first order (which Newton-resolves the steady state from
+        ``seed``), sweeps the bicomplex Hessian at that steady state, and assembles
+        the quadratic blocks over the states, the shocks and their cross plus the
+        risk correction into a :class:`SecondOrderSolution`. Requires the native
+        extension.
+        """
         calib = compiled.config.calibration
         pert = sgu_solve(
             compiled.construct_objective_cfunc(),
@@ -763,7 +808,50 @@ class DSGESolver:
         symmetrize: bool = True,
         R: NDArray | None = None,
         **method_kwargs: Any,
-    ) -> Any:
+    ) -> OptimizationResult | MCMCResult:
+        """Estimate a model specification without producing a solved model object.
+
+        Parameters
+        ----------
+        compiled : CompiledModel
+            Compiled model holding attrs and methods feeding the solution and esitmation routines.
+        y : NDArray | pd.DataFrame
+            Observed data, Array in observable order or ``DataFrame`` with columns named for the observables.
+        routine : str
+            "mle" (Maximum Likelihood Estimation), "map" (Maximum A Posteriori), or "mcmc" (Markov Chain Monte Carlo).
+            "map" and "mcmc" require priors to be specified for the estimated parameters.
+        theta0 : NDArray | Mapping[str, float] | None
+            Initial guess for estimatied parameters. Mapping of {name: guess} or array in order of appearance in calibration.
+        observables : list[str] | None
+            Names of model observables to use in the estimation. If None, all observables are used.
+        filter_mode : str
+            Kalman filter routine to use. "linear" (linear Gaussian), "extended" (linear Gaussian with nonlinear measurements), "unscented" (pruned unscented)
+        estimated_params : list[str] | None
+            Names of model parameters to estimate. If priors are specified names can be derived from there.
+        priors : Mapping[str, Any] | None
+            Mapping of {name: Prior(...)} for the estimated parameters. If None, no priors are used.
+            Use estimation.make_prior or bayesian.make_prior to create prior objects with built-in distributions and transformations.
+        ss_seed : list[float] | NDArray | dict[str, float] | None
+            Initial guess of the steady state Newton solver. List or array in declaration order or
+            mapping of {name: guess} for the model's declared variables.
+        x0 : NDArray | None
+            Initial state vector for the Kalman filter. If None, the steady state is used.
+        P0 : NDArray | None
+            Initial state covariance matrix for the Kalman filter. If None, the stationary state covariance is used.
+        jitter : float | float64 | None
+            Jitter to add in the Kalman kernels when a cholesky decomposition fails. If None, no jitter is added.
+        symmetrize : bool
+            Whether to symmetrize the covariance matrices in the Kalman filter.
+        R : NDArray | None
+            Measurement noise covariance matrix for the Kalman filter. If None, the KalmanConfig.R is used.
+            If both are omitted, the call will raise.
+
+        Returns
+        -------
+        OptimizationResult | MCMCResult
+            Result of the estimation routine. OptimizationResult is a base for MLEResult and MAPResult.
+
+        """
         est = self._estimator(
             compiled=compiled,
             y=y,
@@ -813,8 +901,56 @@ class DSGESolver:
         symmetrize: bool = True,
         R: NDArray | None = None,
         **method_kwargs: Any,
-    ) -> tuple[Any, SolvedModel]:
+    ) -> tuple[OptimizationResult | MCMCResult, SolvedModel]:
+        """Estimate and solve a model specification.
 
+        Parameters
+        ----------
+        compiled : CompiledModel
+            Compiled model holding attrs and methods feeding the solution and esitmation routines.
+        y : NDArray | pd.DataFrame
+            Observed data, Array in observable order or ``DataFrame`` with columns named for the observables.
+        routine : str
+            "mle" (Maximum Likelihood Estimation), "map" (Maximum A Posteriori), or "mcmc" (Markov Chain Monte Carlo).
+            "map" and "mcmc" require priors to be specified for the estimated parameters.
+        theta0 : NDArray | Mapping[str, float] | None
+            Initial guess for estimatied parameters. Mapping of {name: guess} or array in order of appearance in calibration.
+            If None, the calibration values are used as initial guess.
+        posterior_point : str
+            Point estimates to use when sampling a posterior distribution with MCMC.
+            "mean", "mode", "median", "map". Mode and median are equivalent aliases.
+        observables : list[str] | None
+            Names of model observables to use in the estimation. If None, all observables are used.
+        filter_mode : str
+            Kalman filter routine to use. "linear" (linear Gaussian), "extended" (linear Gaussian with nonlinear measurements), "unscented" (pruned unscented)
+        estimated_params : list[str] | None
+            Names of model parameters to estimate. If priors are specified names can be derived from there.
+            If both keys are specified they must match. If None, all parameters are estimated.
+        priors : Mapping[str, Any] | None
+            Mapping of {name: Prior(...)} for the estimated parameters. If None, no priors are used.
+            Use estimation.make_prior or bayesian.make_prior to create prior objects with built-in distributions and transformations.
+        ss_seed : list[float] | NDArray | dict[str, float] | None
+            Initial guess of the steady state Newton solver. List or array in declaration order or
+            mapping of {name: guess} for the model's declared variables.
+        x0 : NDArray | None
+            Initial state vector for the Kalman filter. If None, the steady state is used.
+        P0 : NDArray | None
+            Initial state covariance matrix for the Kalman filter. If None, the stationary state covariance is used.
+        jitter : float | float64 | None
+            Jitter to add in the Kalman kernels when a cholesky decomposition fails. If None, no jitter is added.
+        symmetrize : bool
+            Whether to symmetrize the covariance matrices in the Kalman filter.
+        R : NDArray | None
+            Measurement noise covariance matrix for the Kalman filter. If None, the KalmanConfig.R is used.
+            If both are omitted, the call will raise.
+
+        Returns
+        -------
+        tuple[OptimizationResult | MCMCResult, SolvedModel]
+            Estimation result and solved model produced with the estimated parameters.
+            OptimizationResult is a base for MLEResult and MAPResult.
+
+        """
         ss_seed = (
             np.asarray(ss_seed, dtype=float64) if isinstance(ss_seed, list) else ss_seed
         )

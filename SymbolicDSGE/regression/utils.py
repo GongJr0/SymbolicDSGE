@@ -22,6 +22,23 @@ def log_grid(start: float64, stop: float64, num: int) -> NDF:
 
 @njit(cache=True)
 def aic(rss: float64, n: int, k: float64) -> float64:
+    """Akaike information criterion (AIC) for linear regression.
+
+    Parameters
+    ----------
+    rss : float64
+        Residual sum of squares from linear regression.
+    n : int
+        Number of observations in the regression.
+    k : float64
+        Number of design columns in the regression (including intercept if present).
+
+    Returns
+    -------
+    float64
+        AIC value computed as 2k + n * log(RSS / n).
+
+    """
     if rss <= 0:
         return float64(-np.inf)
     return float64(n * np.log(rss / n) + 2 * k)
@@ -29,6 +46,23 @@ def aic(rss: float64, n: int, k: float64) -> float64:
 
 @njit(cache=True)
 def bic(rss: float64, n: int, k: float64) -> float64:
+    """Bayesian information criterion (BIC) for linear regression.
+
+    Parameters
+    ----------
+    rss : float64
+        Residual sum of squares from linear regression.
+    n : int
+        Number of observations in the regression.
+    k : float64
+        Number of design columns in the regression (including intercept if present).
+
+    Returns
+    -------
+    float64
+        BIC value computed as log(n) * k + n * log(RSS / n).
+
+    """
     if rss <= 0:
         return float64(-np.inf)
     return float64(n * np.log(rss / n) + np.log(n) * k)

@@ -15,15 +15,17 @@ from ..._ckernels.core import simulate_second_order_pruned
 
 
 class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
-    """A model solved to second order: the first-order rule plus corrections."""
+    """A model solved to second order: the first-order rule plus corrections.
+
+    Parameters
+    ----------
+    compiled : CompiledModel
+        The compiled model, containing the linearized equations and other metadata.
+    policy : SecondOrderSolution
+        The second-order decision rule solution.
+    """
 
     def __init__(self, compiled: CompiledModel, policy: SecondOrderSolution) -> None:
-        """Initialize a second-order solved model.
-
-        Args:
-            model: The solved model.
-            solution: The second-order solution.
-        """
         super().__init__(compiled, policy)
 
     def _simulate_state_matrix(

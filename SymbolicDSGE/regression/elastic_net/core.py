@@ -192,6 +192,33 @@ def elastic_net(
     max_iter: int = 1000,
     tol: float | float64 = float64(1e-10),
 ) -> ElasticNetResult:
+    """Fit an elastic net regression at a fixed penalty weight and mix.
+
+    Parameters
+    ----------
+    X : NDF
+        Design matrix, shape ``(n, k)``.
+    y : NDF
+        Response vector, shape ``(n,)``.
+    alpha : float
+        Non-negative total penalty weight.
+    l1_ratio : float
+        Penalty split between L1 and L2, in ``[0, 1]``.
+    variables : list[str] | None
+        Optional names for the design columns. Defaults to ``x0``, ``x1``, ...
+    intercept : bool
+        If True, include an unpenalized intercept column in the design.
+    max_iter : int
+        Maximum coordinate-descent iterations.
+    tol : float64
+        Coordinate-descent convergence tolerance.
+
+    Returns
+    -------
+    ElasticNetResult
+        Fit with the common diagnostics plus combined L1 and L2 diagnostics. Path
+        fields are left None.
+    """
     _validate_elastic_net_params(alpha, l1_ratio, max_iter, tol)
 
     if l1_ratio == 0.0:
@@ -267,6 +294,38 @@ def elastic_net_gs(
     max_iter: int = 1000,
     tol: float | float64 = float64(1e-10),
 ) -> ElasticNetResult:
+    """Select an elastic net penalty over a logarithmic alpha grid at a fixed mix.
+
+    Parameters
+    ----------
+    X : NDF
+        Design matrix, shape ``(n, k)``.
+    y : NDF
+        Response vector, shape ``(n,)``.
+    start : float
+        Positive lower endpoint for the alpha grid.
+    stop : float
+        Positive upper endpoint for the alpha grid.
+    num : int
+        Number of grid points.
+    l1_ratio : float
+        Penalty split between L1 and L2, in ``[0, 1]``. Held fixed across the grid.
+    criterion : str
+        Grid-search criterion to minimize when selecting ``alpha``.
+    variables : list[str] | None
+        Optional names for the design columns. Defaults to ``x0``, ``x1``, ...
+    intercept : bool
+        If True, include an unpenalized intercept column in the design.
+    max_iter : int
+        Maximum coordinate-descent iterations.
+    tol : float64
+        Coordinate-descent convergence tolerance.
+
+    Returns
+    -------
+    ElasticNetResult
+        Fit at the selected penalty, with the path fields populated.
+    """
     if start <= 0 or stop <= 0:
         raise ValueError("start and stop must be positive.")
     if num <= 0:

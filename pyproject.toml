@@ -24,7 +24,6 @@ dependencies = [
     "psutil>=7.2.2",
     "pyyaml>=6.0.3",
     "scipy>=1.16.3",
-    "statsmodels>=0.14.6",
     "sympy>=1.14.0",
 ]
 
@@ -78,6 +77,7 @@ dev = [
     "cython-lint>=0.21.0",
     "pytest-xdist>=3.8.0",
     "mkdocs-charts-plugin>=0.0.13",
+    "ruff>=0.16.7",
 ]
 
 [build-system]
@@ -95,6 +95,31 @@ include = ["SymbolicDSGE*"]
 "SymbolicDSGE" = ["py.typed"]
 "SymbolicDSGE.ui" = ["_static/**/*"]
 "SymbolicDSGE._ckernels" = ["**/*.pyx", "**/*.pxd", "**/*.pyi", "**/*.c", "**/*.h"]
+
+[tool.ruff]
+include = ["SymbolicDSGE/**/*.py"]
+extend-exclude = ["SymbolicDSGE/regression/sr"]
+
+[tool.ruff.lint]
+select = ["D"]
+ignore = [
+    # Missing-docstring family. Tracked as a tiered sweep; re-enable a code
+    # once its tier is clear so new API cannot land undocumented.
+    "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
+    # Imperative mood. A first-word list standing in for numpydoc's SS05,
+    # which targets third-person verbs on callables. It misfires on the
+    # noun-phrase summaries this package uses for properties and attributes.
+    "D401",
+    # Summary/description separation. ~48 pre-existing docstrings wrap their
+    # summary mid-sentence; re-enable once those are rewritten.
+    "D205",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

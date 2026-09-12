@@ -59,6 +59,19 @@ class BundleArchive:
 
     Members are read eagerly into memory on :meth:`open` (bundles are small), so
     no file handle outlives the call.
+
+    Parameters
+    ----------
+    manifest : Manifest
+        Manifest describing the bundle members.
+    files : Mapping[str, bytes]
+        Mapping from member paths to their bytes. Must contain exactly the members
+        enumerated in ``manifest.members``.
+
+    Attributes
+    ----------
+    manifest : Manifest
+        The bundle's manifest.
     """
 
     def __init__(self, manifest: Manifest, files: Mapping[str, bytes]) -> None:
@@ -67,6 +80,19 @@ class BundleArchive:
 
     @classmethod
     def open(cls, path: str | Path) -> BundleArchive:
+        """Open a ``.sdsge`` bundle and read its manifest and members into memory.
+
+        Parameters
+        ----------
+        path : str | Path
+            Path to a ``.sdsge`` zip file.
+
+        Returns
+        -------
+        BundleArchive
+            A :class:`BundleArchive` containing the manifest and member bytes.
+
+        """
         with zipfile.ZipFile(Path(path), "r") as archive:
             names = set(archive.namelist())
             if MANIFEST_NAME not in names:
@@ -87,10 +113,36 @@ class BundleArchive:
         return cls(manifest, files)
 
     def read(self, member_path: str) -> bytes:
+        """Read the bytes of a bundle member.
+
+        Parameters
+        ----------
+        member_path : str
+            Path of the member to read, as enumerated in the manifest.
+
+        Returns
+        -------
+        bytes
+            Bytes of the requested member.
+
+        """
         try:
             return self._files[member_path]
         except KeyError as exc:
             raise KeyError(f"No bundle member at {member_path!r}.") from exc
 
     def read_text(self, member_path: str) -> str:
+        """Read the text of a bundle member, decoding it as UTF-8.
+
+        Parameters
+        ----------
+        member_path : str
+            Path of the member to read, as enumerated in the manifest.
+
+        Returns
+        -------
+        str
+            String content of the requested member, decoded as UTF-8.
+
+        """
         return self.read(member_path).decode("utf-8")

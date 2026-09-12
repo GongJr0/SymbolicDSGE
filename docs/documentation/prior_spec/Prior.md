@@ -78,14 +78,11 @@ Dispatched `transform` values accepted by `make_prior(...)`:
 | `LOWER_BOUNDED` | `"lower_bounded"` | `low` |
 | `UPPER_BOUNDED` | `"upper_bounded"` | `high` |
 | `TANH` | `"tanh"` | none |
+| `CHOLESKY_CORR` | `"cholesky_corr"` | `K` |
 
-Additional `TransformMethod` enum members currently not dispatched by `make_prior(...)`:
-
-| __Enum Member__ | __String__ |
-|:----------------|:----------:|
-| `SIMPLEX` | `"simplex"` |
-| `CHOLESKY_COV` | `"cholesky_cov"` |
-| `CHOLESKY_CORR` | `"cholesky_corr"` |
+???+ note
+    `CHOLESKY_CORR` is only valid on an `lkj_chol` prior. `K` defaults to the
+    distribution's own `K` and must match it if given.
 
 ## Example
 ```python

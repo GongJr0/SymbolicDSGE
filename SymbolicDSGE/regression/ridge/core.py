@@ -81,6 +81,29 @@ def ridge(
     variables: list[str] | None = None,
     intercept: bool = True,
 ) -> RidgeResult:
+    """Fit an L2-penalized (ridge) regression at a fixed penalty weight.
+
+    When ``intercept`` is True the intercept is left unregularized and excluded
+    from the reported penalty.
+
+    Parameters
+    ----------
+    x : NDF
+        Design matrix, shape ``(n, k)``.
+    y : NDF
+        Response vector, shape ``(n,)``.
+    alpha : float
+        Non-negative L2 penalty weight.
+    variables : list[str] | None
+        Optional names for the design columns. Defaults to ``x0``, ``x1``, ...
+    intercept : bool
+        If True, include an unpenalized intercept column in the design.
+
+    Returns
+    -------
+    RidgeResult
+        Fit with the common diagnostics plus ridge penalty diagnostics.
+    """
     if alpha < 0:
         raise ValueError("alpha must be non-negative.")
 
@@ -123,6 +146,32 @@ def ridge_gs(
     variables: list[str] | None = None,
     intercept: bool = True,
 ) -> RidgeResult:
+    """Select a ridge penalty over a logarithmic alpha grid.
+
+    Parameters
+    ----------
+    x : NDF
+        Design matrix, shape ``(n, k)``.
+    y : NDF
+        Response vector, shape ``(n,)``.
+    start : float
+        Positive lower endpoint for the alpha grid.
+    stop : float
+        Positive upper endpoint for the alpha grid.
+    num : int
+        Number of grid points.
+    criterion : str
+        Grid-search criterion to minimize when selecting ``alpha``.
+    variables : list[str] | None
+        Optional names for the design columns. Defaults to ``x0``, ``x1``, ...
+    intercept : bool
+        If True, include an unpenalized intercept column in the design.
+
+    Returns
+    -------
+    RidgeResult
+        Fit at the selected penalty, carrying the criterion and its realized value.
+    """
     if start <= 0 or stop <= 0:
         raise ValueError("start and stop must be positive.")
     if num <= 0:

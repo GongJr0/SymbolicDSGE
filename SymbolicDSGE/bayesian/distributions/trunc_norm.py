@@ -1,3 +1,9 @@
+"""Truncated Normal distribution for Bayesian estimation of DSGE models.
+
+Truncated Normals preserve the two-sided Gaussian shape on a finite support.
+They can be used for any bounded parameter where Gaussian like sampling semantics are desired.
+"""
+
 from .distribution import (
     Distribution,
     DistributionFamily,
@@ -18,6 +24,23 @@ from typing import TypedDict, Tuple, overload
 
 
 class TruncNormParams(TypedDict):
+    """Parameters for the Truncated Normal distribution.
+
+    Attributes
+    ----------
+    low : float
+        Lower standardized bound of the support.
+    high : float
+        Upper standardized bound of the support.
+    mean : float
+        Mean of the underlying normal distribution.
+    std : float
+        Standard deviation of the underlying normal distribution.
+    random_state : RandomState
+        Random state for reproducibility of random variates.
+
+    """
+
     low: float
     high: float
     mean: float

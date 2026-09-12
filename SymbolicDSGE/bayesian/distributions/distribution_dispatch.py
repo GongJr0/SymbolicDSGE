@@ -1,3 +1,8 @@
+"""Dispatcher for distributions.
+
+:func:`get_distribution` returns the distribution class for a given distribution family.
+"""
+
 from .distribution import Distribution, DistributionFamily
 from .norm import Normal
 from .log_norm import LogNormal
@@ -25,6 +30,19 @@ DISTRIBUTION_DISPATCH: dict[DistributionFamily, type[Distribution]] = {
 
 
 def get_distribution(family: str) -> type[Distribution]:
+    """Get the distribution class for a given distribution family.
+
+    Parameters
+    ----------
+    family : str
+        Family name of the distribution. Must be a member of the :class:`DistributionFamily` enum.
+
+    Returns
+    -------
+    type[Distribution]
+        Distribution class corresponding to the given family.
+
+    """
     if family not in DISTRIBUTION_DISPATCH:
         raise ValueError(
             f"Unsupported distribution family: {family}\n please choose from: {list(DISTRIBUTION_DISPATCH.values())}"

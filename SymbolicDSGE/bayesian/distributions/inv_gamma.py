@@ -1,3 +1,9 @@
+"""Inverse Gamma distribution for Bayesian estimation of DSGE models.
+
+Inverted Gamma distributions are used to model positive parameters with heavy tails.
+Discount factors are a good example with a support of (0, 1) and often a heavy tail towards 1.
+"""
+
 from .distribution import Distribution, DistributionFamily, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
 
@@ -11,6 +17,19 @@ from typing import TypedDict, overload
 
 
 class InvGammaParams(TypedDict):
+    """Parameters for the Inverse Gamma distribution.
+
+    Attributes
+    ----------
+    mean : float
+        Mean of the inverse gamma distribution.
+    std : float
+        Standard deviation of the inverse gamma distribution.
+    random_state : RandomState
+        Random state for reproducibility of random variates.
+
+    """
+
     mean: float
     std: float
     random_state: RandomState
@@ -74,11 +93,41 @@ class InvGamma(Distribution[float64, VecF64]):
 
     @staticmethod
     def to_shape(mean: float, std: float) -> float64:
+        """Convert mean and std to shape parameter a of the inverse gamma distribution.
+
+        Parameters
+        ----------
+        mean : float
+            Mean of the inverse gamma distribution.
+        std : float
+            Standard deviation of the inverse gamma distribution.
+
+        Returns
+        -------
+        float64
+            Shape parameter a of the inverse gamma distribution.
+
+        """
         ratio = float64(mean / std)
         return float64(2.0 + ratio**2)
 
     @classmethod
     def to_scale(cls, mean: float, std: float) -> float64:
+        """Convert mean and std to scale parameter beta of the inverse gamma distribution.
+
+        Parameters
+        ----------
+        mean : float
+            Mean of the inverse gamma distribution.
+        std : float
+            Standard deviation of the inverse gamma distribution.
+
+        Returns
+        -------
+        float64
+            Scale parameter beta of the inverse gamma distribution.
+
+        """
         shape = cls.to_shape(mean, std)
         return float64(mean) * float64(shape - 1.0)
 

@@ -1,3 +1,5 @@
+"""Kalman filter configuration for filter specifications."""
+
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 from numpy.typing import NDArray
@@ -9,6 +11,21 @@ from ..core.config import SymbolGetterDict, PairGetterDict
 
 @dataclass(frozen=True)
 class KalmanConfig:
+    """Kalman filter configuration holding a symbolic or scalar representation of the measurement noise covariance matrix.
+
+    Attributes
+    ----------
+    R : NDArray | None
+        Numerical(-ized) measurement noise covariance matrix.
+    R_param_names : list[str] | None
+        Parameter names used in the symbolic R representation.
+    R_std_param_map : SymbolGetterDict[str] | None
+        Standard deviation parameter map for the symbolic R representation.
+    R_corr_param_map : PairGetterDict[str | None] | None
+        Correlation parameter map for the symbolic R representation. A pair mapped to ``None`` indicates zero correlation.
+
+    """
+
     R: NDArray | None
     R_param_names: list[str] | None = None
     R_std_param_map: SymbolGetterDict[str] | None = None
@@ -63,6 +80,29 @@ def make_R(
 
 @dataclass(frozen=True)
 class KalmanStateSpace:
+    """State-space representation for a Kalman filter.
+
+    Attributes
+    ----------
+    A : NDArray[float64]
+        Transition matrix for the state vector.
+    B : NDArray[float64]
+        Shock loading matrix for the state vector.
+    C : NDArray[float64]
+        Measurement coefficient matrix.
+    d : NDArray[float64]
+        Measurement intercept vector.
+    Q : NDArray[float64]
+        Shock covariance matrix for the state vector.
+    y_names : list[str]
+        Observable names corresponding to the rows of ``C`` and ``d``.
+    eps_names : list[str]
+        Shock names corresponding to the columns of ``B`` and ``Q``.
+    x_names : list[str]
+        State names corresponding to the rows of ``A`` and ``B``.
+
+    """
+
     A: NDArray
     B: NDArray
     C: NDArray

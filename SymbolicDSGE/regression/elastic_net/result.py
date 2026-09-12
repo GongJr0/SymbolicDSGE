@@ -15,6 +15,36 @@ NDI = NDArray[np.int64]
 
 @dataclass(frozen=True)
 class ElasticNetResult(RegressionResult):
+    """Elastic net regression result.
+
+    Extends :class:`RegressionResult` with combined L1 and L2 diagnostics. Path
+    fields are populated by the grid-search entry point and are None for a direct
+    fit.
+
+    Attributes
+    ----------
+    alpha : float64
+        Selected total penalty weight.
+    l1_ratio : float64
+        L1 share of the total penalty, in ``[0, 1]``.
+    effective_dof : float64
+        Effective degrees of freedom at the selected penalty.
+    intercept : bool
+        Whether the returned design includes an intercept column.
+    alpha_grid : NDF | None
+        Grid of alpha values evaluated by the grid search.
+    coefficient_path : NDF | None
+        Coefficients evaluated on ``alpha_grid``.
+    objective_trace : NDF | None
+        Objective trace over ``alpha_grid``.
+    rss_trace : NDF | None
+        Residual-sum-of-squares trace over ``alpha_grid``.
+    effective_dof_trace : NDF | None
+        Effective degrees of freedom over ``alpha_grid``.
+    status_trace : NDI | None
+        Solver status code over ``alpha_grid``.
+    """
+
     alpha: float64
     l1_ratio: float64
     effective_dof: float64
@@ -88,43 +118,52 @@ class ElasticNetResult(RegressionResult):
 
     @cached_property
     def penalized_coefficients(self) -> NDF:
+        """Coefficients subject to the penalty, excluding the intercept when present."""
         if self.intercept:
             return self.coefficients[1:]
         return self.coefficients
 
     @cached_property
     def active_mask(self) -> NDArray[np.bool_]:
+        """Boolean mask over the penalized coefficients, True where nonzero."""
         return np.asarray(self.penalized_coefficients != 0.0, dtype=bool)
 
     @cached_property
     def n_active(self) -> int:
+        """Number of active penalized coefficients."""
         return int(np.count_nonzero(self.active_mask))
 
     @cached_property
     def selected_variables(self) -> list[str]:
+        """Variable names whose penalized coefficients are active."""
         variables = self.variables[1:] if self.intercept else self.variables
         return [name for name, active in zip(variables, self.active_mask) if active]
 
     @cached_property
     def l1_norm(self) -> float64:
+        """L1 norm of the penalized coefficients."""
         return float64(np.abs(self.penalized_coefficients).sum())
 
     @cached_property
     def l2_norm_sq(self) -> float64:
+        """Squared L2 norm of the penalized coefficients."""
         return float64(np.dot(self.penalized_coefficients, self.penalized_coefficients))
 
     @cached_property
     def l1_penalty(self) -> float64:
+        """Realized L1 penalty component."""
         return float64(self.alpha * self.l1_ratio * self.l1_norm)
 
     @cached_property
     def l2_penalty(self) -> float64:
+        """Realized L2 penalty component."""
         return float64(
             0.5 * self.alpha * (float64(1.0) - self.l1_ratio) * self.l2_norm_sq
         )
 
     @cached_property
     def penalty(self) -> float64:
+        """Combined realized penalty, the sum of the L1 and L2 components."""
         return float64(self.l1_penalty + self.l2_penalty)
 
 

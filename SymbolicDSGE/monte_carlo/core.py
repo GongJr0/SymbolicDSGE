@@ -67,6 +67,26 @@ def is_failed(native_run: NativeRunResult) -> bool:
 
 @dataclass(frozen=True)
 class MCPipeline:
+    """A Monte Carlo experiment represented as a pipeline; resolving to a Direct Acyclic Graph (DAG) of steps.
+
+    Parameters
+    ----------
+    per_rep_steps : Sequence[MCStep]
+        Per-replication step specifications. Must contain exactly one DATAGEN step
+        and may contain any number of FILTER, TRANSFORM, TEST, and REGRESSION steps.
+    postproc_steps : Sequence[MCStep]
+        Post-loop step specifications. May contain any number of POSTPROC steps.
+        These steps are run once after the loop over the assembled
+        across-replication traces.
+
+    Attributes
+    ----------
+    per_rep_steps : tuple[MCStep, ...]
+        The per-replication steps in resolved execution order.
+    postproc_steps : tuple[MCStep, ...]
+        The post-loop steps.
+    """
+
     #: Per-replication steps: the dependency DAG, a single DATAGEN root first.
     per_rep_steps: tuple[MCStep, ...]
 
@@ -247,7 +267,6 @@ class MCPipeline:
         breakdown, naming no step as the one to shrink: which traces are worth
         their memory is not a question the step graph can answer.
         """
-
         plan = self._resolve_output_specs(reference, dgp)
         return MCMemoryProfiler(
             plan,
@@ -266,7 +285,6 @@ class MCPipeline:
         DTOs. Bulk side-channels (``raw_model_data`` arrays, custom-op blobs) are
         referenced by key and written as bundle members by the bundle builder.
         """
-
         return pipeline_to_spec(self)
 
     def run(
@@ -280,6 +298,52 @@ class MCPipeline:
         n_jobs: int | None = None,
         check_memory_availability: bool = True,
     ) -> MCPipelineResult:
+        """Run a Monte carlo pipeine with the specified per-replication and post-loop steps.
+
+        Parameters
+        ----------
+        reference : SolvedModel
+            The primary model being tested against raw data or a DGP model.
+            The reference slot is mandatory and pipelines name/size/shape resolution
+            largely go through it.
+        n_rep : int
+            Total number of replications to run. Must be positive.
+            Steps do not necessarily keep the data from all replications.
+            Refer to documentation on the monte_carlo module to learn about specifying
+            high-rep runs with controlled memory usage.
+        dgp : SolvedModel | None
+            Model to use as the Data Generating Process (DGP) for simulation DATAGEN steps.
+            A simulation step defaults to DGP as the target but it is possible to override it to
+            use the reference model instead.
+        fail_fast : bool
+            Whether to raise an exception immediately when any step fails. Set it to ``False`` if you expect
+            occasional failures and want to keep collecting results regardless.
+        verbosity : int
+            Reporting granularity of performance metrics.
+            0: silent, 1: report aggregate run performance, 2: report per-step, per-worker performance.
+        n_jobs : int | None
+            joblib-style parallelism control.
+            ``None`` (default) means to use all available cores. A positive integer limits the number of workers.
+            -1 means to use all available cores minus one, leaving one core free for other tasks.
+        check_memory_availability : bool
+            Whether to check if a run and its retainment specifications fit in available memory and swap space.
+            A run will warn if it exceeds physical memory, and raise a ``MemoryError`` if it exceeds all available memory (physical + swap).
+            It's not recommended to disable this check. A raise will enumerate all steps' memory usage. Use the message to trim out steps that
+            are not instrumental to your results.
+
+        Returns
+        -------
+        MCPipelineResult
+            Result object containing run metadata, retained outputs for all step types, and the record of failures collected during the run.
+            Step result accessors:
+            - :attr:`MCPipelineResult.datagen_outputs`
+            - :attr:`MCPipelineResult.filter_outputs`
+            - :attr:`MCPipelineResult.transform_outputs`
+            - :attr:`MCPipelineResult.test_summaries`
+            - :attr:`MCPipelineResult.regression_summaries`
+            - :attr:`MCPipelineResult.postproc`
+
+        """
         if n_rep <= 0:
             raise ValueError("n_rep must be positive.")
         if verbosity not in (0, 1, 2):

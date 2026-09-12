@@ -158,7 +158,7 @@ def _normal_entry(entry: ShockPlanEntry, key: int) -> NativeShockEntry:
 
 
 def _uniform_entry(entry: ShockPlanEntry, key: int) -> NativeShockEntry:
-    """scipy's uniform is parameterized by ``loc`` and a width, not by bounds."""
+    """Scipy's uniform is parameterized by ``loc`` and a width, not by bounds."""
     kwargs = {} if entry.spec is None else entry.spec.dist_kwargs
     return NativeShockEntry(
         family=SHOCK_UNIFORM,

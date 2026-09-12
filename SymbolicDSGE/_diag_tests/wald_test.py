@@ -109,7 +109,7 @@ def _fill_mean_ax0(x: NDF) -> NDF:
 
 
 def _fill_centered_ax0(x: NDF, mean: NDF) -> NDF:
-    """x with its column means subtracted."""
+    """X with its column means subtracted."""
     return fill_centered_ax0(
         np.ascontiguousarray(x, dtype=float64),
         np.ascontiguousarray(mean, dtype=float64),
@@ -132,23 +132,22 @@ def wald_mean_hac(
 
     Parameters
     ----------
-    g:
+    g : NDF
         Moment array with shape (n, q).
-    target:
+    target : NDF
         Target vector with shape (q,).
-    kernel:
+    kernel : Literal["bartlett", "parzen", "qs"]
         HAC kernel to use. One of "bartlett", "parzen", or "qs".
-    bandwidth:
+    bandwidth : int | Literal["andrews", "wooldridge", "auto"] | None
         HAC bandwidth. If an integer is provided, it is used directly. If "andrews", "wooldridge", or "auto" is provided, the bandwidth is selected using the corresponding method from Andrews (1991) or Wooldridge (2006). If None, defaults to "auto".
-    alpha:
-        Significance level for the test, used for p-value calculation. Default is 0.05.
+    alpha : float
+        Significance level for the test, used for p-value calculation.
 
     Returns
     -------
     TestResult
          Wald test result containing the test statistic, degrees of freedom, and p-value method.
     """
-
     g_arr = np.ascontiguousarray(g, dtype=float64)
     target_arr = np.ascontiguousarray(target, dtype=float64)
     n = g_arr.shape[0]
@@ -198,18 +197,17 @@ def wald_covariance_hac(
 
     Parameters
     ----------
-    g:
+    g : NDF
         Moment array with shape (n, q).
-    target:
+    target : NDF
         Target covariance matrix with shape (q, q).
-    kernel:
+    kernel : Literal["bartlett", "parzen", "qs"]
         HAC kernel to use. One of "bartlett", "parzen", or "qs".
-    bandwidth:
+    bandwidth : int | Literal["andrews", "wooldridge", "auto"] | None
         HAC bandwidth. If an integer is provided, it is used directly. If "andrews", "wooldridge", or "auto" is provided, the bandwidth is selected using the corresponding method from Andrews (1991) or Wooldridge (2006). If None, defaults to "auto".
-    alpha:
-        Significance level for the test, used for p-value calculation. Default is 0.05.
+    alpha : float
+        Significance level for the test, used for p-value calculation.
     """
-
     g_arr = np.ascontiguousarray(g, dtype=float64)
     target_arr = np.ascontiguousarray(target, dtype=float64)
 
@@ -277,18 +275,17 @@ def wald_second_moment_hac(
 
     Parameters
     ----------
-    g:
+    g : NDF
         Moment array with shape (n, q).
-    target:
+    target : NDF
         Target second moment matrix with shape (q, q).
-    kernel:
+    kernel : Literal["bartlett", "parzen", "qs"]
         HAC kernel to use. One of "bartlett", "parzen", or "qs".
-    bandwidth:
-        HAC bandwidth. If an integer is provided, it is used directly. If "andrews", "wooldridge", or "auto" is provided, the bandwidth is selected using the corresponding method from Andrews (1991) or Wooldridge (2006). If None, defaults to "auto".
-    alpha:
-        Significance level for the test, used for p-value calculation. Default is 0.05.
+    bandwidth : int | Literal["andrews", "wooldridge", "auto"] | None
+    HAC bandwidth. If an integer is provided, it is used directly. If "andrews", "wooldridge", or "auto" is provided, the bandwidth is selected using the corresponding method from Andrews (1991) or Wooldridge (2006). If None, defaults to "auto".
+    alpha : float
+        Significance level for the test, used for p-value calculation.
     """
-
     g_arr = np.ascontiguousarray(g, dtype=float64)
     target_arr = np.ascontiguousarray(target, dtype=float64)
 

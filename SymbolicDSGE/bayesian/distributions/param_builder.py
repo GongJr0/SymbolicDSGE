@@ -1,3 +1,5 @@
+"""Distribution parameter dispatcher for Bayesian estimation of DSGE models."""
+
 from .norm import NORM_DEFAULTS
 from .log_norm import LOGNORM_DEFAULTS
 from .half_norm import HALFNORM_DEFAULTS
@@ -27,6 +29,19 @@ DIST_PARAMS_DISPATCH: dict[DistributionFamily, Mapping[str, Any]] = {
 
 
 def get_dist_params(family: str) -> dict[str, Any]:
+    """Get the default parameters for the given :class:`DistributionFamily` member.
+
+    Parameters
+    ----------
+    family : str
+        Distribution family name, must be one of the members of :class:`DistributionFamily`.
+
+    Returns
+    -------
+    dict[str, Any]
+        Default parameters for the given distribution family.
+
+    """
     if family not in DIST_PARAMS_DISPATCH:
         raise ValueError(
             f"Unsupported distribution family: {family}\n please choose from: {list(DIST_PARAMS_DISPATCH.keys())}"

@@ -1,3 +1,8 @@
+"""Transforms for :class:`Prior` specifications in Bayesian estimation of DSGE models.
+
+Transformations are used to map distributions finite support to unconstrained space for sampling.
+"""
+
 from .affine_logit import AffineLogitTransform
 from .affine_probit import AffineProbitTransform
 from .cholesky_corr import CholeskyCorrTransform

@@ -1,3 +1,5 @@
+"""Mirror of the native prior program, packing the prior distribution and transform arguments into flat arrays for the kernel to read."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -87,7 +89,8 @@ class PyPriorTables:
     ``len(scalar_indices)``; ``scalar_dist_params`` is n_scalar*5 and
     ``scalar_transform_params`` n_scalar*3, both read row-major flat by C.
     Matrix (CPC/LKJ) block columns run to ``n_blocks`` =
-    ``len(matrix_offsets)``."""
+    ``len(matrix_offsets)``.
+    """
 
     has_prior: bool
     scalar_indices: NDI  # n_scalar
@@ -103,8 +106,10 @@ class PyPriorTables:
 
     @classmethod
     def empty(cls) -> "PyPriorTables":
-        """The disabled table: no priors, or a prior the packer could not
-        represent. Every column is length zero, so the kernel sums nothing."""
+        """The disabled table: no priors, or a prior the packer could not represent.
+
+        Every column is length zero, so the kernel sums nothing.
+        """
         empty_i = np.empty(0, dtype=np.int64)
         return cls(
             has_prior=False,

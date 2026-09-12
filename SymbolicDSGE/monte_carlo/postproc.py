@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, TypedDict, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -28,15 +28,45 @@ from numpy.typing import NDArray
 
 @dataclass(frozen=True)
 class Summary:
+    """Aggregate/summary data representation for a POSTPROC artifact.
+
+    Attributes
+    ----------
+    value : Any
+        Value to be stored as JSON. Can be a scalar, dict, sequence, array, or
+        pandas ``DataFrame``/``Series``.
+    """
+
     value: Any
 
 
 @dataclass(frozen=True)
 class Raw:
+    """Raw numeric data representation for a POSTPROC artifact.
+
+    Attributes
+    ----------
+    value : NDArray[Any]
+        Value being stored. Must be a numeric array (``NDArray[Any]``) to be
+        serialized as a parquet member.
+    """
+
     value: NDArray[Any]
 
 
 class Artifact(TypedDict):
+    """Post-loop step output, holding whichever of the two representations it produced.
+
+    Attributes
+    ----------
+    raw : Raw | None
+        Bulk numeric output, serialized as a parquet member. None when the step
+        returned no raw data.
+    summary : Summary | None
+        Aggregate output, serialized as JSON. None when the step returned no
+        summary.
+    """
+
     raw: Raw | None
     summary: Summary | None
 

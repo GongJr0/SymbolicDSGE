@@ -1,3 +1,10 @@
+"""Tanh transform for :class:`Prior` specifications in Bayesian DSGE estimation.
+
+Tanh transforms are used to map +-1 bounded distributions to unconstrained space for sampling.
+Individual correlation parameters (where LKJ can't be used) and any other [-1, 1] bounded distributions
+are natural complements to this transform.
+"""
+
 from .transform import Transform, TransformMethod
 from ..support import Support
 from typing import overload
@@ -18,8 +25,7 @@ from ..._ckernels.transforms import (
 
 
 class TanhTransform(Transform):
-    """
-    Maps x in (-1, 1) <-> y in (-inf, +inf)
+    """Map x in (-1, 1) <-> y in (-inf, +inf).
 
     forward:  y = atanh(x)
     inverse:  x = tanh(y)

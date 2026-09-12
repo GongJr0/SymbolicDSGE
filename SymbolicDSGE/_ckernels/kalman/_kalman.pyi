@@ -69,7 +69,8 @@ def ekf_hot_loop(
     tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
 ]:
     """Run the native extended Kalman filter (nonlinear measurement via the
-    meas/jac @cfunc addresses)."""
+    meas/jac @cfunc addresses).
+    """
 
 def ukf_hot_loop(
     meas_addr: int,

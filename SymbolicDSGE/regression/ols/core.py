@@ -19,6 +19,27 @@ def ols(
     variables: list[str] | None = None,
     intercept: bool = True,
 ) -> OLSResult:
+    """Fit an ordinary least squares regression.
+
+    Attempts a Cholesky solve and falls back to least squares when the design is
+    rank deficient; the result's ``status`` records which path was taken.
+
+    Parameters
+    ----------
+    x : NDF
+        Design matrix, shape ``(n, k)``.
+    y : NDF
+        Response vector, shape ``(n,)``.
+    variables : list[str] | None
+        Optional names for the design columns. Defaults to ``x0``, ``x1``, ...
+    intercept : bool
+        If True, include an unpenalized intercept column in the design.
+
+    Returns
+    -------
+    OLSResult
+        Fit with the common diagnostics plus OLS inference outputs.
+    """
     X, y, variables = process_args(x, y, variables)
 
     var_names = list(variables)

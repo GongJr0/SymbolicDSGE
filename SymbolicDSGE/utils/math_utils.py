@@ -10,11 +10,13 @@ def HP_two_sided(
     """
     Apply the Hodrick-Prescott filter to a time series to separate the trend and cyclical components.
 
-    Parameters:
+    Parameters
+    ----------
     s (pd.Series | np.ndarray): The input time series data.
     lamb (float): The smoothing parameter. Default is 1600, commonly used for quarterly data.
 
-    Returns:
+    Returns
+    -------
     trend (pd.Series | np.ndarray): The trend component of the series.
     cycle (pd.Series | np.ndarray): The cyclical component of the series.
     """
@@ -49,11 +51,13 @@ def HP_one_sided(
     """
     Apply the one-sided Hodrick-Prescott filter to a time series to separate the trend and cyclical components.
 
-    Parameters:
+    Parameters
+    ----------
     series (pd.Series | np.ndarray): The input time series data.
     lamb (float): The smoothing parameter. Default is 1600, commonly used for quarterly data.
 
-    Returns:
+    Returns
+    -------
     trend (pd.Series | np.ndarray): The trend component of the series.
     cycle (pd.Series | np.ndarray): The cyclical component of the series.
     """
@@ -98,11 +102,13 @@ def annualized_log_percent(
     """
     Calculate the annualized log percent change of a time series.
 
-    Parameters:
+    Parameters
+    ----------
     series (pd.Series | np.ndarray): The input time series data.
     periods_per_year (int): Number of periods in a year. Default is 4 for quarterly data.
 
-    Returns:
+    Returns
+    -------
     pd.Series | np.ndarray: The annualized log percent change of the series.
     """
     if isinstance(s, pd.Series):
@@ -127,10 +133,12 @@ def demean(s: pd.Series | np.ndarray) -> pd.Series | np.ndarray:
     """
     Demean a time series by subtracting its mean.
 
-    Parameters:
+    Parameters
+    ----------
     series (pd.Series | np.ndarray): The input time series data.
 
-    Returns:
+    Returns
+    -------
     pd.Series | np.ndarray: The demeaned series.
     """
     if isinstance(s, pd.Series):
@@ -147,10 +155,12 @@ def detrend(s: pd.Series | np.ndarray) -> pd.Series | np.ndarray:
     """
     Detrend a time series by removing its linear trend.
 
-    Parameters:
+    Parameters
+    ----------
     s (pd.Series | np.ndarray): The input time series data.
 
-    Returns:
+    Returns
+    -------
     pd.Series | np.ndarray: The detrended series.
     """
     if isinstance(s, pd.Series):

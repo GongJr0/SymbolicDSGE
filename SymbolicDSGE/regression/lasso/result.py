@@ -14,6 +14,32 @@ NDF = NDArray[float64]
 
 @dataclass(frozen=True)
 class LassoResult(RegressionResult):
+    """L1-penalized regression result.
+
+    Extends :class:`RegressionResult` with L1 sparsity diagnostics. Path fields are
+    populated by the grid-search entry point; a direct fit returns only the selected
+    coefficient vector and the scalar L1 diagnostics, leaving them None.
+
+    Attributes
+    ----------
+    alpha : float64
+        Selected L1 penalty weight.
+    effective_dof : float64
+        Active penalized coefficient count plus the intercept, when present.
+    intercept : bool
+        Whether the returned design includes an intercept column.
+    alpha_grid : NDF | None
+        Grid of alpha values evaluated by the grid search.
+    coefficient_path : NDF | None
+        Coefficients evaluated on ``alpha_grid``.
+    objective_trace : NDF | None
+        Residual-loss trace over ``alpha_grid``.
+    knot_lambdas : NDF | None
+        LARS path knot locations from grid-search construction.
+    knot_coefficients : NDF | None
+        LARS path coefficients aligned to ``knot_lambdas``.
+    """
+
     alpha: float64
     effective_dof: float64
     intercept: bool = False
@@ -86,29 +112,35 @@ class LassoResult(RegressionResult):
 
     @cached_property
     def penalized_coefficients(self) -> NDF:
+        """Coefficients subject to the penalty, excluding the intercept when present."""
         if self.intercept:
             return self.coefficients[1:]
         return self.coefficients
 
     @cached_property
     def active_mask(self) -> NDArray[np.bool_]:
+        """Boolean mask over the penalized coefficients, True where nonzero."""
         return np.asarray(self.penalized_coefficients != 0.0, dtype=bool)
 
     @cached_property
     def n_active(self) -> int:
+        """Number of active penalized coefficients."""
         return int(np.count_nonzero(self.active_mask))
 
     @cached_property
     def selected_variables(self) -> list[str]:
+        """Variable names whose penalized coefficients are active."""
         variables = self.variables[1:] if self.intercept else self.variables
         return [name for name, active in zip(variables, self.active_mask) if active]
 
     @cached_property
     def l1_norm(self) -> float64:
+        """L1 norm of the penalized coefficients."""
         return float64(np.abs(self.penalized_coefficients).sum())
 
     @cached_property
     def l1_penalty(self) -> float64:
+        """Realized L1 penalty value."""
         return float64(self.alpha * self.l1_norm)
 
 

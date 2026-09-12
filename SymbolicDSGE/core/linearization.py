@@ -1,3 +1,5 @@
+"""Symbolic linearization utilities for DSGE models."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -16,6 +18,19 @@ _VAR_FUNC: TypeAlias = FunctionClass | UndefinedFunction
 
 
 class LinearizationMethod(StrEnum):
+    """Linearization methods for transforming variables in a symbolic model.
+
+    Attributes
+    ----------
+    LOG : Literal["log"]
+        Log-linearization
+    TAYLOR : Literal["taylor"]
+        First-order Taylor expansion linearization
+    NONE : Literal["none"]
+        No linearization; the variable is used as-is in the linearized model.
+
+    """
+
     LOG = "log"
     TAYLOR = "taylor"
     NONE = "none"
@@ -23,12 +38,41 @@ class LinearizationMethod(StrEnum):
 
 @dataclass(frozen=True)
 class VariableTransformSpec:
+    """Specification of a variable transformation for symbolic linearization.
+
+    Attributes
+    ----------
+    original : _VAR_FUNC
+        Original variable function (e.g., a sympy.Function) before transformation.
+    transformed : _VAR_FUNC
+        Transformed variable function after applying the specified linearization method.
+    method : LinearizationMethod
+        Method of linearization applied to the variable (e.g., log-linearization, Taylor expansion, or none).
+    steady_state : Expr | None
+        Steady state value of the variable, required for certain linearization methods (e.g., log-linearization).
+
+    """
+
     original: _VAR_FUNC
     transformed: _VAR_FUNC
     method: LinearizationMethod
     steady_state: Expr | None
 
     def reconstruct(self, transformed_call: Expr) -> Expr:
+        """Reconstruct the original variable expression from the transformed variable expression.
+
+        Parameters
+        ----------
+        transformed_call : Expr
+            Transformed variable expression (e.g., the result of applying the linearization method).
+
+        Returns
+        -------
+        Expr
+            Original variable expression reconstructed from the transformed expression,
+            using the specified linearization method and steady state.
+
+        """
         if self.method == LinearizationMethod.NONE:
             return transformed_call
 
@@ -48,6 +92,23 @@ class VariableTransformSpec:
 
 @dataclass(frozen=True)
 class LinearizationContext:
+    """Context specification for a linearization procedure, including variable transformation specifications and mappings.
+
+    Attributes
+    ----------
+    specs : tuple[VariableTransformSpec, ...]
+        Specs for individual variable transformations.
+    time_symbol : Symbol
+        Symbol representing the time index in the model (e.g., 't').
+    spec_by_original : dict[_VAR_FUNC, VariableTransformSpec]
+        Mapping from original variable functions to their corresponding transformation specifications.
+    spec_by_transformed : dict[_VAR_FUNC, VariableTransformSpec]
+        Mapping from transformed variable functions to their corresponding transformation specifications.
+    transformed_call_registry : dict[_VAR_FUNC, _VAR_FUNC]
+        Registry mapping transformed variable functions back to their original variable functions.
+
+    """
+
     specs: tuple[VariableTransformSpec, ...]
     time_symbol: Symbol
     spec_by_original: dict[_VAR_FUNC, VariableTransformSpec]
@@ -90,6 +151,8 @@ class LinearizationContext:
 
 
 class Linearizer:
+    """Class for performing symbolic linearization of DSGE models."""
+
     def __init__(
         self,
         conf: ModelConfig | None = None,
@@ -142,6 +205,19 @@ class Linearizer:
 
     @classmethod
     def from_config(cls, conf: ModelConfig) -> "Linearizer":
+        """Build a Linearizer instance from a ModelConfig.
+
+        Parameters
+        ----------
+        conf : ModelConfig
+            Model configuration containing the linearization spec.
+
+        Returns
+        -------
+        "Linearizer"
+            Linearizer constructed from the provided ModelConfig.
+
+        """
         return cls(conf)
 
     def _build_context(
@@ -230,6 +306,24 @@ class Linearizer:
         require_zero_at_expansion_point: bool = False,
         equation_index: int | None = None,
     ) -> tuple[Expr, Expr]:
+        """Linearize a specific expression, returning the linearized expression and the residual at the expansion point.
+
+        Parameters
+        ----------
+        expr : Expr
+            Original expression to be linearized.
+        require_zero_at_expansion_point : bool
+            Whether to enforce that the expreesion evaluates to zero at the expansion point
+            (i.e. expansion point is the steady state).
+        equation_index : int | None
+            Index of the equation being linearized, used for error messages. If None, no index is included in error messages.
+
+        Returns
+        -------
+        tuple[Expr, Expr]
+            A tuple containing the linearized expression and the residual at the expansion point.
+
+        """
         self._validate_ready_for_linearization()
         transformed_expr = self._transform_expr(expr)
         transformed_calls = self.context.collect_transformed_calls(transformed_expr)
@@ -260,6 +354,14 @@ class Linearizer:
         return self._rename_public_variables(linear_expr), residual_at_zero
 
     def linearize_equations(self) -> list[Eq]:
+        """Linearize the model equations, returning a list of linearized equations.
+
+        Returns
+        -------
+        list[Eq]
+            List of linearized equations as :class:`sympy.Eq` objects.
+
+        """
         out: list[Eq] = []
         shock_zero_subs = self._shock_zero_substitutions()
         for idx, eq in enumerate(self.equations):
@@ -311,26 +413,32 @@ class Linearizer:
 
     @property
     def context(self) -> LinearizationContext:
+        """Linearization context of the instance."""
         return self._context
 
     @property
     def method_dict(self) -> dict[_VAR_FUNC, LinearizationMethod]:
+        """Mapping of original variable to linearization method."""
         return self._method_dict
 
     @property
     def steady_state(self) -> dict[_VAR_FUNC, Expr | None]:
+        """Mapping of original variable to its steady state value/expression."""
         return self._steady_state
 
     @property
     def equations(self) -> list[Eq]:
+        """Model equations to be linearized, in the form of a list of sympy.Eq objects."""
         return self._equations
 
     @property
     def residuals(self) -> list[Expr]:
+        """Residuals of the model equations at the expansion point (steady state)."""
         return self._residuals
 
     @property
     def missing_steady_states(self) -> tuple[_VAR_FUNC, ...]:
+        """Tuple of original variables that are missing steady state values required for linearization."""
         return tuple(
             spec.original
             for spec in self.context.specs
@@ -339,6 +447,19 @@ class Linearizer:
 
 
 def linearize_model(conf: ModelConfig) -> ModelConfig:
+    """Apply symbolic linearization to a :class:`ModelConfig`, returning a new :class:`ModelConfig` with linearized equations.
+
+    Parameters
+    ----------
+    conf : ModelConfig
+        Initial model configuration to be linearized.
+
+    Returns
+    -------
+    ModelConfig
+        Linearized model configuration with updated equations and a flag indicating that it has been symbolically linearized.
+
+    """
     if conf.symbolically_linearized:
         raise ValueError("ModelConfig is already symbolically linearized.")
 

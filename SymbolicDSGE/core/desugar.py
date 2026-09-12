@@ -55,11 +55,23 @@ class GeneratedVariable:
 
 @dataclass(frozen=True)
 class DesugarResult:
+    """Desugared model configuration and the aux variables the compiler generated.
+
+    Attributes
+    ----------
+    config : ModelConfig
+        The model configuration with the aux variables and their defining equations
+    generated : tuple[GeneratedVariable, ...]
+        The aux variables the compiler generated, with their origin and depth.
+
+    """
+
     config: ModelConfig
     generated: tuple[GeneratedVariable, ...]
 
     @property
     def names(self) -> tuple[str, ...]:
+        """Names of the generated variables."""
         return tuple(g.name for g in self.generated)
 
     def positions(self, order: Any) -> dict[str, int]:

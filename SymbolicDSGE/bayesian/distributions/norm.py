@@ -1,3 +1,10 @@
+"""Normal distribution for Bayesian estimation of DSGE models.
+
+Gaussian distributions are by far the most commonly used in a priori DSGE estimation work.
+They represent unboundedness, therefore are a natural option for multiplicative model equation
+parameters with no structural restrictions.
+"""
+
 from .distribution import Distribution, DistributionFamily, RandomState, Size, VecF64
 from ..support import OutOfSupportError, Support
 
@@ -8,13 +15,26 @@ from scipy.special import ndtr, ndtri
 from numba import njit
 
 
-class NormalParameters(TypedDict):
+class NormalParams(TypedDict):
+    """Parameters for the Normal distribution.
+
+    Attributes
+    ----------
+    mean : float
+        Mean of the normal distribution.
+    std : float
+        Standard deviation of the normal distribution.
+    random_state : RandomState
+        Random state for reproducibility of random variates.
+
+    """
+
     mean: float
     std: float
     random_state: RandomState
 
 
-NORM_DEFAULTS = NormalParameters(
+NORM_DEFAULTS = NormalParams(
     mean=0.0,
     std=1.0,
     random_state=None,
@@ -115,10 +135,6 @@ class Normal(Distribution[float64, VecF64]):
 
     def __repr__(self) -> str:
         return self.__class__.__name__
-
-    @property
-    def rng(self) -> np.random.Generator:
-        return self._rng(self._random_state)
 
     @property
     def support(self) -> Support:

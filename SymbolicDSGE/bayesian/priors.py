@@ -1,3 +1,9 @@
+"""Prior specifications for Bayesian estimation of DSGE models.
+
+Composed as a {distribution, transform} pair, transforms govern the density of the prior in parameter space
+and the transformation to an unconstrained sampling space. Priors are required for MAP and MCMC esitmation.
+"""
+
 from __future__ import annotations
 import warnings
 
@@ -23,6 +29,22 @@ from typing import overload
 
 
 class PriorDispatch(TypedDict):
+    """Interface for dispatching prior specifications to live :class:`Prior` objects.
+
+    Attributes
+    ----------
+    distribution : Distribution
+        Distribution of the prior in parameter space.
+    parameters : dict[str, Any]
+        Parameters of the distribution, as a TypedDict for each family.
+    transform : TransformMethod
+        Transformation mapping the distribution support to unconstrained sampling space.
+    transform_kwargs : dict[str, Any] | None
+        Transform parameters, as a TypedDict for each transform.
+        None if the transform has no parameters.
+
+    """
+
     distribution: Distribution
     parameters: dict[str, Any]  # TypedDicts for each family
     transform: TransformMethod
@@ -31,6 +53,19 @@ class PriorDispatch(TypedDict):
 
 @dataclass(frozen=True)
 class Prior:
+    """Prior specification for a parameter; used in MAP and MCMC routines.
+
+    Attributes
+    ----------
+    dist : Distribution
+        Distribution of the prior in parameter space.
+    transform : Transform
+        Transformation mapping the parameter space outputs to unconstrained
+        optimization/sampling space.
+    support
+    maps_to
+    """
+
     dist: Distribution
     transform: Transform
 
@@ -43,6 +78,19 @@ class Prior:
     def logpdf(self, z: NDArray[float64]) -> NDArray[float64]: ...
 
     def logpdf(self, z: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
+        """Logpdf function for the prior, evaluated in the unconstrained space.
+
+        Parameters
+        ----------
+        z : float64 | NDArray[float64]
+            Value(s) in the unconstrained space at which to evaluate the logpdf.
+
+        Returns
+        -------
+        float64 | NDArray[float64]
+            Log density of the prior evaluated at the given value(s). Transformed back to parameter space.
+
+        """
         maps_to = self.transform.maps_to
         if not maps_to.contains(z):
             raise OutOfSupportError(z, maps_to)
@@ -58,6 +106,19 @@ class Prior:
     def grad_logpdf(self, z: NDArray[float64]) -> NDArray[float64]: ...
 
     def grad_logpdf(self, z: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
+        """Gradient of the logpdf function for the prior, evaluated in the unconstrained space.
+
+        Parameters
+        ----------
+        z : float64 | NDArray[float64]
+            Value(s) in the unconstrained space at which to evaluate the gradient of the logpdf.
+
+        Returns
+        -------
+        float64 | NDArray[float64]
+            Gradient of the log density of the prior evaluated at the given value(s). Transformed back to parameter space.
+
+        """
         maps_to = self.transform.maps_to
         if not maps_to.contains(z):
             raise OutOfSupportError(z, maps_to)
@@ -70,6 +131,21 @@ class Prior:
         return dx_dz * gx + self.transform.grad_log_det_abs_jacobian_inverse(z)
 
     def rvs(self, size: Size, random_state: RandomState) -> NDArray[float64]:
+        """Sampler for the prior, in parameter space.
+
+        Parameters
+        ----------
+        size : Size
+            Shape of the output array of samples to draw from the prior.
+        random_state : RandomState
+            Random state or seed for reproducibility of the samples.
+
+        Returns
+        -------
+        NDArray[float64]
+            Samples drawn from the prior distribution, transformed to the unconstrained space.
+
+        """
         return cast(VecF64, self.dist.rvs(size, random_state))
 
     def to_spec(self) -> PriorSpec:
@@ -96,6 +172,19 @@ class Prior:
 
     @classmethod
     def from_spec(cls, spec: PriorSpec) -> Prior:
+        """Construct a :class:`Prior` from a ``PriorSpec``.
+
+        Parameters
+        ----------
+        spec : PriorSpec
+            Spec class containing the distribution, parameters, transform, and transform_kwargs to construct the Prior.
+
+        Returns
+        -------
+        Prior
+            Live Prior object constructed from the provided spec.
+
+        """
         return make_prior(
             distribution=spec["distribution"],
             parameters=spec["parameters"],
@@ -121,10 +210,12 @@ class Prior:
 
     @property
     def support(self) -> Support:
+        """Support of the prior in parameter space."""
         return self.dist.support
 
     @property
     def maps_to(self) -> Support:
+        """The support of the prior in unconstrained space, i.e., the range of the transform."""
         return self.transform.maps_to
 
 

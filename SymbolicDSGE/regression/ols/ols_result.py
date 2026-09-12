@@ -29,26 +29,50 @@ NDF = NDArray[float64]
 
 @dataclass(frozen=True)
 class OLSResult(RegressionResult):
+    """Ordinary least squares result.
+
+    Extends :class:`RegressionResult` with standard errors, coefficient tests,
+    confidence intervals and an F-test. The fit attempts a Cholesky solve and falls
+    back to least squares when the design is rank deficient; ``status`` records
+    which path was taken.
+    """
+
     _L: NDF = field(repr=False)
 
     @cached_property
     def se(self) -> NDF:
+        """Coefficient standard errors."""
         return se(self._L, self.y, self.y_hat, self.X)
 
     @cached_property
     def t_stat(self) -> NDF:
+        """Coefficient t-statistics."""
         return self.coefficients / self.se
 
     @cached_property
     def partial_r2(self) -> NDF:
+        """Partial R-squared values implied by each t-statistic."""
         return self.t_stat**2 / (self.t_stat**2 + self.n - self.k)
 
     @cached_property
     def p_values(self) -> NDF:
+        """Two-sided coefficient p-values under the t reference distribution."""
         df = self.n - self.k
         return 2 * (1 - t.cdf(abs(self.t_stat), df))
 
     def confidence_intervals(self, alpha: FloatScalar = 0.05) -> NDF:
+        """Lower and upper coefficient bounds.
+
+        Parameters
+        ----------
+        alpha : float
+            Two-sided significance level.
+
+        Returns
+        -------
+        NDF
+            Interval bounds, shape ``(k, 2)``.
+        """
         q = 1 - alpha / 2
         df = self.n - self.k
         t_crit = t.ppf(q, df)
@@ -58,6 +82,18 @@ class OLSResult(RegressionResult):
         return asarray(list(zip(lower_bound, upper_bound)), dtype=float64)
 
     def summary(self, alpha: FloatScalar = 0.05) -> DataFrame:
+        """Coefficient table with intervals, t-statistics, p-values and partial R-squared.
+
+        Parameters
+        ----------
+        alpha : float
+            Two-sided significance level used for the interval columns.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per design column.
+        """
         import pandas as pd
 
         coef_ci = self.confidence_intervals(alpha)
@@ -79,6 +115,18 @@ class OLSResult(RegressionResult):
         return summary_df
 
     def F_test(self, alpha: FloatScalar = 0.05) -> TestResult:
+        """Regression F-test against the relevant F reference distribution.
+
+        Parameters
+        ----------
+        alpha : float
+            Significance level for the rejection decision.
+
+        Returns
+        -------
+        TestResult
+            Statistic, p-value and rejection decision.
+        """
         r2 = self.r2
         n = self.n
         k = self.k

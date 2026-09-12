@@ -1,3 +1,5 @@
+"""Base :class:`SolvedModel` interface for perturbation and piecewise solutions."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -65,6 +67,31 @@ def _load_sr_fit_dependencies() -> tuple[type, type]:
 
 
 class SolvedModel(ABC, Generic[Policy]):
+    """Solved generic DSGE model.
+
+    FirstOrderSolvedModel (order=1) and SecondOrderSolvedModel (order=2) are
+    perturbation subclasses. PiecewiseSolvedModel is the OccBin (order=1 with
+    constraints) subclass.
+
+    Parameters
+    ----------
+    compiled : CompiledModel
+        The compiled model, containing the linearized equations and other metadata.
+    policy : BaseSolution
+        The solution policy, containing the decision rules and steady state.
+
+    Attributes
+    ----------
+    compiled : CompiledModel
+        The compiled model the solution was built from.
+    policy : BaseSolution
+        The decision rule solution.
+    config : ModelConfig
+        The compiled model's symbolic configuration.
+    kalman_config : KalmanConfig | None
+        The compiled model's filter configuration, when one was supplied.
+    """
+
     def __init__(self, compiled: CompiledModel, policy: Policy) -> None:
         self.compiled = compiled
         self.policy = policy
@@ -90,6 +117,7 @@ class SolvedModel(ABC, Generic[Policy]):
     ) -> SimResult:
         """
         Simulate the solved DSGE model over T periods.
+
         Parameters
         ----------
         T : int
@@ -135,6 +163,7 @@ class SolvedModel(ABC, Generic[Policy]):
     ) -> SimResult:
         """
         Compute impulse response functions for specified shocks over T periods.
+
         Parameters
         ----------
         shocks : list[str]
@@ -154,7 +183,6 @@ class SolvedModel(ABC, Generic[Policy]):
         dict[str, ndarray]
             A dictionary mapping variable names to their impulse response time series.
         """
-
         if not shocks:
             raise ValueError("At least one shock must be specified for IRF.")
         unknown = [s for s in shocks if s not in self.compiled.shock_names]
@@ -208,6 +236,7 @@ class SolvedModel(ABC, Generic[Policy]):
     ) -> None:
         """
         Plot impulse response functions for specified shocks over T periods.
+
         Parameters
         ----------
         T : int
@@ -226,7 +255,6 @@ class SolvedModel(ABC, Generic[Policy]):
         -------
         None
         """
-
         tr = self.irf(shocks=shocks, T=T, scale=scale, observables=observables)
         obs_vars = [v.name for v in self.compiled.config.observables]
 
@@ -349,7 +377,6 @@ class SolvedModel(ABC, Generic[Policy]):
         including generated lags. A mapping names the variables it sets and starts
         the rest at their steady state.
         """
-
         n = self.compiled.n_var
 
         if x0 is None:
@@ -393,8 +420,11 @@ class SolvedModel(ABC, Generic[Policy]):
         *,
         drop_initial: bool = False,
     ) -> NDF:
-        """Observables along a ``states`` path. ``states`` is in levels, which is
-        what every ``_simulate_state_matrix`` returns."""
+        """Observables along a ``states`` path.
+
+        ``states`` is in levels, which is what every ``_simulate_state_matrix``
+        returns.
+        """
         start = 1 if drop_initial else 0
         y_names = self.compiled.observable_names
         is_affine = self.config.equations.obs_is_affine
@@ -458,7 +488,41 @@ class SolvedModel(ABC, Generic[Policy]):
         P0: NDF | None = None,
         R: NDF | None = None,
     ) -> FilterResult | UnscentedFilterResult:
+        """Run a Kalman filter against an observable set.
 
+        Parameters
+        ----------
+        y : NDF | pd.DataFrame
+            Observable data as a 2D array in order of declared ``observables`` or a ``DataFrame`` with columns named after the observables.
+        filter_mode : Literal["linear", "extended", "unscented"]
+            Type of the filter to run. "linear" is the standard Kalman filter, "extended" is the allows non-linear measurement equations while the state space is linear. "unscented" is the Unscented Kalman filter which allows for second-order non-linearities in the state space and any parsable non-linear measurement.
+        observables : list[str] | None
+            List of observable variable names to use in the filter. If None, all observables are used.
+        x0 : dict[str, float | float64] | list[float | float64] | NDF | None
+            Initial state at ``t - 1``, in levels. ``None`` initiates
+            the simulation at the model's steady state. A sequence covers
+            every compiled variable in declaration order, including
+            generated lags. A mapping sets variables by name, omitted
+            variables start at their steady state.
+        jitter : float | float64 | None
+            Amount of jitter to add to a covariance matrix when cholesky decomposition fails. If None, no jitter is added.
+        symmetrize : bool
+            Whether to symmetrize the covariance matrix after each update step. This can help maintain numerical stability.
+        joseph_cov : bool
+            Whether to use the Joseph form of the covariance update. This can help maintain numerical stability.
+        return_shocks : bool
+            Whether to return the estimated shocks along with the filtered states. Unavailable for the unscented filter.
+        P0 : NDF | None
+            Initial state covariance matrix. If None, the default is used.
+        R : NDF | None
+            Measurement noise covariance matrix. If None, the default is used.
+
+        Returns
+        -------
+        FilterResult | UnscentedFilterResult
+            The result of the Kalman filter, containing the filtered states, covariances, and optionally the estimated shocks.
+
+        """
         if filter_mode == "linear":
             return KalmanFilter.run(
                 **resolve_linear_args(
@@ -549,10 +613,12 @@ class SolvedModel(ABC, Generic[Policy]):
 
     @property
     def config(self) -> ModelConfig:
+        """Model configuration, including calibration, equations, and metadata."""
         return self.compiled.config
 
     @property
     def kalman_config(self) -> KalmanConfig | None:
+        """Kalman filter configuration, if one was supplied during model compilation."""
         return self.compiled.kalman
 
     @cached_property

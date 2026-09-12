@@ -1,3 +1,9 @@
+"""Softplus transform for :class:`Prior` specifications in Bayesian DSGE estimation.
+
+Softplus transforms are used to map distributions with positive supports to unconstrained space for sampling.
+Distributions such as Gamma, Inverse Gamma, Lognormal, and any other [0, +inf) are natural complements to this transform.
+"""
+
 from .transform import Transform, TransformMethod
 from ..support import Support
 from typing import overload
@@ -18,8 +24,7 @@ from ..._ckernels.transforms import (
 
 
 class SoftplusTransform(Transform):
-    """
-    Maps x in (0, +inf) <-> y in (-inf, +inf)
+    """Map x in (0, +inf) <-> y in (-inf, +inf).
 
     forward:  y = inv_softplus(x) = log(exp(x) - 1)
     inverse:  x = softplus(y)     = log(1 + exp(y))

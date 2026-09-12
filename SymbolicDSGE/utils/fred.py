@@ -6,6 +6,22 @@ from typing import Union, Literal
 
 
 class FRED:
+    """Data retrieval class for the Federal Reserve Economic Data (FRED) database.
+
+    Parameters
+    ----------
+    key_name : str
+        Name of the environment variable that contains the FRED API key.
+    key_env : str | Path | None
+        env file path to load the FRED API key from. If None, it will look for a
+        .env file in the current directory or its parents.
+
+    Attributes
+    ----------
+    db : fredapi.Fred
+        FRED API client instance.
+    """
+
     def __init__(self, key_name: str, key_env: str | Path | None = None) -> None:
         try:
             import fredapi
