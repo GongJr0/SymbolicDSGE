@@ -36,7 +36,6 @@
 ```bash
 pip install SymbolicDSGE
 pip install "SymbolicDSGE[fred]"  # FRED API utilities
-pip install "SymbolicDSGE[sr]"    # Symbolic Regression Deps
 pip install "SymbolicDSGE[ui]"    # Web based GUI
 ```
 
@@ -46,9 +45,7 @@ pip install "SymbolicDSGE[ui]"    # Web based GUI
 
 ### Overview
 
-`SymbolicDSGE` is a Python DSGE engine with a compiled backend for linear and linearized DSGE models, supporting symbolic manipulation features for in-place model modification.
-It also provides measurement-equation augmentation tools, including symbolic regression for complete or restricted free-form function discovery and OLS, Ridge, Lasso, and Elastic Net for structured linear coefficient estimation.
-The library supports a wide set of features beyond augmentation:
+`SymbolicDSGE` is a Python DSGE engine with a compiled backend for first and second order perturbations, OBCs, and symbolically linearized DSGE models; supporting a broad set of features spanning:
 
 - DSGE model specification, symbolic manipulation, and linearization
 - Bayesian and maximum-likelihood estimation
@@ -101,7 +98,9 @@ sol = solver.solve(compiled, ...)
 sol.serve(open_browser=True)
 ```
 
-Although SymbolicDSGE is still a fast-moving project; the UI effectively supports all features with the exception of integration with the `[sr]` extra as of `v1.4.2`. Symbolic Regression requires extensive configuration and templating posing unique difficulties in a no-code environment. Therefore, it's presence as a GUI component is not planned for the future.
+The UI supports multiple tabs for model building, estimation, simulation, and Monte Carlo experiments.
+While most features are not supported in their entirety; the UI offers a low-code interface for basic DSGE experiments
+and crucially, displaying the results from a `.sdsge` experiment bundle.
 
 ### Read the Docs
 

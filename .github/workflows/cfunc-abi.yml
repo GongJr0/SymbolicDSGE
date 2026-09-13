@@ -3,7 +3,7 @@ name: cfunc ABI
 # On-demand cross-platform guard for the cfunc-leaf architecture (issue #248):
 # proves a numba @cfunc is callable from native code (by pointer, GIL-free,
 # NRT-free) on every platform we ship wheels for. Runs ONLY tests/ckernels/
-# test_spike.py -- not the full suite -- with base deps only (no [ui]/[fred]/[sr]).
+# test_spike.py -- not the full suite -- with base deps only (no [ui]/[fred]).
 # The same test also rides along in cibuildwheel's per-platform test-command on
 # each wheel build; this workflow is the fast, targeted, on-demand version.
 
