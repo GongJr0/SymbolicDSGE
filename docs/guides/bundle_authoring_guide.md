@@ -232,25 +232,25 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     5196  09-10-2026 06:11   manifest.json
-     2134  09-10-2026 06:11   model/reference.yaml
-     2134  09-10-2026 06:11   model/dgp.yaml
-      630  09-10-2026 06:11   estimation/spec.json
-     1891  09-10-2026 06:11   estimation/observed.parquet
-    18906  09-10-2026 06:11   estimation/posterior.parquet
-      585  09-10-2026 06:11   estimation/result.json
-     1239  09-10-2026 06:11   montecarlo/pipeline.json
-      567  09-10-2026 06:11   montecarlo/result/meta.json
-      553  09-10-2026 06:11   montecarlo/result/datagen/datagen_steps.json
-      176  09-10-2026 06:11   montecarlo/result/tests/test_steps.json
-     3377  09-10-2026 06:11   montecarlo/result/datagen/datagen_retained_reps.parquet
-  7122646  09-10-2026 06:11   montecarlo/result/datagen/datagen_states.parquet
-  4273014  09-10-2026 06:11   montecarlo/result/datagen/datagen_shocks.parquet
-  4189809  09-10-2026 06:11   montecarlo/result/datagen/datagen_observables.parquet
-    11421  09-10-2026 06:11   montecarlo/result/tests/test_traces.parquet
-     1282  09-10-2026 06:11   data/auxiliary_series.parquet
+     5196  09-13-2026 03:16   manifest.json
+     2134  09-13-2026 03:16   model/reference.yaml
+     2134  09-13-2026 03:16   model/dgp.yaml
+      630  09-13-2026 03:16   estimation/spec.json
+     1891  09-13-2026 03:16   estimation/observed.parquet
+    18906  09-13-2026 03:16   estimation/posterior.parquet
+      585  09-13-2026 03:16   estimation/result.json
+     1146  09-13-2026 03:16   montecarlo/pipeline.json
+      566  09-13-2026 03:16   montecarlo/result/meta.json
+      553  09-13-2026 03:16   montecarlo/result/datagen/datagen_steps.json
+      176  09-13-2026 03:16   montecarlo/result/tests/test_steps.json
+     3377  09-13-2026 03:16   montecarlo/result/datagen/datagen_retained_reps.parquet
+  7122646  09-13-2026 03:16   montecarlo/result/datagen/datagen_states.parquet
+  4273014  09-13-2026 03:16   montecarlo/result/datagen/datagen_shocks.parquet
+  4189809  09-13-2026 03:16   montecarlo/result/datagen/datagen_observables.parquet
+    11421  09-13-2026 03:16   montecarlo/result/tests/test_traces.parquet
+     1282  09-13-2026 03:16   data/auxiliary_series.parquet
 ---------                     -------
- 15635560                     17 files
+ 15635466                     17 files
 ```
 
 For a structured view, decompile it:
