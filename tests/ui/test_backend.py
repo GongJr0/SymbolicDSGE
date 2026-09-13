@@ -12,8 +12,7 @@ from SymbolicDSGE.ui.estimation import (
     build_estimation_inputs,
     serialize_estimation_result,
 )
-from SymbolicDSGE.monte_carlo.builder import build_pipeline
-from SymbolicDSGE.ui.mc import serialize_pipeline_result
+from SymbolicDSGE.ui.mc import build_pipeline, serialize_pipeline_result
 from SymbolicDSGE.ui.mc_schemas import MCPipelineSpec
 from SymbolicDSGE.ui.schemas import ArrayEnvelope, EstimationParameterSpec
 from SymbolicDSGE.ui.serializers import decode_array, encode_array
@@ -531,7 +530,9 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
     # The run fills the MC tab's bundle-bound slots, through the core spec so
     # the shape matches what a bundle stores rather than the request model.
     workspace = client.get("/api/session").json()["workspace"]["mc"]
-    assert [node["id"] for node in workspace["spec"]["nodes"]] == ["sim"]
+    assert [step["name"] for step in workspace["spec"]["replication_steps"]] == [
+        "datagen"
+    ]
     assert workspace["result"]["n_rep"] == 3
 
 
@@ -1235,16 +1236,16 @@ def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
         )
     )
 
-    pipeline = build_pipeline(spec.to_core())
+    pipeline = build_pipeline(spec)
 
-    assert [step.name for step in pipeline.per_rep_steps] == [
+    assert [step.name for step in pipeline.replication_steps] == [
         "datagen",
         "renamed_filter",
         "diagnostic",
     ]
     residuals = next(
         selector
-        for selector in pipeline.per_rep_steps[-1].source_args
+        for selector in pipeline.replication_steps[-1].source_args
         if selector.field == "std_innov"
     )
     assert residuals.source_step == "renamed_filter"
@@ -1252,11 +1253,13 @@ def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
     missing = spec.model_copy(deep=True)
     # The leg is what names the producer; params carry the step's own kwargs.
     residuals_leg = next(
-        leg for leg in missing.nodes[-1].sources if leg.arg == "residuals"
+        leg
+        for leg in missing.replication_steps[-1].source_args
+        if leg.arg == "residuals"
     )
     residuals_leg.source_step = "missing_filter"
     with np.testing.assert_raises_regex(ValueError, "unknown producer"):
-        build_pipeline(missing.to_core())
+        build_pipeline(missing)
 
 
 _UI_CUSTOM_OP = """@custom_transform

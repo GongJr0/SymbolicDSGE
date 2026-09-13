@@ -7,8 +7,9 @@ import pytest
 
 from SymbolicDSGE.core.shock_generators import Shock
 from SymbolicDSGE.monte_carlo import MCPipeline
-from SymbolicDSGE.monte_carlo.builder import build_pipeline
-from SymbolicDSGE.monte_carlo.spec import EdgeSpec, PipelineSpec
+from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc, PandasCustomFunc
+from SymbolicDSGE.monte_carlo.postproc import run_kde
+from SymbolicDSGE.monte_carlo.spec import pipeline_meta
 from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,
     raw_model_data_step,
@@ -49,52 +50,46 @@ def _simulation_pipeline() -> MCPipeline:
     )
 
 
-def test_to_spec_structure_and_edges() -> None:
+def test_to_spec_structure_and_sources() -> None:
     spec = _simulation_pipeline().to_spec()
 
-    assert [n["step_type"] for n in spec["nodes"]] == [
+    assert [step.meta["step_type"] for step in spec.replication_steps] == [
         "simulation",
         "filter",
         "standardize",
         "jarque_bera",
         "wald",
     ]
-    assert {(e["source"], e["target"]) for e in spec["edges"]} == {
-        ("dgp", "filter"),
-        ("dgp", "s"),
-        ("s", "jb"),
-        ("filter", "w"),
-    }
+    assert spec.postproc_steps == []
 
-    by_name = {n["name"]: n for n in spec["nodes"]}
-    # source legs are their own objects, not flattened into params
-    assert by_name["jb"]["sources"] == [
+    by_name = {step.meta["name"]: step.meta for step in spec.replication_steps}
+    # source legs are their own objects, not flattened into kwargs
+    assert by_name["jb"]["source_args"] == [
         {
             "arg": "sample",
             "source_step": "s",
             "field": "payload",
             "columns": None,
             "burn_in": 0,
-            "drop_initial": False,
         }
     ]
-    assert by_name["w"]["sources"][0]["source_step"] == "filter"
-    assert by_name["w"]["sources"][0]["field"] == "std_innov"
+    assert by_name["w"]["source_args"][0]["source_step"] == "filter"
+    assert by_name["w"]["source_args"][0]["field"] == "std_innov"
     # kwargs are stored as the step holds them; no form-shaped renaming
-    assert by_name["w"]["params"]["target"] == [0.0]
+    assert by_name["w"]["kwargs"]["target"] == [0.0]
     # shocks are serialized to JSON-safe dicts
-    assert by_name["dgp"]["params"]["shocks"]["u"]["dist"] == "norm"
-    json.dumps(spec)
+    assert by_name["dgp"]["kwargs"]["shocks"]["u"]["dist"] == "norm"
+    # the meta half is the document a bundle writes, and it is JSON on its own
+    json.dumps(pipeline_meta(spec))
 
 
 def test_to_spec_is_a_fixed_point_under_rebuild() -> None:
     pipe = _simulation_pipeline()
     spec1 = pipe.to_spec()
 
-    rebuilt = build_pipeline(spec1)
+    rebuilt = MCPipeline.from_spec(spec1)
 
-    spec2 = rebuilt.to_spec()
-    assert spec2 == spec1
+    assert pipeline_meta(rebuilt.to_spec()) == pipeline_meta(spec1)
 
 
 def test_to_spec_rejects_shock_generators_with_actionable_message() -> None:
@@ -110,21 +105,21 @@ def test_to_spec_rejects_shock_generators_with_actionable_message() -> None:
             jarque_bera_test_step("jb", source="dgp", field="observables"),
         ]
     )
-    with pytest.raises(TypeError, match="shock generator"):
+    with pytest.raises(TypeError, match="callable"):
         pipe.to_spec()
 
 
 def test_rebuilt_simulation_recovers_live_shocks() -> None:
     pipe = _simulation_pipeline()
-    rebuilt = build_pipeline(pipe.to_spec())
+    rebuilt = MCPipeline.from_spec(pipe.to_spec())
 
-    shock = rebuilt.per_rep_steps[0].kwargs["shocks"]["u"]
+    shock = rebuilt.replication_steps[0].kwargs["shocks"]["u"]
     assert isinstance(shock, Shock)
-    assert shock.to_dict() == pipe.per_rep_steps[0].kwargs["shocks"]["u"].to_dict()
+    assert shock.to_dict() == pipe.replication_steps[0].kwargs["shocks"]["u"].to_dict()
 
 
-def test_to_spec_records_raw_model_data_reference_not_arrays() -> None:
-    states = np.zeros((4, 5, 2))
+def test_to_spec_lifts_bulk_arrays_out_of_the_meta() -> None:
+    states = np.zeros((4, 6, 3))
     observables = np.zeros((4, 5, 3))
     pipe = MCPipeline(
         [
@@ -139,20 +134,35 @@ def test_to_spec_records_raw_model_data_reference_not_arrays() -> None:
     )
     spec = pipe.to_spec()
 
-    dat = spec["nodes"][0]
-    assert dat["step_type"] == "raw_model_data"
-    assert dat["params"]["data_ref"] == "dat"
-    assert dat["params"]["data_shapes"] == {
-        "states": [4, 5, 2],
-        "observables": [4, 5, 3],
-    }
-    assert dat["params"]["observable_names"] == ["a", "b", "c"]
-    assert {(e["source"], e["target"]) for e in spec["edges"]} == {("dat", "jb")}
-    # No raw arrays leak into the JSON spec.
-    json.dumps(spec)
+    dat = spec.replication_steps[0]
+    assert dat.meta["step_type"] == "raw_model_data"
+    assert dat.meta["kwargs"]["observable_names"] == ["a", "b", "c"]
+    # Bulk arrays ride their own slot, under the kwarg names they were passed
+    # with.
+    assert set(dat.arrays) == {"states", "observables"}
+    assert dat.arrays["states"].shape == (4, 6, 3)
+    assert dat.arrays["observables"].shape == (4, 5, 3)
+    assert "states" not in dat.meta["kwargs"]
+    assert "observables" not in dat.meta["kwargs"]
+    # No bulk arrays leak into the JSON document.
+    json.dumps(pipeline_meta(spec))
+
+    # They go back under the names they came from.
+    rebuilt = MCPipeline.from_spec(spec)
+    np.testing.assert_array_equal(
+        rebuilt.replication_steps[0].kwargs["observables"], observables
+    )
 
 
-def test_to_spec_emits_custom_with_func_ref() -> None:
+def test_small_array_kwargs_stay_inline() -> None:
+    pipe = _simulation_pipeline()
+    w = {step.meta["name"]: step for step in pipe.to_spec().replication_steps}["w"]
+    # `target` is a 1-element array: too small to be worth its own member.
+    assert w.arrays == {}
+    assert w.meta["kwargs"]["target"] == [0.0]
+
+
+def test_to_spec_carries_a_custom_transform_callable_beside_its_meta() -> None:
     pipe = MCPipeline(
         [
             raw_model_data_step("dat", observables=np.zeros((4, 5, 3))),
@@ -167,39 +177,52 @@ def test_to_spec_emits_custom_with_func_ref() -> None:
     )
     spec = pipe.to_spec()
 
-    tf = {n["name"]: n for n in spec["nodes"]}["tf"]
-    assert tf["step_type"] == "transform:custom"
-    # the callable rides a separate bundle member; the spec only references it
-    assert tf["params"]["func_ref"] == "tf"
-    assert tf["sources"][0]["source_step"] == "dat"
-    assert tf["sources"][0]["field"] == "observables"
-    assert tf["params"]["output_shape"] == [5, 3]
-    assert {(e["source"], e["target"]) for e in spec["edges"]} == {("dat", "tf")}
+    tf = {step.meta["name"]: step for step in spec.replication_steps}["tf"]
+    assert tf.meta["step_type"] == "transform:custom"
+    # the callable rides its own slot; the meta stays JSON
+    assert isinstance(tf.func, NumbaCustomFunc)
+    assert tf.meta["kwargs"] == {"output_shape": [5, 3]}
+    assert tf.meta["source_args"][0]["source_step"] == "dat"
+    assert tf.meta["source_args"][0]["field"] == "observables"
+    json.dumps(pipeline_meta(spec))
 
 
-def test_to_spec_emits_postproc_custom_with_func_ref_and_kwargs() -> None:
+def test_to_spec_rejects_a_callable_no_step_kind_can_restore() -> None:
+    from SymbolicDSGE.monte_carlo.mc_constructs import MCStep, OpType
+
+    step = MCStep(
+        name="jb",
+        op_type=OpType.TEST,
+        func=_copy_transform,
+        step_type="jarque_bera",
+    )
+    with pytest.raises(ValueError, match="carries a callable"):
+        step.to_spec()
+
+
+def test_to_spec_emits_a_postproc_custom_op_with_its_kwargs() -> None:
     from SymbolicDSGE.monte_carlo.step_factories import postproc_step
-
-    def my_summary(*, traces, threshold):
-        return float(threshold)
 
     pipe = MCPipeline(
         [
             raw_model_data_step("dat", observables=np.zeros((4, 5, 3))),
             jarque_bera_test_step("jb", source="dat", field="observables"),
         ],
-        [postproc_step("sum", my_summary, threshold=0.5)],
+        [postproc_step("sum", _my_summary, threshold=0.5)],
     )
     spec = pipe.to_spec()
 
-    pp = {p["name"]: p for p in spec["postprocs"]}["sum"]
-    assert pp["step_type"] == "postproc:custom"
-    # callable rides a bundle member; op kwargs survive as plain spec params
-    assert pp["params"]["func_ref"] == "sum"
-    assert pp["params"]["threshold"] == 0.5
-    # postprocs are a separate list, never nodes or edges.
-    assert "sum" not in {n["name"] for n in spec["nodes"]}
-    assert all(e["source"] != "sum" and e["target"] != "sum" for e in spec["edges"])
+    pp = {step.meta["name"]: step for step in spec.postproc_steps}["sum"]
+    assert pp.meta["step_type"] == "postproc:custom"
+    # the callable rides its own slot; op kwargs survive as plain meta kwargs
+    assert pp.func is not None
+    assert pp.meta["kwargs"]["threshold"] == 0.5
+    # post-loop ops are a separate list, never replication steps
+    assert "sum" not in {step.meta["name"] for step in spec.replication_steps}
+
+
+def _my_summary(*, traces, threshold):
+    return float(threshold)
 
 
 def test_to_spec_round_trips_a_postproc_pipeline() -> None:
@@ -218,13 +241,29 @@ def test_to_spec_round_trips_a_postproc_pipeline() -> None:
         [kde_step("kde", trace="test.jb.statistic", grid_points=50)],
     )
     spec1 = pipe.to_spec()
-    kde_pp = {p["name"]: p for p in spec1["postprocs"]}["kde"]
-    assert kde_pp["step_type"] == "kde"
-    assert kde_pp["params"]["trace"] == "test.jb.statistic"
-    # postprocs are a separate list, never nodes or edges.
-    assert "kde" not in {n["name"] for n in spec1["nodes"]}
+    kde_pp = {step.meta["name"]: step for step in spec1.postproc_steps}["kde"]
+    assert kde_pp.meta["step_type"] == "kde"
+    assert kde_pp.meta["kwargs"]["trace"] == "test.jb.statistic"
+    # a built-in post-loop kind carries the library callable it runs
+    assert kde_pp.func is run_kde
+    # post-loop ops are a separate list, never replication steps
+    assert "kde" not in {step.meta["name"] for step in spec1.replication_steps}
 
-    rebuilt = build_pipeline(spec1)
-    assert [s.name for s in rebuilt.per_rep_steps] == ["dgp", "jb"]
-    assert [s.name for s in rebuilt.postproc_steps] == ["kde"]
-    assert rebuilt.to_spec() == spec1  # fixed point
+    rebuilt = MCPipeline.from_spec(spec1)
+    assert [step.name for step in rebuilt.replication_steps] == ["dgp", "jb"]
+    assert [step.name for step in rebuilt.postproc_steps] == ["kde"]
+    assert pipeline_meta(rebuilt.to_spec()) == pipeline_meta(spec1)  # fixed point
+
+
+def test_postproc_custom_func_survives_a_rebuild() -> None:
+    from SymbolicDSGE.monte_carlo.step_factories import postproc_step
+
+    pipe = MCPipeline(
+        [
+            raw_model_data_step("dat", observables=np.zeros((4, 5, 3))),
+            jarque_bera_test_step("jb", source="dat", field="observables"),
+        ],
+        [postproc_step("sum", PandasCustomFunc(_my_summary), threshold=0.5)],
+    )
+    rebuilt = MCPipeline.from_spec(pipe.to_spec())
+    assert isinstance(rebuilt.postproc_steps[0].func, PandasCustomFunc)

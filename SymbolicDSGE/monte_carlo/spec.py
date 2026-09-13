@@ -1,4 +1,4 @@
-"""Serializable Monte Carlo pipeline specification (graph form)."""
+"""Serializable Monte Carlo pipeline specification."""
 
 from __future__ import annotations
 
@@ -45,25 +45,21 @@ MCStepKind = Literal[
     "postproc:custom",
 ]
 
-#: Authoritative set of valid step-type strings. Must agree with the keys of
-#: :data:`SymbolicDSGE.monte_carlo.catalog.STEP_CATALOG`. There's a regression
-#: test in ``tests/monte_carlo/test_catalog_builder.py`` that enforces parity.
+#: Authoritative set of valid step-type strings. Every kind here must appear in
+#: :data:`OP_TYPES`; ``tests/monte_carlo/test_from_spec.py`` enforces the parity.
 STEP_KINDS: frozenset[str] = frozenset(get_args(MCStepKind))
 
 #: Post-loop step kinds. A postproc is a *terminal reduction* over the assembled
-#: across-rep traces, not a graph node. It lives in ``PipelineSpec.postprocs``,
-#: never in ``nodes``. Keep in sync with ``catalog.POSTPROC_STEP_TYPES`` + the
-#: custom postproc kind (guarded by the catalog parity test).
+#: across-rep traces, so it lives in :attr:`PipelineSpec.postproc_steps`, never in
+#: :attr:`PipelineSpec.replication_steps`.
 PostprocStepKind = Literal["kde", "postproc:custom"]
 POSTPROC_KINDS: frozenset[str] = frozenset(get_args(PostprocStepKind))
 
-#: Per-replication step kinds (everything that is an actual graph node).
-PER_REP_KINDS: frozenset[str] = STEP_KINDS - POSTPROC_KINDS
 
-
-#: The op kind each step kind is. This is what a node *is*, not how a form
-#: renders it, so it stays here beside the rest of the kind taxonomy: a client
-#: declares a node's ``op_type`` and :func:`build_pipeline` holds it to this.
+#: The op kind each step kind is. This is what a step *is*, not how a form renders
+#: it, so it stays here beside the rest of the kind taxonomy. A client declares a
+#: step's ``op_type``; native lowering dispatches on it and then on the step kind
+#: within it, so a pair this map does not name has no branch to land in.
 OP_TYPES: dict[str, str] = {
     "simulation": "datagen",
     "raw_model_data": "datagen",
@@ -160,21 +156,19 @@ class PipelineMeta(TypedDict):
 
 @dataclass(slots=True)
 class PipelineSpec:
-    """Serializable spec for a :class:`MCPipeline` graph.
+    """Serializable spec for a :class:`MCPipeline`.
 
     Attributes
     ----------
-    nodes : list[NodeSpec]
-        Graph nodes, each a step with its own parameters and sources.
-    postprocs : list[PostprocSpec]
-        Post-loop ops, run once over the assembled traces. Kept separate from the
-        per-rep DAG (``nodes``/``edges``).
-
+    replication_steps : list[StepSpec]
+        The steps run once per replication, each with its own kwargs, source
+        bindings, and whatever side channels its meta could not hold.
+    postproc_steps : list[StepSpec]
+        Post-loop ops, run once over the assembled traces. A separate terminal
+        phase, kept out of the per-replication steps.
     """
 
     replication_steps: list[StepSpec]
-    #: Post-loop ops, run once over the assembled traces. Kept separate from the
-    #: per-rep DAG (``nodes``/``edges``). They are not graph participants.
     postproc_steps: list[StepSpec]
 
 

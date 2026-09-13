@@ -91,7 +91,7 @@ def is_trace_ref(value: object) -> bool:
 
     A postproc names the trace it reads, so a reference is recognized by its own
     spelling rather than by the parameter it was passed under. That covers a
-    custom op's references as well as a catalogue op's.
+    custom op's references as well as a built-in op's.
     """
     return isinstance(value, str) and value.split(".", 1)[0] in _TRACE_OUTPUTS
 

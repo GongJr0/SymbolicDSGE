@@ -633,9 +633,8 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     import pathlib
 
     from SymbolicDSGE import BundleBuilder, load_bundle
-    from SymbolicDSGE.monte_carlo.builder import build_pipeline as build_live_pipeline
-    from SymbolicDSGE.monte_carlo.spec import NodeSpec as LiveNodeSpec
-    from SymbolicDSGE.monte_carlo.spec import PipelineSpec as LivePipelineSpec
+    from SymbolicDSGE.monte_carlo import MCPipeline
+    from SymbolicDSGE.ui.mc import build_pipeline as build_live_pipeline
     from SymbolicDSGE.ui.mc_schemas import MCPipelineSpec
     from tests._spec_helpers import as_posted
 
@@ -687,7 +686,7 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
                 "postprocs": [],
             }
         )
-    ).to_core()
+    )
 
     target = (
         BundleBuilder(created_by="tx-test")
@@ -698,18 +697,17 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
 
     loaded = load_bundle(target)
     assert loaded.mc is not None
-    restored = loaded.mc.pipeline.to_spec()
-    restored_step_types = [n["step_type"] for n in restored["nodes"]]
-    assert restored_step_types == [
+    restored = loaded.mc.pipeline
+    assert [step.step_type for step in restored.replication_steps] == [
         "simulation",
         "standardize",
         "rolling_mean",
         "wald",
     ]
-    # The restored spec still compiles (no drift between the spec's Literal and
+    # The restored spec still rebuilds (no drift between the spec's Literal and
     # the catalog at load time).
-    rebuilt = build_live_pipeline(restored)
-    assert [step.name for step in rebuilt.per_rep_steps] == [
+    rebuilt = MCPipeline.from_spec(restored.to_spec())
+    assert [step.name for step in rebuilt.replication_steps] == [
         "datagen",
         "standardize",
         "rmean",

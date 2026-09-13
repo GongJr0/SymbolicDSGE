@@ -13,7 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from SymbolicDSGE import DSGESolver, ModelParser
-from SymbolicDSGE.monte_carlo.builder import build_pipeline
+from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.step_factories import simulation_step
 from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.estimation import Estimator
@@ -25,7 +26,6 @@ from SymbolicDSGE.estimation.spec import (
     EstimatorParams,
     EstimatorSpec,
 )
-from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
 from SymbolicDSGE.ui import build_workspace, create_app, serve_from
 from SymbolicDSGE.ui.estimation import (
     build_estimation_prefill,
@@ -33,7 +33,6 @@ from SymbolicDSGE.ui.estimation import (
     serialize_estimation_result,
 )
 from SymbolicDSGE.ui.session import TabState, UISession, Workspace
-from tests._spec_helpers import node as _node
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
 
@@ -86,16 +85,12 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
         burn_in=5,
         thin=1,
     )
-    pipeline = PipelineSpec(
-        nodes=[_node(id="n1", step_type="simulation", name="sim", params={"T": 20})],
-        edges=[],
-        postprocs=[],
-    )
+    pipeline = MCPipeline([simulation_step("sim", T=20)])
     return (
         BundleBuilder(created_by="serve-test")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
         .add_estimation(_estimator(observed), result=result)
-        .add_mc(build_pipeline(pipeline))
+        .add_mc(pipeline)
         .set_simulation(
             "reference",
             T=8,
@@ -292,7 +287,7 @@ def test_session_summary_surfaces_workspace_preload() -> None:
             result={"kind": "mcmc", "param_names": ["beta"]},
             view={"method": "mcmc"},
         ),
-        mc=TabState(spec={"nodes": []}, result={"kind": "mc"}),
+        mc=TabState(spec={"replication_steps": []}, result={"kind": "mc"}),
         simulation={"reference": TabState(spec={"T": 8})},
     )
     client = TestClient(create_app(workspace=workspace))
@@ -300,7 +295,10 @@ def test_session_summary_surfaces_workspace_preload() -> None:
     assert payload["estimation"]["spec"]["params"]["estimated_params"] == ["beta"]
     assert payload["estimation"]["result"]["kind"] == "mcmc"
     assert payload["estimation"]["view"]["method"] == "mcmc"
-    assert payload["mc"] == {"spec": {"nodes": []}, "result": {"kind": "mc"}}
+    assert payload["mc"] == {
+        "spec": {"replication_steps": []},
+        "result": {"kind": "mc"},
+    }
     assert payload["simulation"] == {"reference": {"spec": {"T": 8}}}
 
 
@@ -353,9 +351,9 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     # A pipeline with no result: the spec is the only evidence of an MC run in
     # the bundle, so it has to carry enough for the canvas to draw the graph.
     assert ws.mc.spec is not None
-    # The slot holds the live pipeline's own spec, which keys nodes by step name.
-    assert [node["name"] for node in ws.mc.spec["nodes"]] == ["sim"]
-    assert ws.mc.spec["edges"] == []
+    # The slot holds the live pipeline's own spec, which keys steps by name.
+    assert [step["name"] for step in ws.mc.spec["replication_steps"]] == ["sim"]
+    assert ws.mc.spec["postproc_steps"] == []
     assert ws.mc.result is None  # no MC result was attached at build time
     assert ws.mc.view is None  # a bundle stores the pipeline, not the canvas
     assert ws.simulation["reference"].spec is not None

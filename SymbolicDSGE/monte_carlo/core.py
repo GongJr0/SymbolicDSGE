@@ -80,7 +80,7 @@ class MCPipeline:
 
     Attributes
     ----------
-    per_rep_steps : tuple[MCStep, ...]
+    replication_steps : tuple[MCStep, ...]
         The per-replication steps in resolved execution order.
     postproc_steps : tuple[MCStep, ...]
         The post-loop steps.
@@ -103,12 +103,12 @@ class MCPipeline:
 
     @staticmethod
     def _validate_steps(
-        per_rep_steps: tuple[MCStep, ...],
+        replication_steps: tuple[MCStep, ...],
         postproc_steps: tuple[MCStep, ...],
     ) -> None:
-        if not per_rep_steps:
+        if not replication_steps:
             raise ValueError("MCPipeline requires at least one per-replication step.")
-        names = [step.name for step in (*per_rep_steps, *postproc_steps)]
+        names = [step.name for step in (*replication_steps, *postproc_steps)]
         if len(set(names)) != len(names):
             raise ValueError("MCPipeline step names must be unique.")
         for name in names:
@@ -119,13 +119,16 @@ class MCPipeline:
                     f"{''.join(bad)!r}. A step name becomes a bundle member path "
                     f"and a trace column qualifier, which reserve them."
                 )
-        datagens = [step for step in per_rep_steps if step.op_type is OpType.DATAGEN]
+        datagens = [
+            step for step in replication_steps if step.op_type is OpType.DATAGEN
+        ]
         if len(datagens) != 1:
             raise ValueError("MCPipeline requires exactly one DATAGEN step.")
-        for step in per_rep_steps:
+        for step in replication_steps:
             if step.op_type is OpType.POSTPROC:
                 raise ValueError(
-                    "POSTPROC steps can't be specified under per_rep_steps, use postproc_steps."
+                    "POSTPROC steps can't be specified under replication_steps, use "
+                    "postproc_steps."
                 )
         for step in postproc_steps:
             if step.op_type is not OpType.POSTPROC:
@@ -135,7 +138,7 @@ class MCPipeline:
                 )
 
     @staticmethod
-    def _order_steps(per_rep_steps: tuple[MCStep, ...]) -> tuple[MCStep, ...]:
+    def _order_steps(replication_steps: tuple[MCStep, ...]) -> tuple[MCStep, ...]:
         """Sort the steps into execution order: datagen, filters, transforms, terminals.
 
         A caller authors a step list, not a schedule. Filters read only the
@@ -146,7 +149,7 @@ class MCPipeline:
         filters: list[MCStep] = []
         transforms: list[MCStep] = []
         terminals: list[MCStep] = []
-        for step in per_rep_steps:
+        for step in replication_steps:
             if step.op_type is OpType.DATAGEN:
                 datagen.append(step)
             elif step.op_type is OpType.FILTER:
@@ -160,12 +163,14 @@ class MCPipeline:
 
     @staticmethod
     def _resolve_source_indices(
-        per_rep_steps: tuple[MCStep, ...],
+        replication_steps: tuple[MCStep, ...],
     ) -> tuple[tuple[int, ...], ...]:
-        index_by_name = {step.name: index for index, step in enumerate(per_rep_steps)}
+        index_by_name = {
+            step.name: index for index, step in enumerate(replication_steps)
+        }
 
         resolved: list[tuple[int, ...]] = []
-        for step_index, step in enumerate(per_rep_steps):
+        for step_index, step in enumerate(replication_steps):
             step_indices: list[int] = []
             for selector in step.source_args:
                 source_name = selector.source_step
@@ -174,7 +179,7 @@ class MCPipeline:
                     raise ValueError(
                         f"Step {step.name!r} depends on unknown producer {source_name!r}."
                     )
-                producer_step = per_rep_steps[source_idx]
+                producer_step = replication_steps[source_idx]
                 if source_idx >= step_index:
                     raise ValueError(
                         f"Step {step.name!r} depends on {producer_step.name!r}, which does not "
@@ -187,7 +192,7 @@ class MCPipeline:
 
     @staticmethod
     def _validate_postproc_traces(
-        per_rep_steps: tuple[MCStep, ...],
+        replication_steps: tuple[MCStep, ...],
         postproc_steps: tuple[MCStep, ...],
     ) -> None:
         """Check each postproc's trace selectors against what the producers emit.
@@ -204,7 +209,9 @@ class MCPipeline:
         if not postproc_steps:
             return
 
-        available = {key for step in per_rep_steps for key in trace_keys_for_step(step)}
+        available = {
+            key for step in replication_steps for key in trace_keys_for_step(step)
+        }
         for step in postproc_steps:
             for key, value in step.kwargs.items():
                 if not is_trace_ref(value):

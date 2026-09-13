@@ -77,7 +77,9 @@ def _raw_model_data_pipeline() -> MCPipeline:
 
 def test_add_mc_ships_raw_model_data_member_and_loader_rehydrates(tmp_path) -> None:
     pipe = _raw_model_data_pipeline()
-    expected = np.asarray(pipe.per_rep_steps[0].kwargs["observables"], dtype=np.float64)
+    expected = np.asarray(
+        pipe.replication_steps[0].kwargs["observables"], dtype=np.float64
+    )
 
     target = (
         BundleBuilder(created_by="mc-test").add_mc(pipe).write(tmp_path / "raw.sdsge")
@@ -86,12 +88,14 @@ def test_add_mc_ships_raw_model_data_member_and_loader_rehydrates(tmp_path) -> N
     loaded = build_from(target)
     assert loaded.mc is not None
     # The parquet side-channel member exists and rehydrated under data_ref.
-    assert any(m.kind == "mc_raw_model_data" for m in loaded.manifest.members)
+    assert any(m.kind == "mc_data" for m in loaded.manifest.members)
 
     # The member rehydrated into the rebuilt pipeline's datagen step.
     rebuilt = loaded.mc.pipeline
-    np.testing.assert_allclose(rebuilt.per_rep_steps[0].kwargs["observables"], expected)
-    assert [s.step_type for s in rebuilt.per_rep_steps] == [
+    np.testing.assert_allclose(
+        rebuilt.replication_steps[0].kwargs["observables"], expected
+    )
+    assert [s.step_type for s in rebuilt.replication_steps] == [
         "raw_model_data",
         "jarque_bera",
     ]
@@ -119,10 +123,10 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
 
     loaded = build_from(target)
     assert loaded.mc is not None
-    assert any(m.kind == "mc_custom_op" for m in loaded.manifest.members)
+    assert any(m.kind == "mc_func" for m in loaded.manifest.members)
 
     rebuilt = loaded.mc.pipeline
-    z_step = {s.name: s for s in rebuilt.per_rep_steps}["z"]
+    z_step = {s.name: s for s in rebuilt.replication_steps}["z"]
     assert z_step.step_type == "transform:custom"
     assert isinstance(z_step.func, NumbaCustomFunc)  # wrapped + source-carrying
     assert "zscore" in z_step.func.source
@@ -276,7 +280,7 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
 
     # The bulk slot plus the custom-op blob shipped.
     kinds = {m.kind for m in loaded.manifest.members}
-    assert {"mc_custom_op", "mc_postproc_raw"} <= kinds
+    assert {"mc_func", "mc_postproc_raw"} <= kinds
 
     # Rebuild from the stored spec + resources -> equivalent runnable pipeline.
     rebuilt = loaded.mc.pipeline
@@ -291,7 +295,9 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
         serialize_pipeline_result(loaded.mc.result)["postproc"]
         == serialize_pipeline_result(result)["postproc"]
     )
-    assert [s.step_type for s in (*rebuilt.per_rep_steps, *rebuilt.postproc_steps)] == [
+    assert [
+        s.step_type for s in (*rebuilt.replication_steps, *rebuilt.postproc_steps)
+    ] == [
         "raw_model_data",
         "jarque_bera",
         "postproc:custom",

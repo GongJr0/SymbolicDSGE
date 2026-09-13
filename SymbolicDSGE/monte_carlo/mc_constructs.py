@@ -35,7 +35,6 @@ NDB = NDArray[np.bool_]
 ColumnSelector = int | Sequence[int] | slice | NDArray[Any] | None
 CompiledColumnSelector = Sequence[int] | slice | None
 ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
-ShockMapping = Mapping[str, ShockValue]
 
 
 MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "shocks", "observables")
@@ -46,23 +45,6 @@ FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = tuple(
     f.name for f in fields(UnscentedFilterResult) if f.name != "status"
 )
 FILTER_SOURCE_FIELDS: tuple[str, ...] = (
-    "x_pred",
-    "x_filt",
-    "x1_pred",
-    "x2_pred",
-    "x1_filt",
-    "x2_filt",
-    "y_pred",
-    "y_filt",
-    "innov",
-    "std_innov",
-    "eps_hat",
-)
-
-# Array-valued sources currently exposed to MC operations and the catalogue.
-ARRAY_SOURCE_FIELDS: tuple[str, ...] = (
-    "states",
-    "observables",
     "x_pred",
     "x_filt",
     "x1_pred",
@@ -276,7 +258,7 @@ class MCStep:
                     for shock, entry in value.items()
                 }
             elif isinstance(value, np.ndarray):
-                if value.size <= 50:
+                if value.size <= 50:  # ~1kB if float64 with UTF-8 JSON
                     kwargs[name] = _jsonable(value)
                 else:
                     arrays[name] = value

@@ -10,7 +10,6 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
 from SymbolicDSGE.monte_carlo.allocation import ArenaSize, StepBufferPlan
-from SymbolicDSGE.monte_carlo.builder import run_pipeline
 from SymbolicDSGE.monte_carlo.mc_constructs import MCStep, OpType
 from SymbolicDSGE.monte_carlo.memory import (
     RESERVE_FLOOR_BYTES,
@@ -330,9 +329,7 @@ def test_the_warned_message_is_one_line_and_the_table_is_printed(
     assert "sim" in printed
 
 
-@pytest.mark.parametrize(
-    "entry_point", ["validate_memory_requirements", "run_pipeline"]
-)
+@pytest.mark.parametrize("entry_point", ["validate_memory_requirements", "run"])
 def test_the_warning_blames_the_caller_not_the_library(
     solved: SolvedModel,
     monkeypatch: pytest.MonkeyPatch,
@@ -352,8 +349,7 @@ def test_the_warning_blames_the_caller_not_the_library(
         if entry_point == "validate_memory_requirements":
             pipeline.validate_memory_requirements(reference=solved, n_rep=64, n_jobs=1)
         else:
-            run_pipeline(
-                pipeline.to_spec(),
+            MCPipeline.from_spec(pipeline.to_spec()).run(
                 reference=solved,
                 dgp=None,
                 n_rep=64,

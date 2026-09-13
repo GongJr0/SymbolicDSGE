@@ -12,7 +12,8 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE.bundle.builder import BundleBuilder, _observed_to_csv
-from SymbolicDSGE.monte_carlo.builder import build_pipeline
+from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.step_factories import simulation_step
 from SymbolicDSGE.bundle.container import BundleArchive, write_bundle
 from SymbolicDSGE.bundle.loader import _stack_observed, build_from
 from SymbolicDSGE.bundle.manifest import Manifest, Member
@@ -29,8 +30,6 @@ from SymbolicDSGE.estimation.spec import (
     EstimatorSpec,
     MCMCResultMeta,
 )
-from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
-from tests._spec_helpers import node as _node
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
 
@@ -161,22 +160,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
             result=result,
             as_parquet=False,
         )
-        .add_mc(
-            build_pipeline(
-                PipelineSpec(
-                    nodes=[
-                        _node(
-                            id="n1",
-                            step_type="simulation",
-                            name="sim",
-                            params={"T": 50},
-                        )
-                    ],
-                    edges=[],
-                    postprocs=[],
-                )
-            )
-        )
+        .add_mc(MCPipeline([simulation_step("sim", T=50)]))
         .write(tmp_path / "csv.sdsge")
     )
 
