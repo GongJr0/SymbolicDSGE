@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any, TypedDict, cast
 
 import numpy as np
@@ -150,3 +151,23 @@ def run_kde(
             )
         ),
     )
+
+
+#: Post-loop kinds the library implements, each mapped to the callable it runs.
+#: Defined below the ops it names, since it holds the functions themselves.
+BUILTIN_POSTPROCS: Mapping[str, Callable[..., Any]] = {"kde": run_kde}
+
+
+def builtin_postproc(step_type: str | None) -> Callable[..., Any] | None:
+    """The callable a built-in post-loop kind runs, or ``None`` for any other kind.
+
+    Whoever assembles a step supplies its callable; this is what they look it up
+    with. A step never fills the slot on its own, so a kind that names no
+    built-in leaves it empty rather than guessing.
+    """
+    return BUILTIN_POSTPROCS.get(step_type) if step_type is not None else None
+
+
+def is_builtin_postproc(fn: Any) -> bool:
+    """Whether a callable is one the library owns rather than a user's."""
+    return any(fn is builtin for builtin in BUILTIN_POSTPROCS.values())

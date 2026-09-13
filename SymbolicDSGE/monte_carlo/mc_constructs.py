@@ -1,3 +1,5 @@
+"""Containers for use in Monte Carlo pipelines."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field as dcf, fields
@@ -9,6 +11,7 @@ from typing import (
     Mapping,
     Sequence,
     Union,
+    cast,
 )
 
 import numpy as np
@@ -24,6 +27,7 @@ from ..regression.enums import RegressionStatus
 from .postproc import Artifact
 from ..regression.result import MCRegressionResult
 from .custom_op import PandasCustomFunc
+from .spec import SourceSpec, StepMeta, StepSpec
 
 NDF = NDArray[float64]
 NDI = NDArray[np.int_]
@@ -31,7 +35,6 @@ NDB = NDArray[np.bool_]
 ColumnSelector = int | Sequence[int] | slice | NDArray[Any] | None
 CompiledColumnSelector = Sequence[int] | slice | None
 ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
-ShockMapping = Mapping[str, ShockValue]
 
 
 MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "shocks", "observables")
@@ -42,23 +45,6 @@ FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = tuple(
     f.name for f in fields(UnscentedFilterResult) if f.name != "status"
 )
 FILTER_SOURCE_FIELDS: tuple[str, ...] = (
-    "x_pred",
-    "x_filt",
-    "x1_pred",
-    "x2_pred",
-    "x1_filt",
-    "x2_filt",
-    "y_pred",
-    "y_filt",
-    "innov",
-    "std_innov",
-    "eps_hat",
-)
-
-# Array-valued sources currently exposed to MC operations and the catalogue.
-ARRAY_SOURCE_FIELDS: tuple[str, ...] = (
-    "states",
-    "observables",
     "x_pred",
     "x_filt",
     "x1_pred",
@@ -112,41 +98,84 @@ class SourceArgs:
     columns : ColumnSelector
         Author-supplied column selector, normalized to a tuple of ints or a slice
         at construction.
-    column_selector : Sequence[int] | slice
-        Normalized selector. Derived from ``columns``, not set directly.
-    row_start : int
-        First selected row. Derived from ``burn_in`` and ``drop_initial``, not set
-        directly.
     burn_in : int
         Number of leading rows to drop.
-    drop_initial : bool
-        If True and ``burn_in`` is zero, start at row 1.
     """
 
     arg: str
     source_step: str
     field: str
     columns: ColumnSelector = None
-    column_selector: Sequence[int] | slice = dcf(default_factory=lambda: slice(None))
-    row_start: int = 0
-
     burn_in: int = 0
-    drop_initial: bool = False
 
     def __post_init__(self) -> None:
-        columns = _normalize_columns(self.columns)
-        row_start = int(self.burn_in)
-        if row_start < 0:
+        if int(self.burn_in) < 0:
             raise ValueError("burn_in must be non-negative.")
-        if self.drop_initial and row_start == 0:
-            row_start = 1
-        object.__setattr__(self, "columns", columns)
-        object.__setattr__(
-            self,
-            "column_selector",
-            columns if columns is not None else slice(None),
+        object.__setattr__(self, "columns", _normalize_columns(self.columns))
+
+    @property
+    def _compiled_columns(self) -> CompiledColumnSelector:
+        """``columns`` as :meth:`__post_init__` normalized it."""
+        return cast(CompiledColumnSelector, self.columns)
+
+    @property
+    def column_selector(self) -> Sequence[int] | slice:
+        """Selected columns, with an unset selector standing for all of them."""
+        columns = self._compiled_columns
+        return slice(None) if columns is None else columns
+
+    def to_spec(self) -> SourceSpec:
+        """Selector as plain data, keyed by constructor argument.
+
+        Explicit indices travel as a list. A slice carries no width to resolve
+        against, so it travels as its own ``start``/``stop``/``step``; the
+        differing JSON types keep the two forms apart.
+        """
+        columns = self._compiled_columns
+        spec_columns: list[int] | dict[str, int | None] | None
+        if columns is None:
+            spec_columns = None
+        elif isinstance(columns, slice):
+            spec_columns = {
+                name: None if bound is None else int(bound)
+                for name, bound in (
+                    ("start", columns.start),
+                    ("stop", columns.stop),
+                    ("step", columns.step),
+                )
+            }
+        else:
+            spec_columns = [int(column) for column in columns]
+        return {
+            "arg": self.arg,
+            "source_step": self.source_step,
+            "field": self.field,
+            "columns": spec_columns,
+            "burn_in": int(self.burn_in),
+        }
+
+    @classmethod
+    def from_spec(cls, spec: SourceSpec) -> SourceArgs:
+        """Rebuild a selector from the form :meth:`to_spec` records.
+
+        A slice's arguments are read by name, so a hand-authored spec that orders
+        them differently still rebuilds the slice it spells.
+        """
+        recorded = spec["columns"]
+        columns: ColumnSelector
+        if isinstance(recorded, Mapping):
+            columns = slice(
+                recorded.get("start"), recorded.get("stop"), recorded.get("step")
+            )
+        else:
+            columns = recorded
+        return cls(
+            arg=spec["arg"],
+            source_step=spec["source_step"],
+            field=spec["field"],
+            columns=columns,
+            burn_in=spec["burn_in"],
         )
-        object.__setattr__(self, "row_start", row_start)
 
 
 @dataclass(frozen=True)
@@ -203,6 +232,125 @@ class MCStep:
                 f"{self.op_type.value!r} step."
             )
 
+    def to_spec(self) -> StepSpec:
+        """Step as data, plus the two things data cannot hold.
+
+        Bulk array kwargs are lifted into :attr:`StepSpec.arrays` and a custom
+        op's callable rides :attr:`StepSpec.func`, so :attr:`StepSpec.meta` is
+        JSON on its own and a bundle writes the other two as their own members.
+        """
+        if (
+            self.func is not None
+            and self.op_type is not OpType.POSTPROC
+            and self.step_type != "transform:custom"
+        ):
+            raise ValueError(
+                f"MCStep {self.name!r} carries a callable that no replication "
+                f"step kind can restore; only a custom transform ships one."
+            )
+        arrays: dict[str, NDArray[Any]] = {}
+        kwargs: dict[str, Any] = {}
+        for key, value in self.kwargs.items():
+            name = str(key)
+            if name == "shocks" and isinstance(value, Mapping):
+                kwargs[name] = {
+                    str(shock): _shock_spec(str(shock), entry)
+                    for shock, entry in value.items()
+                }
+            elif isinstance(value, np.ndarray):
+                if value.size <= 50:  # ~1kB if float64 with UTF-8 JSON
+                    kwargs[name] = _jsonable(value)
+                else:
+                    arrays[name] = value
+            else:
+                kwargs[name] = _jsonable(value)
+        return StepSpec(
+            meta=StepMeta(
+                name=self.name,
+                op_type=self.op_type.value,
+                step_type=self.step_type,
+                kwargs=kwargs,
+                source_args=[selector.to_spec() for selector in self.source_args],
+                n_retain=int(self.n_retain),
+            ),
+            func=self.func,
+            arrays=arrays,
+        )
+
+    @classmethod
+    def from_spec(cls, spec: StepSpec) -> MCStep:
+        """Rebuild a step from the form :meth:`to_spec` records.
+
+        The arrays go back under the kwarg names they were lifted from. A
+        ``shocks`` mapping is read as one, whichever step carries it, because
+        :meth:`Shock.to_dict` leaves a plain mapping that nothing else about the
+        value distinguishes.
+        """
+        meta = spec.meta
+        kwargs: dict[str, Any] = {**meta["kwargs"], **spec.arrays}
+        shocks = kwargs.get("shocks")
+        if isinstance(shocks, Mapping):
+            kwargs["shocks"] = {
+                str(name): _restore_shock(entry) for name, entry in shocks.items()
+            }
+        return cls(
+            name=meta["name"],
+            op_type=OpType(meta["op_type"]),
+            func=spec.func,
+            kwargs=kwargs,
+            source_args=tuple(
+                SourceArgs.from_spec(source) for source in meta["source_args"]
+            ),
+            step_type=meta["step_type"],
+            n_retain=meta["n_retain"],
+        )
+
+
+def _jsonable(value: Any) -> Any:
+    """One kwarg value as data.
+
+    Anything carrying a ``to_dict`` is asked for it, so a value only has to
+    declare how it serializes once to travel in any step's kwargs.
+    """
+    if hasattr(value, "to_dict"):
+        return value.to_dict()
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _shock_spec(name: str, shock: Any) -> Any:
+    """One named simulation shock as data.
+
+    A generator spec serializes itself and a bare shock path travels as nested
+    lists. A callable travels as nothing.
+    """
+    if callable(shock):
+        raise TypeError(
+            f"Shock {name!r} is a callable, which cannot be serialized. Pass the "
+            f"`Shock` itself rather than the generator it produces."
+        )
+    return _jsonable(shock)
+
+
+def _restore_shock(value: Any) -> Shock | NDF:
+    """One named shock as a simulation takes it.
+
+    A mapping is a generator spec; anything else is a shock path, which the walk
+    out left as nested lists.
+    """
+    if isinstance(value, Shock):
+        return value
+    if isinstance(value, Mapping):
+        return Shock.from_dict(value)
+    return np.asarray(value, dtype=float64)
+
 
 def _compile_source_args(
     *,
@@ -211,7 +359,6 @@ def _compile_source_args(
     field: str,
     columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
 ) -> SourceArgs:
     source_step = str(source)
     if not source_step:
@@ -229,7 +376,6 @@ def _compile_source_args(
             field=source_field,
             columns=columns,
             burn_in=burn_in,
-            drop_initial=bool(drop_initial),
         )
 
     if source_field in FILTER_RAW_SOURCE_FIELDS:

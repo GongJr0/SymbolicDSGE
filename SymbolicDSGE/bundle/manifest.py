@@ -22,13 +22,13 @@ from numpy import float64, ndarray
 from ..core.shock_generators import Shock, ShockParameters
 
 #: Bundle format version. Bump on every manifest change.
-SDSGE_FORMAT_VERSION = 5
+SDSGE_FORMAT_VERSION = 6
 
 #: The version at which the format last broke. A reader rejects bundles older
 #: than this, and each bundle records its own so a reader can tell a version it
 #: predates from a version that postdates it: a bump that breaks nothing
 #: leaves this alone and stays readable by older versions.
-SDSGE_LAST_BREAKING_VERSION = 5
+SDSGE_LAST_BREAKING_VERSION = 6
 
 MemberKind = Literal[
     "model_config",
@@ -40,8 +40,8 @@ MemberKind = Literal[
     "estimation_trace",
     # Monte Carlo: the pipeline and the side-channels it references by key
     "mc_pipeline",
-    "mc_raw_model_data",
-    "mc_custom_op",
+    "mc_data",
+    "mc_func",
     # Monte Carlo: a recorded run, one meta member per step kind beside its bulk
     "mc_result_meta",
     "mc_datagen_steps",

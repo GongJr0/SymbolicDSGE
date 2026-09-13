@@ -30,6 +30,7 @@ from SymbolicDSGE.monte_carlo import (
     MCPipeline,
     custom_transform,
     pandas_operation,
+    Summary,
 )
 from SymbolicDSGE.monte_carlo.step_factories import (
     kde_step,
@@ -42,14 +43,15 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 )
 import cProfile
 
-model, kalman = ModelParser("../../MODELS/misspec_test/reference.yaml").get_all() # (1)!
+model, kalman = ModelParser("../../MODELS/POST82.yaml").get_all() # (1)!
 
 solver = DSGESolver(model, kalman)
 compiled = solver.compile()
 ss_seed = np.zeros(5, dtype=np.float64)  # (2)!
 reference = solver.solve(compiled, ss_seed=ss_seed)
 
-dgp_model, dgp_kalman = ModelParser("../../MODELS/misspec_test/misspec.yaml").get_all() # (3)!
+dgp_model, dgp_kalman = ModelParser("../../MODELS/POST82.yaml").get_all()
+dgp_model.calibration.parameters.update({"psi_x": 0.2, "psi_pi": 3.0}) # (3)!
 dgp_comp = DSGESolver(dgp_model, dgp_kalman).compile()
 dgp_sol = DSGESolver(dgp_model, dgp_kalman)
 dgp = dgp_sol.solve(dgp_comp, ss_seed=ss_seed)
@@ -58,7 +60,7 @@ dgp = dgp_sol.solve(dgp_comp, ss_seed=ss_seed)
 
 1. This is the reference model configuration.
 2. Both models use the same steady-state seed.
-3. The DGP has a separate, misspecified configuration.
+3. Update some parameters so DGP is not exactly equal to the reference. This creates some mild misspecification and makes the tests non-trivial.
 
 Now, we have two models to compare in a Monte Carlo experiment.
 We will determine whether the reference model is misspecified relative to the DGP using MC repeated Wald tests.
@@ -76,7 +78,7 @@ T = 200  # (1)!
 n_obs = len(reference.compiled.observable_names)  # (2)!
 
 pipeline = MCPipeline(
-    per_rep_steps=[...],  # (3)!
+    replication_steps=[...],  # (3)!
     postproc_steps=[...],  # (4)!
 )
 ```
@@ -84,7 +86,7 @@ pipeline = MCPipeline(
 1. Length of each simulated sample.
 2. Number of observables the model(s) have.
 3. Steps here are executed per replication.
-4. This field is reserved for `POSTPROC` steps; these execute once after the replication loop concludes.
+4. This field is reserved for `POSTPROC` steps; these execute once, after the replication loop concludes.
 
 `MCPipeline` is used to compile the steps that need to be executed for each repetition.
 Every step of `MCPipeline` must be an `MCStep` object.
@@ -251,10 +253,13 @@ A custom post-processing function is defined as follows:
 @pandas_operation
 def get_std_obs_mean(*, traces) -> pd.DataFrame:
     stacked = traces["payload.custom_std"]  # (1)!
-    return pd.DataFrame({"mean": stacked.mean(axis=(0, 1))})
+    return Summary(value=pd.DataFrame({"mean": stacked.mean(axis=(0, 1))}))
 ```
 
 1. Shape `(n_retained, T, n_obs)`. Averaging over the first two axes gives the per-observable mean across the experiment.
+
+???+ note "Post-Processing Return Types"
+    Post-processes return `Raw(value)`, `Summary(value)`, or a 2-`tuple` of them in any order. `Raw` handles large, bare array returns while `Summary` can handle smaller arrays, scalars, and tabular data. Bare ojects are rejected.
 
 To create a step out of this function, we use `postproc_step`:
 
@@ -284,7 +289,7 @@ builtin_kde = kde_step(
 
 ```python
 pipeline = MCPipeline(
-    per_rep_steps=[
+    replication_steps=[
     datagen_step,
     kf_step,
     custom_std,
@@ -306,7 +311,7 @@ The `MCPipeline` object explains the procedure that will run per iteration.
 mc = pipeline.run(
     reference=reference,
     dgp=dgp,
-    n_rep=10000,
+    n_rep=1000,
     n_jobs=-1,  # (1)!
     verbosity=2,  # (2)!
 )
@@ -319,19 +324,19 @@ mc = pipeline.run(
     The native loop only collects per-step profiling when it is asked to. At any lower verbosity `meta.step_elapsed_s`, `meta.step_counts`, and `meta.step_failures` are empty dictionaries.
 
 ```bash
->>> MC run concluded successfully in 0.33s with 29916.19 it/s.
+>>> MC run concluded successfully in 0.05s with 20350.26 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 27987.63 worker it/s (0.36 worker-s), 29916.19 wall it/s.
-    filter: 0 failures, 2145.69 worker it/s (4.66 worker-s), 29916.19 wall it/s.
-    custom_std: 0 failures, 126337.92 worker it/s (0.08 worker-s), 29916.19 wall it/s.
-    builtin_std: 0 failures, 118365.61 worker it/s (0.08 worker-s), 29916.19 wall it/s.
-    std_innov_mean: 0 failures, 59597.31 worker it/s (0.17 worker-s), 29916.19 wall it/s.
+    datagen: 0 failures, 46869.49 worker it/s (0.02 worker-s), 20350.26 wall it/s.
+    filter: 0 failures, 3101.53 worker it/s (0.32 worker-s), 20350.26 wall it/s.
+    custom_std: 0 failures, 223065.68 worker it/s (0.00 worker-s), 20350.26 wall it/s.
+    builtin_std: 0 failures, 119482.22 worker it/s (0.01 worker-s), 20350.26 wall it/s.
+    std_innov_mean: 0 failures, 81373.27 worker it/s (0.01 worker-s), 20350.26 wall it/s.
 
 Post-processing Report:
 
-    custom_postproc: Succeeded in 0.0215s.
-    builtin_kde: Succeeded in 9.2167s.
+    custom_postproc: Succeeded in 0.0017s.
+    builtin_kde: Succeeded in 0.2205s.
 ```
 
 ???+ note "Worker Time vs Wall Time"

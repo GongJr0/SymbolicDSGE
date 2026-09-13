@@ -90,8 +90,9 @@ def columns_to_parquet(
     """Encode numeric trace columns into Parquet bytes, without going through JSON.
 
     Takes what :func:`trace_to_csv` takes: each value is a 1-D array, or a 2-D
-    array ``(n, k)`` expanded into columns ``f"{name}.{j}"``. All columns must
-    share the leading length ``n``.
+    array ``(n, k)`` expanded into columns ``f"{name}.{j}"``. Anything above 2-D
+    folds into its leading axis first (see :func:`_flat_column`). All columns
+    must share the leading length ``n`` once folded.
 
     Values reach the engine as raw buffers, so a non-finite float is stored as
     itself rather than as the null the text path writes it as. Columns are
@@ -102,15 +103,11 @@ def columns_to_parquet(
     raw: dict[str, tuple[str, bytes]] = {}
     length: int | None = None
     for name, value in columns.items():
-        arr = np.asarray(value)
+        arr = _flat_column(np.asarray(value))
         if arr.ndim == 1:
             expanded = {name: arr}
-        elif arr.ndim == 2:
-            expanded = {f"{name}.{j}": arr[:, j] for j in range(arr.shape[1])}
         else:
-            raise ValueError(
-                f"trace column {name!r} must be 1-D or 2-D, got {arr.ndim}-D"
-            )
+            expanded = {f"{name}.{j}": arr[:, j] for j in range(arr.shape[1])}
         for key, col in expanded.items():
             if length is None:
                 length = int(col.shape[0])
@@ -140,6 +137,18 @@ def columns_from_parquet(data: bytes) -> dict[str, NDArray[Any]]:
         name: np.frombuffer(buffer, dtype=dtype).copy()
         for name, (dtype, buffer) in parquet_engine.decode_columns(data).items()
     }
+
+
+def _flat_column(arr: NDArray[Any]) -> NDArray[Any]:
+    """One value as the ``(n,)`` or ``(n, k)`` a column block stores.
+
+    A column block is two-dimensional, so anything above that is folded into its
+    leading axis. Rank is not this layer's to police: a caller records the
+    original shape beside the member and restores it from there.
+    """
+    if arr.ndim <= 2:
+        return arr
+    return arr.reshape(-1, arr.shape[-1])
 
 
 def _raw_column(name: str, values: NDArray[Any]) -> tuple[str, bytes]:
@@ -257,9 +266,10 @@ def frame_to_json(columns: Mapping[str, Sequence[Any]]) -> bytes:
 def trace_to_csv(columns: Mapping[str, Any]) -> bytes:
     """Convert columnar trace data into CSV bytes (header row + data rows).
 
-    Mirrors :func:`columns_to_parquet`: 1-D arrays stay as single columns; a 2-D
-    ``(n, k)`` array expands to ``"{name}.{j}"`` columns. Non-finite floats and
-    ``None`` become empty cells (the CSV analogue of JSON ``null``).
+    Mirrors :func:`columns_to_parquet`: 1-D arrays stay as single columns, a 2-D
+    ``(n, k)`` array expands to ``"{name}.{j}"`` columns, and anything above 2-D
+    folds into its leading axis first. Non-finite floats and ``None`` become
+    empty cells (the CSV analogue of JSON ``null``).
     """
     if not columns:
         return b""
@@ -267,15 +277,11 @@ def trace_to_csv(columns: Mapping[str, Any]) -> bytes:
     flat: dict[str, NDArray[Any]] = {}
     length: int | None = None
     for name, value in columns.items():
-        arr = np.asarray(value)
+        arr = _flat_column(np.asarray(value))
         if arr.ndim == 1:
             expanded = {name: arr}
-        elif arr.ndim == 2:
-            expanded = {f"{name}.{j}": arr[:, j] for j in range(arr.shape[1])}
         else:
-            raise ValueError(
-                f"trace column {name!r} must be 1-D or 2-D, got {arr.ndim}-D"
-            )
+            expanded = {f"{name}.{j}": arr[:, j] for j in range(arr.shape[1])}
         for key, col in expanded.items():
             if length is None:
                 length = int(col.shape[0])

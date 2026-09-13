@@ -96,14 +96,14 @@ def _source_binding(
         )
     n_rows, n_columns = layout.shape
     columns = _selected_columns(source, n_columns)
-    n_selected_rows = n_rows - source.row_start
+    n_selected_rows = n_rows - source.burn_in
     if n_selected_rows < 0:
         raise ValueError("Native source row selection starts past the input.")
     return FloatInputBinding(
         source_step_idx=source_step_idx,
         source_offset=layout.offset,
         source_row_stride=n_columns,
-        row_start=source.row_start,
+        row_start=source.burn_in,
         n_rows=n_selected_rows,
         columns=columns,
         target_offset=target_offset,

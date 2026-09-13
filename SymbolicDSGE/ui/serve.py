@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING, cast
 
 from ..monte_carlo.serialize import serialize_pipeline_result
+from ..monte_carlo.spec import pipeline_meta
 from .estimation import (
     build_estimation_prefill,
     emit_estimation_wire,
@@ -108,7 +109,7 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
 
     mc = TabState()
     if loaded.mc is not None:
-        mc.spec = dict(loaded.mc.pipeline.to_spec())
+        mc.spec = dict(pipeline_meta(loaded.mc.pipeline.to_spec()))
         if loaded.mc.result is not None:
             mc.result = serialize_pipeline_result(loaded.mc.result)
 

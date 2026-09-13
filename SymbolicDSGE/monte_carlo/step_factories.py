@@ -241,7 +241,6 @@ def passthrough_step(
     field: str,
     columns: ColumnSelector,
     burn_in: int = 0,
-    drop_initial: bool = False,
 ) -> MCStep:
     """TRANSFORM step to passthrough a specific output column from a step in the pipeline.
     Allows choosing specific steps to be retained; it's useful for memory management
@@ -263,8 +262,6 @@ def passthrough_step(
         Number of samples to retain. -1 means all, 0 means none.
     burn_in : int
         Number of initial samples to discard from the source step before passthrough.
-    drop_initial : bool
-        Whether to drop the initial sample from the passthrough.
 
     Returns
     -------
@@ -283,7 +280,6 @@ def passthrough_step(
                 field=field,
                 columns=columns,
                 burn_in=burn_in,
-                drop_initial=drop_initial,
             ),
         ),
         step_type="passthrough",
@@ -301,7 +297,6 @@ def _one_source_step(
     field: str,
     columns: ColumnSelector,
     burn_in: int,
-    drop_initial: bool,
     kwargs: Mapping[str, Any],
 ) -> MCStep:
     return MCStep(
@@ -315,7 +310,6 @@ def _one_source_step(
                 field=field,
                 columns=columns,
                 burn_in=burn_in,
-                drop_initial=drop_initial,
             ),
         ),
         step_type=step_type,
@@ -333,7 +327,6 @@ def transform_step(
     output_shape: tuple[int, int],
     columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
 ) -> MCStep:
     """Custom TRANSFORM step with a user-defined callable.
     The callable accepts (input: NDF, output: NDF) and returns
@@ -363,8 +356,6 @@ def transform_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source step before applying the transform.
-    drop_initial : bool
-        Whether to drop the initial sample from the transform output.
 
     Returns
     -------
@@ -388,7 +379,6 @@ def transform_step(
                 field=field,
                 columns=columns,
                 burn_in=burn_in,
-                drop_initial=drop_initial,
             ),
         ),
         step_type="transform:custom",
@@ -404,7 +394,6 @@ def standardize_step(
     field: str,
     columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     ddof: int = 0,
 ) -> MCStep:
     """TRANSFORM step to standardize an input sample.
@@ -425,8 +414,6 @@ def standardize_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source step before applying the transform.
-    drop_initial : bool
-        Whether to drop the initial sample from the transform output.
     ddof : int
         Delta degrees of freedom for the standard deviation calculation. ``0`` divides by ``n``, ``1`` by ``n - 1``.
 
@@ -443,7 +430,6 @@ def standardize_step(
         field=field,
         columns=columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"ddof": ddof},
         n_retain=n_retain,
     )
@@ -457,7 +443,6 @@ def log_step(
     field: str,
     columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     offset: float = 0.0,
 ) -> MCStep:
     """TRANSFORM step to take the logarithm of an input sample, with an optional offset.
@@ -478,8 +463,6 @@ def log_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source step before applying the transform.
-    drop_initial : bool
-        Whether to drop the initial sample from the transform output.
     offset : float
         Additive offset to apply before taking the logarithm.
 
@@ -496,7 +479,6 @@ def log_step(
         field=field,
         columns=columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"offset": offset},
         n_retain=n_retain,
     )
@@ -510,7 +492,6 @@ def log_diff_step(
     field: str,
     columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     offset: float = 0.0,
 ) -> MCStep:
     """TRANSFORM step to take the logarithmic difference of an input sample, with an optional offset.
@@ -531,8 +512,6 @@ def log_diff_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source step before applying the transform.
-    drop_initial : bool
-        Whether to drop the initial sample from the transform output.
     offset : float
         Additive offset to apply before taking the logarithmic difference.
 
@@ -549,7 +528,6 @@ def log_diff_step(
         field=field,
         columns=columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"offset": offset},
         n_retain=n_retain,
     )
@@ -563,7 +541,6 @@ def diff_step(
     field: str,
     columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     order: int = 1,
 ) -> MCStep:
     """TRANSFORM step to take the difference of an input sample, with a specified order.
@@ -584,8 +561,6 @@ def diff_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source step before applying the transform.
-    drop_initial : bool
-        Whether to drop the initial sample from the transform output.
     order : int
         Order of differencing to apply. Must be a positive integer.
 
@@ -602,7 +577,6 @@ def diff_step(
         field=field,
         columns=columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"order": order},
         n_retain=n_retain,
     )
@@ -616,7 +590,6 @@ def rolling_mean_step(
     field: str,
     columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     window: int = 10,
 ) -> MCStep:
     """TRANSFORM step to compute the rolling mean of an input sample over a specified window.
@@ -637,8 +610,6 @@ def rolling_mean_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source step before applying the transform.
-    drop_initial : bool
-        Whether to drop the initial sample from the transform output.
     window : int
         Rolling window size for computing the mean. Must be a positive integer.
 
@@ -655,7 +626,6 @@ def rolling_mean_step(
         field=field,
         columns=columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"window": window},
         n_retain=n_retain,
     )
@@ -669,7 +639,6 @@ def rolling_std_step(
     field: str,
     columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     window: int = 10,
     ddof: int = 0,
 ) -> MCStep:
@@ -691,8 +660,6 @@ def rolling_std_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source step before applying the transform.
-    drop_initial : bool
-        Whether to drop the initial sample from the transform output.
     window : int
         Rolling window size for computing the standard deviation. Must be a positive integer.
     ddof : int
@@ -711,7 +678,6 @@ def rolling_std_step(
         field=field,
         columns=columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"window": window, "ddof": ddof},
         n_retain=n_retain,
     )
@@ -725,7 +691,6 @@ def rolling_var_step(
     field: str,
     columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     window: int = 10,
     ddof: int = 0,
 ) -> MCStep:
@@ -747,8 +712,6 @@ def rolling_var_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source step before applying the transform.
-    drop_initial : bool
-        Whether to drop the initial sample from the transform output.
     window : int
         Rolling window size for computing the variance. Must be a positive integer.
     ddof : int
@@ -767,7 +730,6 @@ def rolling_var_step(
         field=field,
         columns=columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"window": window, "ddof": ddof},
         n_retain=n_retain,
     )
@@ -784,7 +746,6 @@ def regression_step(
     y_column: ColumnSelector = None,
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     kind: Literal[
         "ols", "ridge", "lasso", "elastic_net", "ridge_gs", "lasso_gs", "elastic_net_gs"
     ] = "ols",
@@ -816,8 +777,6 @@ def regression_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source steps before applying the regression.
-    drop_initial : bool
-        Whether to drop the initial sample from the regression output.
     kind : Literal["ols", "ridge", "lasso", "elastic_net", "ridge_gs", "lasso_gs", "elastic_net_gs"]
         Regression type to perform.
     intercept : bool
@@ -849,7 +808,6 @@ def regression_step(
                 field=y_field,
                 columns=y_column,
                 burn_in=burn_in,
-                drop_initial=drop_initial,
             ),
             _compile_source_args(
                 arg="X",
@@ -857,7 +815,6 @@ def regression_step(
                 field=X_field,
                 columns=X_columns,
                 burn_in=burn_in,
-                drop_initial=drop_initial,
             ),
         ),
         step_type="regression",
@@ -879,7 +836,6 @@ def _two_source_test(
     second_arg: str,
     second_columns: ColumnSelector,
     burn_in: int,
-    drop_initial: bool,
     kwargs: Mapping[str, Any],
 ) -> MCStep:
     return MCStep(
@@ -893,7 +849,6 @@ def _two_source_test(
                 field=first_field,
                 columns=first_columns,
                 burn_in=burn_in,
-                drop_initial=drop_initial,
             ),
             _compile_source_args(
                 arg=second_arg,
@@ -901,7 +856,6 @@ def _two_source_test(
                 field=second_field,
                 columns=second_columns,
                 burn_in=burn_in,
-                drop_initial=drop_initial,
             ),
         ),
         step_type=step_type,
@@ -917,7 +871,6 @@ def wald_test_step(
     field: str,
     columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     kind: Literal["mean", "covariance", "second_moment"] = "mean",
     target: NDF,
     kernel: Literal["bartlett", "parzen", "qs"] = "bartlett",
@@ -944,8 +897,6 @@ def wald_test_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source step before applying the test.
-    drop_initial : bool
-        Whether to drop the initial sample from the test output.
     kind : Literal["mean", "covariance", "second_moment"]
         Kind of wald test to perform.
     kernel : Literal["bartlett", "parzen", "qs"]
@@ -969,7 +920,6 @@ def wald_test_step(
         field=field,
         columns=columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={
             "kind": kind,
             "target": target,
@@ -989,7 +939,6 @@ def ljung_box_test_step(
     field: str,
     column: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     lags: int = 10,
     alpha: float = 0.05,
 ) -> MCStep:
@@ -1011,8 +960,6 @@ def ljung_box_test_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source step before applying the test.
-    drop_initial : bool
-        Whether to drop the initial sample from the test output.
     lags : int
         Number of lags to include in the test. Must be a positive integer.
     alpha : float
@@ -1031,7 +978,6 @@ def ljung_box_test_step(
         field=field,
         columns=column,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"lags": lags, "alpha": alpha},
         n_retain=n_retain,
     )
@@ -1045,7 +991,6 @@ def jarque_bera_test_step(
     field: str,
     column: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     alpha: float = 0.05,
 ) -> MCStep:
     """TEST step to perform a Jarque-Bera test on the specified input sample.
@@ -1066,8 +1011,6 @@ def jarque_bera_test_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source step before applying the test.
-    drop_initial : bool
-        Whether to drop the initial sample from the test output.
     alpha : float
         Significance level for the test.
 
@@ -1084,7 +1027,6 @@ def jarque_bera_test_step(
         field=field,
         columns=column,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"alpha": alpha},
         n_retain=n_retain,
     )
@@ -1101,7 +1043,6 @@ def breusch_pagan_test_step(
     residual_col: ColumnSelector = None,
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     robust: bool = False,
     alpha: float = 0.05,
 ) -> MCStep:
@@ -1129,8 +1070,6 @@ def breusch_pagan_test_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source steps before applying the test.
-    drop_initial : bool
-        Whether to drop the initial sample from the test output.
     robust : bool
         Whether to use a robust version of the Breusch-Pagan test.
     alpha : float
@@ -1153,7 +1092,6 @@ def breusch_pagan_test_step(
         second_arg="X",
         second_columns=X_columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"robust": robust, "alpha": alpha},
         n_retain=n_retain,
     )
@@ -1170,7 +1108,6 @@ def breusch_godfrey_test_step(
     residual_col: ColumnSelector = None,
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     lags: int = 1,
     alpha: float = 0.05,
 ) -> MCStep:
@@ -1198,8 +1135,6 @@ def breusch_godfrey_test_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source steps before applying the test.
-    drop_initial : bool
-        Whether to drop the initial sample from the test output.
     lags : int
         Number of lags to include in the test. Must be a positive integer.
     alpha : float
@@ -1222,7 +1157,6 @@ def breusch_godfrey_test_step(
         second_arg="X",
         second_columns=X_columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"lags": lags, "alpha": alpha},
         n_retain=n_retain,
     )
@@ -1239,7 +1173,6 @@ def cusum_test_step(
     y_column: ColumnSelector = None,
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     alpha: float = 0.05,
 ) -> MCStep:
     """TEST step to perform a CUSUM test on the specified dependent variable and regressors.
@@ -1266,8 +1199,6 @@ def cusum_test_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source steps before applying the test.
-    drop_initial : bool
-        Whether to drop the initial sample from the test output.
     alpha : float
         Significance level for the test.
 
@@ -1288,7 +1219,6 @@ def cusum_test_step(
         second_arg="X",
         second_columns=X_columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"alpha": alpha},
         n_retain=n_retain,
     )
@@ -1305,7 +1235,6 @@ def cusumsq_test_step(
     y_column: ColumnSelector = None,
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     alpha: float = 0.05,
 ) -> MCStep:
     """TEST step to perform a CUSUM of squares test on the specified dependent variable and regressors.
@@ -1332,8 +1261,6 @@ def cusumsq_test_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source steps before applying the test.
-    drop_initial : bool
-        Whether to drop the initial sample from the test output.
     alpha : float
         Significance level for the test.
 
@@ -1354,7 +1281,6 @@ def cusumsq_test_step(
         second_arg="X",
         second_columns=X_columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"alpha": alpha},
         n_retain=n_retain,
     )
@@ -1371,7 +1297,6 @@ def chow_test_step(
     y_column: ColumnSelector = None,
     X_columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     t_break: int = 10,
     alpha: float = 0.05,
 ) -> MCStep:
@@ -1399,8 +1324,6 @@ def chow_test_step(
         ``None`` means all columns.
     burn_in : int
         Number of initial samples to discard from the source steps before applying the test.
-    drop_initial : bool
-        Whether to drop the initial sample from the test output.
     t_break : int
         Index of the suspected structural break point in the sample. Must be a positive integer.
     alpha : float
@@ -1423,7 +1346,6 @@ def chow_test_step(
         second_arg="X",
         second_columns=X_columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
         kwargs={"t_break": t_break, "alpha": alpha},
         n_retain=n_retain,
     )

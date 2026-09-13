@@ -8,7 +8,8 @@ from pathlib import Path
 
 import numpy as np
 
-from SymbolicDSGE.monte_carlo.builder import build_pipeline
+from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.step_factories import simulation_step
 from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.loader import build_from
 from SymbolicDSGE.core.shock_generators import Shock
@@ -18,8 +19,6 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult
 from SymbolicDSGE.estimation.spec import EstimatorParams, EstimatorSpec
-from SymbolicDSGE.monte_carlo.spec import NodeSpec, PipelineSpec
-from tests._spec_helpers import node as _node
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
 
@@ -61,11 +60,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
         burn_in=10,
         thin=1,
     )
-    pipeline = PipelineSpec(
-        nodes=[_node(id="n1", step_type="simulation", name="sim", params={"T": 50})],
-        edges=[],
-        postprocs=[],
-    )
+    pipeline = MCPipeline([simulation_step("sim", T=50)])
 
     builder = (
         BundleBuilder(created_by="test-suite")
@@ -75,7 +70,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
             compile_kwargs={},
         )
         .add_estimation(_estimator(observed), result=result)
-        .add_mc(build_pipeline(pipeline))
+        .add_mc(pipeline)
         .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
         .set_simulation(
             "reference",
@@ -110,7 +105,8 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
 
     # monte carlo
     assert loaded.mc is not None
-    assert loaded.mc.pipeline.to_spec()["nodes"][0]["step_type"] == "simulation"
+    rebuilt = loaded.mc.pipeline.to_spec().replication_steps
+    assert [s.meta["step_type"] for s in rebuilt] == ["simulation"]
     assert loaded.mc.result is None  # no result attached
 
     # simulation prefill

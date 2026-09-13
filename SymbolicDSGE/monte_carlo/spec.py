@@ -1,10 +1,10 @@
-"""Serializable Monte Carlo pipeline specification (graph form)."""
+"""Serializable Monte Carlo pipeline specification."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, Sequence, TypedDict, get_args
 from numpy.typing import NDArray
 from numpy import float64, int_
@@ -45,25 +45,21 @@ MCStepKind = Literal[
     "postproc:custom",
 ]
 
-#: Authoritative set of valid step-type strings. Must agree with the keys of
-#: :data:`SymbolicDSGE.monte_carlo.catalog.STEP_CATALOG`. There's a regression
-#: test in ``tests/monte_carlo/test_catalog_builder.py`` that enforces parity.
+#: Authoritative set of valid step-type strings. Every kind here must appear in
+#: :data:`OP_TYPES`; ``tests/monte_carlo/test_from_spec.py`` enforces the parity.
 STEP_KINDS: frozenset[str] = frozenset(get_args(MCStepKind))
 
 #: Post-loop step kinds. A postproc is a *terminal reduction* over the assembled
-#: across-rep traces, not a graph node. It lives in ``PipelineSpec.postprocs``,
-#: never in ``nodes``. Keep in sync with ``catalog.POSTPROC_STEP_TYPES`` + the
-#: custom postproc kind (guarded by the catalog parity test).
+#: across-rep traces, so it lives in :attr:`PipelineSpec.postproc_steps`, never in
+#: :attr:`PipelineSpec.replication_steps`.
 PostprocStepKind = Literal["kde", "postproc:custom"]
 POSTPROC_KINDS: frozenset[str] = frozenset(get_args(PostprocStepKind))
 
-#: Per-replication step kinds (everything that is an actual graph node).
-PER_REP_KINDS: frozenset[str] = STEP_KINDS - POSTPROC_KINDS
 
-
-#: The op kind each step kind is. This is what a node *is*, not how a form
-#: renders it, so it stays here beside the rest of the kind taxonomy: a client
-#: declares a node's ``op_type`` and :func:`build_pipeline` holds it to this.
+#: The op kind each step kind is. This is what a step *is*, not how a form renders
+#: it, so it stays here beside the rest of the kind taxonomy. A client declares a
+#: step's ``op_type``; native lowering dispatches on it and then on the step kind
+#: within it, so a pair this map does not name has no branch to land in.
 OP_TYPES: dict[str, str] = {
     "simulation": "datagen",
     "raw_model_data": "datagen",
@@ -92,67 +88,88 @@ OP_TYPES: dict[str, str] = {
 
 
 class SourceSpec(TypedDict):
-    """One authored source binding of a step.
+    """Serialized form of a :class:`SourceArgs`, one key per constructor argument.
 
-    ``SourceArgs`` derives ``column_selector`` and ``row_start``, so only the
-    fields an author sets travel.
+    ``columns`` is a list of explicit indices, an object carrying a slice's
+    ``start``/``stop``/``step``, or null for every column.
     """
 
     arg: str
     source_step: str
     field: str
-    columns: list[int] | None
+    columns: list[int] | dict[str, int | None] | None
     burn_in: int
-    drop_initial: bool
 
 
-class NodeSpec(TypedDict):
-    id: str
-    op_type: str
-    step_type: str
-    name: str
-    params: dict[str, Any]
-    sources: list[SourceSpec]
+class StepMeta(TypedDict):
+    """The JSON-ready half of a :class:`StepSpec`.
 
-
-class EdgeSpec(TypedDict):
-    source: str
-    target: str
-
-
-class PostprocSpec(TypedDict):
-    """A post-loop op: a named, typed, parameterized terminal reduction.
-
-    Runs over the assembled across-rep traces. Deliberately *not* a graph node.
-    It has no ``id`` and no edges; its inputs are trace keys carried in
-    ``params``.
+    Everything an :class:`MCStep` holds that travels as data. A callable and any
+    bulk arrays ride the :class:`StepSpec` around it instead.
     """
 
     name: str
-    step_type: str
-    params: dict[str, Any]
+    op_type: str
+    step_type: str | None
+    kwargs: dict[str, Any]
+    source_args: list[SourceSpec]
+    n_retain: int
 
 
-class PipelineSpec(TypedDict):
-    """Serializable spec for a :class:`MCPipeline` graph.
+@dataclass(slots=True)
+class StepSpec:
+    """Serialized form of an :class:`MCStep`: its meta, plus what JSON cannot hold.
 
     Attributes
     ----------
-    nodes : list[NodeSpec]
-        Graph nodes, each a step with its own parameters and sources.
-    edges : list[EdgeSpec]
-        Graph edges, each a source-target pair of node ``id``s.
-    postprocs : list[PostprocSpec]
-        Post-loop ops, run once over the assembled traces. Kept separate from the
-        per-rep DAG (``nodes``/``edges``).
-
+    meta : StepMeta
+        The step as data. This is what a bundle writes to its spec member.
+    func : Callable[..., Any] | None
+        The step's callable, for the kinds that carry one. A bundle ships it as
+        its own member and hands it back here on load.
+    arrays : dict[str, NDArray[Any]]
+        Bulk array kwargs, lifted out of ``meta["kwargs"]`` under the names they
+        were passed with. A bundle ships these as their own members too.
     """
 
-    nodes: list[NodeSpec]
-    edges: list[EdgeSpec]
-    #: Post-loop ops, run once over the assembled traces. Kept separate from the
-    #: per-rep DAG (``nodes``/``edges``). They are not graph participants.
-    postprocs: list[PostprocSpec]
+    meta: StepMeta
+    func: Callable[..., Any] | None = None
+    arrays: dict[str, NDArray[Any]] = field(default_factory=dict)
+
+
+def pipeline_meta(spec: "PipelineSpec") -> "PipelineMeta":
+    """A pipeline spec as the document a bundle writes.
+
+    Drops what JSON cannot hold: each step's callable and bulk arrays ride their
+    own members, so only the metas travel here.
+    """
+    return PipelineMeta(
+        replication_steps=[step.meta for step in spec.replication_steps],
+        postproc_steps=[step.meta for step in spec.postproc_steps],
+    )
+
+
+class PipelineMeta(TypedDict):
+    replication_steps: list[StepMeta]
+    postproc_steps: list[StepMeta]
+
+
+@dataclass(slots=True)
+class PipelineSpec:
+    """Serializable spec for a :class:`MCPipeline`.
+
+    Attributes
+    ----------
+    replication_steps : list[StepSpec]
+        The steps run once per replication, each with its own kwargs, source
+        bindings, and whatever side channels its meta could not hold.
+    postproc_steps : list[StepSpec]
+        Post-loop ops, run once over the assembled traces. A separate terminal
+        phase, kept out of the per-replication steps.
+    """
+
+    replication_steps: list[StepSpec]
+    postproc_steps: list[StepSpec]
 
 
 class MCDataGenResultMeta(TypedDict):

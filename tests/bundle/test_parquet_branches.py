@@ -23,12 +23,20 @@ def test_empty_input_returns():
     assert P._parse_csv_columns("") == ([], [])
 
 
-def test_dimension_errors():
-    bad = {"x": np.zeros((2, 2, 2))}
-    with pytest.raises(ValueError, match="must be 1-D or 2-D"):
-        P.columns_to_parquet(bad)
-    with pytest.raises(ValueError, match="must be 1-D or 2-D"):
-        P.trace_to_csv(bad)
+def test_above_2d_folds_into_the_leading_axis():
+    # A column block is 2-D. Rank is not this layer's to police: a value above
+    # 2-D folds to (-1, last) and the caller restores it from the shape it
+    # recorded beside the member.
+    high = {"x": np.arange(8.0).reshape(2, 2, 2)}
+
+    assert (
+        P.trace_to_csv(high).decode() == "x.0,x.1\n0.0,1.0\n2.0,3.0\n4.0,5.0\n6.0,7.0\n"
+    )
+
+    recovered = P.columns_from_parquet(P.columns_to_parquet(high))
+    assert set(recovered) == {"x.0", "x.1"}
+    np.testing.assert_array_equal(recovered["x.0"], [0.0, 2.0, 4.0, 6.0])
+    np.testing.assert_array_equal(recovered["x.1"], [1.0, 3.0, 5.0, 7.0])
 
 
 def test_frame_to_json_length_mismatch():

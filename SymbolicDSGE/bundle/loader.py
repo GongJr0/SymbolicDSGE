@@ -10,7 +10,7 @@ pipeline/result, and the simulation prefill. The read counterpart to
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
@@ -34,14 +34,16 @@ from ..estimation.spec import (
 )
 from .._diag_tests.result import MCTestResult
 from ..regression.result import MCRegressionResult
-from ..monte_carlo.builder import build_pipeline
 from ..monte_carlo.postproc import Artifact, Raw, Summary
 from ..monte_carlo.spec import (
     MCRegressionResultMeta,
     MCRegressionResultSpec,
     MCTestResultMeta,
     MCTestResultSpec,
+    PipelineMeta,
     PipelineSpec,
+    StepMeta,
+    StepSpec,
 )
 from ..monte_carlo.mc_constructs import (
     MCDataGenResult,
@@ -80,12 +82,7 @@ class LoadedMC:
     """Monte-Carlo pipeline + (optional) run result recovered from a bundle.
 
     ``pipeline`` is the live, runnable :class:`MCPipeline`, rebuilt eagerly at
-    load with its bulk side-channels reattached: each ``raw_model_data``
-    ``data_ref`` to its restored arrays and each ``custom`` ``func_ref``
-    (transform *or* post-loop) to its callable. No model is needed to build it
-    (simulation shocks come from the explicit registry, not a model), so it is
-    ready to run against models supplied at ``pipeline.run(reference=...,
-    dgp=...)`` time.
+    load with its bulk side-channels reattached.
 
     ``result`` is the run the bundle recorded, rebuilt as the same
     :class:`MCPipelineResult` the run returned, or ``None`` when the bundle
@@ -291,16 +288,31 @@ def _rebuild_mcmc_result(
 
 
 def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
+    """Rebuild the pipeline a bundle recorded, side-channels reattached.
+
+    The spec member holds the steps as data; the arrays and callables each step
+    lifted out of itself ride their own members, keyed by step name. Pairing the
+    three is all this does, since a step knows how to rebuild itself from them.
+    """
     pipeline_members = manifest.members_by_kind("mc_pipeline")
     if not pipeline_members:
         return None
-    spec = cast(PipelineSpec, json.loads(archive.read_text(pipeline_members[0].path)))
+    from ..monte_carlo.core import MCPipeline
 
-    resources = _load_mc_resources(archive, manifest, spec)
+    doc = cast(PipelineMeta, json.loads(archive.read_text(pipeline_members[0].path)))
+    arrays = _mc_step_arrays(archive, manifest)
+    funcs = _mc_step_funcs(archive, manifest)
 
-    pipeline = build_pipeline(spec, resources=resources)
+    def step_spec(meta: StepMeta) -> StepSpec:
+        name = meta["name"]
+        return StepSpec(meta=meta, func=funcs.get(name), arrays=arrays.get(name, {}))
+
+    spec = PipelineSpec(
+        replication_steps=[step_spec(meta) for meta in doc["replication_steps"]],
+        postproc_steps=[step_spec(meta) for meta in doc["postproc_steps"]],
+    )
     result = _load_mc_result(archive, manifest)
-    return LoadedMC(pipeline=pipeline, result=result)
+    return LoadedMC(pipeline=MCPipeline.from_spec(spec), result=result)
 
 
 def _mc_json(archive: BundleArchive, manifest: Manifest, kind: str) -> dict[str, Any]:
@@ -652,40 +664,45 @@ def _load_mc_result(
     )
 
 
-def _load_mc_resources(
-    archive: BundleArchive, manifest: Manifest, spec: PipelineSpec
-) -> dict[str, Any]:
-    """Restore the bulk side-channels referenced by the MC spec.
+def _mc_step_arrays(
+    archive: BundleArchive, manifest: Manifest
+) -> dict[str, dict[str, NDArray[Any]]]:
+    """Each step's lifted array kwargs, keyed by step name then kwarg name.
 
-    ``raw_model_data`` members are read format-agnostically and reshaped using the
-    ``data_shapes`` recorded on their spec node; ``custom`` op members are
-    unpickled. Keyed by the node's ``data_ref`` / ``func_ref`` so
-    :func:`build_pipeline` can reattach them.
+    A member packs one step's arrays into a single column block, so each was
+    folded to ``(-1, last)`` and padded to the tallest. The filler sits at the
+    end of the row axis, which is why the recorded shape is enough: take the
+    array's own rows back, then restore its rank.
     """
-    resources: dict[str, Any] = {}
-
-    shapes_by_ref = {
-        (params := node["params"])["data_ref"]: params.get("data_shapes", {})
-        for node in spec["nodes"]
-        if node["step_type"] == "raw_model_data" and "data_ref" in node["params"]
-    }
-    for member in manifest.members_by_kind("mc_raw_model_data"):
-        ref = str(member.options.get("ref", ""))
-        shapes = shapes_by_ref.get(ref, {})
+    out: dict[str, dict[str, NDArray[Any]]] = {}
+    for member in manifest.members_by_kind("mc_data"):
         columns = collapse_columns(_load_columns(archive, member))
-        resources[ref] = {
-            name: np.asarray(columns[name], dtype=np.float64).reshape(
-                tuple(int(d) for d in shape)
-            )
-            for name, shape in shapes.items()
+        shapes = cast(Mapping[str, Sequence[int]], member.options.get("shapes", {}))
+        out[str(member.options["name"])] = {
+            key: _restore_array(columns[key], shape) for key, shape in shapes.items()
         }
+    return out
 
-    custom_members = manifest.members_by_kind("mc_custom_op")
-    if custom_members:
-        import cloudpickle
 
-        for member in custom_members:
-            ref = str(member.options.get("ref", ""))
-            resources[ref] = cloudpickle.loads(archive.read(member.path))
+def _restore_array(column: NDArray[Any], shape: Sequence[int]) -> NDArray[Any]:
+    """One column group as the array it was written from."""
+    dims = tuple(int(size) for size in shape)
+    rows = int(np.prod(dims[:-1])) if len(dims) > 1 else dims[0]
+    return np.asarray(column, dtype=np.float64)[:rows].reshape(dims)
 
-    return resources
+
+def _mc_step_funcs(archive: BundleArchive, manifest: Manifest) -> dict[str, Any]:
+    """Each step's callable, keyed by step name.
+
+    A user op unpickles as its authoring wrapper and a built-in as the library
+    function itself; a step takes either as it finds it.
+    """
+    members = manifest.members_by_kind("mc_func")
+    if not members:
+        return {}
+    import cloudpickle
+
+    return {
+        str(member.options["name"]): cloudpickle.loads(archive.read(member.path))
+        for member in members
+    }

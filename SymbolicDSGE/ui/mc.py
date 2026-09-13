@@ -11,10 +11,10 @@ from __future__ import annotations
 from typing import Any
 
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.monte_carlo.builder import build_pipeline as build_pipeline
-from SymbolicDSGE.monte_carlo.builder import run_pipeline as _run_pipeline
+from SymbolicDSGE.monte_carlo.core import MCPipeline
 from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult
-from SymbolicDSGE.monte_carlo.spec import NodeSpec, PostprocSpec
+from SymbolicDSGE.monte_carlo.postproc import builtin_postproc
+from SymbolicDSGE.monte_carlo.spec import PipelineSpec, StepMeta, StepSpec
 from SymbolicDSGE.monte_carlo.traces import _trace_keys
 from SymbolicDSGE.monte_carlo.custom_op import (
     CustomFunc,
@@ -26,7 +26,7 @@ from SymbolicDSGE.monte_carlo.serialize import (
     serialize_pipeline_result as serialize_pipeline_result,
 )
 
-from .mc_schemas import MCNodeSpec, MCPipelineSpec, MCPostprocSpec
+from .mc_schemas import MCPipelineSpec, MCStepSpec
 
 #: Pre-fill for the custom-op Monaco editor. numpy is available as ``np`` inside
 #: the safe namespace, so no imports are needed (and the validator rejects them).
@@ -75,29 +75,43 @@ def validate_custom_op(
     return {"valid": True, "name": func.name}
 
 
-def compile_custom_resources(spec: MCPipelineSpec) -> dict[str, Any]:
-    """Compile each ``custom`` node's source into a callable, keyed by node name.
+def _step_func(step: MCStepSpec) -> Any | None:
+    """The callable a step runs, or ``None`` when its kind names none.
 
-    Feeds ``build_pipeline``/``run_pipeline`` via their ``resources`` seam. The
-    namespace is phase-based: ``postproc:custom`` nodes compile under the pandas
-    namespace, ``transform:custom`` under Numba. Raises ``ValueError``
-    (node-scoped) on missing or invalid source so the validate/run endpoints
-    report which step failed.
+    A custom op compiles from the source the editor submitted; a built-in
+    post-loop op is looked up by kind. Nothing is inferred: a step whose kind
+    owns no callable keeps an empty slot, which is what the library expects.
     """
-    resources: dict[str, Any] = {}
-    # transform:custom lives in nodes; postproc:custom in postprocs.
-    steps: list[MCNodeSpec | MCPostprocSpec] = [*spec.nodes, *spec.postprocs]
-    for node in steps:
-        if node.step_type not in ("transform:custom", "postproc:custom"):
-            continue
-        code = node.params.get("code", "")
-        if not isinstance(code, str) or not code.strip():
-            raise ValueError(f"Custom step '{node.name}' has no source code.")
-        try:
-            resources[node.name] = _custom_func_class(node.step_type).from_source(code)
-        except CustomOpValidationError as exc:
-            raise ValueError(f"Custom step '{node.name}': {exc}") from exc
-    return resources
+    if step.step_type not in ("transform:custom", "postproc:custom"):
+        return builtin_postproc(step.step_type)
+    code = step.code or ""
+    if not code.strip():
+        raise ValueError(f"Custom step {step.name!r} has no source code.")
+    try:
+        return _custom_func_class(step.step_type).from_source(code)
+    except CustomOpValidationError as exc:
+        raise ValueError(f"Custom step {step.name!r}: {exc}") from exc
+
+
+def build_pipeline(spec: MCPipelineSpec) -> MCPipeline:
+    """Compile a UI pipeline request into a live :class:`MCPipeline`.
+
+    The request is the pipeline as data, which is everything except the
+    callables. Pairing each step's meta with the callable its kind implies is
+    the last thing left before the library can take it.
+    """
+    funcs = {step.name: _step_func(step) for step in spec.steps}
+    doc = spec.to_core()
+
+    def step_spec(meta: StepMeta) -> StepSpec:
+        return StepSpec(meta=meta, func=funcs.get(meta["name"]))
+
+    return MCPipeline.from_spec(
+        PipelineSpec(
+            replication_steps=[step_spec(m) for m in doc["replication_steps"]],
+            postproc_steps=[step_spec(m) for m in doc["postproc_steps"]],
+        )
+    )
 
 
 def run_pipeline(
@@ -111,13 +125,13 @@ def run_pipeline(
     verbosity: int = 0,
 ) -> MCPipelineResult:
     """Validate, compile, and run a UI pipeline request (custom ops included)."""
-    return _run_pipeline(
-        spec.to_core(),
+    if reference is None:
+        raise ValueError("A solved reference model is required.")
+    return build_pipeline(spec).run(
         reference=reference,
         dgp=dgp,
         n_rep=n_rep,
         fail_fast=fail_fast,
         n_jobs=n_jobs,
         verbosity=verbosity,
-        resources=compile_custom_resources(spec),
     )

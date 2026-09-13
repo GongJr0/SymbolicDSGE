@@ -1,16 +1,15 @@
-"""Node construction for tests that author a spec the way the client posts one.
+"""Step construction for tests that author a pipeline the way the client posts one.
 
-The GUI resolves a node's op kind and lifts its source legs out of the flat form
-fields before posting. A test that hand-writes a node stands in for that client,
-so it does the same: the op kind comes from the kind taxonomy, and source legs
-are given as their own objects.
+The GUI resolves a step's op kind, lifts its source legs out of the flat form
+fields, and separates a custom op's source from its kwargs before posting. A
+test that hand-writes a step stands in for that client, so it does the same.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from SymbolicDSGE.monte_carlo.spec import OP_TYPES, NodeSpec, SourceSpec
+from SymbolicDSGE.monte_carlo.spec import OP_TYPES, POSTPROC_KINDS, SourceSpec, StepMeta
 
 
 def source(
@@ -20,7 +19,6 @@ def source(
     *,
     columns: list[int] | None = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
 ) -> SourceSpec:
     return SourceSpec(
         arg=arg,
@@ -28,25 +26,24 @@ def source(
         field=field,
         columns=columns,
         burn_in=burn_in,
-        drop_initial=drop_initial,
     )
 
 
-def node(
+def step(
     *,
-    id: str,
     step_type: str,
     name: str,
-    params: dict[str, Any] | None = None,
-    sources: list[SourceSpec] | None = None,
-) -> NodeSpec:
-    return NodeSpec(
-        id=id,
+    kwargs: dict[str, Any] | None = None,
+    source_args: list[SourceSpec] | None = None,
+    n_retain: int = -1,
+) -> StepMeta:
+    return StepMeta(
+        name=name,
         op_type=OP_TYPES.get(step_type, ""),
         step_type=step_type,
-        name=name,
-        params=dict(params or {}),
-        sources=list(sources or []),
+        kwargs=dict(kwargs or {}),
+        source_args=list(source_args or []),
+        n_retain=n_retain,
     )
 
 
@@ -78,27 +75,34 @@ def _leg_key(key: str) -> tuple[str, str] | None:
 def as_posted(pipeline: dict[str, Any]) -> dict[str, Any]:
     """Resolve a flatly-authored pipeline the way the GUI resolves one.
 
-    The client lifts source legs out of the form fields and names each node's
-    op kind before posting. A test that writes the flat form shape runs it
-    through here so it exercises the same payload the browser sends.
+    The client names each step's op kind, lifts its source legs out of the form
+    fields, and splits a custom op's source off its kwargs before posting. A test
+    that writes the flat form shape runs it through here so it exercises the same
+    payload the browser sends.
+
+    Steps are authored under ``nodes``/``postprocs``; ``edges`` are ignored, since
+    the posted pipeline carries no graph of its own.
     """
-    posted = dict(pipeline)
-    posted["nodes"] = [_posted_node(node) for node in pipeline["nodes"]]
-    return posted
+    replication = [_posted_step(raw) for raw in pipeline.get("nodes") or []]
+    postproc = [_posted_step(raw) for raw in pipeline.get("postprocs") or []]
+    return {"replication_steps": replication, "postproc_steps": postproc}
 
 
-def _posted_node(raw: dict[str, Any]) -> dict[str, Any]:
+def _posted_step(raw: dict[str, Any]) -> dict[str, Any]:
+    step_type = raw["step_type"]
     params = dict(raw.get("params") or {})
     burn_in = int(params.pop("burn_in", 0) or 0)
-    drop_initial = bool(params.pop("drop_initial", False))
+    code = params.pop("code", None)
+    n_retain = int(params.pop("n_retain", -1))
 
     legs: dict[str, dict[str, Any]] = {}
-    for key in list(params):
-        split = _leg_key(key)
-        if split is None:
-            continue
-        arg, role = split
-        legs.setdefault(arg, {})[role] = params.pop(key)
+    if step_type not in POSTPROC_KINDS:
+        for key in list(params):
+            split = _leg_key(key)
+            if split is None:
+                continue
+            arg, role = split
+            legs.setdefault(arg, {})[role] = params.pop(key)
 
     sources = [
         source(
@@ -107,16 +111,22 @@ def _posted_node(raw: dict[str, Any]) -> dict[str, Any]:
             str(parts["field"]),
             columns=_columns(parts.get("columns")),
             burn_in=burn_in,
-            drop_initial=drop_initial,
         )
         for arg, parts in legs.items()
         if "source" in parts and "field" in parts
     ]
-    node_spec = dict(raw)
-    node_spec["op_type"] = OP_TYPES.get(raw["step_type"], "")
-    node_spec["params"] = params
-    node_spec["sources"] = sources
-    return node_spec
+    posted: dict[str, Any] = dict(
+        step(
+            step_type=step_type,
+            name=raw["name"],
+            kwargs=params,
+            source_args=sources,
+            n_retain=n_retain,
+        )
+    )
+    if code is not None:
+        posted["code"] = code
+    return posted
 
 
 def _columns(value: Any) -> list[int] | None:
