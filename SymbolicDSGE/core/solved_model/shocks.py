@@ -7,47 +7,59 @@ assembled covariance and its factor all depend on the model and the spec alone.
 
 from __future__ import annotations
 
-from typing import Callable, Mapping, Tuple, Union
+from typing import Mapping, Tuple, Union
 
 import numpy as np
 from numpy import asarray, float64, ndarray
 from numpy.typing import NDArray
-from sympy import Symbol
 
 from ..compiled_model import CompiledModel
 from ..config import make_Q
 from ..shock_generators import Shock, _gaussian_factor
-from ..shock_plan import ShockPlan, ShockPlanEntry, validate_shock_targets
+from ..shock_plan import (
+    ArrayEntry,
+    ShockEntry,
+    ShockPlan,
+    validate_shock_targets,
+)
 
 NDF = NDArray[float64]
 
-ShockSpec = Mapping[str, Union[Shock, Callable[[Union[float, NDF]], NDF], NDF]]
+ShockSpec = Mapping[str, Union[Shock, NDF]]
 
 
 def _require_horizon(T: int | None, name: str) -> int:
     """A live ``Shock`` resolves its family against a horizon; demand one."""
     if T is None:
         raise ValueError(
-            f"Shock spec {name!r} is a live Shock, so resolving it needs a "
-            "horizon T. Pass T, or materialize the spec into a draw closure first."
+            f"Shock spec {name!r} is a live Shock; resolving it needs a horizon "
+            "T. Pass T, or draw the path yourself and pass the array."
         )
     return T
 
 
-def materialize_shocks(
-    shocks: ShockSpec,
-    T: int,
-) -> dict[str, Callable[[float | NDF], NDF] | NDF]:
-    """Resolve any ``Shock`` specs into their ``T``-horizon draw closures.
+def _columns(key: str, shock_col: Mapping[str, int]) -> tuple[int, ...]:
+    """The exogenous columns one spec key targets, in column order.
 
-    Live callables and raw arrays pass through untouched. Callers that hold the
-    specs themselves can hand them to :func:`resolve_shock_plan` directly, which
-    resolves the family without going through a closure.
+    Sorting here is what makes a grouped key's spelling irrelevant: ``"e_g,e_z"``
+    and ``"e_z,e_g"`` resolve to the same columns, in the order the covariance
+    block and its factor are built in. Nothing downstream re-sorts.
     """
-    return {
-        name: shock.shock_generator(T) if isinstance(shock, Shock) else shock
-        for name, shock in shocks.items()
-    }
+    names = [n.strip() for n in key.split(",")] if "," in key else [key]
+    return tuple(sorted(shock_col[name] for name in names))
+
+
+def _array_entry(key: str, indices: tuple[int, ...], shock: ndarray) -> ArrayEntry:
+    """A literal path, widened to ``(T, width)`` so every entry unpacks alike."""
+    values = asarray(shock, dtype=float64)
+    if values.ndim == 1:
+        values = values.reshape(-1, 1)
+    if values.ndim != 2 or values.shape[1] != len(indices):
+        raise ValueError(
+            f"Shock array for {key!r} must have shape (T, {len(indices)}); "
+            f"got {tuple(values.shape)}."
+        )
+    return ArrayEntry(key=key, indices=indices, value=values)
 
 
 def resolve_shock_plan(
@@ -62,123 +74,70 @@ def resolve_shock_plan(
     correlations read off the calibration, and the covariance factor a joint
     entry draws through. Drawing is separate, so one plan serves many draws.
 
+    The calibration is plan-invariant: the covariance is assembled at most once
+    here and each grouped entry indexes its own block out of it. Entry columns are
+    positions in ``config.shocks`` (``shock_names`` is built from it, and
+    ``shock_idx`` from that), which is the order the covariance is assembled in,
+    letting an entry's indices slice it directly. A spec of single shocks reads
+    its standard deviations straight off the calibration and never assembles one,
+    which is also what keeps correlations out of a spec that declares no groups.
+
     ``T`` is required only when the mapping carries live :class:`Shock` specs,
     which resolve their distribution family against a horizon.
     """
     calib = compiled.config.calibration
-    shock_stds = calib.shock_std
-
     shock_col = compiled.shock_idx
     validate_shock_targets(list(shocks), list(compiled.shock_names))
 
-    entries: list[ShockPlanEntry] = []
+    entries: list[ShockEntry | ArrayEntry] = []
     seeded_count = 0
+    cov: NDF | None = None
 
-    for name, shock in shocks.items():
-        if isinstance(shock, Shock) and shock.seed is not None:
+    for key, shock in shocks.items():
+        indices = _columns(key, shock_col)
+
+        if isinstance(shock, ndarray):
+            entries.append(_array_entry(key, indices, shock))
+            continue
+
+        if not isinstance(shock, Shock):
+            raise TypeError(
+                f"Shock for {key!r} must be a Shock or an ndarray path; got "
+                f"{type(shock).__name__}."
+            )
+
+        if shock.seed is not None:
             seeded_count += 1
 
-        if "," in name:
-            multi_names = [n.strip() for n in name.split(",")]
-            indices = [shock_col[n] for n in multi_names]
-            perm = np.argsort(indices)
-            multi_names_sorted = [multi_names[i] for i in perm]
-            indices_sorted = tuple(indices[i] for i in perm)
-
-            if isinstance(shock, ndarray):
-                assert shock.shape[1] == len(
-                    multi_names
-                ), f"Shock array for {name} must have shape (T, {len(multi_names)})"
-                entries.append(
-                    ShockPlanEntry(
-                        key=name,
-                        indices=indices_sorted,
-                        multivar=True,
-                        values=asarray(shock[:, perm], dtype=float64),
-                    )
-                )
-                continue
-
-            if not isinstance(shock, Shock) and not callable(shock):
-                raise TypeError(
-                    f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
-                )
-
-            cov = make_Q(
-                compiled.config.shocks,
-                shock_stds,
-                calib.shock_corr,
-                calib.parameters,
-                shocks=multi_names_sorted,
-            )
-
-            if isinstance(shock, Shock):
-                entries.append(
-                    ShockPlanEntry(
-                        key=name,
-                        indices=indices_sorted,
-                        multivar=True,
-                        scale=cov,
-                        factor=_gaussian_factor(cov),
-                        draw=shock.draw_fn(_require_horizon(T, name)),
-                        base_seed=(None if shock.seed is None else int(shock.seed)),
-                        spec=shock,
-                    )
-                )
-            else:
-                entries.append(
-                    ShockPlanEntry(
-                        key=name,
-                        indices=indices_sorted,
-                        multivar=True,
-                        scale=cov,
-                        func=shock,
-                    )
-                )
-            continue
-
-        # Uni-Var (target validity already checked by validate_shock_targets)
-        idx = (shock_col[name],)
-        if isinstance(shock, ndarray):
-            entries.append(
-                ShockPlanEntry(
-                    key=name,
-                    indices=idx,
-                    multivar=False,
-                    values=asarray(shock, dtype=float64),
-                )
-            )
-            continue
-
-        if not isinstance(shock, Shock) and not callable(shock):
-            raise TypeError(
-                f"Shock for {name} must be a callable or ndarray, got {type(shock)}."
-            )
-
-        sig = calib.parameters[calib.shock_std[name]]
-
-        if isinstance(shock, Shock):
-            entries.append(
-                ShockPlanEntry(
-                    key=name,
-                    indices=idx,
-                    multivar=False,
-                    scale=sig,
-                    draw=shock.draw_fn(_require_horizon(T, name)),
-                    base_seed=None if shock.seed is None else int(shock.seed),
-                    spec=shock,
-                )
-            )
+        # A width-1 entry draws against its own standard deviation; a grouped
+        # one against its covariance block, which is why only the grouped case
+        # assembles one. The assembly reads a calibration no entry can vary:
+        # the first group pays for it and the rest index the same matrix.
+        if len(indices) == 1:
+            scale: float | NDF = calib.parameters[calib.shock_std[key]]
+            factor = None
         else:
-            entries.append(
-                ShockPlanEntry(
-                    key=name,
-                    indices=idx,
-                    multivar=False,
-                    scale=sig,
-                    func=shock,
+            if cov is None:
+                cov = make_Q(
+                    compiled.config.shocks,
+                    calib.shock_std,
+                    calib.shock_corr,
+                    calib.parameters,
                 )
+            scale = cov[np.ix_(indices, indices)]
+            factor = _gaussian_factor(scale)
+
+        entries.append(
+            ShockEntry(
+                key=key,
+                indices=indices,
+                scale=scale,
+                draw=shock.draw_fn(_require_horizon(T, key), len(indices) > 1),
+                factor=factor,
+                base_seed=None if shock.seed is None else int(shock.seed),
+                kwargs=dict(shock.dist_kwargs),
             )
+        )
 
     return ShockPlan(
         entries=tuple(entries),
@@ -189,7 +148,7 @@ def resolve_shock_plan(
 
 def shock_unpack(
     compiled: CompiledModel,
-    shocks: Mapping[str, NDF | Callable[[float | NDF], NDF]],
+    shocks: ShockSpec,
 ) -> list[Tuple[int, NDF]]:
     """Resolve a spec and draw it once, as ``(exogenous index, column)``."""
     return resolve_shock_plan(compiled, shocks).unpack()

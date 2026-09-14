@@ -21,8 +21,11 @@ def test_shock_spec_branches():
     assert MC._shock_spec("u", Shock(dist="norm", seed=0))["seed"] == 0
     # A bare shock path travels as nested lists.
     assert MC._shock_spec("u", np.zeros((2, 1))) == [[0.0], [0.0]]
-    with pytest.raises(TypeError, match="callable"):
+    # Neither a Shock nor a path: a callable and a bare string alike.
+    with pytest.raises(TypeError, match="no serialized form"):
         MC._shock_spec("u", lambda s: s)
+    with pytest.raises(TypeError, match="no serialized form"):
+        MC._shock_spec("u", "norm")
 
 
 def test_restore_shock_branches():

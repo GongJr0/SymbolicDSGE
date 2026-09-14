@@ -431,14 +431,12 @@ def test_solved_model_build_C_d_from_observables(solved_test):
 
 def test_solved_model_shock_unpack_multivar_key_order_is_canonical(solved_test):
     T = 6
+    path = np.tile(np.array([0.3, -0.7], dtype=np.float64), (T, 1))
 
-    def mv_shock(cov):
-        # deterministic mapping from covariance -> shock matrix
-        base = np.array([cov[0, 0], cov[1, 1]], dtype=float)
-        return np.tile(base, (T, 1))
-
-    unpack_1 = shock_unpack(solved_test.compiled, {"e_u,e_v": mv_shock})
-    unpack_2 = shock_unpack(solved_test.compiled, {"e_v,e_u": mv_shock})
+    # The key's spelling is not the block's order: both resolve into column
+    # order, so the same path lands on the same columns either way.
+    unpack_1 = shock_unpack(solved_test.compiled, {"e_u,e_v": path})
+    unpack_2 = shock_unpack(solved_test.compiled, {"e_v,e_u": path})
 
     idx_to_vec_1 = {idx: vec for idx, vec in unpack_1}
     idx_to_vec_2 = {idx: vec for idx, vec in unpack_2}
@@ -448,9 +446,9 @@ def test_solved_model_shock_unpack_multivar_key_order_is_canonical(solved_test):
         assert np.array_equal(idx_to_vec_1[k], idx_to_vec_2[k])
 
 
-def test_solved_model_shock_unpack_univariate_callable_and_errors(solved_test):
+def test_solved_model_shock_unpack_univariate_path_and_errors(solved_test):
     out = shock_unpack(
-        solved_test.compiled, {"e_u": lambda sig: np.full((4,), sig, dtype=np.float64)}
+        solved_test.compiled, {"e_u": np.full((4,), 0.50, dtype=np.float64)}
     )
 
     assert out[0][0] == solved_test.compiled.shock_idx["e_u"]
@@ -459,18 +457,17 @@ def test_solved_model_shock_unpack_univariate_callable_and_errors(solved_test):
     with pytest.raises(ValueError, match="is not a model shock"):
         shock_unpack(solved_test.compiled, {"Pi": np.ones((4,), dtype=np.float64)})
 
-    with pytest.raises(TypeError, match="must be a callable or ndarray"):
+    with pytest.raises(TypeError, match="must be a Shock or an ndarray path"):
         shock_unpack(solved_test.compiled, {"e_u": "bad-shock"})
 
 
 def test_solved_model_shock_unpack_multivariate_error_paths(solved_test):
-    def bad_shape(_cov):
-        return np.ones((3, 1), dtype=np.float64)
+    with pytest.raises(ValueError, match=r"must have shape \(T, 2\)"):
+        shock_unpack(
+            solved_test.compiled, {"e_u,e_v": np.ones((3, 1), dtype=np.float64)}
+        )
 
-    with pytest.raises(ValueError, match="must return array with shape"):
-        shock_unpack(solved_test.compiled, {"e_u,e_v": bad_shape})
-
-    with pytest.raises(TypeError, match="must be a callable or ndarray"):
+    with pytest.raises(TypeError, match="must be a Shock or an ndarray path"):
         shock_unpack(solved_test.compiled, {"e_u,e_v": "bad-shock"})
 
 

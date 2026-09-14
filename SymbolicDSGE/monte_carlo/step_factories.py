@@ -21,7 +21,7 @@ def simulation_step(
     n_retain: int = -1,
     *,
     T: int,
-    shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
+    shocks: Mapping[str, Shock | NDF] | None = None,
     shock_scale: float = 1.0,
     x0: list[float] | NDF | None = None,
     observables: bool = True,
@@ -38,7 +38,7 @@ def simulation_step(
         Target model by role. "reference" or "dgp".
     n_retain : int
         Number of samples to retain. -1 means all, 0 means none.
-    shocks : Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None
+    shocks : Mapping[str, Shock | NDF] | None
         Shock specification for the simulation. Mirrors :meth:`SolvedModel.sim`.
         A bare array can include a replication dimension (n_rep, T, n_shock)
         for per-rep dispatch.

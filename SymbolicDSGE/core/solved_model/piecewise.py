@@ -34,9 +34,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     def _simulate_state_matrix(
         self,
         T: int,
-        shocks: (
-            Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
-        ) = None,
+        shocks: Mapping[str, Shock | NDF] | None = None,
         shock_scale: float = 1,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         *,
@@ -95,7 +93,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     def sim(
         self,
         T: int,
-        shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
+        shocks: Mapping[str, Shock | NDF] | None = None,
         shock_scale: float = 1.0,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         observables: bool = False,
@@ -124,7 +122,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         T : int
             Number of time periods to simulate.
 
-        shocks : Mapping[str, Shock | Callable[[float], ndarray] | ndarray], optional
+        shocks : Mapping[str, Shock | ndarray], optional
             Maps each exogenous variable name to its shock. A ``"a,b"`` key is a
             joint (multivar) shock over those variables. Each value may be a
             :class:`Shock` distribution spec (materialized into a ``T``-horizon
@@ -208,7 +206,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     def sim_reference(
         self,
         T: int,
-        shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
+        shocks: Mapping[str, Shock | NDF] | None = None,
         shock_scale: float = 1.0,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         observables: bool = False,
@@ -220,7 +218,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         T : int
             Number of time periods to simulate.
 
-        shocks : Mapping[str, Shock | Callable[[float], ndarray] | ndarray], optional
+        shocks : Mapping[str, Shock | ndarray], optional
             Maps each exogenous variable name to its shock. A ``"a,b"`` key is a
             joint (multivar) shock over those variables. Each value may be a
             :class:`Shock` distribution spec (materialized into a ``T``-horizon

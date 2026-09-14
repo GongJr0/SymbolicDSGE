@@ -22,7 +22,7 @@ from ..defaults import (
     DEFAULT_SIMULATION_TARGET,
 )
 from ..mc_constructs import MCStep
-from ..shock_native import build_native_plan, validate_shock_specs
+from ..shock_native import build_native_plan
 from .utils import (
     NDF,
     FloatInputBinding,
@@ -213,7 +213,6 @@ def _simulation_shocks(
     if shocks is None:
         return _array_shocks(model, T, shock_scale), False
 
-    validate_shock_specs(shocks)
     plan = resolve_shock_plan(model.compiled, shocks, T)
 
     values = np.zeros((n_rep, T, model.compiled.n_exog), dtype=np.float64)

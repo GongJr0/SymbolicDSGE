@@ -13,7 +13,7 @@ import numpy as np
 from numpy import asarray, ndarray, float64, random, zeros, generic
 from numpy.linalg import cholesky, eigh, LinAlgError
 from numpy.typing import NDArray
-from typing import Any, Callable, Literal, Mapping, TypedDict, cast, overload
+from typing import Any, Callable, Literal, Mapping, TypedDict, cast
 
 ShockDistribution = Literal["norm", "t", "uni"]
 
@@ -32,8 +32,6 @@ class ShockParameters(TypedDict):
     ----------
     dist : ShockDistribution
         Distribution to draw shocks from. Can be a string identifier ("norm", "t", "uni").
-    multivar : bool
-        Whether the distribution is multivariate.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
     dist_args : list[Any]
@@ -44,7 +42,6 @@ class ShockParameters(TypedDict):
     """
 
     dist: ShockDistribution
-    multivar: bool
     seed: int | None
     dist_args: list[Any]
     dist_kwargs: dict[str, Any]
@@ -157,187 +154,6 @@ def _draw_uniform(
     )
 
 
-def normal_shock_array(
-    T: int,
-    seed: int,
-    mu: float | float64 = 0.0,
-    sigma: float | float64 = 1.0,
-) -> ndarray:
-    """
-    Generate an array of normally distributed shocks.
-
-    Parameters
-    ----------
-    T (int): The number of time periods.
-    seed (int): Seed for the random number generator.
-    mu (float | float64): Mean of the normal distribution.
-    sigma (float | float64): Standard deviation of the normal distribution.
-
-    Returns
-    -------
-    np.ndarray: An array of normally distributed shocks of length T.
-    """
-    return _draw_normal(T, seed, mu, sigma)
-
-
-def normal_multivariate_shock_array(
-    T: int,
-    seed: int,
-    mus: list[float | float64],
-    cov_mat: list[list[float | float64]],
-) -> ndarray:
-    """
-    Generate an array of multivariate normally distributed shocks.
-
-    Parameters
-    ----------
-    T (int): The number of time periods.
-    k (int): The number of variables (dimensions).
-    seed (int): Seed for the random number generator.
-    mu (float | float64): Mean of the normal distribution.
-    sigma (float | float64): Standard deviation of the normal distribution.
-
-    Returns
-    -------
-    np.ndarray: An array of shape (T, k) of multivariate normally distributed shocks.
-    """
-    return _draw_normal_mv(T, seed, asarray(mus, dtype=float64), asarray(cov_mat))
-
-
-def t_shock_array(
-    T: int,
-    seed: int | None,
-    df: float,
-    loc: float | float64 = 0.0,
-    scale: float | float64 = 1.0,
-) -> ndarray:
-    """
-    Generate an array of t-distributed shocks.
-
-    Parameters
-    ----------
-    T (int): The number of time periods.
-    seed (int): Seed for the random number generator.
-    df (float): Degrees of freedom for the t-distribution.
-    loc (float | float64): Location parameter of the t-distribution.
-    scale (float | float64): Scale parameter of the t-distribution.
-
-    Returns
-    -------
-    np.ndarray: An array of t-distributed shocks of length T.
-    """
-    return _draw_t(T, seed, df, loc, scale)
-
-
-def t_multivariate_shock_array(
-    T: int,
-    seed: int | None,
-    df: float,
-    locs: list[float | float64],
-    cov_mat: list[list[float | float64]],
-) -> ndarray:
-    """
-    Generate an array of multivariate t-distributed shocks.
-
-    Parameters
-    ----------
-    T (int): The number of time periods.
-    k (int): The number of variables (dimensions).
-    seed (int): Seed for the random number generator.
-    df (float): Degrees of freedom for the t-distribution.
-    loc (float | float64): Location parameter of the t-distribution.
-    scale (float | float64): Scale parameter of the t-distribution.
-
-    Returns
-    -------
-    np.ndarray: An array of shape (T, k) of multivariate t-distributed shocks.
-    """
-    return _draw_t_mv(T, seed, df, asarray(locs, dtype=float64), asarray(cov_mat))
-
-
-def uniform_shock_array(
-    T: int, seed: int | None, loc: float | float64 = 0.0, scale: float | float64 = 1.0
-) -> ndarray:
-    """
-    Generate an array of uniformly distributed shocks.
-
-    Parameters
-    ----------
-    T (int): The number of time periods.
-    seed (int): Seed for the random number generator.
-    low (float): Lower bound of the uniform distribution.
-    high (float): Upper bound of the uniform distribution.
-
-    Returns
-    -------
-    np.ndarray: An array of uniformly distributed shocks of length T.
-    """
-    return _draw_uniform(T, seed, loc, scale)
-
-
-def uniform_multivariate_shock_array(
-    T: int,
-    k: int,
-    seed: int | None,
-    locs: list[float | float64],
-    cov_mat: list[list[float | float64]],
-) -> ndarray:
-    """Not implemented.
-
-    Generate an array of multivariate uniformly distributed shocks.
-    Rectangular uniform distributions implicitly indicate cov_ij = 0 for i != j.
-
-
-    Parameters
-    ----------
-    T (int): The number of time periods.
-    k (int): The number of variables (dimensions).
-    seed (int): Seed for the random number generator.
-    locs (list[float | float64]): List of means for each dimension.
-    cov_mat (list[list[float | float64]]): Covariance matrix for the distribution.
-
-    Returns
-    -------
-    np.ndarray: An array of shape (T, k) of multivariate uniformly distributed shocks.
-    """
-    raise NotImplementedError(
-        "Multivariate uniforms can get complex and computationally expensive."
-        " The function will remain in the namespace but will not be implemented unless explicitly needed."
-    )
-
-
-def shock_placement(
-    T: int, shock_spec: dict[int, float], shock_arr: ndarray = None
-) -> ndarray:
-    """
-    Place shocks in a time series array based on a shock specification.
-
-    Parameters
-    ----------
-    T (int): The number of time periods.
-    shock_spec (dict): A dictionary where keys are time indices (0-based) and
-                       values are shock scales (shock = scale * var_sigma at simulation time).
-
-    Returns
-    -------
-    np.ndarray: An array of shocks of length T with specified shocks placed.
-    """
-    if shock_arr is not None:
-        shocks = shock_arr
-    else:
-        rdim = T
-        shocks = zeros((rdim,), dtype=float64)
-
-    for i, shock in shock_spec.items():
-        shocks[i] = shock
-
-    return shocks
-
-
-ShockSpecUni = dict[int, float]
-ShockSpecMulti = dict[tuple[int, int], float]
-
-
 class Shock:
     """Shock generator specification for a simulation run.
 
@@ -347,68 +163,49 @@ class Shock:
         Distribution to draw shocks from. Can be a string identifier ("norm", "t",
         "uni") or a scipy.stats distribution object. Alternatively, a custom class
         implementing ``rvs`` can be passed in. If None, no distribution is specified.
-    multivar : bool
-        Boolean indicating whether the distribution is multivariate.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
     dist_args : tuple
         Positional arguments for the distribution.
     dist_kwargs : dict | None
         Optional keyword arguments for the distribution.
-    shock_arr : ndarray | None
-        Optional pre-generated shock array. If provided, this array will be used
-        instead of generating new shocks.
 
     Attributes
     ----------
     dist : ShockDistribution | rv_generic | multi_rv_generic | None
         The configured distribution.
-    multivar : bool
-        Whether the distribution is multivariate.
     seed : int | None
         The configured random seed.
     dist_args : tuple
         The configured positional arguments.
     dist_kwargs : dict | None
         The configured keyword arguments.
-    shock_arr : ndarray | None
-        The pre-generated shock array, when one was supplied.
     """
 
     def __init__(
         self,
         dist: ShockDistribution | rv_generic | multi_rv_generic | None = None,
-        multivar: bool = False,
         seed: int | None = 0,
         dist_args: tuple = (),
         dist_kwargs: dict | None = None,
-        shock_arr: ndarray | None = None,
     ) -> None:
         # A Shock is a horizon-independent distribution spec: the number of
         # periods ``T`` is supplied by the caller at generation time, not baked
         # in here. The simulation is the single authority on its own horizon.
         self.dist = dist
-        self.multivar = multivar
         self.seed = seed
         self.dist_args = dist_args
         self.dist_kwargs = dist_kwargs if dist_kwargs is not None else {}
-        self.shock_arr = shock_arr
 
     # TODO: Pass through array if provided else generate based on dist
 
-    def _assert_generator(self) -> None:
-        assert self.dist is not None, "Distribution must be specified."
-        assert (
-            self.shock_arr is None
-        ), "shock_arr is already provided. Please use place_shocks to mutate it."
-        assert "scale" not in self.dist_kwargs, (
-            "The generator function returns a callable that takes scale as an argument."
-            " Please adjust `sig_` variables in the config to change the distribution scale."
-            " Alternatively, the scale parameter in simulation and irf functions are multiplied directly with the shocks generated."
-        )
-
-    def draw_fn(self, T: int) -> ShockDrawFn:
+    def draw_fn(self, T: int, multivar: bool) -> ShockDrawFn:
         """Resolve the distribution family once for a ``T``-period horizon.
+
+        ``multivar`` is the arity of the entry being resolved, which the spec key
+        fixes: a key naming one shock draws a scalar standard deviation, a key
+        naming several draws their covariance block. It is a required parameter
+        rather than stored state because the key is the only authority on it.
 
         The returned callable is ``f(scale, seed, factor)``. Resolving the
         family, its keyword arguments, and (on the scipy route) the distribution
@@ -422,19 +219,27 @@ class Shock:
         Family validation is eager: an unknown family, a Student-t without
         ``df``, or a multivariate uniform raises here rather than at draw time.
         """
-        self._assert_generator()
+        if self.dist is None:
+            raise ValueError("Distribution must be specified to draw shocks.")
+        if "scale" in self.dist_kwargs:
+            raise ValueError(
+                "The generator function returns a callable that takes scale as an argument."
+                " Please adjust `sig_` variables in the config to change the distribution scale."
+                " Alternatively, the scale parameter in simulation and irf functions are multiplied directly with the shocks generated."
+            )
+
         kwargs = self.dist_kwargs.copy()
 
         # Known string families go through the numpy Generator fast paths. A raw
         # scipy distribution object (or a string with positional dist_args, which
         # the fast path doesn't model) keeps the scipy ``.rvs`` route.
         if isinstance(self.dist, str) and not self.dist_args:
-            return self._numpy_draw_fn(T, kwargs)
+            return self._numpy_draw_fn(T, kwargs, multivar)
 
         scale_key = "scale"
-        if self.multivar:
+        if multivar:
             scale_key = "shape" if self.dist == "t" else "cov"
-        dist = self._get_dist()
+        dist = self._get_dist(multivar)
         dist_args = self.dist_args
 
         def _scipy_draw(
@@ -453,20 +258,7 @@ class Shock:
 
         return _scipy_draw
 
-    def shock_generator(
-        self, T: int
-    ) -> Callable[[float | NDArray[float64]], NDArray[float64]]:
-        """Build the per-scale draw closure for a ``T``-period horizon.
-
-        ``T`` is supplied by the caller (the simulation), not stored on the
-        Shock; the returned callable takes only the scale argument ``s`` and
-        draws against this Shock's own ``seed``.
-        """
-        draw = self.draw_fn(T)
-        seed = self.seed
-        return lambda s: draw(s, seed, None)
-
-    def _numpy_draw_fn(self, T: int, kwargs: dict) -> ShockDrawFn:
+    def _numpy_draw_fn(self, T: int, kwargs: dict, multivar: bool) -> ShockDrawFn:
         """Resolve a string family onto the numpy Generator fast paths.
 
         The returned callable takes the scale argument ``s`` (a scalar std for
@@ -474,7 +266,6 @@ class Shock:
         mirroring the scipy-route contract.
         """
         family = self.dist
-        multivar = self.multivar
 
         if family == "norm":
             if multivar:
@@ -507,90 +298,20 @@ class Shock:
 
         raise ValueError(f"Unknown shock distribution family: {family!r}")
 
-    @overload
-    def place_shocks(self, shock_spec: ShockSpecUni, T: int) -> ndarray: ...
-    @overload
-    def place_shocks(self, shock_spec: ShockSpecMulti, T: int) -> ndarray: ...
-
-    def place_shocks(
-        self,
-        shock_spec: ShockSpecUni | ShockSpecMulti,
-        T: int,
-    ) -> ndarray:
-        """Place shocks in a time series array based on a shock specification.
-
-        Parameters
-        ----------
-        shock_spec : ShockSpecUni | ShockSpecMulti
-            A dictionary specifying the shocks to place. For univariate shocks, keys are time indices (0-based) and values are shock scales.
-            For multivariate shocks, keys are tuples of (time index, shock dimension index) and values are shock scales.
-        T : int
-            The number of time periods.
-
-        Returns
-        -------
-        ndarray
-            An array of shocks of length T (for univariate) or shape (T, k) (for multivariate) with specified shocks placed.
-        """
-        if self.shock_arr is not None:
-            assert self.shock_arr.shape[0] == T, "shock_arr length must match T."
-
-        if not shock_spec:
-            if self.shock_arr is not None:
-                return self.shock_arr
-            return (
-                zeros((T,), dtype=float64)
-                if not self.multivar
-                else zeros((T, 0), dtype=float64)
-            )
-
-        if not self.multivar:
-            # Narrow for mypy
-            shock_spec_u = cast(ShockSpecUni, shock_spec)
-
-            for k in shock_spec_u.keys():
-                if k < 0 or k >= T:
-                    raise IndexError(f"Time index {k} out of bounds for T={T}.")
-            return shock_placement(T, shock_spec_u, self.shock_arr)
-
-        # multivar
-        shock_spec_m = cast(ShockSpecMulti, shock_spec)
-
-        for t, k in shock_spec_m.keys():
-            if t < 0 or t >= T:
-                raise IndexError(f"Time index {t} out of bounds for T={T}.")
-            if k < 0:
-                raise IndexError(f"Shock dimension index {k} must be non-negative.")
-
-        if self.shock_arr is not None:
-            shocks = self.shock_arr
-        else:
-            K = max(k for (_, k) in shock_spec_m.keys()) + 1
-            shocks = zeros((T, K), dtype=float64)
-
-        for (t, k), val in shock_spec_m.items():
-            if k >= shocks.shape[1]:
-                raise IndexError(
-                    f"Shock dimension index {k} out of bounds for K={shocks.shape[1]}."
-                )
-            shocks[t, k] = float64(val)
-
-        return shocks
-
-    def _get_dist(self) -> rv_generic | multi_rv_generic:
+    def _get_dist(self, multivar: bool) -> rv_generic | multi_rv_generic:
         dist = self.dist
 
-        if dist == "norm" and not self.multivar:
+        if dist == "norm" and not multivar:
             return norm
-        elif dist == "norm" and self.multivar:
+        elif dist == "norm" and multivar:
             return mnorm
-        elif dist == "t" and not self.multivar:
+        elif dist == "t" and not multivar:
             return t
-        elif dist == "t" and self.multivar:
+        elif dist == "t" and multivar:
             return mt
-        elif dist == "uni" and not self.multivar:
+        elif dist == "uni" and not multivar:
             return uniform
-        elif dist == "uni" and self.multivar:
+        elif dist == "uni" and multivar:
             raise NotImplementedError(
                 "Multivariate uniform distribution is not implemented."
             )
@@ -614,14 +335,8 @@ class Shock:
                 "Only string-identified distributions ('norm'/'t'/'uni') are "
                 "serializable; got a live scipy distribution object."
             )
-        if self.shock_arr is not None:
-            raise ValueError(
-                "Cannot serialize a Shock carrying a materialized shock_arr; "
-                "array-backed shocks must be shipped as bulk (parquet) data."
-            )
         return ShockParameters(
             dist=self.dist,
-            multivar=bool(self.multivar),
             seed=None if self.seed is None else int(self.seed),
             dist_args=[_jsonable(arg) for arg in self.dist_args],
             dist_kwargs={k: _jsonable(v) for k, v in self.dist_kwargs.items()},
@@ -629,7 +344,12 @@ class Shock:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "Shock":
-        """Rebuild a generator-style Shock from :meth:`to_dict` output."""
+        """Rebuild a generator-style Shock from :meth:`to_dict` output.
+
+        A ``multivar`` written by an older release is ignored: the spec key the
+        shock is filed under fixes its arity, and a stored flag could contradict
+        it.
+        """
         dist = data["dist"]
         if dist not in {"norm", "t", "uni"}:
             raise ValueError(
@@ -638,7 +358,6 @@ class Shock:
         seed = data.get("seed")
         return cls(
             dist=cast(ShockDistribution, dist),
-            multivar=bool(data.get("multivar", False)),
             seed=None if seed is None else int(seed),
             dist_args=tuple(data.get("dist_args") or ()),
             dist_kwargs=dict(data.get("dist_kwargs") or {}),

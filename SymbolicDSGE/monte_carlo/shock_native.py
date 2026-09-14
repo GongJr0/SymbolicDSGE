@@ -24,7 +24,7 @@ from numpy.typing import NDArray
 
 from .._ckernels.monte_carlo._runner import NativeShockPlan, shock_plan
 from ..core.shock_generators import Shock
-from ..core.shock_plan import ShockPlan, ShockPlanEntry
+from ..core.shock_plan import ShockPlan, ShockEntry
 from ..core.solved_model.shocks import resolve_shock_plan
 from .defaults import DEFAULT_SHOCK_SCALE
 
@@ -74,8 +74,11 @@ def _spec_family(name: str, shock: Any) -> int | None:
     distribution object draws through code we have not ported.
     """
     if not isinstance(shock, Shock):
-        return None  # A literal array or a user callable.
-    if shock.shock_arr is not None or shock.dist_args:
+        # A supplied path is data the kernel could copy. The entry struct has no
+        # family for one, and one ineligible entry sends the whole spec to the
+        # Python draw.
+        return None
+    if shock.dist_args:
         return None
     if not isinstance(shock.dist, str):
         return None
@@ -120,7 +123,7 @@ def native_shock_scratch(shocks: Mapping[str, Any] | None, T: int) -> int:
     return T * max(len(name.split(",")) for name in shocks)
 
 
-def _entry_key(entry: ShockPlanEntry, rng: np.random.Generator) -> int:
+def _entry_key(entry: ShockEntry, rng: np.random.Generator) -> int:
     """The engine key for an entry.
 
     A seeded spec keys on its own seed, so its draws replay run to run. An
@@ -132,9 +135,9 @@ def _entry_key(entry: ShockPlanEntry, rng: np.random.Generator) -> int:
     return int(rng.integers(0, 2**64, dtype=np.uint64))
 
 
-def _normal_entry(entry: ShockPlanEntry, key: int) -> NativeShockEntry:
+def _normal_entry(entry: ShockEntry, key: int) -> NativeShockEntry:
     """Both widths take one code path in C, so give univariate a 1x1 factor."""
-    kwargs = {} if entry.spec is None else entry.spec.dist_kwargs
+    kwargs = entry.kwargs or {}
     columns = np.asarray(entry.indices, dtype=np.int64)
 
     if entry.multivar:
@@ -142,7 +145,7 @@ def _normal_entry(entry: ShockPlanEntry, key: int) -> NativeShockEntry:
         mean = kwargs.get("mean")
         loc = None if mean is None else np.asarray(mean, dtype=np.float64)
     else:
-        factor = np.asarray([[float(entry.scale)]], dtype=np.float64)  # type: ignore[arg-type]
+        factor = np.asarray([[float(entry.scale)]], dtype=np.float64)
         loc_value = float(kwargs.get("loc", 0.0))
         loc = None if loc_value == 0.0 else np.asarray([loc_value], dtype=np.float64)
 
@@ -157,16 +160,16 @@ def _normal_entry(entry: ShockPlanEntry, key: int) -> NativeShockEntry:
     )
 
 
-def _uniform_entry(entry: ShockPlanEntry, key: int) -> NativeShockEntry:
+def _uniform_entry(entry: ShockEntry, key: int) -> NativeShockEntry:
     """Scipy's uniform is parameterized by ``loc`` and a width, not by bounds."""
-    kwargs = {} if entry.spec is None else entry.spec.dist_kwargs
+    kwargs = entry.kwargs or {}
     return NativeShockEntry(
         family=SHOCK_UNIFORM,
         columns=np.asarray(entry.indices, dtype=np.int64),
         factor=None,
         loc=None,
         low=float(kwargs.get("loc", 0.0)),
-        span=float(entry.scale),  # type: ignore[arg-type]
+        span=float(entry.scale),
         key=key,
     )
 
@@ -184,6 +187,15 @@ def native_shock_entries(
     draws = np.random.default_rng() if rng is None else rng
     out: list[NativeShockEntry] = []
     for entry in plan.entries:
+        if not isinstance(entry, ShockEntry):
+            # Eligibility is all-or-nothing and a supplied path never qualifies,
+            # so a plan that reaches here draws every one of its entries. Stated
+            # rather than assumed: if eligibility ever goes per-entry, this is
+            # the line that should fail.
+            raise TypeError(
+                f"Shock entry {entry.key!r} is a supplied path, which the native "
+                "draw does not lower. This spec should have taken the Python route."
+            )
         family = families[entry.key]
         key = _entry_key(entry, draws)
         out.append(
@@ -192,20 +204,6 @@ def native_shock_entries(
             else _uniform_entry(entry, key)
         )
     return tuple(out)
-
-
-def validate_shock_specs(shocks: Mapping[str, Any]) -> None:
-    """Reject shock specs the per-replication redraw cannot honor."""
-    for name, shock in shocks.items():
-        if not isinstance(shock, Shock):
-            continue
-        if shock.shock_arr is not None:
-            raise ValueError("MC simulation requires generator-style Shock instances.")
-        if ("," in name) != shock.multivar:
-            raise ValueError(
-                f"Shock '{name}' must set multivar={',' in name} to match its "
-                "specification."
-            )
 
 
 def build_native_plan(
@@ -226,7 +224,6 @@ def build_native_plan(
     if families is None:
         return None
 
-    validate_shock_specs(shocks)
     plan = resolve_shock_plan(model.compiled, shocks, T)
     entries = native_shock_entries(plan, families)
     return shock_plan(
@@ -262,7 +259,6 @@ def replication_shocks(
     if not shocks:
         raise ValueError("The simulation step draws no shocks.")
 
-    validate_shock_specs(shocks)
     resolved = resolve_shock_plan(model.compiled, shocks, T)
     plan = build_native_plan(model, step, T)
     block = (

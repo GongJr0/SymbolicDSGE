@@ -32,9 +32,7 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
     def _simulate_state_matrix(
         self,
         T: int,
-        shocks: (
-            Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
-        ) = None,
+        shocks: Mapping[str, Shock | NDF] | None = None,
         shock_scale: float = 1,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
     ) -> StatePath:

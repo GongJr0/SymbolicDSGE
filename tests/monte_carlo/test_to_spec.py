@@ -92,20 +92,20 @@ def test_to_spec_is_a_fixed_point_under_rebuild() -> None:
     assert pipeline_meta(rebuilt.to_spec()) == pipeline_meta(spec1)
 
 
-def test_to_spec_rejects_shock_generators_with_actionable_message() -> None:
-    # `.shock_generator()` returns an opaque callable the runtime accepts but
-    # that cannot be serialized; to_spec must say how to fix it.
+def test_to_spec_rejects_unserializable_shocks_with_actionable_message() -> None:
+    # A spec is a `Shock` or a path. Anything else has no serialized form, and
+    # to_spec must name the two that do.
     pipe = MCPipeline(
         [
             simulation_step(
                 "dgp",
                 T=8,
-                shocks={"u": Shock(dist="norm", seed=0).shock_generator(8)},
+                shocks={"u": lambda scale: np.zeros(8)},
             ),
             jarque_bera_test_step("jb", source="dgp", field="observables"),
         ]
     )
-    with pytest.raises(TypeError, match="callable"):
+    with pytest.raises(TypeError, match="no serialized form"):
         pipe.to_spec()
 
 

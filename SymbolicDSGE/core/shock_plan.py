@@ -1,7 +1,7 @@
 """Resolved shock specifications, separated from the draws they produce.
 
-Turning a ``{name: Shock | callable | ndarray}`` mapping into a shock matrix has
-two halves. One half depends only on the model and the spec: which exogenous
+Turning a ``{name: Shock | ndarray}`` mapping into a shock matrix has two
+halves. One half depends only on the model and the spec: which exogenous
 columns an entry targets, the canonical order of a grouped (multivariate) entry,
 the standard deviations and correlations pulled from the calibration, the
 covariance assembled from them, and its factorization. The other half is the
@@ -15,85 +15,118 @@ rather than once per replication.
 """
 
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from typing import Sequence
+from functools import cached_property
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from .shock_generators import Shock, ShockDrawFn
+from .shock_generators import ShockDrawFn
 
 NDF = NDArray[float64]
 
 
 @dataclass(frozen=True)
-class ShockPlanEntry:
-    """One resolved entry of a shock spec.
+class ShockEntry:
+    """One drawn entry of a shock spec, resolved against a model.
 
-    Exactly one of ``draw``, ``func``, or ``values`` is set. ``draw`` is a
-    family-resolved :class:`Shock` whose seed varies per call, ``func`` is a
-    user-supplied callable with its own seed already baked in, and ``values`` is
-    a literal array. ``scale`` is the standard deviation for a univariate entry
-    and the covariance (or shape) matrix for a multivariate one. ``factor``
-    holds its precomputed Cholesky factor when the entry can accept one.
+    ``draw`` is the entry's family resolved for one horizon, ``scale`` the
+    dispersion it draws against: the standard deviation at width 1, the
+    covariance block above it. ``factor`` is that block's precomputed Cholesky,
+    absent at width 1 where a scalar has nothing to factorize. ``base_seed`` is
+    the spec's own seed, which :meth:`unpack` shifts per draw.
 
-    ``spec`` keeps the originating :class:`Shock` alongside its resolved draw.
-    The draw closure has already absorbed the family and its keyword arguments,
-    which is all the Python route needs, but the native Monte Carlo lowering has
-    to inspect them to decide whether it can reproduce the entry in C, so the
-    resolution keeps the spec rather than making that caller re-resolve it.
+    ``kwargs`` carries the distribution's keyword arguments forward for the
+    native lowering, which has to spell out what a closure holds implicitly:
+    ``loc``/``mean`` for a normal entry, the interval's low edge for a uniform
+    one. The Python draw needs none of it, having closed over them already.
     """
 
     key: str
     indices: tuple[int, ...]
-    multivar: bool
-    scale: float | NDF | None = None
+    scale: float | NDF
+    draw: ShockDrawFn
     factor: NDF | None = None
-    draw: ShockDrawFn | None = None
     base_seed: int | None = None
-    spec: Shock | None = None
-    func: Callable[[float | NDF], NDF] | None = None
-    values: NDF | None = None
+    kwargs: dict | None = None
 
-    @property
+    @cached_property
     def width(self) -> int:
         """Number of columns this entry targets."""
         return len(self.indices)
 
+    @property
+    def multivar(self) -> bool:
+        """Whether this entry drives more than one exogenous column."""
+        return self.width > 1
+
     def unpack(self, seed_offset: int = 0) -> list[tuple[int, NDF]]:
         """Draw this entry and pair each column with its exogenous index.
 
-        ``seed_offset`` shifts the base seed of a :class:`Shock` entry. The
-        fixed-callable and literal-array entries carry no seed to shift and
-        ignore it.
+        ``seed_offset`` shifts the base seed, which is what keeps the
+        replications of one Monte Carlo run on different paths. An unseeded
+        entry has nothing to shift and redraws freshly.
         """
-        if self.values is not None:
-            drawn = self.values
-        elif self.draw is not None:
-            seed = None if self.base_seed is None else self.base_seed + seed_offset
-            drawn = self.draw(self.scale, seed, self.factor)
-        elif self.func is not None:
-            drawn = self.func(self.scale)  # type: ignore[arg-type]
-        else:  # pragma: no cover - construction guarantees one source
-            raise ValueError(f"Shock entry {self.key!r} has no draw source.")
+        seed = None if self.base_seed is None else self.base_seed + seed_offset
+        drawn = self.draw(self.scale, seed, self.factor)
 
         if not self.multivar:
             return [(self.indices[0], np.asarray(drawn, dtype=float64))]
 
-        mat = np.asarray(drawn, dtype=float64)
-        if mat.ndim != 2 or mat.shape[1] != self.width:
+        if drawn.ndim != 2 or drawn.shape[1] != self.width:
             raise ValueError(
-                f"Shock callable for {self.key} must return array with shape "
-                f"(T, {self.width})"
+                f"Draw for {self.key!r} must return shape (T, {self.width}); "
+                f"got {tuple(drawn.shape)}."
             )
-        return list(zip(self.indices, (mat[:, i] for i in range(self.width))))
+        return list(zip(self.indices, (drawn[:, i] for i in range(self.width))))
+
+
+@dataclass(frozen=True)
+class ArrayEntry:
+    """One literal path of a shock spec, resolved against a model.
+
+    Nothing about a supplied path depends on the calibration: this carries no
+    scale, no factor, and no seed. ``value`` is always ``(T, width)``. The
+    resolution widens a single shock's one-dimensional path, which lets every
+    entry unpack the same way.
+    """
+
+    key: str
+    indices: tuple[int, ...]
+    value: NDF
+
+    @cached_property
+    def width(self) -> int:
+        """Number of columns this entry targets."""
+        return len(self.indices)
+
+    @property
+    def multivar(self) -> bool:
+        """Whether this entry drives more than one exogenous column."""
+        return self.width > 1
+
+    def unpack(self, seed_offset: int = 0) -> list[tuple[int, NDF]]:
+        """Pair each column of the supplied path with its exogenous index.
+
+        Takes ``seed_offset`` to match :meth:`ShockEntry.unpack`; a plan then
+        unpacks its entries without asking which kind each one is. A supplied
+        path has no seed to shift.
+        """
+        del seed_offset
+        if self.value.ndim != 2 or self.value.shape[1] != self.width:
+            raise ValueError(
+                f"Array entry for {self.key!r} must have shape (T, {self.width}); "
+                f"got {tuple(self.value.shape)}."
+            )
+        return list(zip(self.indices, (self.value[:, i] for i in range(self.width))))
 
 
 @dataclass(frozen=True)
 class ShockPlan:
     """A shock spec resolved against a model, ready to draw from repeatedly."""
 
-    entries: tuple[ShockPlanEntry, ...]
+    entries: tuple[ShockEntry | ArrayEntry, ...]
     n_exog: int
     seeded_count: int
 
@@ -163,7 +196,8 @@ def validate_shock_targets(
 
 
 __all__ = [
+    "ArrayEntry",
     "ShockPlan",
-    "ShockPlanEntry",
+    "ShockEntry",
     "validate_shock_targets",
 ]

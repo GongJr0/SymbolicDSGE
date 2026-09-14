@@ -136,19 +136,24 @@ from SymbolicDSGE.monte_carlo.step_factories import (  # (1)!
     simulation_step,
 )
 
-gz_shock = Shock(seed=0, multivar=True, dist="norm")  # (2)!
-r_shock = Shock(seed=1, multivar=False, dist="t", dist_kwargs={"df": 3})
+gz_shock = Shock(seed=0, dist="norm")
+r_shock = Shock(seed=1, dist="t", dist_kwargs={"df": 3})
 
 mc_pipeline = MCPipeline(
     [
         simulation_step(
             "datagen",
+            n_retain=100,
             target="dgp",
             T=200,
             shocks={"e_g,e_z": gz_shock, "e_r": r_shock},
         ),
         jarque_bera_test_step(
-            "jb_test", source="datagen", field="observables", column=0  # (3)!
+            "jb_test",
+            n_retain=100,
+            source="datagen",
+            field="observables",
+            column=0  # (2)!
         ),
     ]
 )
@@ -165,8 +170,7 @@ bundle.add_mc(pipeline=mc_pipeline, result=mc_res)
 ```
 
 1. Every built-in step factory lives in `step_factories`: data generation, raw data consumption, Kalman filtering, transforms, statistical tests, regressions, and post-processing.
-2. Notice we don't call `Shock.shock_generator` here. The MC pipeline needs to manage the seed per replication to avoid repeating the same shock path across replications.
-3. `source` names the producer step, and `field` names the array on its output. Here the test reads the first observable column of the simulated sample.
+2. `source` names the producer step, and `field` names the array on its output. Here the test reads the first observable column of the simulated sample.
 
 ## Specify a simulation prefill
 
@@ -232,25 +236,25 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     5196  09-13-2026 03:16   manifest.json
-     2134  09-13-2026 03:16   model/reference.yaml
-     2134  09-13-2026 03:16   model/dgp.yaml
-      630  09-13-2026 03:16   estimation/spec.json
-     1891  09-13-2026 03:16   estimation/observed.parquet
-    18906  09-13-2026 03:16   estimation/posterior.parquet
-      585  09-13-2026 03:16   estimation/result.json
-     1146  09-13-2026 03:16   montecarlo/pipeline.json
-      566  09-13-2026 03:16   montecarlo/result/meta.json
-      553  09-13-2026 03:16   montecarlo/result/datagen/datagen_steps.json
-      176  09-13-2026 03:16   montecarlo/result/tests/test_steps.json
-     3377  09-13-2026 03:16   montecarlo/result/datagen/datagen_retained_reps.parquet
-  7122646  09-13-2026 03:16   montecarlo/result/datagen/datagen_states.parquet
-  4273014  09-13-2026 03:16   montecarlo/result/datagen/datagen_shocks.parquet
-  4189809  09-13-2026 03:16   montecarlo/result/datagen/datagen_observables.parquet
-    11421  09-13-2026 03:16   montecarlo/result/tests/test_traces.parquet
-     1282  09-13-2026 03:16   data/auxiliary_series.parquet
+     5167  09-14-2026 17:59   manifest.json
+     2134  09-14-2026 17:59   model/reference.yaml
+     2134  09-14-2026 17:59   model/dgp.yaml
+      630  09-14-2026 17:59   estimation/spec.json
+     1891  09-14-2026 17:59   estimation/observed.parquet
+    18903  09-14-2026 17:59   estimation/posterior.parquet
+      585  09-14-2026 17:59   estimation/result.json
+     1087  09-14-2026 17:59   montecarlo/pipeline.json
+      564  09-14-2026 17:59   montecarlo/result/meta.json
+      548  09-14-2026 17:59   montecarlo/result/datagen/datagen_steps.json
+      175  09-14-2026 17:59   montecarlo/result/tests/test_steps.json
+      829  09-14-2026 17:59   montecarlo/result/datagen/datagen_retained_reps.parquet
+   714503  09-14-2026 17:59   montecarlo/result/datagen/datagen_states.parquet
+   428886  09-14-2026 17:59   montecarlo/result/datagen/datagen_shocks.parquet
+   421699  09-14-2026 17:59   montecarlo/result/datagen/datagen_observables.parquet
+     2274  09-14-2026 17:59   montecarlo/result/tests/test_traces.parquet
+     1282  09-14-2026 17:59   data/auxiliary_series.parquet
 ---------                     -------
- 15635466                     17 files
+  1603291                     17 files
 ```
 
 For a structured view, decompile it:

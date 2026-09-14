@@ -22,7 +22,7 @@ from numpy import float64, ndarray
 from ..core.shock_generators import Shock, ShockParameters
 
 #: Bundle format version. Bump on every manifest change.
-SDSGE_FORMAT_VERSION = 6
+SDSGE_FORMAT_VERSION = 7
 
 #: The version at which the format last broke. A reader rejects bundles older
 #: than this, and each bundle records its own so a reader can tell a version it

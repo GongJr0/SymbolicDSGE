@@ -34,7 +34,7 @@ NDI = NDArray[np.int_]
 NDB = NDArray[np.bool_]
 ColumnSelector = int | Sequence[int] | slice | NDArray[Any] | None
 CompiledColumnSelector = Sequence[int] | slice | None
-ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
+ShockValue = Union[Shock, NDF]
 
 
 MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "shocks", "observables")
@@ -328,13 +328,16 @@ def _jsonable(value: Any) -> Any:
 def _shock_spec(name: str, shock: Any) -> Any:
     """One named simulation shock as data.
 
-    A generator spec serializes itself and a bare shock path travels as nested
-    lists. A callable travels as nothing.
+    A :class:`Shock` travels as its constructor arguments and the receiver
+    redraws it. A supplied path travels as nested lists. The gate is positive
+    because a spec is one of those two things: anything else has no
+    representation here, whether or not it happens to be callable.
     """
-    if callable(shock):
+    if not isinstance(shock, (Shock, np.ndarray)):
         raise TypeError(
-            f"Shock {name!r} is a callable, which cannot be serialized. Pass the "
-            f"`Shock` itself rather than the generator it produces."
+            f"Shock {name!r} is a {type(shock).__name__}, which has no "
+            f"serialized form. Pass a `Shock` for the receiver to redraw, or the "
+            f"path itself as an array."
         )
     return _jsonable(shock)
 

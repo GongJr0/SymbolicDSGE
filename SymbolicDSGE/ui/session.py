@@ -292,7 +292,6 @@ class UISession:
         shock_arrays = self._decode_shocks(shocks)
         generated_shocks = self._generate_shocks(
             slot=slot,
-            T=T,
             generation=shock_generation,
             raw_shocks=shock_arrays,
         )
@@ -643,11 +642,15 @@ class UISession:
     def _generate_shocks(
         *,
         slot: ModelSlot,
-        T: int,
         generation: ShockGenerationRequest | None,
         raw_shocks: Mapping[str, NDArray[np.float64]],
-    ) -> dict[str, NDArray[np.float64] | Callable[..., NDArray[np.float64]]]:
-        out: dict[str, NDArray[np.float64] | Callable[..., NDArray[np.float64]]] = {
+    ) -> dict[str, NDArray[np.float64] | Shock]:
+        """The shock spec a simulation takes, as unresolved specs.
+
+        The horizon is the simulation's to supply. The specs travel unresolved
+        and :func:`resolve_shock_plan` binds them to ``T`` once.
+        """
+        out: dict[str, NDArray[np.float64] | Shock] = {
             name: value for name, value in raw_shocks.items()
         }
         if generation is None or slot.solved is None:
@@ -672,10 +675,9 @@ class UISession:
                 dist_kwargs = {"mean": [generation.loc] * len(pending)}
             out[key] = Shock(
                 dist=generation.dist,
-                multivar=True,
                 seed=seed,
                 dist_kwargs=dist_kwargs,
-            ).shock_generator(T)
+            )
             return out
 
         for i, name in enumerate(pending):
@@ -685,10 +687,9 @@ class UISession:
             shock_seed = None if seed is None else seed + i
             out[name] = Shock(
                 dist=generation.dist,
-                multivar=False,
                 seed=shock_seed,
                 dist_kwargs=uni_kwargs,
-            ).shock_generator(T)
+            )
         return out
 
 
