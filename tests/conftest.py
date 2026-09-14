@@ -13,18 +13,6 @@ RBC_SECOND_ORDER_TEST_MODEL_PATH = (
 )
 
 
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    # Pin every `sr`-marked test to a single xdist group so the pysr / Julia
-    # fits all land on one worker under `--dist loadgroup`. Running them in
-    # parallel makes multiple workers trigger juliapkg install + Julia
-    # precompilation into the same depot at once, which deadlocks on the
-    # precompile lock on a cold CI depot (green locally only because the depot
-    # is already warm). Serializing them removes that race.
-    for item in items:
-        if item.get_closest_marker("sr") is not None:
-            item.add_marker(pytest.mark.xdist_group("sr"))
-
-
 #: More memory than any test plan sizes to.
 ABUNDANT_MEMORY_BYTES = 1 << 50
 

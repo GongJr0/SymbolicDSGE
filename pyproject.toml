@@ -12,7 +12,7 @@ authors = [
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["DSGE", "symbolic", "measurement augmentation", "misspecification", "model diagnostics", "Kalman Filter", "function discovery", "Monte Carlo"]
+keywords = ["DSGE", "symbolic", "measurement augmentation", "misspecification", "model diagnostics", "Kalman Filter", "estimation", "Monte Carlo"]
 requires-python = ">=3.11"
 dependencies = [
     "cloudpickle>=3.1.2",
@@ -40,9 +40,6 @@ sdsge-decompile = "SymbolicDSGE.bundle.cli:main_decompile"
 fred = [
     "fredapi>=0.5.2",
     "python-dotenv>=1.2.3",
-]
-sr = [
-    "pysr>=2.2.0",
 ]
 ui = [
     "fastapi>=0.140.13",
@@ -98,7 +95,6 @@ include = ["SymbolicDSGE*"]
 
 [tool.ruff]
 include = ["SymbolicDSGE/**/*.py"]
-extend-exclude = ["SymbolicDSGE/regression/sr"]
 
 [tool.ruff.lint]
 select = ["D"]
@@ -126,9 +122,6 @@ testpaths = ["tests"]
 pythonpath = ["tests"]
 python_files = ["test_*.py"]
 addopts = "--import-mode=importlib"
-markers = [
-    "sr: tests that require the optional symbolic-regression dependency",
-]
 
 [tool.coverage.run]
 source = ["SymbolicDSGE"]

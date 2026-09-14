@@ -23,7 +23,6 @@ __Public Modules:__
 | `regression.ridge` | Ridge regression and L2 grid search. |
 | `regression.lasso` | Lasso regression and Lasso grid/path utilities. |
 | `regression.elastic_net` | Elastic Net regression and grid search. |
-| `regression.sr` | Symbolic-regression utilities. |
 
 __RegressionKind Values:__
 
