@@ -7,7 +7,7 @@ import io
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Callable, Mapping, cast
+from typing import Any, Callable, Mapping, Sequence, cast
 
 # Set non-interactive backend before any user code can import pyplot.
 try:
@@ -644,13 +644,13 @@ class UISession:
         slot: ModelSlot,
         generation: ShockGenerationRequest | None,
         raw_shocks: Mapping[str, NDArray[np.float64]],
-    ) -> dict[str, NDArray[np.float64] | Shock]:
+    ) -> dict[str | Sequence[str], NDArray[np.float64] | Shock]:
         """The shock spec a simulation takes, as unresolved specs.
 
         The horizon is the simulation's to supply. The specs travel unresolved
         and :func:`resolve_shock_plan` binds them to ``T`` once.
         """
-        out: dict[str, NDArray[np.float64] | Shock] = {
+        out: dict[str | Sequence[str], NDArray[np.float64] | Shock] = {
             name: value for name, value in raw_shocks.items()
         }
         if generation is None or slot.solved is None:

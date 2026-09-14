@@ -43,7 +43,7 @@ class ShockEntry:
     one. The Python draw needs none of it, having closed over them already.
     """
 
-    key: str
+    key: tuple[str, ...]
     indices: tuple[int, ...]
     scale: float | NDF
     draw: ShockDrawFn
@@ -92,7 +92,7 @@ class ArrayEntry:
     entry unpack the same way.
     """
 
-    key: str
+    key: tuple[str, ...]
     indices: tuple[int, ...]
     value: NDF
 
@@ -166,7 +166,7 @@ class ShockPlan:
 
 
 def validate_shock_targets(
-    keys: Sequence[str],
+    keys: Sequence[tuple[str, ...]],
     shock_names: Sequence[str],
 ) -> None:
     """Check every entry names model shocks, each owned by one entry.
@@ -176,12 +176,11 @@ def validate_shock_targets(
     key cannot reach here because the mapping deduplicates it upstream.
     """
     shock_set = set(shock_names)
-    owner: dict[str, str] = {}
-    for name in keys:
-        members = [n.strip() for n in name.split(",")] if "," in name else [name]
+    owner: dict[str, str | Sequence[str]] = {}
+    for members in keys:
         for member in members:
             if member not in shock_set:
-                where = f" in entry {name!r}" if "," in name else ""
+                where = f" in entry {','.join(members)!r}" if len(members) > 1 else ""
                 raise ValueError(
                     f"Shock {member!r}{where} is not a model shock. "
                     f"Valid shocks: {list(shock_names)}."
@@ -189,10 +188,10 @@ def validate_shock_targets(
             if member in owner:
                 raise ValueError(
                     f"Shock {member!r} is driven by more than one shock entry "
-                    f"({owner[member]!r} and {name!r}); each shock may appear "
+                    f"({owner[member]!r} and {','.join(members)!r}); each shock may appear "
                     "in at most one entry."
                 )
-            owner[member] = name
+            owner[member] = ",".join(members)
 
 
 __all__ = [

@@ -85,7 +85,7 @@ class SolvedModel(ABC, Generic[Policy]):
     def _simulate_state_matrix(
         self,
         T: int,
-        shocks: Mapping[str, Shock | NDF] | None = None,
+        shocks: Mapping[str | Sequence[str], Shock | NDF] | None = None,
         shock_scale: float = 1.0,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
     ) -> StatePath: ...
@@ -93,7 +93,7 @@ class SolvedModel(ABC, Generic[Policy]):
     def sim(
         self,
         T: int,
-        shocks: Mapping[str, Shock | NDF] | None = None,
+        shocks: Mapping[str | Sequence[str], Shock | NDF] | None = None,
         shock_scale: float = 1.0,
         x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
         observables: bool = False,
@@ -176,7 +176,7 @@ class SolvedModel(ABC, Generic[Policy]):
             )
         conf = self.compiled.config
 
-        shock_spec = {}
+        shock_spec: dict[str | Sequence[str], Shock | NDF] = {}
         sig_map = conf.calibration.shock_std
         for s in shocks:
             sig = conf.calibration.parameters[sig_map[s]]

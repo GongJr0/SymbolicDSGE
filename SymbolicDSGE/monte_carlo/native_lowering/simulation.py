@@ -210,7 +210,7 @@ def _simulation_shocks(
     """
     shocks = step.kwargs.get("shocks")
     shock_scale = float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE))
-    if shocks is None:
+    if not shocks:
         return _array_shocks(model, T, shock_scale), False
 
     plan = resolve_shock_plan(model.compiled, shocks, T)

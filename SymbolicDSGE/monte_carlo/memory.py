@@ -321,9 +321,9 @@ class MCMemoryProfiler:
         if step.op_type is not OpType.DATAGEN or step.step_type != "simulation":
             return 0
         shocks = step.kwargs.get("shocks")
-        if shocks is None:
+        if not shocks:
             return 0  # A single (T, n_exog) matrix, shared by every replication.
-        if native_shock_families(shocks) is not None:
+        if native_shock_families(shocks):
             return 0
         target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
         model = self._reference if target == "reference" else self._dgp

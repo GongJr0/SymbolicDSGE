@@ -7,7 +7,7 @@ assembled covariance and its factor all depend on the model and the spec alone.
 
 from __future__ import annotations
 
-from typing import Mapping, Tuple, Union
+from typing import Mapping, Sequence, Tuple, Union, Any
 
 import numpy as np
 from numpy import asarray, float64, ndarray
@@ -25,31 +25,55 @@ from ..shock_plan import (
 
 NDF = NDArray[float64]
 
-ShockSpec = Mapping[str, Union[Shock, NDF]]
+ShockSpec = Mapping[str | Sequence[str], Shock | NDF]
 
 
-def _require_horizon(T: int | None, name: str) -> int:
+def _normalized_spec(
+    shocks: Any,
+) -> dict[tuple[str, ...], Shock | NDF]:
+    """Normalize a shock spec to tuple keys, for internal use."""
+    if shocks is None:
+        return {}
+
+    if not isinstance(shocks, Mapping):
+        raise TypeError(f"Shock spec must be a mapping; got {type(shocks).__name__}.")
+    if not all(isinstance(k, Sequence) for k in shocks.keys()):  # str is Sequence[str].
+        raise TypeError(
+            "Shock spec keys must be str or Sequence[str]; got "
+            f"{[type(k).__name__ for k in shocks.keys()]}."
+        )
+    if not all(isinstance(v, (Shock, ndarray)) for v in shocks.values()):
+        raise TypeError(
+            "Shock spec values must be Shock or ndarray; got "
+            f"{[type(v).__name__ for v in shocks.values()]}."
+        )
+
+    return {(k,) if isinstance(k, str) else tuple(k): v for k, v in shocks.items()}
+
+
+def _require_horizon(T: int | None, key: tuple[str, ...]) -> int:
     """A live ``Shock`` resolves its family against a horizon; demand one."""
     if T is None:
         raise ValueError(
-            f"Shock spec {name!r} is a live Shock; resolving it needs a horizon "
+            f"Shock spec {','.join(key)!r} is a live Shock; resolving it needs a horizon "
             "T. Pass T, or draw the path yourself and pass the array."
         )
     return T
 
 
-def _columns(key: str, shock_col: Mapping[str, int]) -> tuple[int, ...]:
+def _columns(key: tuple[str, ...], shock_col: Mapping[str, int]) -> tuple[int, ...]:
     """The exogenous columns one spec key targets, in column order.
 
     Sorting here is what makes a grouped key's spelling irrelevant: ``"e_g,e_z"``
     and ``"e_z,e_g"`` resolve to the same columns, in the order the covariance
     block and its factor are built in. Nothing downstream re-sorts.
     """
-    names = [n.strip() for n in key.split(",")] if "," in key else [key]
-    return tuple(sorted(shock_col[name] for name in names))
+    return tuple(sorted(shock_col[name] for name in key))
 
 
-def _array_entry(key: str, indices: tuple[int, ...], shock: ndarray) -> ArrayEntry:
+def _array_entry(
+    key: tuple[str, ...], indices: tuple[int, ...], shock: ndarray
+) -> ArrayEntry:
     """A literal path, widened to ``(T, width)`` so every entry unpacks alike."""
     values = asarray(shock, dtype=float64)
     if values.ndim == 1:
@@ -87,13 +111,16 @@ def resolve_shock_plan(
     """
     calib = compiled.config.calibration
     shock_col = compiled.shock_idx
-    validate_shock_targets(list(shocks), list(compiled.shock_names))
+
+    spec = _normalized_spec(shocks)
+
+    validate_shock_targets(list(spec.keys()), list(compiled.shock_names))
 
     entries: list[ShockEntry | ArrayEntry] = []
     seeded_count = 0
     cov: NDF | None = None
 
-    for key, shock in shocks.items():
+    for key, shock in spec.items():
         indices = _columns(key, shock_col)
 
         if isinstance(shock, ndarray):
@@ -114,7 +141,7 @@ def resolve_shock_plan(
         # assembles one. The assembly reads a calibration no entry can vary:
         # the first group pays for it and the rest index the same matrix.
         if len(indices) == 1:
-            scale: float | NDF = calib.parameters[calib.shock_std[key]]
+            scale = calib.parameters[calib.shock_std[key[0]]]
             factor = None
         else:
             if cov is None:

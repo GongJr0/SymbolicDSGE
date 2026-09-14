@@ -1,7 +1,7 @@
 """First-order (Klein) solved model."""
 
 from __future__ import annotations
-from typing import Mapping, Callable, Union
+from typing import Mapping, Callable, Sequence
 from numpy import float64, ndarray
 import numpy as np
 
@@ -32,7 +32,7 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
     def _simulate_state_matrix(
         self,
         T: int,
-        shocks: Mapping[str, Shock | NDF] | None = None,
+        shocks: Mapping[str | Sequence[str], Shock | NDF] | None = None,
         shock_scale: float = 1,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
     ) -> StatePath:

@@ -16,7 +16,7 @@ reads the raw spec alone, so planning never has to resolve a model.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 import numpy as np
 from numpy import float64
@@ -48,7 +48,7 @@ class NativeShockEntry:
     family: int
     columns: NDArray[np.int64]
     factor: NDF | None
-    loc: NDF | None
+    loc: NDF
     low: float
     span: float
     key: int
@@ -65,7 +65,7 @@ class NativeShockEntry:
         )
 
 
-def _spec_family(name: str, shock: Any) -> int | None:
+def _spec_family(name: tuple[str, ...], shock: Shock | NDF) -> int | None:
     """The native family code for one raw spec entry, or None if C cannot draw it.
 
     A spec only qualifies when it names a known family as a string with no
@@ -85,42 +85,39 @@ def _spec_family(name: str, shock: Any) -> int | None:
     family = _NATIVE_FAMILIES.get(shock.dist)
     if family is None:
         return None  # Student-t and anything else unported.
-    if family == SHOCK_UNIFORM and "," in name:
+    if family == SHOCK_UNIFORM and len(name) > 1:
         return None
     return family
 
 
 def native_shock_families(
-    shocks: Mapping[str, Any] | None,
-) -> dict[str, int] | None:
+    shocks: Mapping[tuple[str, ...], Shock | NDF],
+) -> dict[tuple[str, ...], int]:
     """Family codes for a spec the native draw can take, else None.
 
     Eligibility is all-or-nothing: one entry the kernel cannot draw sends the
     whole spec back to the Python route, since a simulation step reads a single
     shock block.
     """
-    if not shocks:
-        return None
-    families: dict[str, int] = {}
-    for name, shock in shocks.items():
-        family = _spec_family(name, shock)
+    families: dict[tuple[str, ...], int] = {}
+    for key, shock in shocks.items():
+        family = _spec_family(key, shock)
         if family is None:
-            return None
-        families[name] = family
+            return {}
+        families[key] = family
     return families
 
 
-def native_shock_scratch(shocks: Mapping[str, Any] | None, T: int) -> int:
-    """Float arena elements the native draw needs, or 0 when it does not run.
+def native_shock_scratch(shocks: Mapping[tuple[str, ...], Shock | NDF], T: int) -> int:
+    """Float arena elements the native draw needs.
 
     Reads the raw spec so arena planning can size the scratch without resolving
     a plan against the model or drawing keys it would immediately discard. The
     widest entry sets the requirement, since entries are drawn one at a time.
     """
-    if native_shock_families(shocks) is None:
+    if not native_shock_families(shocks):
         return 0
-    assert shocks is not None
-    return T * max(len(name.split(",")) for name in shocks)
+    return T * max(len(k) for k in shocks)
 
 
 def _entry_key(entry: ShockEntry, rng: np.random.Generator) -> int:
@@ -142,12 +139,12 @@ def _normal_entry(entry: ShockEntry, key: int) -> NativeShockEntry:
 
     if entry.multivar:
         factor = np.ascontiguousarray(entry.factor, dtype=np.float64)
-        mean = kwargs.get("mean")
-        loc = None if mean is None else np.asarray(mean, dtype=np.float64)
+        loc = np.asarray(
+            kwargs.get("mean", np.zeros(entry.width, dtype=np.float64)),
+        )
     else:
         factor = np.asarray([[float(entry.scale)]], dtype=np.float64)
-        loc_value = float(kwargs.get("loc", 0.0))
-        loc = None if loc_value == 0.0 else np.asarray([loc_value], dtype=np.float64)
+        loc = np.asarray(kwargs.get("loc", 0.0), dtype=np.float64)
 
     return NativeShockEntry(
         family=SHOCK_NORMAL,
@@ -167,7 +164,7 @@ def _uniform_entry(entry: ShockEntry, key: int) -> NativeShockEntry:
         family=SHOCK_UNIFORM,
         columns=np.asarray(entry.indices, dtype=np.int64),
         factor=None,
-        loc=None,
+        loc=np.asarray([kwargs.get("loc", 0.0)], dtype=np.float64),
         low=float(kwargs.get("loc", 0.0)),
         span=float(entry.scale),
         key=key,
@@ -176,7 +173,7 @@ def _uniform_entry(entry: ShockEntry, key: int) -> NativeShockEntry:
 
 def native_shock_entries(
     plan: ShockPlan,
-    families: Mapping[str, int],
+    families: Mapping[tuple[str, ...], int],
     rng: np.random.Generator | None = None,
 ) -> tuple[NativeShockEntry, ...]:
     """Lower a resolved plan into the entries the native draw reads.
@@ -217,14 +214,21 @@ def build_native_plan(
     reproduce (Student-t, a scipy distribution object, a user callable, a
     literal array), so the caller draws every replication in Python up front.
     """
-    shocks = step.kwargs.get("shocks")
-    if not shocks:
-        return None
-    families = native_shock_families(shocks)
-    if families is None:
+    shocks_raw: Mapping[str | Sequence[str], Shock | NDF] | None = step.kwargs.get(
+        "shocks"
+    )
+    if not shocks_raw:
         return None
 
-    plan = resolve_shock_plan(model.compiled, shocks, T)
+    shocks: dict[tuple[str, ...], Shock | NDF] = {
+        (k,) if isinstance(k, str) else tuple(k): v for k, v in shocks_raw.items()
+    }
+
+    families = native_shock_families(shocks)
+    if not families:
+        return None
+
+    plan = resolve_shock_plan(model.compiled, shocks_raw, T)
     entries = native_shock_entries(plan, families)
     return shock_plan(
         [entry.as_tuple() for entry in entries],
@@ -238,7 +242,7 @@ def replication_shocks(
     model: SolvedModel,
     step: MCStep,
     rep_idx: int,
-) -> dict[str, NDF]:
+) -> dict[tuple[str, ...], NDF]:
     """The shock paths one Monte Carlo replication saw, keyed by spec name.
 
     A Monte Carlo replication is not reproducible by rerunning the pipeline with
@@ -271,7 +275,7 @@ def replication_shocks(
         else plan.draw(rep_idx)
     )
 
-    out: dict[str, NDF] = {}
+    out: dict[tuple[str, ...], NDF] = {}
     for entry in resolved.entries:
         columns = np.asarray(entry.indices, dtype=np.int64)
         out[entry.key] = block[:, columns] if entry.multivar else block[:, columns[0]]
