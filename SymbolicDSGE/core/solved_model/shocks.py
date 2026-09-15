@@ -15,7 +15,7 @@ from numpy.typing import NDArray
 
 from ..compiled_model import CompiledModel
 from ..config import make_Q
-from ..shock_generators import Shock, _gaussian_factor
+from ..shock_generators import Shock, _gaussian_factor, resolve_loc
 from ..shock_plan import (
     ArrayEntry,
     ShockEntry,
@@ -58,6 +58,8 @@ def _require_horizon(T: int | None, key: tuple[str, ...]) -> int:
             f"Shock spec {','.join(key)!r} is a live Shock; resolving it needs a horizon "
             "T. Pass T, or draw the path yourself and pass the array."
         )
+    if not isinstance(T, int) or T < 1:
+        raise ValueError(f"T must be a positive integer; got {T!r}.")
     return T
 
 
@@ -141,8 +143,12 @@ def resolve_shock_plan(
         # assembles one. The assembly reads a calibration no entry can vary:
         # the first group pays for it and the rest index the same matrix.
         if len(indices) == 1:
-            scale = calib.parameters[calib.shock_std[key[0]]]
-            factor = None
+            # A 1x1 factor is the Cholesky of the 1x1 covariance, so the scalar
+            # standard deviation needs no square root and every consumer sees
+            # one shape.
+            factor = np.array(
+                [[calib.parameters[calib.shock_std[key[0]]]]], dtype=float64
+            )
         else:
             if cov is None:
                 cov = make_Q(
@@ -158,8 +164,8 @@ def resolve_shock_plan(
             ShockEntry(
                 key=key,
                 indices=indices,
-                scale=scale,
                 draw=shock.draw_fn(_require_horizon(T, key), len(indices) > 1),
+                loc=resolve_loc(shock.dist_kwargs, len(indices)),
                 factor=factor,
                 base_seed=None if shock.seed is None else int(shock.seed),
                 kwargs=dict(shock.dist_kwargs),

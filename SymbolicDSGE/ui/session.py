@@ -664,7 +664,7 @@ class UISession:
 
         seed = generation.seed
         if generation.dist in {"norm", "t"} and len(pending) > 1:
-            key = ",".join(pending)
+            key = tuple(pending)
             dist_kwargs: dict[str, Any]
             if generation.dist == "t":
                 dist_kwargs = {

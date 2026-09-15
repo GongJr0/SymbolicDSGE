@@ -21,13 +21,10 @@ typedef struct {
   i64 width;
   /* width-long, the exogenous columns this entry drives, in factor order. */
   const i64 *columns;
-  /* width x width, row-major, with factor @ factor.T == cov. Normal only. */
+  /* width x width, row-major, with factor @ factor.T == cov. */
   const f64 *factor;
-  /* width-long mean vector, or NULL for zeros. Normal only. */
+  /* width-long mean vector */
   const f64 *loc;
-  /* Uniform only: draws land in [low, low + span). */
-  f64 low;
-  f64 span;
   u64 key; /* the spec's seed; entry_idx separates entries sharing one. */
   u64 entry_idx;
 } sdsge_mc_shock_entry;

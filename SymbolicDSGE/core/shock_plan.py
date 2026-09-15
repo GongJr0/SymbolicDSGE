@@ -31,23 +31,24 @@ NDF = NDArray[float64]
 class ShockEntry:
     """One drawn entry of a shock spec, resolved against a model.
 
-    ``draw`` is the entry's family resolved for one horizon, ``scale`` the
-    dispersion it draws against: the standard deviation at width 1, the
-    covariance block above it. ``factor`` is that block's precomputed Cholesky,
-    absent at width 1 where a scalar has nothing to factorize. ``base_seed`` is
-    the spec's own seed, which :meth:`unpack` shifts per draw.
+    ``draw`` is the entry's family resolved for one horizon, and it computes
+    ``loc + factor @ v`` over that family's standardized variate. ``factor`` is
+    the scale at any width: the 1x1 holding a standard deviation, or the
+    covariance block's factor. ``loc`` is the ``width``-long location. Both are
+    resolved once here rather than read from the spec at each boundary, which is
+    what keeps the Python draw and the native lowering from interpreting one
+    spec two ways. ``base_seed`` is the spec's own seed, which :meth:`unpack`
+    shifts per draw.
 
-    ``kwargs`` carries the distribution's keyword arguments forward for the
-    native lowering, which has to spell out what a closure holds implicitly:
-    ``loc``/``mean`` for a normal entry, the interval's low edge for a uniform
-    one. The Python draw needs none of it, having closed over them already.
+    ``kwargs`` carries what is neither location nor scale, which today is the
+    Student-t's ``df``, forward for the native lowering.
     """
 
     key: tuple[str, ...]
     indices: tuple[int, ...]
-    scale: float | NDF
+    loc: NDF
+    factor: NDF
     draw: ShockDrawFn
-    factor: NDF | None = None
     base_seed: int | None = None
     kwargs: dict | None = None
 
@@ -55,11 +56,6 @@ class ShockEntry:
     def width(self) -> int:
         """Number of columns this entry targets."""
         return len(self.indices)
-
-    @property
-    def multivar(self) -> bool:
-        """Whether this entry drives more than one exogenous column."""
-        return self.width > 1
 
     def unpack(self, seed_offset: int = 0) -> list[tuple[int, NDF]]:
         """Draw this entry and pair each column with its exogenous index.
@@ -69,10 +65,7 @@ class ShockEntry:
         entry has nothing to shift and redraws freshly.
         """
         seed = None if self.base_seed is None else self.base_seed + seed_offset
-        drawn = self.draw(self.scale, seed, self.factor)
-
-        if not self.multivar:
-            return [(self.indices[0], np.asarray(drawn, dtype=float64))]
+        drawn = self.draw(self.loc, self.factor, seed)
 
         if drawn.ndim != 2 or drawn.shape[1] != self.width:
             raise ValueError(
@@ -100,11 +93,6 @@ class ArrayEntry:
     def width(self) -> int:
         """Number of columns this entry targets."""
         return len(self.indices)
-
-    @property
-    def multivar(self) -> bool:
-        """Whether this entry drives more than one exogenous column."""
-        return self.width > 1
 
     def unpack(self, seed_offset: int = 0) -> list[tuple[int, NDF]]:
         """Pair each column of the supplied path with its exogenous index.
@@ -178,6 +166,8 @@ def validate_shock_targets(
     shock_set = set(shock_names)
     owner: dict[str, str | Sequence[str]] = {}
     for members in keys:
+        if not members:
+            raise ValueError("Shock entries must name at least one shock.")
         for member in members:
             if member not in shock_set:
                 where = f" in entry {','.join(members)!r}" if len(members) > 1 else ""

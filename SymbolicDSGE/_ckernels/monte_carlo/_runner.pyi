@@ -4,12 +4,15 @@ from typing import NamedTuple
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from ...monte_carlo.shock_native import NativeShockEntry
+from ...monte_carlo.native_lowering import FloatInputBinding
+
 from ._arenas import ArenaAllocation
-from SymbolicDSGE._diag_tests.distributions import (
+
+from ..._diag_tests.distributions import (
     DistributionParameter,
     ReferenceDistribution,
 )
-from SymbolicDSGE.monte_carlo.native_lowering import FloatInputBinding
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
@@ -71,9 +74,7 @@ class NativeShockPlan:
     def draw(self, rep_idx: int) -> NDF: ...
 
 def shock_plan(
-    entries: Sequence[
-        tuple[int, ArrayLike, ArrayLike | None, ArrayLike | None, float, float, int]
-    ],
+    entries: Sequence[NativeShockEntry],
     T: int,
     n_exog: int,
     shock_scale: float,

@@ -11,7 +11,6 @@ from time import perf_counter
 from typing import NamedTuple
 
 import numpy as np
-cimport numpy as cnp
 
 from cpython.mem cimport PyMem_Free, PyMem_Malloc
 from libc.stdint cimport int64_t, uint64_t, uintptr_t
@@ -33,8 +32,6 @@ cdef extern from "shocks.h":
         const int64_t *columns
         const double *factor
         const double *loc
-        double low
-        double span
         uint64_t key
         uint64_t entry_idx
 
@@ -705,21 +702,24 @@ cdef class NativeShockPlan:
 
 
 def shock_plan(
-    list entries,
+    tuple entries,
     int64_t T,
     int64_t n_exog,
     double shock_scale,
 ):
     """Build a native shock plan from resolved entries.
 
-    Each entry is ``(family, columns, factor, loc, low, span, key)``. ``family``
-    is one of the ``SHOCK_*`` constants below. ``columns`` is the int64 array of
-    exogenous column indices the entry drives, in the order its ``factor`` was
-    built in. ``factor`` is the row-major ``(width, width)`` matrix with
-    ``factor @ factor.T`` equal to the covariance (a 1x1 holding the standard
-    deviation in the univariate case) and is required for normal entries.
-    ``loc`` is an optional width-long mean vector. ``low`` and ``span`` apply to
-    uniform entries only.
+    Each entry is ``(family, columns, factor, loc, key)``. ``family`` is one of
+    the ``SHOCK_*`` constants below and selects which standardized variate the
+    draw fills; every other field is read by both families. ``columns`` is the
+    int64 array of exogenous column indices the entry drives, in the order its
+    ``factor`` was built in. ``factor`` is the row-major ``(width, width)``
+    matrix with ``factor @ factor.T`` equal to the covariance, a 1x1 holding the
+    standard deviation at width 1. ``loc`` is the width-long location.
+
+    The resolver settles every one of those shapes, so nothing is re-checked
+    here: the declarations below accept only a contiguous array of the right
+    rank and dtype, and a mismatch is a lowering bug rather than user input.
 
     An entry's position in this list becomes its stream selector, so two entries
     sharing a seed still draw independently.
@@ -730,14 +730,9 @@ def shock_plan(
     cdef int64_t width
     cdef int64_t max_width = 0
     cdef int family
-    cdef cnp.ndarray columns_arr
-    cdef cnp.ndarray factor_arr
-    cdef cnp.ndarray loc_arr
-
-    if T < 0 or n_exog < 0:
-        raise ValueError("Native shock plan dimensions must be non-negative.")
-    if n <= 0:
-        raise ValueError("Native shock plan requires at least one entry.")
+    cdef int64_t[::1] columns_mv
+    cdef double[:, ::1] factor_mv
+    cdef double[::1] loc_mv
 
     plan._entries = <sdsge_mc_shock_entry *>PyMem_Malloc(
         <size_t>n * sizeof(sdsge_mc_shock_entry)
@@ -746,52 +741,27 @@ def shock_plan(
         raise MemoryError("Could not allocate native shock entries.")
 
     for i in range(n):
-        family, columns, factor, loc, low, span, key = entries[i]
+        family, columns, factor, loc, key = entries[i]
 
-        columns_arr = np.ascontiguousarray(columns, dtype=np.int64)
-        if columns_arr.ndim != 1 or columns_arr.shape[0] == 0:
-            raise ValueError("Shock entry columns must be a non-empty 1D array.")
-        width = columns_arr.shape[0]
-        if (columns_arr < 0).any() or (columns_arr >= n_exog).any():
-            raise ValueError("Shock entry columns must index the exogenous block.")
-        plan._backing.append(columns_arr)
+        columns_mv = np.ascontiguousarray(columns, dtype=np.int64)
+        width = columns_mv.shape[0]
 
-        if family == SDSGE_MC_SHOCK_UNIFORM:
-            if width != 1:
-                raise ValueError("Uniform shock entries must be univariate.")
-            plan._entries[i].factor = NULL
-            plan._entries[i].loc = NULL
-        elif family == SDSGE_MC_SHOCK_NORMAL:
-            if factor is None:
-                raise ValueError("Normal shock entries require a factor matrix.")
-            factor_arr = np.ascontiguousarray(factor, dtype=np.float64)
-            if factor_arr.ndim != 2 or factor_arr.shape[0] != width \
-                    or factor_arr.shape[1] != width:
-                raise ValueError(
-                    "Shock entry factor must be square and match its width."
-                )
-            plan._backing.append(factor_arr)
-            plan._entries[i].factor = <const double *>cnp.PyArray_DATA(factor_arr)
-            if loc is None:
-                plan._entries[i].loc = NULL
-            else:
-                loc_arr = np.ascontiguousarray(loc, dtype=np.float64)
-                if loc_arr.ndim != 1 or loc_arr.shape[0] != width:
-                    raise ValueError("Shock entry loc must match its width.")
-                plan._backing.append(loc_arr)
-                plan._entries[i].loc = <const double *>cnp.PyArray_DATA(loc_arr)
-        else:
-            raise ValueError(f"Unsupported native shock family: {family!r}.")
+        plan._backing.append(columns_mv)
+        plan._entries[i].columns = &columns_mv[0]
+
+        factor_mv = np.ascontiguousarray(factor, dtype=np.float64)
+        plan._backing.append(factor_mv)
+        plan._entries[i].factor = &factor_mv[0, 0]
+
+        loc_mv = np.ascontiguousarray(loc, dtype=np.float64)
+        plan._backing.append(loc_mv)
+        plan._entries[i].loc = &loc_mv[0]
 
         plan._entries[i].family = family
         plan._entries[i].width = width
-        plan._entries[i].columns = <const int64_t *>cnp.PyArray_DATA(columns_arr)
-        plan._entries[i].low = low
-        plan._entries[i].span = span
         plan._entries[i].key = <uint64_t>key
         # Position in the spec, so entries sharing a seed stay independent.
         plan._entries[i].entry_idx = <uint64_t>i
-
         if width > max_width:
             max_width = width
 
@@ -885,36 +855,11 @@ cdef class NativeStep:
         return self._test_df
 
 
-cdef cnp.ndarray _require_arena(
-    object value,
-    object dtype,
-    int64_t n_rows,
-    str label,
-):
-    cdef cnp.ndarray array = np.asarray(value)
-    if array.dtype != dtype:
-        raise TypeError(f"{label} must have dtype {dtype}.")
-    if array.ndim != 2:
-        raise ValueError(f"{label} must be a two-dimensional array.")
-    if array.shape[0] != n_rows:
-        raise ValueError(f"{label} has an unexpected row count.")
-    if not array.flags.c_contiguous:
-        raise ValueError(f"{label} must be C-contiguous.")
-    return array
-
-
-cdef inline double *_float_data(cnp.ndarray array):
-    return <double *>cnp.PyArray_DATA(array)
-
-
-cdef inline int64_t *_int_data(cnp.ndarray array):
-    return <int64_t *>cnp.PyArray_DATA(array)
-
-
 def payload_step(str name, value):
     """Bind a native payload materialization step to immutable input data."""
     cdef NativeStep step = NativeStep()
-    cdef cnp.ndarray input_array = np.ascontiguousarray(value, dtype=np.float64)
+    cdef object input_array = np.ascontiguousarray(value, dtype=np.float64)
+    cdef double[::1] input_mv
     cdef int64_t n
 
     if input_array.ndim not in (1, 2, 3):
@@ -927,7 +872,8 @@ def payload_step(str name, value):
     else:
         n = input_array.size
 
-    step._ctx_store.payload.input = <const double *>cnp.PyArray_DATA(input_array)
+    input_mv = input_array.reshape(-1)
+    step._ctx_store.payload.input = &input_mv[0]
     step._ctx_store.payload.n = n
     step._ctx_store.payload.input_batched = input_array.ndim == 3
     step._bind(
@@ -942,8 +888,11 @@ def payload_step(str name, value):
 def raw_model_data_step(str name, states=None, shocks=None, observables=None):
     """Bind native raw data materialization with optional batched inputs."""
     cdef NativeStep step = NativeStep()
-    cdef cnp.ndarray states_array
-    cdef cnp.ndarray observables_array
+    cdef object states_array
+    cdef object observables_array
+    cdef double[::1] states_mv
+    cdef double[::1] shocks_mv
+    cdef double[::1] observables_mv
     cdef int64_t n_states = 0
     cdef int64_t n_shocks = 0
     cdef int64_t n_observables = 0
@@ -965,9 +914,8 @@ def raw_model_data_step(str name, states=None, shocks=None, observables=None):
             if states_batched else states_array.size
         )
         n_batch = states_array.shape[0] if states_batched else 0
-        step._ctx_store.raw_model_data.states_input = <const double *>cnp.PyArray_DATA(
-            states_array
-        )
+        states_mv = states_array.reshape(-1)
+        step._ctx_store.raw_model_data.states_input = &states_mv[0]
     else:
         states_array = None
         step._ctx_store.raw_model_data.states_input = NULL
@@ -987,9 +935,8 @@ def raw_model_data_step(str name, states=None, shocks=None, observables=None):
                                  "and observables must share n_rep."
                                  )
             n_batch = shocks_array.shape[0] if shocks_batched else 0
-        step._ctx_store.raw_model_data.shocks_input = <const double *>cnp.PyArray_DATA(
-                shocks_array
-        )
+        shocks_mv = shocks_array.reshape(-1)
+        step._ctx_store.raw_model_data.shocks_input = &shocks_mv[0]
     else:
         shocks_array = None
         step._ctx_store.raw_model_data.shocks_input = NULL
@@ -1011,9 +958,8 @@ def raw_model_data_step(str name, states=None, shocks=None, observables=None):
                                  "and observables must share n_rep."
                                  )
             n_batch = observables_array.shape[0]
-        step._ctx_store.raw_model_data.observables_input = (
-            <const double *>cnp.PyArray_DATA(observables_array)
-        )
+        observables_mv = observables_array.reshape(-1)
+        step._ctx_store.raw_model_data.observables_input = &observables_mv[0]
     else:
         observables_array = None
         step._ctx_store.raw_model_data.observables_input = NULL
@@ -1368,7 +1314,7 @@ def ols_step(str name, int64_t n, int64_t p, bint intercept=DEFAULT_INTERCEPT):
     return step
 
 
-cdef cnp.ndarray _alpha_grid(
+cdef object _alpha_grid(
     double start,
     double stop,
     int64_t num,
@@ -1417,10 +1363,12 @@ def ridge_gs_step(
     bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
-    cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
+    cdef object alphas = _alpha_grid(start, stop, num)
+    cdef double[::1] alphas_mv
     if n < 0 or p <= 0:
         raise ValueError("Native ridge grid-search dimensions must be valid.")
-    step._ctx_store.ridge_gs.alphas = <const double *>cnp.PyArray_DATA(alphas)
+    alphas_mv = alphas.reshape(-1)
+    step._ctx_store.ridge_gs.alphas = &alphas_mv[0]
     step._ctx_store.ridge_gs.n = n
     step._ctx_store.ridge_gs.p = p
     step._ctx_store.ridge_gs.n_alpha = num
@@ -1474,10 +1422,12 @@ def lasso_gs_step(
     bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
-    cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
+    cdef object alphas = _alpha_grid(start, stop, num)
+    cdef double[::1] alphas_mv
     if n < 0 or p <= 0 or max_iter <= 0 or tol <= 0.0:
         raise ValueError("Native lasso grid-search settings must be valid.")
-    step._ctx_store.lasso_gs.alphas = <const double *>cnp.PyArray_DATA(alphas)
+    alphas_mv = alphas.reshape(-1)
+    step._ctx_store.lasso_gs.alphas = &alphas_mv[0]
     step._ctx_store.lasso_gs.n = n
     step._ctx_store.lasso_gs.p = p
     step._ctx_store.lasso_gs.n_alpha = num
@@ -1537,11 +1487,13 @@ def elastic_net_gs_step(
     bint intercept=DEFAULT_INTERCEPT,
 ):
     cdef NativeStep step = NativeStep()
-    cdef cnp.ndarray alphas = _alpha_grid(start, stop, num)
+    cdef object alphas = _alpha_grid(start, stop, num)
+    cdef double[::1] alphas_mv
     if (n < 0 or p <= 0 or l1_ratio < 0.0 or l1_ratio > 1.0
             or max_iter <= 0 or tol <= 0.0):
         raise ValueError("Native elastic-net grid-search settings must be valid.")
-    step._ctx_store.elastic_net_gs.alphas = <const double *>cnp.PyArray_DATA(alphas)
+    alphas_mv = alphas.reshape(-1)
+    step._ctx_store.elastic_net_gs.alphas = &alphas_mv[0]
     step._ctx_store.elastic_net_gs.n = n
     step._ctx_store.elastic_net_gs.p = p
     step._ctx_store.elastic_net_gs.n_alpha = num
@@ -1589,10 +1541,12 @@ def wald_step(
     int kind=DEFAULT_WALD_KIND,
 ):
     cdef NativeStep step = NativeStep()
-    cdef cnp.ndarray target_array = np.ascontiguousarray(target, dtype=np.float64)
+    cdef object target_array = np.ascontiguousarray(target, dtype=np.float64)
+    cdef double[::1] target_mv
     if n < 0 or q <= 0 or target_array.size == 0:
         raise ValueError("Native Wald dimensions and target must be valid.")
-    step._ctx_store.wald.target = <const double *>cnp.PyArray_DATA(target_array)
+    target_mv = target_array.reshape(-1)
+    step._ctx_store.wald.target = &target_mv[0]
     step._ctx_store.wald.n = n
     step._ctx_store.wald.q = q
     step._ctx_store.wald.manual_bandwidth = manual_bandwidth
@@ -1740,20 +1694,22 @@ def run(
     cdef object step_binding_specs
     cdef object binding_spec
     cdef NativeStep step
-    cdef cnp.ndarray float_in_work
-    cdef cnp.ndarray int_in_work
-    cdef cnp.ndarray float_live_out
-    cdef cnp.ndarray int_live_out
-    cdef cnp.ndarray float_retained
-    cdef cnp.ndarray int_retained
-    cdef cnp.ndarray retained_row_by_rep
-    cdef cnp.ndarray failure_step_by_rep
-    cdef cnp.ndarray failure_status_by_rep
-    cdef cnp.ndarray step_elapsed_s_by_worker
-    cdef cnp.ndarray step_counts_by_worker
-    cdef cnp.ndarray step_failures_by_worker
-    cdef cnp.ndarray binding_columns
-    cdef cnp.ndarray static_values
+    cdef double[:, ::1] float_in_work
+    cdef int64_t[:, ::1] int_in_work
+    cdef double[:, ::1] float_live_out
+    cdef int64_t[:, ::1] int_live_out
+    cdef double[:, ::1] float_retained
+    cdef int64_t[:, ::1] int_retained
+    cdef int64_t[::1] failure_step_by_rep
+    cdef int64_t[::1] failure_status_by_rep
+    cdef double[:, ::1] step_elapsed_s_by_worker
+    cdef int64_t[:, ::1] step_counts_by_worker
+    cdef int64_t[:, ::1] step_failures_by_worker
+    # These three are validated against their own messages before the buffer is
+    # typed, so they keep the array alongside the view that addresses it.
+    cdef int64_t[::1] retained_row_by_rep
+    cdef int64_t[::1] binding_columns
+    cdef double[::1] static_values
     cdef sdsge_mc_step_desc *descs
     cdef sdsge_mc_float_input_binding *bindings = NULL
     cdef sdsge_mc_runner_ctx runner
@@ -1773,22 +1729,8 @@ def run(
     for step_binding_specs in input_bindings:
         n_bindings += len(step_binding_specs)
 
-    failure_step_by_rep = _require_arena(
-        np.asarray(allocation.failure_step_by_rep).reshape(1, -1),
-        np.dtype(np.int64),
-        1,
-        "failure_step_by_rep",
-    )
-    failure_status_by_rep = _require_arena(
-        np.asarray(allocation.failure_status_by_rep).reshape(1, -1),
-        np.dtype(np.int64),
-        1,
-        "failure_status_by_rep",
-    )
-    if failure_step_by_rep.shape[1] != allocation.n_rep:
-        raise ValueError("failure_step_by_rep has an unexpected length.")
-    if failure_status_by_rep.shape[1] != allocation.n_rep:
-        raise ValueError("failure_status_by_rep has an unexpected length.")
+    failure_step_by_rep = allocation.failure_step_by_rep
+    failure_status_by_rep = allocation.failure_status_by_rep
 
     descs = <sdsge_mc_step_desc *>PyMem_Malloc(
         n_steps * sizeof(sdsge_mc_step_desc)
@@ -1817,68 +1759,23 @@ def run(
                 )
 
             step_arenas = allocation.steps[step.name]
-            float_in_work = _require_arena(
-                step_arenas.float_in_work,
-                np.dtype(np.float64),
-                allocation.n_workers,
-                f"{step.name}.float_in_work",
-            )
-            int_in_work = _require_arena(
-                step_arenas.int_in_work,
-                np.dtype(np.int64),
-                allocation.n_workers,
-                f"{step.name}.int_in_work",
-            )
-            float_live_out = _require_arena(
-                step_arenas.float_live_out,
-                np.dtype(np.float64),
-                allocation.n_workers,
-                f"{step.name}.float_live_out",
-            )
-            int_live_out = _require_arena(
-                step_arenas.int_live_out,
-                np.dtype(np.int64),
-                allocation.n_workers,
-                f"{step.name}.int_live_out",
-            )
-            float_retained = _require_arena(
-                step_arenas.float_retained,
-                np.dtype(np.float64),
-                step_arenas.retained_reps.shape[0],
-                f"{step.name}.float_retained",
-            )
-            int_retained = _require_arena(
-                step_arenas.int_retained,
-                np.dtype(np.int64),
-                step_arenas.retained_reps.shape[0],
-                f"{step.name}.int_retained",
-            )
-            retained_row_by_rep = np.asarray(step_arenas.retained_row_by_rep)
-            if (
-                retained_row_by_rep.dtype != np.dtype(np.int64)
-                or retained_row_by_rep.ndim != 1
-                or retained_row_by_rep.shape[0] != allocation.n_rep
-                or not retained_row_by_rep.flags.c_contiguous
-            ):
-                raise ValueError(
-                    f"{step.name}.retained_row_by_rep must be a "
-                    "contiguous int64 vector."
-                )
-            if (
-                float_live_out.shape[1] != float_retained.shape[1]
-                or int_live_out.shape[1] != int_retained.shape[1]
-            ):
-                raise ValueError(f"Step {step.name!r} has mismatched "
-                                 "live and retained lanes.")
+            float_in_work = step_arenas.float_in_work
+            int_in_work = step_arenas.int_in_work
+            float_live_out = step_arenas.float_live_out
+            int_live_out = step_arenas.int_live_out
+            float_retained = step_arenas.float_retained
+            int_retained = step_arenas.int_retained
+
+            retained_row_by_rep = step_arenas.retained_row_by_rep
 
             descs[step_idx].fn = step._fn
-            descs[step_idx].float_in_work = _float_data(float_in_work)
-            descs[step_idx].int_in_work = _int_data(int_in_work)
-            descs[step_idx].float_live_out = _float_data(float_live_out)
-            descs[step_idx].int_live_out = _int_data(int_live_out)
-            descs[step_idx].float_retained = _float_data(float_retained)
-            descs[step_idx].int_retained = _int_data(int_retained)
-            descs[step_idx].retained_row_by_rep = _int_data(retained_row_by_rep)
+            descs[step_idx].float_in_work = &float_in_work[0, 0]
+            descs[step_idx].int_in_work = &int_in_work[0, 0]
+            descs[step_idx].float_live_out = &float_live_out[0, 0]
+            descs[step_idx].int_live_out = &int_live_out[0, 0]
+            descs[step_idx].float_retained = &float_retained[0, 0]
+            descs[step_idx].int_retained = &int_retained[0, 0]
+            descs[step_idx].retained_row_by_rep = &retained_row_by_rep[0]
             descs[step_idx].float_in_work_worker_stride = float_in_work.shape[1]
             descs[step_idx].int_in_work_worker_stride = int_in_work.shape[1]
             descs[step_idx].float_live_out_worker_stride = float_live_out.shape[1]
@@ -1893,15 +1790,7 @@ def run(
             )
             for binding_idx in range(len(step_binding_specs)):
                 binding_spec = step_binding_specs[binding_idx]
-                binding_columns = np.asarray(binding_spec.columns)
-                if (
-                    binding_columns.dtype != np.dtype(np.int64)
-                    or binding_columns.ndim != 1
-                    or not binding_columns.flags.c_contiguous
-                ):
-                    raise ValueError(
-                        "Native input binding columns must be contiguous int64 vectors."
-                    )
+                binding_columns = binding_spec.columns
                 bindings[binding_offset + binding_idx].source_step_idx = (
                     binding_spec.source_step_idx
                 )
@@ -1915,11 +1804,12 @@ def run(
                         binding_spec.row_start
                 )
                 bindings[binding_offset + binding_idx].n_rows = binding_spec.n_rows
-                bindings[binding_offset + binding_idx].columns = (
-                    _int_data(binding_columns)
-                    if binding_columns.shape[0]
-                    else NULL
-                )
+                if binding_columns.shape[0]:
+                    bindings[binding_offset + binding_idx].columns = (
+                        &binding_columns[0]
+                    )
+                else:
+                    bindings[binding_offset + binding_idx].columns = NULL
                 bindings[binding_offset + binding_idx].n_columns = (
                     binding_columns.shape[0]
                 )
@@ -1933,18 +1823,9 @@ def run(
                         binding_spec.fill_value
                 )
                 if binding_spec.source_step_idx < -1:
-                    static_values = np.asarray(binding_spec.static_values)
-                    if (
-                        static_values.dtype != np.dtype(np.float64)
-                        or static_values.ndim != 1
-                        or not static_values.flags.c_contiguous
-                    ):
-                        raise ValueError(
-                            "Native static input bindings require "
-                            "contiguous float64 vectors."
-                        )
-                    bindings[binding_offset + binding_idx].static_source = _float_data(
-                        static_values
+                    static_values = binding_spec.static_values
+                    bindings[binding_offset + binding_idx].static_source = (
+                        &static_values[0]
                     )
                     bindings[binding_offset + binding_idx].static_rep_stride = (
                         binding_spec.static_rep_stride
@@ -1967,8 +1848,8 @@ def run(
         runner.halt_failure.rep_idx = -1
         runner.halt_failure.step_idx = -1
         runner.halt_failure.status = 0
-        runner.failure_step_by_rep = _int_data(failure_step_by_rep)
-        runner.failure_status_by_rep = _int_data(failure_status_by_rep)
+        runner.failure_step_by_rep = &failure_step_by_rep[0]
+        runner.failure_status_by_rep = &failure_status_by_rep[0]
         runner.profile_steps = profile_steps
         if profile_steps:
             step_elapsed_s_by_worker = np.empty(
@@ -1980,9 +1861,9 @@ def run(
             step_failures_by_worker = np.empty(
                 (allocation.n_workers, n_steps), dtype=np.int64
             )
-            runner.step_elapsed_s_by_worker = _float_data(step_elapsed_s_by_worker)
-            runner.step_counts_by_worker = _int_data(step_counts_by_worker)
-            runner.step_failures_by_worker = _int_data(step_failures_by_worker)
+            runner.step_elapsed_s_by_worker = &step_elapsed_s_by_worker[0, 0]
+            runner.step_counts_by_worker = &step_counts_by_worker[0, 0]
+            runner.step_failures_by_worker = &step_failures_by_worker[0, 0]
             wall_started_s = perf_counter()
         else:
             runner.step_elapsed_s_by_worker = NULL
@@ -1998,9 +1879,9 @@ def run(
             runner.halt_failure.step_idx,
             runner.halt_failure.status,
             wall_elapsed_s,
-            step_elapsed_s_by_worker if profile_steps else None,
-            step_counts_by_worker if profile_steps else None,
-            step_failures_by_worker if profile_steps else None,
+            np.asarray(step_elapsed_s_by_worker) if profile_steps else None,
+            np.asarray(step_counts_by_worker) if profile_steps else None,
+            np.asarray(step_failures_by_worker) if profile_steps else None,
         )
     finally:
         PyMem_Free(bindings)

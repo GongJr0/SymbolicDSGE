@@ -11,6 +11,9 @@ import type { ShockRegistryEntry } from "../types";
 const BANDWIDTH_KEYWORDS = new Set(["andrews", "wooldridge", "auto"]);
 
 interface SerializedShock {
+  // The shocks this entry drives. A spec key names one or more of them, which a
+  // JSON object cannot be keyed by, so each entry carries its own.
+  key: string[];
   dist: string;
   multivar: boolean;
   seed: number | null;
@@ -43,6 +46,7 @@ function shockFor(entry: ShockRegistryEntry): SerializedShock {
     throw new Error(`Unsupported shock distribution: ${String(entry.dist)}`);
   }
   return {
+    key: vars,
     dist: entry.dist,
     multivar,
     seed: entry.seed ?? null,
@@ -53,9 +57,10 @@ function shockFor(entry: ShockRegistryEntry): SerializedShock {
 
 export function shocksFromRegistry(
   registry: ShockRegistryEntry[],
-): Record<string, SerializedShock> | null {
+): SerializedShock[] | null {
   if (registry.length === 0) return null;
-  const shocks: Record<string, SerializedShock> = {};
+  const shocks: SerializedShock[] = [];
+  const seen = new Set<string>();
   for (const entry of registry) {
     const vars = entry.vars.map(String);
     if (vars.length === 0) {
@@ -63,11 +68,16 @@ export function shocksFromRegistry(
         "Each shock registry entry must select at least one variable.",
       );
     }
-    const key = vars.join(",");
-    if (key in shocks) {
-      throw new Error(`Duplicate shock entry for '${key}' in the registry.`);
+    // A list cannot deduplicate its own entries the way an object key did, so
+    // the same selection twice is caught here.
+    const seenKey = vars.join("\u0000");
+    if (seen.has(seenKey)) {
+      throw new Error(
+        `Duplicate shock entry for '${vars.join(", ")}' in the registry.`,
+      );
     }
-    shocks[key] = shockFor(entry);
+    seen.add(seenKey);
+    shocks.push(shockFor(entry));
   }
   return shocks;
 }

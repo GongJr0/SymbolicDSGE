@@ -28,7 +28,6 @@ def _cloned_matrix(model, shocks, T, shock_scale, seed_offset):
             cloned[name] = Shock(
                 dist=shock.dist,
                 seed=seed,
-                dist_args=shock.dist_args,
                 dist_kwargs=shock.dist_kwargs.copy(),
             )
         else:
@@ -43,8 +42,8 @@ def _cloned_matrix(model, shocks, T, shock_scale, seed_offset):
         {"e_u": Shock(dist="norm", seed=3)},
         {"e_u": Shock(dist="t", seed=5, dist_kwargs={"df": 4})},
         {"e_u": Shock(dist="uni", seed=7)},
-        {"e_u,e_v": Shock(dist="norm", seed=11)},
-        {"e_u,e_v": Shock(dist="t", seed=13, dist_kwargs={"df": 6})},
+        {("e_u", "e_v"): Shock(dist="norm", seed=11)},
+        {("e_u", "e_v"): Shock(dist="t", seed=13, dist_kwargs={"df": 6})},
     ],
 )
 @pytest.mark.parametrize("seed_offset", [0, 1, 37])
@@ -58,7 +57,7 @@ def test_plan_draw_matches_clone_per_draw(solved_test, spec, seed_offset):
 
 
 def test_plan_reseeds_independently_across_draws(solved_test):
-    spec = {"e_u,e_v": Shock(dist="norm", seed=11)}
+    spec = {("e_u", "e_v"): Shock(dist="norm", seed=11)}
     plan = resolve_shock_plan(solved_test.compiled, spec, T)
 
     first = plan.matrix(T, 1.0, 0)
@@ -82,21 +81,8 @@ def test_unseeded_spec_redraws_each_time(solved_test):
     assert not np.array_equal(first, second)
 
 
-def test_plan_factor_matches_unfactored_covariance(solved_test):
-    spec = {"e_u,e_v": Shock(dist="norm", seed=11)}
-    plan = resolve_shock_plan(solved_test.compiled, spec, T)
-    entry = plan.entries[0]
-
-    assert entry.factor is not None
-    np.testing.assert_allclose(entry.factor @ entry.factor.T, entry.scale, atol=1e-12)
-
-    with_factor = entry.draw(entry.scale, 11, entry.factor)
-    without_factor = entry.draw(entry.scale, 11, None)
-    np.testing.assert_array_equal(with_factor, without_factor)
-
-
 def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
-    spec = {"e_u,e_v": Shock(dist="norm", seed=11)}
+    spec = {("e_u", "e_v"): Shock(dist="norm", seed=11)}
 
     calls = {"n": 0}
     original = shocks_mod.make_Q
@@ -127,7 +113,7 @@ def test_passthrough_entries_ignore_the_seed_offset(solved_test):
 
 def test_seeded_count_counts_seeded_entries(solved_test):
     spec = {
-        "e_u,e_v": Shock(dist="norm", seed=0),
+        ("e_u", "e_v"): Shock(dist="norm", seed=0),
     }
     plan = resolve_shock_plan(solved_test.compiled, spec, T)
 

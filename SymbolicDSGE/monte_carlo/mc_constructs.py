@@ -253,10 +253,9 @@ class MCStep:
         for key, value in self.kwargs.items():
             name = str(key)
             if name == "shocks" and isinstance(value, Mapping):
-                kwargs[name] = {
-                    str(shock): _shock_spec(str(shock), entry)
-                    for shock, entry in value.items()
-                }
+                kwargs[name] = [
+                    _shock_spec(shock, entry) for shock, entry in value.items()
+                ]
             elif isinstance(value, np.ndarray):
                 if value.size <= 50:  # ~1kB if float64 with UTF-8 JSON
                     kwargs[name] = _jsonable(value)
@@ -289,9 +288,9 @@ class MCStep:
         meta = spec.meta
         kwargs: dict[str, Any] = {**meta["kwargs"], **spec.arrays}
         shocks = kwargs.get("shocks")
-        if isinstance(shocks, Mapping):
+        if isinstance(shocks, Sequence) and not isinstance(shocks, (str, bytes)):
             kwargs["shocks"] = {
-                str(name): _restore_shock(entry) for name, entry in shocks.items()
+                tuple(entry["key"]): _restore_shock(entry) for entry in shocks
             }
         return cls(
             name=meta["name"],
@@ -325,34 +324,43 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def _shock_spec(name: str, shock: Any) -> Any:
-    """One named simulation shock as data.
+def _shock_spec(key: Any, shock: Any) -> dict[str, Any]:
+    """One simulation shock as a self-describing entry.
 
-    A :class:`Shock` travels as its constructor arguments and the receiver
-    redraws it. A supplied path travels as nested lists. The gate is positive
-    because a spec is one of those two things: anything else has no
-    representation here, whether or not it happens to be callable.
+    A spec key names one or more shocks, which a JSON object cannot be keyed by,
+    so an entry carries its own ``key`` and the mapping travels as a list. A
+    :class:`Shock` flattens its constructor arguments into the entry and the
+    receiver redraws it; a supplied path rides under ``path``. The two are told
+    apart by what the entry declares rather than by the shape of a bare value.
+
+    The gate is positive because a spec is one of those two things: anything else
+    has no representation here, whether or not it happens to be callable.
     """
-    if not isinstance(shock, (Shock, np.ndarray)):
-        raise TypeError(
-            f"Shock {name!r} is a {type(shock).__name__}, which has no "
-            f"serialized form. Pass a `Shock` for the receiver to redraw, or the "
-            f"path itself as an array."
-        )
-    return _jsonable(shock)
+    names = [key] if isinstance(key, str) else [str(name) for name in key]
+    if isinstance(shock, Shock):
+        return {"key": names, **shock.to_dict()}
+    if isinstance(shock, np.ndarray):
+        return {"key": names, "path": _jsonable(shock)}
+    raise TypeError(
+        f"Shock {key!r} is a {type(shock).__name__}, which has no "
+        f"serialized form. Pass a `Shock` for the receiver to redraw, or the "
+        f"path itself as an array."
+    )
 
 
-def _restore_shock(value: Any) -> Shock | NDF:
-    """One named shock as a simulation takes it.
+def _restore_shock(entry: Any) -> Shock | NDF:
+    """One serialized entry as a simulation takes it.
 
-    A mapping is a generator spec; anything else is a shock path, which the walk
-    out left as nested lists.
+    An entry declares which of the two forms it is: ``path`` is a supplied path
+    left as nested lists by the walk out, and anything else carries the
+    constructor arguments :meth:`Shock.from_dict` reads. A live ``Shock`` passes
+    through, for kwargs that were never lowered.
     """
-    if isinstance(value, Shock):
-        return value
-    if isinstance(value, Mapping):
-        return Shock.from_dict(value)
-    return np.asarray(value, dtype=float64)
+    if isinstance(entry, Shock):
+        return entry
+    if "path" in entry:
+        return np.asarray(entry["path"], dtype=float64)
+    return Shock.from_dict(entry)
 
 
 def _compile_source_args(

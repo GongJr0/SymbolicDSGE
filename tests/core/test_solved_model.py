@@ -435,8 +435,8 @@ def test_solved_model_shock_unpack_multivar_key_order_is_canonical(solved_test):
 
     # The key's spelling is not the block's order: both resolve into column
     # order, so the same path lands on the same columns either way.
-    unpack_1 = shock_unpack(solved_test.compiled, {"e_u,e_v": path})
-    unpack_2 = shock_unpack(solved_test.compiled, {"e_v,e_u": path})
+    unpack_1 = shock_unpack(solved_test.compiled, {("e_u", "e_v"): path})
+    unpack_2 = shock_unpack(solved_test.compiled, {("e_v", "e_u"): path})
 
     idx_to_vec_1 = {idx: vec for idx, vec in unpack_1}
     idx_to_vec_2 = {idx: vec for idx, vec in unpack_2}
@@ -457,18 +457,18 @@ def test_solved_model_shock_unpack_univariate_path_and_errors(solved_test):
     with pytest.raises(ValueError, match="is not a model shock"):
         shock_unpack(solved_test.compiled, {"Pi": np.ones((4,), dtype=np.float64)})
 
-    with pytest.raises(TypeError, match="must be a Shock or an ndarray path"):
+    with pytest.raises(TypeError, match="must be Shock or ndarray"):
         shock_unpack(solved_test.compiled, {"e_u": "bad-shock"})
 
 
 def test_solved_model_shock_unpack_multivariate_error_paths(solved_test):
     with pytest.raises(ValueError, match=r"must have shape \(T, 2\)"):
         shock_unpack(
-            solved_test.compiled, {"e_u,e_v": np.ones((3, 1), dtype=np.float64)}
+            solved_test.compiled, {("e_u", "e_v"): np.ones((3, 1), dtype=np.float64)}
         )
 
-    with pytest.raises(TypeError, match="must be a Shock or an ndarray path"):
-        shock_unpack(solved_test.compiled, {"e_u,e_v": "bad-shock"})
+    with pytest.raises(TypeError, match="must be Shock or ndarray"):
+        shock_unpack(solved_test.compiled, {("e_u", "e_v"): "bad-shock"})
 
 
 def test_solved_model_shock_unpack_names_unknown_multivar_member(solved_test):
@@ -476,7 +476,7 @@ def test_solved_model_shock_unpack_names_unknown_multivar_member(solved_test):
     # from, so a typo is traceable to the exact grouped spec.
     arr = np.zeros((4, 2), dtype=np.float64)
     with pytest.raises(ValueError, match=r"'Pi'.*entry 'e_u,Pi'"):
-        shock_unpack(solved_test.compiled, {"e_u,Pi": arr})
+        shock_unpack(solved_test.compiled, {("e_u", "Pi"): arr})
 
 
 def test_solved_model_shock_unpack_rejects_shock_in_two_entries(solved_test):
@@ -485,7 +485,7 @@ def test_solved_model_shock_unpack_rejects_shock_in_two_entries(solved_test):
     mv = np.zeros((4, 2), dtype=np.float64)
     uni = np.zeros((4,), dtype=np.float64)
     with pytest.raises(ValueError, match=r"'e_u' is driven by more than one"):
-        shock_unpack(solved_test.compiled, {"e_u,e_v": mv, "e_u": uni})
+        shock_unpack(solved_test.compiled, {("e_u", "e_v"): mv, "e_u": uni})
 
 
 def test_solved_model_kalman_smoke(solved_post82):

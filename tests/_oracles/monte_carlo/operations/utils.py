@@ -31,7 +31,6 @@ def _clone_or_pass_shocks(
             out[name] = Shock(
                 dist=shock.dist,  # pyright: ignore
                 seed=seed,
-                dist_args=shock.dist_args,
                 dist_kwargs=shock.dist_kwargs.copy(),
             )
         else:

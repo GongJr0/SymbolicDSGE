@@ -124,15 +124,13 @@ class _FakeSolvedModel:
         if shocks is not None:
             for name, shock in shocks.items():
                 if isinstance(shock, Shock):
-                    multivar = "," in name
-                    # Stands in for the calibration a real model would resolve.
-                    scale = (
-                        np.eye(len(name.split(",")), dtype=np.float64)
-                        if multivar
-                        else np.float64(1.0)
-                    )
+                    width = len(name) if isinstance(name, tuple) else 1
+                    # Stands in for the calibration a real model would resolve:
+                    # a unit factor, so the draw is the standardized variate.
                     shock_draws[name] = np.asarray(
-                        shock.draw_fn(T, multivar)(scale, shock.seed, None),
+                        shock.draw_fn(T, width > 1)(
+                            np.zeros(width), np.eye(width), shock.seed
+                        ),
                         dtype=np.float64,
                     )
                 else:
@@ -1062,8 +1060,8 @@ def test_simulation_step_can_advance_seeded_shock_spec_as_stream() -> None:
     reference = _FakeSolvedModel()
     dgp = _FakeSolvedModel(offset=1.0)
     shocks = {
-        "g,z": Shock("norm", seed=0),
-        "r": Shock("norm", seed=1),
+        ("g", "z"): Shock("norm", seed=0),
+        ("r",): Shock("norm", seed=1),
     }
     pipeline = MCPipeline(
         [
@@ -1080,13 +1078,13 @@ def test_simulation_step_can_advance_seeded_shock_spec_as_stream() -> None:
     expected_seeds = [(0, 1), (2, 3), (4, 5)]
     for rep_idx, (gz_seed, r_seed) in enumerate(expected_seeds):
         expected_gz = Shock("norm", seed=gz_seed).draw_fn(T, True)(
-            np.eye(2, dtype=np.float64), gz_seed, None
+            np.zeros(2), np.eye(2, dtype=np.float64), gz_seed
         )
         expected_r = Shock("norm", seed=r_seed).draw_fn(T, False)(
-            np.float64(1.0), r_seed, None
+            np.zeros(1), np.eye(1), r_seed
         )
-        np.testing.assert_allclose(dgp.sim_shocks[rep_idx]["g,z"], expected_gz)
-        np.testing.assert_allclose(dgp.sim_shocks[rep_idx]["r"], expected_r)
+        np.testing.assert_allclose(dgp.sim_shocks[rep_idx][("g", "z")], expected_gz)
+        np.testing.assert_allclose(dgp.sim_shocks[rep_idx][("r",)], expected_r)
 
 
 def test_simulate_dgp_fast_path_for_real_solved_model() -> None:

@@ -18,9 +18,15 @@ def test_jsonable_branches():
 
 
 def test_shock_spec_branches():
-    assert MC._shock_spec("u", Shock(dist="norm", seed=0))["seed"] == 0
-    # A bare shock path travels as nested lists.
-    assert MC._shock_spec("u", np.zeros((2, 1))) == [[0.0], [0.0]]
+    # An entry names its own shocks, so the spec needs no object key: a Shock
+    # flattens its arguments in, a path rides under "path".
+    drawn = MC._shock_spec(("u",), Shock(dist="norm", seed=0))
+    assert drawn == {"key": ["u"], "dist": "norm", "seed": 0, "dist_kwargs": {}}
+    assert MC._shock_spec(("u", "v"), Shock(dist="norm", seed=0))["key"] == ["u", "v"]
+    assert MC._shock_spec("u", np.zeros((2, 1))) == {
+        "key": ["u"],
+        "path": [[0.0], [0.0]],
+    }
     # Neither a Shock nor a path: a callable and a bare string alike.
     with pytest.raises(TypeError, match="no serialized form"):
         MC._shock_spec("u", lambda s: s)
@@ -31,7 +37,7 @@ def test_shock_spec_branches():
 def test_restore_shock_branches():
     live = Shock(dist="norm", seed=3)
     assert MC._restore_shock(live) is live
-    assert MC._restore_shock(live.to_dict()).seed == 3
-    restored = MC._restore_shock([[0.0], [1.0]])
+    assert MC._restore_shock({"key": ["u"], **live.to_dict()}).seed == 3
+    restored = MC._restore_shock({"key": ["u"], "path": [[0.0], [1.0]]})
     assert isinstance(restored, np.ndarray)
     assert restored.shape == (2, 1)

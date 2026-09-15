@@ -16,7 +16,8 @@ reads the raw spec alone, so planning never has to resolve a model.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Mapping, Sequence
+from enum import IntEnum
+from typing import TYPE_CHECKING, Any, Mapping, NamedTuple, Sequence
 
 import numpy as np
 from numpy import float64
@@ -27,79 +28,83 @@ from ..core.shock_generators import Shock
 from ..core.shock_plan import ShockPlan, ShockEntry
 from ..core.solved_model.shocks import resolve_shock_plan
 from .defaults import DEFAULT_SHOCK_SCALE
+from SymbolicDSGE._ckernels.monte_carlo import _runner
 
-if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime
+if TYPE_CHECKING:  # pragma: no cover; import cycle at runtime
     from ..core.solved_model import SolvedModel
     from .mc_constructs import MCStep
 
 NDF = NDArray[float64]
 
-# Mirrors the SDSGE_MC_SHOCK_* constants in _ckernels/monte_carlo/shocks.h.
-SHOCK_NORMAL = 0
-SHOCK_UNIFORM = 1
 
-_NATIVE_FAMILIES = {"norm": SHOCK_NORMAL, "uni": SHOCK_UNIFORM}
+class ShockCode(IntEnum):
+    """Integer codes for the shock families the native draw implements.
+
+    Mirrors the ``SDSGE_MC_SHOCK_*`` constants in
+    ``_ckernels/monte_carlo/shocks.h`` -- the two MUST stay in lockstep (same
+    names, same values). The code selects which standardized variate fills an
+    entry's draw; every other field an entry carries is family-independent.
+    """
+
+    NORMAL = _runner.SHOCK_NORMAL
+    UNIFORM = _runner.SHOCK_UNIFORM
+
+    @classmethod
+    def for_dist(cls, dist: Any) -> "ShockCode | None":
+        """The code the kernel draws ``dist`` under, else ``None``.
+
+        ``None`` is how a spec is found unported, which sends the whole spec to
+        the Python draw: Student-t has no kernel, and neither has a live scipy
+        distribution object, which compares equal to no family name.
+        """
+        if dist == "norm":
+            return cls.NORMAL
+        if dist == "uni":
+            return cls.UNIFORM
+        return None
 
 
-@dataclass(frozen=True)
-class NativeShockEntry:
+class NativeShockEntry(NamedTuple):
     """One entry in the layout ``_runner.shock_plan`` consumes."""
 
     family: int
     columns: NDArray[np.int64]
     factor: NDF | None
     loc: NDF
-    low: float
-    span: float
     key: int
 
-    def as_tuple(self) -> tuple:
-        return (
-            self.family,
-            self.columns,
-            self.factor,
-            self.loc,
-            self.low,
-            self.span,
-            self.key,
-        )
 
-
-def _spec_family(name: tuple[str, ...], shock: Shock | NDF) -> int | None:
+def _spec_family(name: tuple[str, ...], shock: Shock | NDF) -> ShockCode | None:
     """The native family code for one raw spec entry, or None if C cannot draw it.
 
-    A spec only qualifies when it names a known family as a string with no
-    positional arguments, which is exactly the condition under which
-    :meth:`Shock.draw_fn` itself bypasses scipy. Anything routed through a scipy
-    distribution object draws through code we have not ported.
+    A spec qualifies when it names a family the kernel implements, which is
+    what :class:`ShockCode.for_dist` answers. A live scipy distribution object
+    draws through code we have not ported, and so does Student-t.
     """
     if not isinstance(shock, Shock):
         # A supplied path is data the kernel could copy. The entry struct has no
         # family for one, and one ineligible entry sends the whole spec to the
         # Python draw.
         return None
-    if shock.dist_args:
+    code = ShockCode.for_dist(shock.dist)
+    if code is None:
+        return None  # Student-t, a scipy object, anything else unported.
+    if code is ShockCode.UNIFORM and len(name) > 1:
+        # A linear map of independent uniforms is not uniform in its margins.
         return None
-    if not isinstance(shock.dist, str):
-        return None
-    family = _NATIVE_FAMILIES.get(shock.dist)
-    if family is None:
-        return None  # Student-t and anything else unported.
-    if family == SHOCK_UNIFORM and len(name) > 1:
-        return None
-    return family
+    return code
 
 
 def native_shock_families(
     shocks: Mapping[tuple[str, ...], Shock | NDF],
-) -> dict[tuple[str, ...], int]:
+) -> dict[tuple[str, ...], ShockCode]:
     """Family codes for a spec the native draw can take, else None.
 
     Eligibility is all-or-nothing: one entry the kernel cannot draw sends the
     whole spec back to the Python route, since a simulation step reads a single
     shock block.
     """
-    families: dict[tuple[str, ...], int] = {}
+    families: dict[tuple[str, ...], ShockCode] = {}
     for key, shock in shocks.items():
         family = _spec_family(key, shock)
         if family is None:
@@ -132,41 +137,15 @@ def _entry_key(entry: ShockEntry, rng: np.random.Generator) -> int:
     return int(rng.integers(0, 2**64, dtype=np.uint64))
 
 
-def _normal_entry(entry: ShockEntry, key: int) -> NativeShockEntry:
+def _native_entry(entry: ShockEntry, key: int, family: int) -> NativeShockEntry:
     """Both widths take one code path in C, so give univariate a 1x1 factor."""
-    kwargs = entry.kwargs or {}
     columns = np.asarray(entry.indices, dtype=np.int64)
 
-    if entry.multivar:
-        factor = np.ascontiguousarray(entry.factor, dtype=np.float64)
-        loc = np.asarray(
-            kwargs.get("mean", np.zeros(entry.width, dtype=np.float64)),
-        )
-    else:
-        factor = np.asarray([[float(entry.scale)]], dtype=np.float64)
-        loc = np.asarray(kwargs.get("loc", 0.0), dtype=np.float64)
-
     return NativeShockEntry(
-        family=SHOCK_NORMAL,
+        family=family,
         columns=columns,
-        factor=factor,
-        loc=loc,
-        low=0.0,
-        span=0.0,
-        key=key,
-    )
-
-
-def _uniform_entry(entry: ShockEntry, key: int) -> NativeShockEntry:
-    """Scipy's uniform is parameterized by ``loc`` and a width, not by bounds."""
-    kwargs = entry.kwargs or {}
-    return NativeShockEntry(
-        family=SHOCK_UNIFORM,
-        columns=np.asarray(entry.indices, dtype=np.int64),
-        factor=None,
-        loc=np.asarray([kwargs.get("loc", 0.0)], dtype=np.float64),
-        low=float(kwargs.get("loc", 0.0)),
-        span=float(entry.scale),
+        factor=entry.factor,
+        loc=entry.loc,
         key=key,
     )
 
@@ -195,11 +174,7 @@ def native_shock_entries(
             )
         family = families[entry.key]
         key = _entry_key(entry, draws)
-        out.append(
-            _normal_entry(entry, key)
-            if family == SHOCK_NORMAL
-            else _uniform_entry(entry, key)
-        )
+        out.append(_native_entry(entry, key, family))
     return tuple(out)
 
 
@@ -231,7 +206,7 @@ def build_native_plan(
     plan = resolve_shock_plan(model.compiled, shocks_raw, T)
     entries = native_shock_entries(plan, families)
     return shock_plan(
-        [entry.as_tuple() for entry in entries],
+        entries,
         T,
         model.compiled.n_exog,
         float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE)),
@@ -278,5 +253,5 @@ def replication_shocks(
     out: dict[tuple[str, ...], NDF] = {}
     for entry in resolved.entries:
         columns = np.asarray(entry.indices, dtype=np.int64)
-        out[entry.key] = block[:, columns] if entry.multivar else block[:, columns[0]]
+        out[entry.key] = block[:, columns]
     return out

@@ -77,8 +77,14 @@ def test_to_spec_structure_and_sources() -> None:
     assert by_name["w"]["source_args"][0]["field"] == "std_innov"
     # kwargs are stored as the step holds them; no form-shaped renaming
     assert by_name["w"]["kwargs"]["target"] == [0.0]
-    # shocks are serialized to JSON-safe dicts
-    assert by_name["dgp"]["kwargs"]["shocks"]["u"]["dist"] == "norm"
+    # a shock spec travels as a list of entries, each naming its own shocks
+    (entry,) = by_name["dgp"]["kwargs"]["shocks"]
+    assert entry == {
+        "key": ["u"],
+        "dist": "norm",
+        "seed": 0,
+        "dist_kwargs": {"loc": 0.0},
+    }
     # the meta half is the document a bundle writes, and it is JSON on its own
     json.dumps(pipeline_meta(spec))
 
@@ -113,7 +119,9 @@ def test_rebuilt_simulation_recovers_live_shocks() -> None:
     pipe = _simulation_pipeline()
     rebuilt = MCPipeline.from_spec(pipe.to_spec())
 
-    shock = rebuilt.replication_steps[0].kwargs["shocks"]["u"]
+    # A spec key round-trips as the tuple the entry's names make, whatever
+    # spelling the author used.
+    shock = rebuilt.replication_steps[0].kwargs["shocks"][("u",)]
     assert isinstance(shock, Shock)
     assert shock.to_dict() == pipe.replication_steps[0].kwargs["shocks"]["u"].to_dict()
 

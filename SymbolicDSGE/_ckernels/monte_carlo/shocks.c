@@ -56,10 +56,14 @@ static void sdsge_mc_shock_apply_uniform(const sdsge_mc_shock_plan *plan,
   const i64 n_exog = plan->n_exog;
   const i64 column = entry->columns[0];
   const f64 shock_scale = plan->shock_scale;
+
+  const f64 sqrt3 = sqrt(3.0);
+  const f64 lo = entry->loc[0] - sqrt3 * entry->factor[0];
+  const f64 sc = 2.0 * sqrt3 * entry->factor[0];
   i64 t;
 
   for (t = 0; t < plan->T; t++) {
-    out[t * n_exog + column] = shock_scale * (entry->low + entry->span * u[t]);
+    out[t * n_exog + column] = shock_scale * (lo + sc * u[t]);
   }
 }
 

@@ -13,14 +13,19 @@ import numpy as np
 from numpy import asarray, ndarray, float64, random, zeros, generic
 from numpy.linalg import cholesky, eigh, LinAlgError
 from numpy.typing import NDArray
-from typing import Any, Callable, Literal, Mapping, TypedDict, cast
+from typing import Any, Callable, Literal, Mapping, TypedDict, cast, get_args
 
+#: The built-in families a spec may name.
 ShockDistribution = Literal["norm", "t", "uni"]
 
-# A family-resolved draw: ``(scale, seed, factor) -> (T,) | (T, k)``. See
+
+# A family-resolved draw: ``(loc, factor, seed) -> (T, width)``, computing
+# ``loc + factor @ v`` over the family's standardized variate. Both spec numbers
+# are arguments rather than closed-over state, so the resolver is the only place
+# that reads a spec and the two draw routes cannot disagree about it. See
 # :meth:`Shock.draw_fn` for the contract each argument carries.
 ShockDrawFn = Callable[
-    [Any, int | None, NDArray[float64] | None],
+    [NDArray[float64], NDArray[float64], int | None],
     NDArray[float64],
 ]
 
@@ -31,11 +36,9 @@ class ShockParameters(TypedDict):
     Attributes
     ----------
     dist : ShockDistribution
-        Distribution to draw shocks from. Can be a string identifier ("norm", "t", "uni").
+        Name of the family the shocks are drawn from.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
-    dist_args : list[Any]
-        Positional arguments for the distribution.
     dist_kwargs : dict[str, Any]
         Keyword arguments for the distribution.
 
@@ -43,7 +46,6 @@ class ShockParameters(TypedDict):
 
     dist: ShockDistribution
     seed: int | None
-    dist_args: list[Any]
     dist_kwargs: dict[str, Any]
 
 
@@ -51,7 +53,6 @@ def abstract_shock_array(
     T: int,
     seed: int | None,
     dist: rv_generic | multi_rv_generic,
-    *dist_args: object,
     **dist_kwargs: object,
 ) -> ndarray:
     """
@@ -61,7 +62,6 @@ def abstract_shock_array(
     ----------
     T (int): The number of time periods.
     dist: A scipy.stats distribution object (e.g., norm, t, uniform).
-    *dist_args: Positional arguments for the distribution.
     **dist_kwargs: Keyword arguments for the distribution.
 
     Returns
@@ -69,7 +69,7 @@ def abstract_shock_array(
     np.ndarray: An array of shocks of length T.
     """
     state = random.RandomState(seed)
-    shocks = dist.rvs(size=T, random_state=state, *dist_args, **dist_kwargs)  # type: ignore
+    shocks = dist.rvs(size=T, random_state=state, **dist_kwargs)  # type: ignore
     return asarray(shocks, dtype=float64)
 
 
@@ -94,64 +94,63 @@ def _gaussian_factor(cov: ndarray) -> ndarray:
         return cast(ndarray, V * np.sqrt(np.clip(w, 0.0, None)))
 
 
+def resolve_loc(kwargs: Mapping[str, Any], width: int) -> ndarray:
+    """The location one spec declares, as a ``width``-long vector.
+
+    The split draw paths read two names for one parameter, ``mean`` on the
+    multivariate families and ``loc`` on the univariate ones, because each
+    mirrored the scipy call it wrapped. One expression now covers both widths, so
+    both spellings resolve here and ``mean`` wins when a spec carries both.
+
+    The resolver calls this once per entry and the result travels on the entry,
+    which is what keeps the Python draw and the native lowering from reading the
+    same keyword arguments under two different rules.
+    """
+    loc = (
+        kwargs["mean"]
+        if "mean" in kwargs
+        else kwargs.get("loc", np.zeros(width, dtype=float64))
+    )
+    return asarray(loc, dtype=float64).reshape(width)
+
+
 def _draw_normal(
-    T: int, seed: int | None, mu: float | float64, sigma: float | float64
+    T: int, seed: int | None, loc: float | ndarray, factor: ndarray
 ) -> ndarray:
-    return random.default_rng(seed).normal(loc=mu, scale=sigma, size=T).astype(float64)
+    """``(T, width)`` normals with mean ``loc`` and covariance ``factor @ factor.T``.
 
-
-def _draw_normal_mv(
-    T: int,
-    seed: int | None,
-    mean: ndarray | None,
-    cov: ndarray,
-    factor: ndarray | None = None,
-) -> ndarray:
-    cov = asarray(cov, dtype=float64)
-    k = cov.shape[0]
-    mean_vec = zeros(k, dtype=float64) if mean is None else asarray(mean, dtype=float64)
-    F = _gaussian_factor(cov) if factor is None else factor
-    z = random.default_rng(seed).standard_normal((T, k))
-    return cast(ndarray, (mean_vec + z @ F.T).astype(float64))
+    One expression covers every width: a scalar standard deviation is the 1x1
+    factor, which is how the native draw already reads both cases.
+    """
+    z = random.default_rng(seed).standard_normal((T, factor.shape[0]))
+    return cast(ndarray, (loc + z @ factor.T).astype(float64))
 
 
 def _draw_t(
-    T: int,
-    seed: int | None,
-    df: float,
-    loc: float | float64,
-    scale: float | float64,
+    T: int, seed: int | None, df: float, loc: float | ndarray, factor: ndarray
 ) -> ndarray:
-    draws = random.default_rng(seed).standard_t(df, size=T)
-    return (loc + scale * draws).astype(float64)
+    """``(T, width)`` Student-t draws, as a normal scaled by a chi-square.
 
-
-def _draw_t_mv(
-    T: int,
-    seed: int | None,
-    df: float,
-    loc: ndarray | None,
-    shape: ndarray,
-    factor: ndarray | None = None,
-) -> ndarray:
-    shape = asarray(shape, dtype=float64)
-    k = shape.shape[0]
-    loc_vec = zeros(k, dtype=float64) if loc is None else asarray(loc, dtype=float64)
-    F = _gaussian_factor(shape) if factor is None else factor
+    ``factor`` scales the Gaussian core, so the drawn covariance is
+    ``factor @ factor.T`` only up to the t's own ``df/(df - 2)`` inflation.
+    """
+    k = factor.shape[0]
     rng = random.default_rng(seed)
-    z = rng.standard_normal((T, k)) @ F.T
+    z = rng.standard_normal((T, k)) @ factor.T
     g = rng.chisquare(df, size=T) / df
-    return cast(ndarray, (loc_vec + z / np.sqrt(g)[:, None]).astype(float64))
+    return cast(ndarray, (loc + z / np.sqrt(g)[:, None]).astype(float64))
 
 
 def _draw_uniform(
-    T: int, seed: int | None, loc: float | float64, scale: float | float64
+    T: int, seed: int | None, loc: float | ndarray, factor: ndarray
 ) -> ndarray:
-    return (
-        random.default_rng(seed)
-        .uniform(low=loc, high=loc + scale, size=T)
-        .astype(float64)
-    )
+    """``(T, width)`` uniforms centred on ``loc``.
+
+    The standardized variate is ``U(-sqrt(3), sqrt(3))``, so a 1x1 ``factor`` of ``sig``
+    results in a standard deviation ``sig``.
+    """
+    u = random.default_rng(seed).random((T, factor.shape[0])) - np.sqrt(3.0)
+    return cast(ndarray, (loc + u @ factor.T).astype(float64))
 
 
 class Shock:
@@ -160,13 +159,11 @@ class Shock:
     Parameters
     ----------
     dist : ShockDistribution | rv_generic | multi_rv_generic | None
-        Distribution to draw shocks from. Can be a string identifier ("norm", "t",
+        Distribution to draw shocks from. Can be a family name ("norm", "t",
         "uni") or a scipy.stats distribution object. Alternatively, a custom class
         implementing ``rvs`` can be passed in. If None, no distribution is specified.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
-    dist_args : tuple
-        Positional arguments for the distribution.
     dist_kwargs : dict | None
         Optional keyword arguments for the distribution.
 
@@ -186,7 +183,6 @@ class Shock:
         self,
         dist: ShockDistribution | rv_generic | multi_rv_generic | None = None,
         seed: int | None = 0,
-        dist_args: tuple = (),
         dist_kwargs: dict | None = None,
     ) -> None:
         # A Shock is a horizon-independent distribution spec: the number of
@@ -194,7 +190,6 @@ class Shock:
         # in here. The simulation is the single authority on its own horizon.
         self.dist = dist
         self.seed = seed
-        self.dist_args = dist_args
         self.dist_kwargs = dist_kwargs if dist_kwargs is not None else {}
 
     # TODO: Pass through array if provided else generate based on dist
@@ -203,18 +198,18 @@ class Shock:
         """Resolve the distribution family once for a ``T``-period horizon.
 
         ``multivar`` is the arity of the entry being resolved, which the spec key
-        fixes: a key naming one shock draws a scalar standard deviation, a key
-        naming several draws their covariance block. It is a required parameter
-        rather than stored state because the key is the only authority on it.
+        fixes. The native families no longer branch on it, since one factor
+        expression covers both widths; it survives for the scipy route, which
+        hands scipy a covariance and picks a different distribution object and a
+        different keyword per arity.
 
-        The returned callable is ``f(scale, seed, factor)``. Resolving the
-        family, its keyword arguments, and (on the scipy route) the distribution
-        object costs the same whether one path or a hundred thousand are drawn,
-        so callers that redraw under varying seeds resolve once and call many
-        times. ``factor`` is an optional precomputed matrix ``F`` with
-        ``F @ F.T == scale`` for the multivariate families; passing it skips the
-        per-call factorization of an unchanged covariance. The univariate
-        families and the scipy route ignore it.
+        The returned callable is ``f(factor, seed)``, returning ``(T, width)``.
+        ``factor`` is the entry's scale in every family and at every width: the
+        1x1 holding a standard deviation, or the covariance block's factor.
+        Resolving the family, its keyword arguments, and (on the scipy route)
+        the distribution object costs the same whether one path or a hundred
+        thousand are drawn, so callers that redraw under varying seeds resolve
+        once and call many times.
 
         Family validation is eager: an unknown family, a Student-t without
         ``df``, or a multivariate uniform raises here rather than at draw time.
@@ -230,96 +225,84 @@ class Shock:
 
         kwargs = self.dist_kwargs.copy()
 
-        # Known string families go through the numpy Generator fast paths. A raw
-        # scipy distribution object (or a string with positional dist_args, which
-        # the fast path doesn't model) keeps the scipy ``.rvs`` route.
-        if isinstance(self.dist, str) and not self.dist_args:
-            return self._numpy_draw_fn(T, kwargs, multivar)
+        # A linear map of independent uniforms is not uniform in its margins,
+        # so the factor form cannot express a grouped uniform. Refused here,
+        # where the arity is known, rather than at the first draw.
+        if self.dist == "uni" and multivar:
+            raise NotImplementedError(
+                "Multivariate uniform shocks are not implemented."
+            )
 
-        scale_key = "scale"
-        if multivar:
-            scale_key = "shape" if self.dist == "t" else "cov"
+        # A named family is drawn by the numpy fast paths, a live distribution
+        # object by its own ``.rvs``. The route follows what ``dist`` is and
+        # nothing else: every scipy family takes its parameters by keyword, so no
+        # parameter a caller supplies can change which implementation draws it.
+        if isinstance(self.dist, str):
+            return self._numpy_draw_fn(T, kwargs)
+
+        # A grouped object is handed its covariance under the keyword
+        # ``multivariate_normal`` declares. An object that names it otherwise
+        # (``multivariate_t`` calls it ``shape``) is not supported here and says
+        # so through scipy rather than silently drawing something else.
+        scale_key = "cov" if multivar else "scale"
         dist = self._get_dist(multivar)
-        dist_args = self.dist_args
 
         def _scipy_draw(
-            s: float | NDArray[float64],
+            loc: NDArray[float64],
+            factor: NDArray[float64],
             seed: int | None,
-            factor: NDArray[float64] | None = None,
         ) -> NDArray[float64]:
-            del factor  # scipy's own rvs owns the factorization
-            return abstract_shock_array(
+            # scipy owns its own factorization and is parameterized by the
+            # second moment, so hand back what the factor came from. The location
+            # rides in ``kwargs`` on this route, which is where scipy wants it.
+            del loc
+            s: float | NDArray[float64] = (
+                factor @ factor.T if multivar else float(factor[0, 0])
+            )
+            drawn = abstract_shock_array(
                 T,
                 seed,
                 dist,
-                *dist_args,
                 **{**kwargs, scale_key: s},
             )
+            return drawn.reshape(T, -1)
 
         return _scipy_draw
 
-    def _numpy_draw_fn(self, T: int, kwargs: dict, multivar: bool) -> ShockDrawFn:
-        """Resolve a string family onto the numpy Generator fast paths.
+    def _numpy_draw_fn(self, T: int, kwargs: dict) -> ShockDrawFn:
+        """Resolve a named family onto the numpy Generator fast paths.
 
-        The returned callable takes the scale argument ``s`` (a scalar std for
-        univariate families, a covariance/shape matrix for multivariate ones),
-        mirroring the scipy-route contract.
+        One closure per family: the factor carries the arity, so width 1 and a
+        grouped block take the same expression, the way the native draw does.
         """
-        family = self.dist
+        if self.dist == "norm":
+            return lambda loc, factor, seed: _draw_normal(T, seed, loc, factor)
 
-        if family == "norm":
-            if multivar:
-                mean = kwargs.get("mean")
-                return lambda s, seed, factor: _draw_normal_mv(
-                    T, seed, mean, cast(ndarray, s), factor
-                )
-            loc = kwargs.get("loc", 0.0)
-            return lambda s, seed, factor: _draw_normal(T, seed, loc, cast(float, s))
-
-        if family == "t":
+        if self.dist == "t":
             if "df" not in kwargs:
                 raise ValueError("Student-t shocks require 'df' in dist_kwargs.")
             df = kwargs["df"]
-            if multivar:
-                loc_mv = kwargs.get("loc")
-                return lambda s, seed, factor: _draw_t_mv(
-                    T, seed, df, loc_mv, cast(ndarray, s), factor
-                )
-            loc = kwargs.get("loc", 0.0)
-            return lambda s, seed, factor: _draw_t(T, seed, df, loc, cast(float, s))
+            return lambda loc, factor, seed: _draw_t(T, seed, df, loc, factor)
 
-        if family == "uni":
-            if multivar:
-                raise NotImplementedError(
-                    "Multivariate uniform shocks are not implemented."
-                )
-            loc = kwargs.get("loc", 0.0)
-            return lambda s, seed, factor: _draw_uniform(T, seed, loc, cast(float, s))
+        if self.dist == "uni":
+            return lambda loc, factor, seed: _draw_uniform(T, seed, loc, factor)
 
-        raise ValueError(f"Unknown shock distribution family: {family!r}")
+        raise ValueError(f"Unknown shock distribution family: {self.dist!r}")
 
     def _get_dist(self, multivar: bool) -> rv_generic | multi_rv_generic:
-        dist = self.dist
+        """The distribution object the scipy route draws through.
 
-        if dist == "norm" and not multivar:
-            return norm
-        elif dist == "norm" and multivar:
-            return mnorm
-        elif dist == "t" and not multivar:
-            return t
-        elif dist == "t" and multivar:
-            return mt
-        elif dist == "uni" and not multivar:
-            return uniform
-        elif dist == "uni" and multivar:
-            raise NotImplementedError(
-                "Multivariate uniform distribution is not implemented."
+        Only a live object reaches here: a named family is drawn by the numpy
+        fast paths, so the built-in names never take this route.
+        """
+        del multivar
+        dist = self.dist
+        if not isinstance(dist, rv_generic | multi_rv_generic):
+            raise TypeError(
+                f"dist must be one of {list(get_args(ShockDistribution))} or a "
+                f"scipy.stats distribution object; got {type(dist).__name__}."
             )
-        else:
-            assert isinstance(
-                dist, rv_generic | multi_rv_generic
-            ), "dist must be a valid scipy.stats distribution or a string identifier."
-            return dist
+        return dist
 
     def to_dict(self) -> ShockParameters:
         """Serialize a generator-style Shock to a JSON-able dict.
@@ -336,9 +319,8 @@ class Shock:
                 "serializable; got a live scipy distribution object."
             )
         return ShockParameters(
-            dist=self.dist,
+            dist=self.dist,  # pyright: ignore
             seed=None if self.seed is None else int(self.seed),
-            dist_args=[_jsonable(arg) for arg in self.dist_args],
             dist_kwargs={k: _jsonable(v) for k, v in self.dist_kwargs.items()},
         )
 
@@ -346,20 +328,21 @@ class Shock:
     def from_dict(cls, data: Mapping[str, Any]) -> "Shock":
         """Rebuild a generator-style Shock from :meth:`to_dict` output.
 
-        A ``multivar`` written by an older release is ignored: the spec key the
-        shock is filed under fixes its arity, and a stored flag could contradict
-        it.
+        A ``multivar`` or ``dist_args`` written by an older release is ignored:
+        the spec key the shock is filed under fixes its arity, and every scipy
+        family takes its parameters by keyword, so a positional list carries
+        nothing a keyword does not.
         """
         dist = data["dist"]
-        if dist not in {"norm", "t", "uni"}:
+        if dist not in get_args(ShockDistribution):
             raise ValueError(
-                f"Shock.from_dict expects a 'norm'/'t'/'uni' dist, got {dist!r}."
+                f"Shock.from_dict expects one of "
+                f"{list(get_args(ShockDistribution))}, got {dist!r}."
             )
         seed = data.get("seed")
         return cls(
             dist=cast(ShockDistribution, dist),
             seed=None if seed is None else int(seed),
-            dist_args=tuple(data.get("dist_args") or ()),
             dist_kwargs=dict(data.get("dist_kwargs") or {}),
         )
 

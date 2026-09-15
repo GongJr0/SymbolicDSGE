@@ -20,17 +20,16 @@ def test_abstract_shock_array_is_seed_reproducible():
 
 
 def test_shock_class_draw_fn_and_rejections():
+    # The draw takes ``(loc, factor, seed)`` and returns ``(T, width)``: the
+    # factor carries the scale at either arity, a 1x1 holding a standard
+    # deviation or a covariance block's factor.
     sh = Shock(dist="norm", seed=3)
-    arr = sh.draw_fn(6, False)(0.5, sh.seed, None)
-    assert arr.shape == (6,)
+    arr = sh.draw_fn(6, False)(np.zeros(1), np.array([[0.5]]), sh.seed)
+    assert arr.shape == (6, 1)
 
     # Arity is the caller's to state: the same spec draws either way.
-    sh_t = Shock(
-        dist="t",
-        seed=3,
-        dist_kwargs={"loc": [0.0, 0.0], "df": 5.0},
-    )
-    t_arr = sh_t.draw_fn(6, True)(np.eye(2, dtype=float64), sh_t.seed, None)
+    sh_t = Shock(dist="t", seed=3, dist_kwargs={"df": 5.0})
+    t_arr = sh_t.draw_fn(6, True)(np.zeros(2), np.eye(2, dtype=float64), sh_t.seed)
     assert t_arr.shape == (6, 2)
 
     with pytest.raises(ValueError, match="scale"):
@@ -39,14 +38,18 @@ def test_shock_class_draw_fn_and_rejections():
     with pytest.raises(ValueError, match="Distribution must be specified"):
         Shock().draw_fn(6, False)
 
+    # A linear map of independent uniforms is not uniform in its margins, so a
+    # grouped uniform is refused where the arity is known.
+    with pytest.raises(NotImplementedError, match="Multivariate uniform"):
+        Shock(dist="uni").draw_fn(6, True)
 
-def test_shock_class_dist_resolution_and_custom_dist():
-    sh_norm = Shock(dist="norm")
-    sh_t = Shock(dist="t")
-    sh_uni = Shock(dist="uni")
-    assert sh_norm._get_dist(False) is not None
-    assert sh_t._get_dist(False) is not None
-    assert sh_uni._get_dist(False) is not None
+
+def test_get_dist_takes_only_live_objects():
+    # A named family draws through the numpy fast paths, so only a live
+    # distribution object ever reaches the scipy route's resolution.
+    for name in ("norm", "t", "uni"):
+        with pytest.raises(TypeError, match="scipy.stats distribution object"):
+            Shock(dist=name)._get_dist(False)
 
     class CustomDist:
         @staticmethod
@@ -54,5 +57,5 @@ def test_shock_class_dist_resolution_and_custom_dist():
             return np.zeros(size, dtype=float64)
 
     sh_custom = Shock(dist=CustomDist())  # type: ignore[arg-type]
-    with pytest.raises(AssertionError, match="valid scipy.stats distribution"):
+    with pytest.raises(TypeError, match="scipy.stats distribution object"):
         sh_custom._get_dist(False)
