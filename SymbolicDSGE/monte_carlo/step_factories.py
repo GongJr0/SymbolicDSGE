@@ -21,7 +21,7 @@ def simulation_step(
     n_retain: int = -1,
     *,
     T: int,
-    shocks: Mapping[str, Shock | NDF] | None = None,
+    shocks: Mapping[str | Sequence[str], Shock | NDF] | None = None,
     shock_scale: float = 1.0,
     x0: list[float] | NDF | None = None,
     observables: bool = True,

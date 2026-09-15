@@ -38,7 +38,7 @@ __Methods:__
 ```python
 SolvedModel.sim(
     T: int,
-    shocks: Mapping[str, Shock | Callable | np.ndarray] | None = None, # (1)!
+    shocks: Mapping[str | Sequence[str], Shock | Callable | np.ndarray] | None = None, # (1)!
     shock_scale: float = 1.0, # (2)!
     x0: dict[str, float] | list[float] | np.ndarray | None = None,
     observables: bool = False
