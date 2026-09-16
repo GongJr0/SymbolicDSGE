@@ -19,7 +19,7 @@ from typing import Any, Literal, get_args
 import numpy as np
 from numpy import float64, ndarray
 
-from ..core.shock_generators import Shock, ShockParameters
+from ..core.shock.spec import shock_entry_from_json
 
 #: Bundle format version. Bump on every manifest change.
 SDSGE_FORMAT_VERSION = 8
@@ -100,9 +100,11 @@ class SimSpec:
     x0: Mapping[str, float] | list[float] | ndarray | None = None
     observables: bool = False
     shock_scale: float = 1.0
-    #: Per key, either a ``Shock.to_dict()`` mapping or a raw path as a nested
-    #: list. Both are what ``SolvedModel.sim`` accepts, in JSON-safe form.
-    shocks: dict[str, ShockParameters | list[Any]] | None = None
+    #: The shock spec as a list of self-describing entries: each carries the
+    #: ``key`` it is filed under, plus either a ``Shock.to_dict()``'s fields or
+    #: a raw path under ``path``. A list rather than an object because a grouped
+    #: key names several shocks, which a JSON object cannot be keyed by.
+    shocks: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """The JSON-serializable form: shocks stay as parameters or raw paths."""
@@ -123,7 +125,7 @@ class SimSpec:
         """
         out = self.to_dict()
         out["shocks"] = (
-            {key: _shock_from_json(value) for key, value in self.shocks.items()}
+            dict(shock_entry_from_json(entry) for entry in self.shocks)
             if self.shocks
             else None
         )
@@ -160,13 +162,6 @@ def _x0_to_json(x0: Mapping[str, float] | list[float] | ndarray | None) -> Any:
     if isinstance(x0, Mapping):
         return {str(name): float(value) for name, value in x0.items()}
     return [float(value) for value in x0]
-
-
-def _shock_from_json(value: ShockParameters | list[Any]) -> Any:
-    """One stored shock as ``sim`` takes it: a :class:`Shock` or a raw path."""
-    if isinstance(value, Mapping):
-        return Shock.from_dict(value)
-    return np.asarray(value, dtype=float64)
 
 
 @dataclass

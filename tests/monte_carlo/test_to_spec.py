@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pytest
 
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.core.shock.generators import Shock
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc, PandasCustomFunc
 from SymbolicDSGE.monte_carlo.postproc import run_kde

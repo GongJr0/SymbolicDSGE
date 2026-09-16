@@ -19,7 +19,7 @@ from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.bundle.loader import build_from
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.core.shock.generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult, MAPResult
 from SymbolicDSGE.estimation.spec import (
@@ -358,7 +358,8 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     assert ws.mc.view is None  # a bundle stores the pipeline, not the canvas
     assert ws.simulation["reference"].spec is not None
     assert ws.simulation["reference"].spec["T"] == 8
-    assert ws.simulation["reference"].spec["shocks"]["e_u"]["seed"] == 42
+    assert ws.simulation["reference"].spec["shocks"][0]["key"] == ["e_u"]
+    assert ws.simulation["reference"].spec["shocks"][0]["seed"] == 42
 
 
 def test_prefill_restores_the_settings_a_run_was_made_with() -> None:
@@ -515,15 +516,16 @@ def test_a_simulation_that_cannot_replay_leaves_the_session_usable(
     loaded = build_from(_hydrated_bundle(tmp_path))
     workspace = build_workspace(loaded)
     assert workspace.simulation["reference"].spec is not None
-    workspace.simulation["reference"].spec["shocks"] = {
-        "not_a_shock": {
+    workspace.simulation["reference"].spec["shocks"] = [
+        {
+            "key": ["not_a_shock"],
             "dist": "norm",
             "multivar": False,
             "seed": 1,
             "dist_args": [],
             "dist_kwargs": {},
         }
-    }
+    ]
 
     app = create_app(reference=loaded.reference, workspace=workspace)
 

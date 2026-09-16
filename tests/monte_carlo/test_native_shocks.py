@@ -34,7 +34,7 @@ from SymbolicDSGE.monte_carlo.shock_native import (
     native_shock_scratch,
 )
 from SymbolicDSGE.monte_carlo.step_factories import simulation_step
-from SymbolicDSGE.core.solved_model.shocks import resolve_shock_plan
+from SymbolicDSGE.core.shock.spec import resolve_shock_plan
 
 T = 16
 

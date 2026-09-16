@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 
 from . import export, measurement
 
-from ..shock_generators import Shock
+from ..shock.generators import Shock
 from ..solver_backend import BaseSolution
 from ..sim_result import StatePath, SimResult
 

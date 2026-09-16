@@ -7,7 +7,7 @@ from typing import Any, Callable, Literal, Mapping, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from ..core.shock_generators import Shock
+from ..core.shock.generators import Shock
 from .custom_op import NumbaCustomFunc
 from .mc_constructs import ColumnSelector, MCStep, OpType, _compile_source_args
 from .postproc import run_kde

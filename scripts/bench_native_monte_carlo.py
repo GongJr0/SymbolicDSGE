@@ -41,7 +41,7 @@ sys.path.insert(0, str(ROOT))
 NDF: TypeAlias = NDArray[np.float64]
 
 from SymbolicDSGE import DSGESolver, ModelParser  # noqa: E402
-from SymbolicDSGE.core.shock_generators import Shock  # noqa: E402
+from SymbolicDSGE.core.shock.generators import Shock  # noqa: E402
 from SymbolicDSGE.core.solved_model import SolvedModel  # noqa: E402
 from SymbolicDSGE.monte_carlo.core import MCPipeline  # noqa: E402
 from SymbolicDSGE.monte_carlo.mc_constructs import (

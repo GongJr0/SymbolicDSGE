@@ -15,7 +15,11 @@ from ..._ckernels.monte_carlo._runner import (
     simulate2_step,
 )
 from ...core.solved_model import SolvedModel
-from ...core.solved_model.shocks import resolve_shock_plan, simulation_shock_matrix
+from ...core.shock.spec import (
+    _normalized_spec,
+    resolve_shock_plan,
+    simulation_shock_matrix,
+)
 from ..defaults import (
     DEFAULT_SHOCK_SCALE,
     DEFAULT_SIMULATION_OBSERVABLES,
@@ -208,7 +212,7 @@ def _simulation_shocks(
     Cholesky are not repeated. Each replication shifts every base seed by the
     number of seeded entries, which keeps entries that share a run apart.
     """
-    shocks = step.kwargs.get("shocks")
+    shocks = _normalized_spec(step.kwargs.get("shocks"))
     shock_scale = float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE))
     if not shocks:
         return _array_shocks(model, T, shock_scale), False

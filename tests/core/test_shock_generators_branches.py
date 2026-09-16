@@ -16,8 +16,8 @@ from scipy.stats import (
     multivariate_t as mt,
 )
 
-from SymbolicDSGE.core import shock_generators as S
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.core.shock import generators as S
+from SymbolicDSGE.core.shock.generators import Shock
 
 
 def test_abstract_shock_array_scipy_route():

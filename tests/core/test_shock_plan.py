@@ -12,9 +12,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE.core.shock_generators import Shock
-import SymbolicDSGE.core.solved_model.shocks as shocks_mod
-from SymbolicDSGE.core.solved_model.shocks import resolve_shock_plan
+from SymbolicDSGE.core.shock.generators import Shock
+import SymbolicDSGE.core.shock.spec as shocks_mod
+from SymbolicDSGE.core.shock.spec import resolve_shock_plan
 
 T = 12
 
@@ -39,9 +39,9 @@ def _cloned_matrix(model, shocks, T, shock_scale, seed_offset):
 @pytest.mark.parametrize(
     "spec",
     [
-        {"e_u": Shock(dist="norm", seed=3)},
-        {"e_u": Shock(dist="t", seed=5, dist_kwargs={"df": 4})},
-        {"e_u": Shock(dist="uni", seed=7)},
+        {("e_u",): Shock(dist="norm", seed=3)},
+        {("e_u",): Shock(dist="t", seed=5, dist_kwargs={"df": 4})},
+        {("e_u",): Shock(dist="uni", seed=7)},
         {("e_u", "e_v"): Shock(dist="norm", seed=11)},
         {("e_u", "e_v"): Shock(dist="t", seed=13, dist_kwargs={"df": 6})},
     ],
@@ -71,7 +71,7 @@ def test_plan_reseeds_independently_across_draws(solved_test):
 
 def test_unseeded_spec_redraws_each_time(solved_test):
     plan = resolve_shock_plan(
-        solved_test.compiled, {"e_u": Shock(dist="norm", seed=None)}, T
+        solved_test.compiled, {("e_u",): Shock(dist="norm", seed=None)}, T
     )
 
     first = plan.matrix(T, 1.0, 0)
@@ -106,7 +106,7 @@ def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
 
 def test_passthrough_entries_ignore_the_seed_offset(solved_test):
     values = np.arange(T, dtype=np.float64)
-    plan = resolve_shock_plan(solved_test.compiled, {"e_u": values}, T)
+    plan = resolve_shock_plan(solved_test.compiled, {("e_u",): values}, T)
 
     np.testing.assert_array_equal(plan.matrix(T, 1.0, 0), plan.matrix(T, 1.0, 9))
 
@@ -122,7 +122,7 @@ def test_seeded_count_counts_seeded_entries(solved_test):
 
 def test_unseeded_specs_do_not_count(solved_test):
     plan = resolve_shock_plan(
-        solved_test.compiled, {"e_u": Shock(dist="norm", seed=None)}, T
+        solved_test.compiled, {("e_u",): Shock(dist="norm", seed=None)}, T
     )
 
     assert plan.seeded_count == 0
@@ -130,4 +130,4 @@ def test_unseeded_specs_do_not_count(solved_test):
 
 def test_live_shock_requires_a_horizon(solved_test):
     with pytest.raises(ValueError, match="needs a horizon T"):
-        resolve_shock_plan(solved_test.compiled, {"e_u": Shock(dist="norm", seed=1)})
+        resolve_shock_plan(solved_test.compiled, {("e_u",): Shock(dist="norm", seed=1)})

@@ -6,11 +6,11 @@ from numpy import ndarray, float64
 import numpy as np
 
 from .base import SolvedModel, NDF
-from .shocks import simulation_shock_matrix
+from ..shock.spec import simulation_shock_matrix
 from ..solver_backend import SecondOrderSolution
 from ..compiled_model import CompiledModel
 from ..sim_result import StatePath
-from ..shock_generators import Shock
+from ..shock.generators import Shock
 from ..._ckernels.core import simulate_second_order_pruned
 
 

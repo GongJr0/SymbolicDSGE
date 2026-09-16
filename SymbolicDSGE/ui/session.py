@@ -21,12 +21,12 @@ import numpy as np
 from numpy.typing import NDArray
 from sympy import Symbol
 
-from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.core.compiled_model import CompiledModel
-from SymbolicDSGE.core.config import ModelConfig
-from SymbolicDSGE.core.shock_generators import Shock
-from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.kalman.config import KalmanConfig
+from ..core import DSGESolver, ModelParser
+from ..core.compiled_model import CompiledModel
+from ..core.config import ModelConfig
+from ..core.shock.generators import Shock
+from ..core.solved_model.base import SolvedModel
+from ..kalman.config import KalmanConfig
 
 from .schemas import (
     ArrayEnvelope,
@@ -37,8 +37,8 @@ from .schemas import (
     ShockParamUpdate,
     WorkspaceTab,
 )
-from SymbolicDSGE.bundle.manifest import SimSpec
-from SymbolicDSGE.estimation.spec import EstimatorParams, EstimatorSpec
+from ..bundle.manifest import SimSpec
+from ..estimation.spec import EstimatorParams, EstimatorSpec
 
 from .estimation import (
     build_estimation_inputs,

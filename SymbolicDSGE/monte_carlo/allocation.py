@@ -23,7 +23,7 @@ from .._ckernels.monte_carlo._runner import (
     DEFAULT_WINDOW,
 )
 from ..core.solved_model import SolvedModel
-from ..core.solved_model.shocks import _normalized_spec
+from ..core.shock.spec import _normalized_spec
 from .defaults import (
     DEFAULT_FILTER_MODE,
     DEFAULT_REGRESSION_KIND,

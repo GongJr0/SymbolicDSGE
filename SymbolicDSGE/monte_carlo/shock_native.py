@@ -24,9 +24,9 @@ from numpy import float64
 from numpy.typing import NDArray
 
 from .._ckernels.monte_carlo._runner import NativeShockPlan, shock_plan
-from ..core.shock_generators import Shock
-from ..core.shock_plan import ShockPlan, ShockEntry
-from ..core.solved_model.shocks import resolve_shock_plan
+from ..core.shock.generators import Shock
+from ..core.shock.plan import ShockPlan, ShockEntry
+from ..core.shock.spec import resolve_shock_plan, _normalized_spec
 from .defaults import DEFAULT_SHOCK_SCALE
 from SymbolicDSGE._ckernels.monte_carlo import _runner
 
@@ -189,21 +189,12 @@ def build_native_plan(
     reproduce (Student-t, a scipy distribution object, a user callable, a
     literal array), so the caller draws every replication in Python up front.
     """
-    shocks_raw: Mapping[str | Sequence[str], Shock | NDF] | None = step.kwargs.get(
-        "shocks"
-    )
-    if not shocks_raw:
-        return None
-
-    shocks: dict[tuple[str, ...], Shock | NDF] = {
-        (k,) if isinstance(k, str) else tuple(k): v for k, v in shocks_raw.items()
-    }
-
+    shocks = _normalized_spec(step.kwargs.get("shocks"))
     families = native_shock_families(shocks)
     if not families:
         return None
 
-    plan = resolve_shock_plan(model.compiled, shocks_raw, T)
+    plan = resolve_shock_plan(model.compiled, shocks, T)
     entries = native_shock_entries(plan, families)
     return shock_plan(
         entries,
@@ -234,7 +225,7 @@ def replication_shocks(
     back for it is a fresh path rather than the one that ran.
     """
     T = int(step.kwargs["T"])
-    shocks = step.kwargs.get("shocks")
+    shocks = _normalized_spec(step.kwargs.get("shocks"))
     if not shocks:
         raise ValueError("The simulation step draws no shocks.")
 

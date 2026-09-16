@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 import numpy as np
 from numpy.typing import NDArray
 
-from SymbolicDSGE.core.shock_generators import Shock, ShockParameters
+from SymbolicDSGE.core.shock.generators import Shock, ShockParameters
 from .catalog import STEP_CATALOG
 from .mc_constructs import SourceArgs
 from .spec import EdgeSpec, NodeSpec, PipelineSpec, PostprocSpec

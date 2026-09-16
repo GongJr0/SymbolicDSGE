@@ -23,11 +23,11 @@ from SymbolicDSGE.regression.ols.core import ols
 from SymbolicDSGE.regression.enums import RegressionStatus
 from SymbolicDSGE.regression.ols.ols_result import OLSResult
 from SymbolicDSGE.regression.result import MCRegressionResult
-from SymbolicDSGE.regression.ols.solvers import (
+from SymbolicDSGE.regression.solvers import (
     OK,
     RANK_DEFICIENT,
     chol_solve,
-    ltsq_solve,
+    lstsq_solve,
     xtx_xty,
 )
 
@@ -151,11 +151,11 @@ def test_xtx_xty_matches_matrix_products_for_manual_and_blas_paths() -> None:
     np.testing.assert_allclose(g_wide, x_wide.T @ y_wide)
 
 
-def test_ltsq_solve_uses_empty_factor_placeholder() -> None:
+def test_lstsq_solve_uses_empty_factor_placeholder() -> None:
     x = np.array([[1.0, 0.0], [1.0, 1.0], [1.0, 2.0]], dtype=np.float64)
     y = np.array([1.0, 2.0, 3.0], dtype=np.float64)
 
-    coef, L, status = ltsq_solve(x, y)
+    coef, L, status = lstsq_solve(x, y)
 
     assert status == OK
     assert L.shape == (0, 0)
@@ -174,7 +174,7 @@ def test_rank_deficient_se_falls_back_to_pseudoinverse() -> None:
     )
     y = np.array([1.0, 2.1, 2.9, 4.2], dtype=np.float64)
 
-    coef, L, status = ltsq_solve(x, y)
+    coef, L, status = lstsq_solve(x, y)
     y_hat = x @ coef
     out = se(L, y, y_hat, x=x)
 
@@ -288,7 +288,7 @@ def test_rank_deficient_ols_result_uses_pseudoinverse_standard_errors() -> None:
         dtype=np.float64,
     )
     y = np.array([1.0, 2.1, 2.9, 4.2], dtype=np.float64)
-    coef, L, status = ltsq_solve(x, y)
+    coef, L, status = lstsq_solve(x, y)
     out = OLSResult(
         variables=["const", "x", "two_x"],
         coefficients=coef,

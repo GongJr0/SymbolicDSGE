@@ -1,8 +1,6 @@
 # type: ignore
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
 import yaml
@@ -10,8 +8,6 @@ import yaml
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.compiled_model import _shock_covariance
 from SymbolicDSGE._ckernels.core import jacobian_eval, measurement_eval
-from SymbolicDSGE.core.solved_model import FirstOrderSolvedModel
-from SymbolicDSGE.core.solved_model.shocks import shock_unpack
 
 # States then controls, each in declaration order. test.yaml lags u, v and r,
 # so those are the states; its two shocks are innovations, not variables.
@@ -101,27 +97,6 @@ def test_measurement_dispatchers_accept_canonical_state_order_after_yaml_reorder
     np.testing.assert_allclose(jacobian, expected_jacobian)
 
 
-def _stub_solved(compiled):
-    n_ctrl = N_VAR - compiled.n_state
-    return FirstOrderSolvedModel(
-        compiled=compiled,
-        policy=SimpleNamespace(
-            f=np.zeros((n_ctrl, compiled.n_state), dtype=np.float64),
-            order=1,
-            A=np.eye(N_VAR, dtype=np.float64),
-            B=np.vstack(
-                [
-                    np.eye(compiled.n_exog, dtype=np.float64),
-                    np.zeros(
-                        (N_VAR - compiled.n_exog, compiled.n_exog), dtype=np.float64
-                    ),
-                ]
-            ),
-            steady_state=np.zeros(N_VAR, dtype=np.float64),
-        ),
-    )
-
-
 def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(tmp_path):
     compiled = _compile_misordered_test_model(tmp_path)
 
@@ -129,24 +104,6 @@ def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(tmp_path)
         _shock_covariance(compiled),
         np.diag([0.50**2, 0.25**2]).astype(np.float64),
     )
-
-
-def test_simulation_shock_unpack_accepts_shocks_by_name(tmp_path):
-    compiled = _compile_misordered_test_model(tmp_path)
-    solved = _stub_solved(compiled)
-
-    unpacked = shock_unpack(
-        solved.compiled,
-        {
-            "e_u": np.array([1.0, 2.0], dtype=np.float64),
-            "e_v": np.array([3.0, 4.0], dtype=np.float64),
-        },
-    )
-
-    # Indices are columns of the (T, n_exog) shock matrix, not state positions.
-    assert [idx for idx, _ in unpacked] == [0, 1]
-    np.testing.assert_allclose(unpacked[0][1], np.array([1.0, 2.0]))
-    np.testing.assert_allclose(unpacked[1][1], np.array([3.0, 4.0]))
 
 
 def test_explicit_order_permutes_within_each_block(tmp_path):

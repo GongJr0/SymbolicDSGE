@@ -14,6 +14,8 @@ from numpy import asarray, ndarray, float64, random, zeros, generic
 from numpy.linalg import cholesky, eigh, LinAlgError
 from numpy.typing import NDArray
 from typing import Any, Callable, Literal, Mapping, TypedDict, cast, get_args
+import copy
+import warnings
 
 #: The built-in families a spec may name.
 ShockDistribution = Literal["norm", "t", "uni"]
@@ -161,7 +163,10 @@ class Shock:
     dist : ShockDistribution | rv_generic | multi_rv_generic | None
         Distribution to draw shocks from. Can be a family name ("norm", "t",
         "uni") or a scipy.stats distribution object. Alternatively, a custom class
-        implementing ``rvs`` can be passed in. If None, no distribution is specified.
+        implementing ``rvs`` can be passed in. Mutually exclusive with ``path``.
+    path : NDArray[float64] | None
+        Pre-generated shock array to use instead of drawing from a distribution.
+        Mutually exclusive with ``dist``.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
     dist_kwargs : dict | None
@@ -171,17 +176,32 @@ class Shock:
     ----------
     dist : ShockDistribution | rv_generic | multi_rv_generic | None
         The configured distribution.
+    path : NDArray[float64] | None
+        The pre-generated shock array.
     seed : int | None
         The configured random seed.
-    dist_args : tuple
-        The configured positional arguments.
     dist_kwargs : dict | None
         The configured keyword arguments.
+
+    Notes
+    -----
+    A ``Shock`` names no shock variable of its own: it is an unbound template
+    until one of :meth:`at`, :meth:`joint`, or :meth:`independent` binds a copy
+    of it to one or more targets. The same template therefore serves any model,
+    whatever that model names its shocks.
+
+    The bind also decides where the scale comes from. :meth:`joint` draws one
+    entry from the targets' covariance block, so the correlations declared in
+    ``calibration.shock_corr`` apply. :meth:`independent` draws one entry per
+    target from that target's standard deviation alone, so those correlations
+    do not. Neither reads a covariance off the ``Shock``; both read it off the
+    model's calibration.
     """
 
     def __init__(
         self,
         dist: ShockDistribution | rv_generic | multi_rv_generic | None = None,
+        path: NDArray[float64] | None = None,
         seed: int | None = 0,
         dist_kwargs: dict | None = None,
     ) -> None:
@@ -189,10 +209,145 @@ class Shock:
         # periods ``T`` is supplied by the caller at generation time, not baked
         # in here. The simulation is the single authority on its own horizon.
         self.dist = dist
+        self.path = path
         self.seed = seed
-        self.dist_kwargs = dist_kwargs if dist_kwargs is not None else {}
+        self.dist_kwargs = dict(dist_kwargs) if dist_kwargs is not None else {}
+        self._validate_construction()
 
-    # TODO: Pass through array if provided else generate based on dist
+        # Binding Slot (post-construction)
+        self._targets: tuple[str, ...] | None = None
+
+    def _validate_construction(self) -> None:
+        """Validate the Shock construction parameters."""
+        if self.dist is not None and self.path is not None:
+            raise ValueError(
+                "``dist`` and ``path`` are mutually exclusive; "
+                "Omit ``dist`` to use a pre-generated shock array, "
+                "or omit ``path`` to draw from a distribution."
+            )
+
+        if self.path is not None and any(v for v in [self.seed, self.dist_kwargs]):
+            warnings.warn(
+                "Using a ``path`` will ignore ``seed`` and ``dist_kwargs``.",
+                UserWarning,
+            )
+
+    @property
+    def targets(self) -> tuple[str, ...]:
+        """The shock variables this spec drives, once it has been bound."""
+        if self._targets is None:
+            raise ValueError(
+                "This ``Shock`` instance has not been bound to any variables "
+                "yet. Use ``.at(key)`` for a single shock, ``.joint(*keys)`` to "
+                "draw several from their calibrated covariance, or "
+                "``.independent(*keys)`` to draw each from its own standard "
+                "deviation."
+            )
+        return self._targets
+
+    @property
+    def is_bound(self) -> bool:
+        """Whether this spec has been bound to any shock variables."""
+        return self._targets is not None
+
+    def _bind(self, keys: tuple[str, ...]) -> "Shock":
+        """A copy of this spec bound to ``keys``.
+
+        Binding copies rather than mutating, which is what lets one template be
+        bound many times: ``[s.at("e_g"), s.at("e_z")]`` is two specs, not one
+        object rebound twice. ``path`` is shared by reference, since it is
+        read-only bulk data, while ``dist_kwargs`` is copied so two binds of one
+        template cannot drift into each other.
+
+        The copy skips ``__init__``, so a ``path`` spec carrying an ignored seed
+        warns once where the user wrote it rather than again at every bind.
+        """
+        bound = copy.copy(self)
+        bound.dist_kwargs = dict(self.dist_kwargs)
+        bound._targets = keys
+        return bound
+
+    def at(self, *keys: str) -> "Shock":
+        """Bind this spec to one shock variable.
+
+        Parameters
+        ----------
+        *keys : str
+            The single shock variable this spec drives.
+
+        Returns
+        -------
+        Shock
+            A copy of this spec, bound to ``keys``.
+
+        Raises
+        ------
+        ValueError
+            If other than one target is named. Naming several is a choice
+            between :meth:`joint` and :meth:`independent`, and the two draw
+            different distributions, so it cannot be made by omission.
+        """
+        if len(keys) != 1:
+            raise ValueError(
+                f"``at`` binds exactly one shock variable; got {len(keys)}. "
+                "For several, use ``.joint(*keys)`` to draw them from their "
+                "calibrated covariance block, or ``.independent(*keys)`` to "
+                "draw each from its own standard deviation."
+            )
+        return self._bind(tuple(keys))
+
+    def joint(self, *keys: str) -> "Shock":
+        """Bind this spec to several shock variables, drawn together.
+
+        The resolved entry spans every named target and draws through the factor
+        of their block of the calibrated covariance, so the correlations declared
+        in ``calibration.shock_corr`` between them apply.
+
+        Parameters
+        ----------
+        *keys : str
+            The shock variables this spec drives, in any order. The resolver
+            sorts them into column order before building the block.
+
+        Returns
+        -------
+        Shock
+            A copy of this spec, bound to ``keys`` as one entry.
+        """
+        if not keys:
+            raise ValueError("``joint`` needs at least one shock variable.")
+        return self._bind(tuple(keys))
+
+    def independent(self, *keys: str, offset_seeds: bool = True) -> "list[Shock]":
+        """Bind this spec to several shock variables, drawn separately.
+
+        One copy per target, each resolving to a width-1 entry that draws
+        through that target's own standard deviation. Any correlation
+        ``calibration.shock_corr`` declares between the targets is not applied,
+        which is the difference from :meth:`joint` and the reason both exist.
+
+        Parameters
+        ----------
+        *keys : str
+            The shock variables this spec drives, one copy each.
+        offset_seeds : bool
+            Whether to advance the seed by one per copy. Copies sharing a seed
+            draw the same path on the Python route, so the default keeps them
+            apart. An unseeded template has nothing to offset.
+
+        Returns
+        -------
+        list[Shock]
+            One bound copy per target, in the order given. Slicing the result is
+            a valid spec, since every element stands alone.
+        """
+        out: list[Shock] = []
+        for i, key in enumerate(keys):
+            bound = self._bind((key,))
+            if offset_seeds and self.seed is not None:
+                bound.seed = self.seed + i
+            out.append(bound)
+        return out
 
     def draw_fn(self, T: int, multivar: bool) -> ShockDrawFn:
         """Resolve the distribution family once for a ``T``-period horizon.

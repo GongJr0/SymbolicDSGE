@@ -15,8 +15,8 @@ from numpy.typing import NDArray
 
 from ..compiled_model import CompiledModel
 from ..config import make_Q
-from ..shock_generators import Shock, _gaussian_factor, resolve_loc
-from ..shock_plan import (
+from .generators import Shock, _gaussian_factor, resolve_loc
+from .plan import (
     ArrayEntry,
     ShockEntry,
     ShockPlan,
@@ -90,7 +90,7 @@ def _array_entry(
 
 def resolve_shock_plan(
     compiled: CompiledModel,
-    shocks: ShockSpec,
+    shocks: Mapping[tuple[str, ...], Shock | NDF],
     T: int | None = None,
 ) -> ShockPlan:
     """Resolve a shock spec against a model into a reusable plan.
@@ -114,15 +114,13 @@ def resolve_shock_plan(
     calib = compiled.config.calibration
     shock_col = compiled.shock_idx
 
-    spec = _normalized_spec(shocks)
-
-    validate_shock_targets(list(spec.keys()), list(compiled.shock_names))
+    validate_shock_targets(list(shocks.keys()), list(compiled.shock_names))
 
     entries: list[ShockEntry | ArrayEntry] = []
     seeded_count = 0
     cov: NDF | None = None
 
-    for key, shock in spec.items():
+    for key, shock in shocks.items():
         indices = _columns(key, shock_col)
 
         if isinstance(shock, ndarray):
@@ -179,14 +177,6 @@ def resolve_shock_plan(
     )
 
 
-def shock_unpack(
-    compiled: CompiledModel,
-    shocks: ShockSpec,
-) -> list[Tuple[int, NDF]]:
-    """Resolve a spec and draw it once, as ``(exogenous index, column)``."""
-    return resolve_shock_plan(compiled, shocks).unpack()
-
-
 def simulation_shock_matrix(
     compiled: CompiledModel,
     T: int,
@@ -196,4 +186,39 @@ def simulation_shock_matrix(
     """``(T, n_exog)`` innovations for a spec, or zeros when there is none."""
     if shocks is None:
         return np.zeros((T, compiled.n_exog), dtype=float64)
-    return resolve_shock_plan(compiled, shocks, T).matrix(T, shock_scale)
+    return resolve_shock_plan(
+        compiled,
+        _normalized_spec(shocks),
+        T,
+    ).matrix(T, shock_scale)
+
+
+def shock_entry_to_json(key: tuple[str, ...], shock: Shock | NDF) -> dict[str, Any]:
+    """One spec entry as a self-describing JSON object.
+
+    A key names one or more shocks, which a JSON object cannot be keyed by, so
+    an entry carries its own ``key`` and a spec travels as a list of entries. A
+    :class:`Shock` flattens its constructor arguments into the entry and the
+    receiver redraws it; a supplied path rides under ``path``. The two are told
+    apart by what the entry declares rather than by the shape of a bare value.
+    """
+    names = [str(name) for name in key]
+    if isinstance(shock, Shock):
+        return {"key": names, **shock.to_dict()}
+    if isinstance(shock, ndarray):
+        return {"key": names, "path": shock.tolist()}
+    raise TypeError(
+        f"Shock {key!r} is a {type(shock).__name__}, which has no serialized "
+        f"form. Pass a Shock for the receiver to redraw, or the path itself as "
+        f"an array."
+    )
+
+
+def shock_entry_from_json(
+    entry: Mapping[str, Any],
+) -> tuple[tuple[str, ...], Shock | NDF]:
+    """One serialized entry as the ``(key, spec)`` pair a mapping was keyed by."""
+    key = tuple(str(name) for name in entry["key"])
+    if "path" in entry:
+        return key, asarray(entry["path"], dtype=float64)
+    return key, Shock.from_dict(entry)

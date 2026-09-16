@@ -29,7 +29,7 @@ from SymbolicDSGE.bundle.cli import (
     main_decompile,
 )
 from SymbolicDSGE.bundle.loader import build_from
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.core.shock.generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.step_factories import (
@@ -262,4 +262,4 @@ def test_simulation_prefill_survives_the_round_trip(tmp_path: Path) -> None:
     loaded = build_from(packed)
 
     assert loaded.simulation is not None
-    assert loaded.simulation["reference"]["shocks"]["u"].seed == 42
+    assert loaded.simulation["reference"]["shocks"][("u",)].seed == 42

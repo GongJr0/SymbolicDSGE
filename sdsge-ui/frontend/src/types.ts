@@ -209,7 +209,8 @@ export interface SimSpecWire {
   x0: number[] | null;
   observables: boolean;
   shock_scale: number;
-  shocks: Record<string, unknown> | null;
+  /** One self-describing entry per spec key, each carrying its own `key`. */
+  shocks: Array<Record<string, unknown>> | null;
 }
 
 export interface SimResult {

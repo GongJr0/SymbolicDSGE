@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy.stats import norm
 
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.core.shock.generators import Shock
 
 
 def test_norm_univariate_round_trips() -> None:

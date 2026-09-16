@@ -7,7 +7,7 @@ from numpy import float64
 
 from scipy.stats import norm
 
-from SymbolicDSGE.core.shock_generators import Shock, abstract_shock_array
+from SymbolicDSGE.core.shock.generators import Shock, abstract_shock_array
 
 
 def test_abstract_shock_array_is_seed_reproducible():

@@ -5,7 +5,7 @@ from .types import NDF
 
 import numpy as np
 
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.core.shock.generators import Shock
 from ..mc_constructs import (
     MCContext,
     SeedIncrement,

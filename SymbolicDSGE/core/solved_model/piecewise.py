@@ -7,10 +7,10 @@ from numpy.typing import NDArray
 
 from .base import SolvedModel, NDF
 from .first_order import FirstOrderSolvedModel
-from .shocks import simulation_shock_matrix
+from ..shock.spec import simulation_shock_matrix
 from ..solver_backend import PiecewiseSolution
 from ..compiled_model import CompiledModel
-from ..shock_generators import Shock
+from ..shock.generators import Shock
 from ..sim_result import OccBinDiagnostics, SimResult, StatePath
 from ..._ckernels.occbin import occbin_sim
 
