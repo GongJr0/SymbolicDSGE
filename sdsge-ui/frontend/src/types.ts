@@ -14,7 +14,6 @@ export interface NamedArray {
 
 export interface ShockSpec {
   shock: string;
-  target: string;
   std_param: string | null;
   std_value: number | null;
 }

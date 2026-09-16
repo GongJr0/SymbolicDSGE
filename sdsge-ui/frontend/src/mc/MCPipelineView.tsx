@@ -236,9 +236,9 @@ function MCPipelineBuilder({
   const exogByRole: Record<Role, string[]> = useMemo(
     () => ({
       reference: (session?.models.reference?.shock_specs ?? []).map(
-        (spec) => spec.target,
+        (spec) => spec.shock,
       ),
-      dgp: (session?.models.dgp?.shock_specs ?? []).map((spec) => spec.target),
+      dgp: (session?.models.dgp?.shock_specs ?? []).map((spec) => spec.shock),
     }),
     [session],
   );

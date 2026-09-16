@@ -15,7 +15,6 @@ import pytest
 from SymbolicDSGE.core.shock.generators import Shock, ShockPath
 from SymbolicDSGE.core.shock.spec import _normalized_spec
 
-
 # --- the two authored shapes ------------------------------------------------
 
 
@@ -38,7 +37,7 @@ def test_a_mapping_value_may_be_the_path_itself() -> None:
     (entry,) = _normalized_spec({"e_u": path})
     assert isinstance(entry, ShockPath)
     assert entry.target == ("e_u",)
-    assert entry.path is path
+    assert np.array_equal(entry.path, path)
 
 
 def test_a_sequence_takes_entries_that_name_themselves() -> None:

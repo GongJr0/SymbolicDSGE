@@ -6,7 +6,7 @@ import numpy as np
 from numpy import asarray, ndarray, float64, random, generic
 from numpy.linalg import cholesky, eigh, LinAlgError
 from numpy.typing import NDArray
-from typing import Any, Callable, Literal, Mapping, TypedDict, cast, get_args
+from typing import Any, Callable, Literal, Mapping, TypedDict, Sequence, cast, get_args
 import copy
 
 #: The built-in families a spec may name.
@@ -489,9 +489,21 @@ class ShockPath:
         ``path``.
     """
 
-    def __init__(self, path: NDArray[float64], *keys: str) -> None:
-        self.path = path
+    def __init__(
+        self,
+        path: NDArray[float64] | Sequence[float] | Sequence[Sequence[float]],
+        *keys: str,
+    ) -> None:
+        self.path = asarray(path, dtype=float64)
         self.target = tuple(keys)
+
+        try:
+            self.path = self.path.reshape(self.path.shape[0], len(self.target))
+        except ValueError:
+            raise ValueError(
+                f"Shock paths do not match the number of variables. "
+                f"Expected {len(keys)} columns, but got {self.path.shape[1]}."
+            )
 
     def to_dict(self) -> ShockPathParameters:
         """Serialize a ShockPath to a JSON-able dict."""
