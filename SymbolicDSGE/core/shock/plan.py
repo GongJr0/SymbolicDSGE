@@ -22,7 +22,7 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from .generators import ShockDrawFn
+from .generators import Shock, ShockPath, ShockDrawFn
 
 NDF = NDArray[float64]
 
@@ -154,7 +154,7 @@ class ShockPlan:
 
 
 def validate_shock_targets(
-    keys: Sequence[tuple[str, ...]],
+    shocks: Sequence[Shock | ShockPath],
     shock_names: Sequence[str],
 ) -> None:
     """Check every entry names model shocks, each owned by one entry.
@@ -165,7 +165,8 @@ def validate_shock_targets(
     """
     shock_set = set(shock_names)
     owner: dict[str, str | Sequence[str]] = {}
-    for members in keys:
+    for shock in shocks:
+        members = shock.target
         if not members:
             raise ValueError("Shock entries must name at least one shock.")
         for member in members:

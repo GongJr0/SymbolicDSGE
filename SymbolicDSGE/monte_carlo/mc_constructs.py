@@ -23,6 +23,7 @@ from ..kalman.filter import FilterResult, UnscentedFilterResult
 from .._diag_tests.result import MCTestResult
 from .._diag_tests.status import TestStatus
 from ..core.shock.generators import Shock
+from ..core.shock.spec import _normalized_spec, shock_from_json
 from ..regression.enums import RegressionStatus
 from .postproc import Artifact
 from ..regression.result import MCRegressionResult
@@ -34,8 +35,6 @@ NDI = NDArray[np.int_]
 NDB = NDArray[np.bool_]
 ColumnSelector = int | Sequence[int] | slice | NDArray[Any] | None
 CompiledColumnSelector = Sequence[int] | slice | None
-ShockValue = Union[Shock, NDF]
-
 
 MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "shocks", "observables")
 DYNAMIC_SOURCE_FIELDS: tuple[str, ...] = ("payload",)
@@ -252,10 +251,12 @@ class MCStep:
         kwargs: dict[str, Any] = {}
         for key, value in self.kwargs.items():
             name = str(key)
-            if name == "shocks" and isinstance(value, Mapping):
-                kwargs[name] = [
-                    _shock_spec(shock, entry) for shock, entry in value.items()
-                ]
+
+            if name == "shocks" and self.step_type == "simulation":
+                # The kwarg holds the spec as authored, which may be a mapping
+                # keyed from the outside and carrying unbound shocks. Only the
+                # normal form can serialize: every entry names its own targets.
+                kwargs[name] = [shock.to_dict() for shock in _normalized_spec(value)]
             elif isinstance(value, np.ndarray):
                 if value.size <= 50:  # ~1kB if float64 with UTF-8 JSON
                     kwargs[name] = _jsonable(value)
@@ -287,11 +288,9 @@ class MCStep:
         """
         meta = spec.meta
         kwargs: dict[str, Any] = {**meta["kwargs"], **spec.arrays}
-        shocks = kwargs.get("shocks")
-        if isinstance(shocks, Sequence) and not isinstance(shocks, (str, bytes)):
-            kwargs["shocks"] = {
-                tuple(entry["key"]): _restore_shock(entry) for entry in shocks
-            }
+        if meta["step_type"] == "simulation" and "shocks" in kwargs:
+            kwargs["shocks"] = [shock_from_json(s) for s in kwargs["shocks"]]
+
         return cls(
             name=meta["name"],
             op_type=OpType(meta["op_type"]),
@@ -322,45 +321,6 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, np.generic):
         return value.item()
     return value
-
-
-def _shock_spec(key: Any, shock: Any) -> dict[str, Any]:
-    """One simulation shock as a self-describing entry.
-
-    A spec key names one or more shocks, which a JSON object cannot be keyed by,
-    so an entry carries its own ``key`` and the mapping travels as a list. A
-    :class:`Shock` flattens its constructor arguments into the entry and the
-    receiver redraws it; a supplied path rides under ``path``. The two are told
-    apart by what the entry declares rather than by the shape of a bare value.
-
-    The gate is positive because a spec is one of those two things: anything else
-    has no representation here, whether or not it happens to be callable.
-    """
-    names = [key] if isinstance(key, str) else [str(name) for name in key]
-    if isinstance(shock, Shock):
-        return {"key": names, **shock.to_dict()}
-    if isinstance(shock, np.ndarray):
-        return {"key": names, "path": _jsonable(shock)}
-    raise TypeError(
-        f"Shock {key!r} is a {type(shock).__name__}, which has no "
-        f"serialized form. Pass a `Shock` for the receiver to redraw, or the "
-        f"path itself as an array."
-    )
-
-
-def _restore_shock(entry: Any) -> Shock | NDF:
-    """One serialized entry as a simulation takes it.
-
-    An entry declares which of the two forms it is: ``path`` is a supplied path
-    left as nested lists by the walk out, and anything else carries the
-    constructor arguments :meth:`Shock.from_dict` reads. A live ``Shock`` passes
-    through, for kwargs that were never lowered.
-    """
-    if isinstance(entry, Shock):
-        return entry
-    if "path" in entry:
-        return np.asarray(entry["path"], dtype=float64)
-    return Shock.from_dict(entry)
 
 
 def _compile_source_args(

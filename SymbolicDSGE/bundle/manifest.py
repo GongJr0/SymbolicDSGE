@@ -19,7 +19,8 @@ from typing import Any, Literal, get_args
 import numpy as np
 from numpy import float64, ndarray
 
-from ..core.shock.spec import shock_entry_from_json
+from ..core.shock.generators import ShockParameters, ShockPathParameters
+from ..core.shock.spec import shock_from_json
 
 #: Bundle format version. Bump on every manifest change.
 SDSGE_FORMAT_VERSION = 8
@@ -104,7 +105,7 @@ class SimSpec:
     #: ``key`` it is filed under, plus either a ``Shock.to_dict()``'s fields or
     #: a raw path under ``path``. A list rather than an object because a grouped
     #: key names several shocks, which a JSON object cannot be keyed by.
-    shocks: list[dict[str, Any]] | None = None
+    shocks: list[ShockParameters | ShockPathParameters] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """The JSON-serializable form: shocks stay as parameters or raw paths."""
@@ -125,9 +126,7 @@ class SimSpec:
         """
         out = self.to_dict()
         out["shocks"] = (
-            dict(shock_entry_from_json(entry) for entry in self.shocks)
-            if self.shocks
-            else None
+            [shock_from_json(entry) for entry in self.shocks] if self.shocks else None
         )
         return out
 

@@ -1,4 +1,4 @@
-"""Transformation Interface for Prior Specifications in Bayesian DSGE Estimation
+"""Transformation Interface for Prior Specifications in Bayesian DSGE Estimation.
 
 Transformations map given supports to-and-from unconstrained space for sampling.
 This module defines the interface for transformations, as well as specific implementations for various transformation methods.

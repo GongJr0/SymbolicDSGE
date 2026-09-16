@@ -34,7 +34,7 @@ from SymbolicDSGE.monte_carlo.shock_native import (
     native_shock_scratch,
 )
 from SymbolicDSGE.monte_carlo.step_factories import simulation_step
-from SymbolicDSGE.core.shock.spec import resolve_shock_plan
+from SymbolicDSGE.core.shock.spec import _normalized_spec, resolve_shock_plan
 
 T = 16
 
@@ -52,7 +52,7 @@ def _plan(solved, shocks, shock_scale=1.0):
 
 
 def _entries(solved, shocks):
-    families = native_shock_families(shocks)
+    families = native_shock_families(_normalized_spec(shocks))
     resolved = resolve_shock_plan(solved.compiled, shocks, T)
     return native_shock_entries(resolved, families)
 
@@ -61,15 +61,14 @@ def _entries(solved, shocks):
 
 
 def test_native_families_accepts_normal_and_univariate_uniform() -> None:
-    assert native_shock_families({("e_u",): Shock("norm", seed=0)}) == {
-        ("e_u",): ShockCode.NORMAL
-    }
-    assert native_shock_families({("e_u", "e_v"): Shock("norm", seed=0)}) == {
+    def families(spec):
+        return native_shock_families(_normalized_spec(spec))
+
+    assert families({("e_u",): Shock("norm", seed=0)}) == {("e_u",): ShockCode.NORMAL}
+    assert families({("e_u", "e_v"): Shock("norm", seed=0)}) == {
         ("e_u", "e_v"): ShockCode.NORMAL
     }
-    assert native_shock_families({("e_u",): Shock("uni", seed=0)}) == {
-        ("e_u",): ShockCode.UNIFORM
-    }
+    assert families({("e_u",): Shock("uni", seed=0)}) == {("e_u",): ShockCode.UNIFORM}
 
 
 @pytest.mark.parametrize(
@@ -79,7 +78,6 @@ def test_native_families_accepts_normal_and_univariate_uniform() -> None:
         {("e_u",): Shock("t", seed=0, dist_kwargs={"df": 5})},
         {("e_u", "e_v"): Shock("uni", seed=0)},
         {("e_u",): np.zeros(T)},
-        {("e_u",): lambda scale: np.zeros(T)},
         # One ineligible entry sends the whole specification back.
         {
             ("e_u",): Shock("norm", seed=0),
@@ -88,14 +86,16 @@ def test_native_families_accepts_normal_and_univariate_uniform() -> None:
     ],
 )
 def test_native_families_rejects_unported_specs(shocks) -> None:
-    assert native_shock_families(shocks) == {}
-    assert native_shock_scratch(shocks, T) == 0
+    spec = _normalized_spec(shocks)
+    assert native_shock_families(spec) == {}
+    assert native_shock_scratch(spec, T) == 0
 
 
 def test_native_scratch_sizes_on_the_widest_entry() -> None:
-    shocks = {("e_u", "e_v"): Shock("norm", seed=0)}
-    assert native_shock_scratch(shocks, T) == T * 2
-    assert native_shock_scratch({("e_u",): Shock("norm", seed=0)}, T) == T
+    wide = _normalized_spec({("e_u", "e_v"): Shock("norm", seed=0)})
+    assert native_shock_scratch(wide, T) == T * 2
+    narrow = _normalized_spec({("e_u",): Shock("norm", seed=0)})
+    assert native_shock_scratch(narrow, T) == T
 
 
 # --- the draw itself --------------------------------------------------------

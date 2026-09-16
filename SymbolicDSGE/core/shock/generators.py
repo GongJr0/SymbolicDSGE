@@ -37,6 +37,8 @@ class ShockParameters(TypedDict):
 
     Attributes
     ----------
+    target : tuple[str, ...]
+        Names of the shock variables this spec drives.
     dist : ShockDistribution
         Name of the family the shocks are drawn from.
     seed : int | None
@@ -46,9 +48,28 @@ class ShockParameters(TypedDict):
 
     """
 
+    target: tuple[str, ...]
     dist: ShockDistribution
     seed: int | None
     dist_kwargs: dict[str, Any]
+
+
+class ShockPathParameters(TypedDict):
+    """Parameters for a pre-generated shock array.
+
+    Attributes
+    ----------
+    target : tuple[str, ...]
+        Names of the shock variables this spec drives.
+    path : NDArray[float64]
+        Pre-generated shock array to use instead of drawing from a distribution.
+        The shape must be (T, width), where T is the number of time periods and
+        width is the number of shock variables.
+
+    """
+
+    target: tuple[str, ...]
+    path: NDArray[float64]
 
 
 def abstract_shock_array(
@@ -201,7 +222,6 @@ class Shock:
     def __init__(
         self,
         dist: ShockDistribution | rv_generic | multi_rv_generic | None = None,
-        path: NDArray[float64] | None = None,
         seed: int | None = 0,
         dist_kwargs: dict | None = None,
     ) -> None:
@@ -209,33 +229,16 @@ class Shock:
         # periods ``T`` is supplied by the caller at generation time, not baked
         # in here. The simulation is the single authority on its own horizon.
         self.dist = dist
-        self.path = path
         self.seed = seed
         self.dist_kwargs = dict(dist_kwargs) if dist_kwargs is not None else {}
-        self._validate_construction()
 
         # Binding Slot (post-construction)
-        self._targets: tuple[str, ...] | None = None
-
-    def _validate_construction(self) -> None:
-        """Validate the Shock construction parameters."""
-        if self.dist is not None and self.path is not None:
-            raise ValueError(
-                "``dist`` and ``path`` are mutually exclusive; "
-                "Omit ``dist`` to use a pre-generated shock array, "
-                "or omit ``path`` to draw from a distribution."
-            )
-
-        if self.path is not None and any(v for v in [self.seed, self.dist_kwargs]):
-            warnings.warn(
-                "Using a ``path`` will ignore ``seed`` and ``dist_kwargs``.",
-                UserWarning,
-            )
+        self._target: tuple[str, ...] | None = None
 
     @property
-    def targets(self) -> tuple[str, ...]:
+    def target(self) -> tuple[str, ...]:
         """The shock variables this spec drives, once it has been bound."""
-        if self._targets is None:
+        if self._target is None:
             raise ValueError(
                 "This ``Shock`` instance has not been bound to any variables "
                 "yet. Use ``.at(key)`` for a single shock, ``.joint(*keys)`` to "
@@ -243,12 +246,12 @@ class Shock:
                 "``.independent(*keys)`` to draw each from its own standard "
                 "deviation."
             )
-        return self._targets
+        return self._target
 
     @property
     def is_bound(self) -> bool:
         """Whether this spec has been bound to any shock variables."""
-        return self._targets is not None
+        return self._target is not None
 
     def _bind(self, keys: tuple[str, ...]) -> "Shock":
         """A copy of this spec bound to ``keys``.
@@ -264,37 +267,8 @@ class Shock:
         """
         bound = copy.copy(self)
         bound.dist_kwargs = dict(self.dist_kwargs)
-        bound._targets = keys
+        bound._target = keys
         return bound
-
-    def at(self, *keys: str) -> "Shock":
-        """Bind this spec to one shock variable.
-
-        Parameters
-        ----------
-        *keys : str
-            The single shock variable this spec drives.
-
-        Returns
-        -------
-        Shock
-            A copy of this spec, bound to ``keys``.
-
-        Raises
-        ------
-        ValueError
-            If other than one target is named. Naming several is a choice
-            between :meth:`joint` and :meth:`independent`, and the two draw
-            different distributions, so it cannot be made by omission.
-        """
-        if len(keys) != 1:
-            raise ValueError(
-                f"``at`` binds exactly one shock variable; got {len(keys)}. "
-                "For several, use ``.joint(*keys)`` to draw them from their "
-                "calibrated covariance block, or ``.independent(*keys)`` to "
-                "draw each from its own standard deviation."
-            )
-        return self._bind(tuple(keys))
 
     def joint(self, *keys: str) -> "Shock":
         """Bind this spec to several shock variables, drawn together.
@@ -474,6 +448,7 @@ class Shock:
                 "serializable; got a live scipy distribution object."
             )
         return ShockParameters(
+            target=self.target,
             dist=self.dist,  # pyright: ignore
             seed=None if self.seed is None else int(self.seed),
             dist_kwargs={k: _jsonable(v) for k, v in self.dist_kwargs.items()},
@@ -499,7 +474,46 @@ class Shock:
             dist=cast(ShockDistribution, dist),
             seed=None if seed is None else int(seed),
             dist_kwargs=dict(data.get("dist_kwargs") or {}),
+        ).joint(*data["target"])
+
+
+class ShockPath:
+    """A pre-generated shock array for a simulation run.
+
+    Parameters
+    ----------
+    path : NDArray[float64]
+        Pre-generated shock array to use instead of drawing from a distribution.
+        The shape must be (T, width), where T is the number of time periods and
+        width is the number of shock variables.
+
+    Attributes
+    ----------
+    path : NDArray[float64]
+        The pre-generated shock array.
+    *keys : str
+        The shock variables this spec drives.
+        Key order must match the order of columns in
+        ``path``.
+    """
+
+    def __init__(self, path: NDArray[float64], *keys: str) -> None:
+        self.path = path
+        self.target = tuple(keys)
+
+    def to_dict(self) -> ShockPathParameters:
+        """Serialize a ShockPath to a JSON-able dict."""
+        return ShockPathParameters(
+            target=self.target,
+            path=_jsonable(self.path),
         )
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ShockPath":
+        """Rebuild a ShockPath from :meth:`to_dict` output."""
+        path = asarray(data["path"], dtype=float64)
+        keys = tuple(data["target"])
+        return cls(path, *keys)
 
 
 def _jsonable(value: Any) -> Any:

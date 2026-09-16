@@ -489,9 +489,9 @@ function describeEntry(entry: ShockRegistryEntry): string {
 }
 
 // Read the registry the panel renders, literally, from the step params. A
-// GUI-authored step carries `shock_registry`; a bundle-serialized step carries
-// the compiled `shocks` map, which we reconstruct one entry per key with no
-// invented info (the key alone gives the variables and joint/multivar status).
+// GUI-authored step carries `shock_registry`; a serialized step carries the
+// compiled `shocks` list, which we reconstruct one entry per element with no
+// invented info (`target` alone gives the variables and whether it is joint).
 function registryFromParams(
   params: Record<string, unknown>,
 ): ShockRegistryEntry[] {
@@ -500,12 +500,14 @@ function registryFromParams(
     return registry.map(normalizeEntry);
   }
   const shocks = params.shocks;
-  if (shocks !== null && typeof shocks === "object" && !Array.isArray(shocks)) {
-    return Object.entries(shocks as Record<string, unknown>).map(([key, value]) =>
-      entryFromShock(key, (value ?? {}) as Record<string, unknown>),
-    );
-  }
-  return [];
+  if (!Array.isArray(shocks)) return [];
+  return shocks
+    .map((value) => (value ?? {}) as Record<string, unknown>)
+    // A supplied path is data, not a family, so it has no registry form. The
+    // two entry kinds are told apart by what the entry declares: `path` is
+    // present on one and absent on the other.
+    .filter((entry) => !("path" in entry))
+    .map(entryFromShock);
 }
 
 function normalizeEntry(raw: unknown): ShockRegistryEntry {
@@ -520,18 +522,12 @@ function normalizeEntry(raw: unknown): ShockRegistryEntry {
   };
 }
 
-// Invert `_shock_for`: recover the registry entry from a serialized Shock dict.
+// Invert `shockFor`: recover the registry entry from a serialized Shock dict.
 // `loc` lives under `mean`/`loc` (scalar or per-variable list) by dist and shape.
-function entryFromShock(
-  key: string,
-  dict: Record<string, unknown>,
-): ShockRegistryEntry {
-  const vars = key
-    .split(",")
-    .map((name) => name.trim())
-    .filter(Boolean);
+function entryFromShock(dict: Record<string, unknown>): ShockRegistryEntry {
+  const vars = Array.isArray(dict.target) ? dict.target.map(String) : [];
   const dist = asDist(dict.dist);
-  const multivar = Boolean(dict.multivar) || vars.length > 1;
+  const multivar = vars.length > 1;
   const kwargs = (dict.dist_kwargs ?? {}) as Record<string, unknown>;
   const first = (value: unknown) =>
     Array.isArray(value) ? Number(value[0] ?? 0) : Number(value ?? 0);

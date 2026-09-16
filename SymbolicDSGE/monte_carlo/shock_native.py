@@ -24,7 +24,7 @@ from numpy import float64
 from numpy.typing import NDArray
 
 from .._ckernels.monte_carlo._runner import NativeShockPlan, shock_plan
-from ..core.shock.generators import Shock
+from ..core.shock.generators import Shock, ShockPath
 from ..core.shock.plan import ShockPlan, ShockEntry
 from ..core.shock.spec import resolve_shock_plan, _normalized_spec
 from .defaults import DEFAULT_SHOCK_SCALE
@@ -74,7 +74,7 @@ class NativeShockEntry(NamedTuple):
     key: int
 
 
-def _spec_family(name: tuple[str, ...], shock: Shock | NDF) -> ShockCode | None:
+def _spec_family(shock: Shock | ShockPath) -> ShockCode | None:
     """The native family code for one raw spec entry, or None if C cannot draw it.
 
     A spec qualifies when it names a family the kernel implements, which is
@@ -86,17 +86,16 @@ def _spec_family(name: tuple[str, ...], shock: Shock | NDF) -> ShockCode | None:
         # family for one, and one ineligible entry sends the whole spec to the
         # Python draw.
         return None
+
     code = ShockCode.for_dist(shock.dist)
-    if code is None:
-        return None  # Student-t, a scipy object, anything else unported.
-    if code is ShockCode.UNIFORM and len(name) > 1:
+    if code is ShockCode.UNIFORM and len(shock.target) > 1:
         # A linear map of independent uniforms is not uniform in its margins.
         return None
     return code
 
 
 def native_shock_families(
-    shocks: Mapping[tuple[str, ...], Shock | NDF],
+    shocks: Sequence[Shock | ShockPath],
 ) -> dict[tuple[str, ...], ShockCode]:
     """Family codes for a spec the native draw can take, else None.
 
@@ -105,15 +104,15 @@ def native_shock_families(
     shock block.
     """
     families: dict[tuple[str, ...], ShockCode] = {}
-    for key, shock in shocks.items():
-        family = _spec_family(key, shock)
+    for shock in shocks:
+        family = _spec_family(shock)
         if family is None:
             return {}
-        families[key] = family
+        families[shock.target] = family
     return families
 
 
-def native_shock_scratch(shocks: Mapping[tuple[str, ...], Shock | NDF], T: int) -> int:
+def native_shock_scratch(shocks: Sequence[Shock | ShockPath], T: int) -> int:
     """Float arena elements the native draw needs.
 
     Reads the raw spec so arena planning can size the scratch without resolving
@@ -122,7 +121,7 @@ def native_shock_scratch(shocks: Mapping[tuple[str, ...], Shock | NDF], T: int) 
     """
     if not native_shock_families(shocks):
         return 0
-    return T * max(len(k) for k in shocks)
+    return T * max(len(s.target) for s in shocks)
 
 
 def _entry_key(entry: ShockEntry, rng: np.random.Generator) -> int:

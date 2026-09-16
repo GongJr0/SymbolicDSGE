@@ -113,7 +113,9 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
     assert loaded.simulation is not None
     prefill = loaded.simulation["reference"]
     assert prefill["T"] == 8
-    assert prefill["shocks"][("u",)].seed == 42
+    (prefill_shock,) = prefill["shocks"]
+    assert prefill_shock.target == ("u",)
+    assert prefill_shock.seed == 42
 
     # manifest integrity
     assert loaded.manifest.created_by == "test-suite"

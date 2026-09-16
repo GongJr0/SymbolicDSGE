@@ -34,8 +34,13 @@ from ..estimation.spec import (
     MAPResultSpec,
     MCMCResultMeta,
 )
-from ..core.shock.generators import Shock
-from ..core.shock.spec import _normalized_spec, shock_entry_to_json
+from ..core.shock.generators import (
+    Shock,
+    ShockPath,
+    ShockParameters,
+    ShockPathParameters,
+)
+from ..core.shock.spec import ShockSpec, _normalized_spec
 from ..estimation.results import MLEResult, MAPResult
 
 from ..monte_carlo.core import MCPipeline
@@ -567,7 +572,11 @@ class BundleBuilder:
         role: str,
         *,
         T: int,
-        shocks: Mapping[str | Sequence[str], Shock | NDF] | None = None,
+        shocks: (
+            Mapping[str | Sequence[str], Shock | NDF]
+            | Sequence[Shock | ShockPath]
+            | None
+        ) = None,
         shock_scale: float = 1.0,
         x0: Mapping[str, float] | Sequence[float] | NDF | None = None,
         observables: bool = False,
@@ -675,8 +684,8 @@ def _prefill_x0(
 
 
 def _prefill_shocks(
-    shocks: Mapping[str | Sequence[str], Shock | NDF] | None,
-) -> list[dict[str, Any]] | None:
+    shocks: ShockSpec | None,
+) -> list[ShockParameters | ShockPathParameters] | None:
     """Lower each shock to its stored shape: parameters, or a raw path.
 
     A :class:`Shock` travels as its parameters so the receiver redraws it under
@@ -689,10 +698,7 @@ def _prefill_shocks(
     """
     if shocks is None:
         return None
-    return [
-        shock_entry_to_json(key, value)
-        for key, value in _normalized_spec(shocks).items()
-    ]
+    return [shock.to_dict() for shock in _normalized_spec(shocks)]
 
 
 def _observed_to_csv(

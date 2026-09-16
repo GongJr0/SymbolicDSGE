@@ -15,7 +15,14 @@ from numpy.typing import NDArray
 
 from ..compiled_model import CompiledModel
 from ..config import make_Q
-from .generators import Shock, _gaussian_factor, resolve_loc
+from .generators import (
+    Shock,
+    ShockParameters,
+    ShockPath,
+    ShockPathParameters,
+    _gaussian_factor,
+    resolve_loc,
+)
 from .plan import (
     ArrayEntry,
     ShockEntry,
@@ -25,30 +32,63 @@ from .plan import (
 
 NDF = NDArray[float64]
 
-ShockSpec = Mapping[str | Sequence[str], Shock | NDF]
+#: A shock spec in either input shape, before :func:`_normalized_spec`.
+#:
+#: A mapping keys each entry from the outside, which is why its values are the
+#: unbound forms: a :class:`Shock` the key binds, or a bare array the key names.
+#: A :class:`ShockPath` is bound at construction and carries its own target, so
+#: a key over one can only restate it or contradict it; it belongs to the
+#: sequence shape, where every entry names itself.
+ShockSpec = Mapping[str | Sequence[str], Shock | NDF] | Sequence[Shock | ShockPath]
 
 
 def _normalized_spec(
     shocks: Any,
-) -> dict[tuple[str, ...], Shock | NDF]:
-    """Normalize a shock spec to tuple keys, for internal use."""
+) -> Sequence[Shock | ShockPath]:
+    """A shock spec in either authored shape, as the sequence of bound entries.
+
+    The shapes differ in where an entry's targets come from. A mapping keys them
+    from the outside, so its values are the unbound forms: a :class:`Shock` the
+    key binds, or a bare array the key names. A sequence carries entries that
+    name themselves, which is why a :class:`ShockPath` belongs only there.
+
+    The names themselves are not checked here. Whether a target is a model shock
+    is :func:`validate_shock_targets`, which runs where a model is in hand.
+    """
     if shocks is None:
-        return {}
+        return []
+    normalized: list[Shock | ShockPath] = []
+    if isinstance(shocks, Mapping):
+        for k, s in shocks.items():
+            keys = (k,) if isinstance(k, str) else tuple(k)
+            if not isinstance(s, (Shock, ndarray)):
+                raise TypeError(
+                    f"Shock spec entry for {keys!r} must be a Shock to draw from "
+                    f"or an array holding its path; got {type(s).__name__}."
+                )
+            normalized.append(
+                s.joint(*keys) if isinstance(s, Shock) else ShockPath(s, *keys)
+            )
 
-    if not isinstance(shocks, Mapping):
-        raise TypeError(f"Shock spec must be a mapping; got {type(shocks).__name__}.")
-    if not all(isinstance(k, Sequence) for k in shocks.keys()):  # str is Sequence[str].
+    elif isinstance(shocks, Sequence):
+        for s in shocks:
+            if not isinstance(s, (Shock, ShockPath)):
+                raise TypeError(
+                    f"Shock spec entries must be a bound Shock or a ShockPath; "
+                    f"got {type(s).__name__}."
+                )
+            if isinstance(s, Shock) and not s.is_bound:
+                raise ValueError(
+                    "Unbound Shock in sequence. "
+                    "Call .joint(*keys) to bind a single instance "
+                    "or .independent(*keys) to bind independent shocks per key."
+                )
+            normalized.append(s)
+    else:
         raise TypeError(
-            "Shock spec keys must be str or Sequence[str]; got "
-            f"{[type(k).__name__ for k in shocks.keys()]}."
+            f"Shock spec must be a mapping or sequence; got {type(shocks).__name__}."
         )
-    if not all(isinstance(v, (Shock, ndarray)) for v in shocks.values()):
-        raise TypeError(
-            "Shock spec values must be Shock or ndarray; got "
-            f"{[type(v).__name__ for v in shocks.values()]}."
-        )
-
-    return {(k,) if isinstance(k, str) else tuple(k): v for k, v in shocks.items()}
+    return normalized
 
 
 def _require_horizon(T: int | None, key: tuple[str, ...]) -> int:
@@ -66,31 +106,51 @@ def _require_horizon(T: int | None, key: tuple[str, ...]) -> int:
 def _columns(key: tuple[str, ...], shock_col: Mapping[str, int]) -> tuple[int, ...]:
     """The exogenous columns one spec key targets, in column order.
 
-    Sorting here is what makes a grouped key's spelling irrelevant: ``"e_g,e_z"``
-    and ``"e_z,e_g"`` resolve to the same columns, in the order the covariance
-    block and its factor are built in. Nothing downstream re-sorts.
+    Sorting here is what makes a grouped key's spelling irrelevant to a drawn
+    entry: ``"e_g,e_z"`` and ``"e_z,e_g"`` resolve to the same columns, in the
+    order the covariance block and its factor are built in. Nothing downstream
+    re-sorts. A supplied path has no such freedom, since its own columns say
+    which shock each one drives; :func:`_array_entry` sorts that case itself.
     """
     return tuple(sorted(shock_col[name] for name in key))
 
 
-def _array_entry(
-    key: tuple[str, ...], indices: tuple[int, ...], shock: ndarray
-) -> ArrayEntry:
-    """A literal path, widened to ``(T, width)`` so every entry unpacks alike."""
-    values = asarray(shock, dtype=float64)
+def _array_entry(shock: ShockPath, shock_col: Mapping[str, int]) -> ArrayEntry:
+    """A literal path, widened to ``(T, width)`` and put into column order.
+
+    The key order is what says which column of the path drives which shock, and
+    it is the user's to keep consistent. Entries are filed in ascending column
+    order, so the permutation that sorts the key has to move the path's columns
+    with it: ``ShockPath(arr, "e_v", "e_u")`` means ``arr[:, 0]`` is ``e_v``
+    whichever order the model lists the two in. Sorting the key alone would hand
+    each column to the other shock.
+    """
+    key = shock.target
+    order = sorted(range(len(key)), key=lambda i: shock_col[key[i]])
+
+    values = asarray(shock.path, dtype=float64)
     if values.ndim == 1:
         values = values.reshape(-1, 1)
-    if values.ndim != 2 or values.shape[1] != len(indices):
+    if values.ndim != 2 or values.shape[1] != len(key):
         raise ValueError(
-            f"Shock array for {key!r} must have shape (T, {len(indices)}); "
+            f"Shock array for {key!r} must have shape (T, {len(key)}); "
             f"got {tuple(values.shape)}."
         )
-    return ArrayEntry(key=key, indices=indices, value=values)
+    # Fancy indexing copies, and a key already written in column order is the
+    # common case, so only permute when the order actually differs.
+    if order != list(range(len(order))):
+        values = values[:, order]
+
+    return ArrayEntry(
+        key=tuple(key[i] for i in order),
+        indices=tuple(shock_col[key[i]] for i in order),
+        value=values,
+    )
 
 
 def resolve_shock_plan(
     compiled: CompiledModel,
-    shocks: Mapping[tuple[str, ...], Shock | NDF],
+    shocks: ShockSpec,
     T: int | None = None,
 ) -> ShockPlan:
     """Resolve a shock spec against a model into a reusable plan.
@@ -114,24 +174,27 @@ def resolve_shock_plan(
     calib = compiled.config.calibration
     shock_col = compiled.shock_idx
 
-    validate_shock_targets(list(shocks.keys()), list(compiled.shock_names))
+    spec = _normalized_spec(shocks)
+    validate_shock_targets(spec, list(compiled.shock_names))
 
     entries: list[ShockEntry | ArrayEntry] = []
     seeded_count = 0
     cov: NDF | None = None
 
-    for key, shock in shocks.items():
-        indices = _columns(key, shock_col)
+    for shock in spec:
+        key = shock.target
 
-        if isinstance(shock, ndarray):
-            entries.append(_array_entry(key, indices, shock))
+        if isinstance(shock, ShockPath):
+            entries.append(_array_entry(shock, shock_col))
             continue
 
         if not isinstance(shock, Shock):
             raise TypeError(
-                f"Shock for {key!r} must be a Shock or an ndarray path; got "
+                f"Shock for {key!r} must be a Shock or ShockPath; got "
                 f"{type(shock).__name__}."
             )
+
+        indices = _columns(key, shock_col)
 
         if shock.seed is not None:
             seeded_count += 1
@@ -193,32 +256,10 @@ def simulation_shock_matrix(
     ).matrix(T, shock_scale)
 
 
-def shock_entry_to_json(key: tuple[str, ...], shock: Shock | NDF) -> dict[str, Any]:
-    """One spec entry as a self-describing JSON object.
-
-    A key names one or more shocks, which a JSON object cannot be keyed by, so
-    an entry carries its own ``key`` and a spec travels as a list of entries. A
-    :class:`Shock` flattens its constructor arguments into the entry and the
-    receiver redraws it; a supplied path rides under ``path``. The two are told
-    apart by what the entry declares rather than by the shape of a bare value.
-    """
-    names = [str(name) for name in key]
-    if isinstance(shock, Shock):
-        return {"key": names, **shock.to_dict()}
-    if isinstance(shock, ndarray):
-        return {"key": names, "path": shock.tolist()}
-    raise TypeError(
-        f"Shock {key!r} is a {type(shock).__name__}, which has no serialized "
-        f"form. Pass a Shock for the receiver to redraw, or the path itself as "
-        f"an array."
-    )
-
-
-def shock_entry_from_json(
-    entry: Mapping[str, Any],
-) -> tuple[tuple[str, ...], Shock | NDF]:
-    """One serialized entry as the ``(key, spec)`` pair a mapping was keyed by."""
-    key = tuple(str(name) for name in entry["key"])
+def shock_from_json(
+    entry: ShockParameters | ShockPathParameters,
+) -> Shock | ShockPath:
     if "path" in entry:
-        return key, asarray(entry["path"], dtype=float64)
-    return key, Shock.from_dict(entry)
+        return ShockPath.from_dict(entry)
+    else:
+        return Shock.from_dict(entry)

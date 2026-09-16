@@ -262,4 +262,6 @@ def test_simulation_prefill_survives_the_round_trip(tmp_path: Path) -> None:
     loaded = build_from(packed)
 
     assert loaded.simulation is not None
-    assert loaded.simulation["reference"]["shocks"][("u",)].seed == 42
+    (prefill_shock,) = loaded.simulation["reference"]["shocks"]
+    assert prefill_shock.target == ("u",)
+    assert prefill_shock.seed == 42

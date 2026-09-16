@@ -358,7 +358,7 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     assert ws.mc.view is None  # a bundle stores the pipeline, not the canvas
     assert ws.simulation["reference"].spec is not None
     assert ws.simulation["reference"].spec["T"] == 8
-    assert ws.simulation["reference"].spec["shocks"][0]["key"] == ["e_u"]
+    assert ws.simulation["reference"].spec["shocks"][0]["target"] == ["e_u"]
     assert ws.simulation["reference"].spec["shocks"][0]["seed"] == 42
 
 
@@ -518,7 +518,7 @@ def test_a_simulation_that_cannot_replay_leaves_the_session_usable(
     assert workspace.simulation["reference"].spec is not None
     workspace.simulation["reference"].spec["shocks"] = [
         {
-            "key": ["not_a_shock"],
+            "target": ["not_a_shock"],
             "dist": "norm",
             "multivar": False,
             "seed": 1,

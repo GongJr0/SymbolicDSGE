@@ -28,7 +28,8 @@ import matplotlib.pyplot as plt
 
 from . import export, measurement
 
-from ..shock.generators import Shock
+from ..shock.generators import Shock, ShockPath
+from ..shock.spec import ShockSpec
 from ..solver_backend import BaseSolution
 from ..sim_result import StatePath, SimResult
 
@@ -85,7 +86,7 @@ class SolvedModel(ABC, Generic[Policy]):
     def _simulate_state_matrix(
         self,
         T: int,
-        shocks: Mapping[str | Sequence[str], Shock | NDF] | None = None,
+        shocks: ShockSpec | None = None,
         shock_scale: float = 1.0,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
     ) -> StatePath: ...
@@ -93,7 +94,11 @@ class SolvedModel(ABC, Generic[Policy]):
     def sim(
         self,
         T: int,
-        shocks: Mapping[str | Sequence[str], Shock | NDF] | None = None,
+        shocks: (
+            Mapping[str | Sequence[str], Shock | NDF]
+            | Sequence[Shock | ShockPath]
+            | None
+        ) = None,
         shock_scale: float = 1.0,
         x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
         observables: bool = False,

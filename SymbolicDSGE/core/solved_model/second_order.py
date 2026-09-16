@@ -6,11 +6,10 @@ from numpy import ndarray, float64
 import numpy as np
 
 from .base import SolvedModel, NDF
-from ..shock.spec import simulation_shock_matrix
+from ..shock.spec import ShockSpec, simulation_shock_matrix
 from ..solver_backend import SecondOrderSolution
 from ..compiled_model import CompiledModel
 from ..sim_result import StatePath
-from ..shock.generators import Shock
 from ..._ckernels.core import simulate_second_order_pruned
 
 
@@ -31,7 +30,7 @@ class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
     def _simulate_state_matrix(
         self,
         T: int,
-        shocks: Mapping[str | Sequence[str], Shock | NDF] | None = None,
+        shocks: ShockSpec | None = None,
         shock_scale: float = 1,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
     ) -> StatePath:

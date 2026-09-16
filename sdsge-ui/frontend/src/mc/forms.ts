@@ -11,13 +11,12 @@ import type { ShockRegistryEntry } from "../types";
 const BANDWIDTH_KEYWORDS = new Set(["andrews", "wooldridge", "auto"]);
 
 interface SerializedShock {
-  // The shocks this entry drives. A spec key names one or more of them, which a
-  // JSON object cannot be keyed by, so each entry carries its own.
-  key: string[];
+  // The shocks this entry drives. An entry names one or more of them, which a
+  // JSON object cannot be keyed by, so each entry carries its own targets and a
+  // spec travels as a list.
+  target: string[];
   dist: string;
-  multivar: boolean;
   seed: number | null;
-  dist_args: unknown[];
   dist_kwargs: Record<string, unknown>;
 }
 
@@ -46,11 +45,9 @@ function shockFor(entry: ShockRegistryEntry): SerializedShock {
     throw new Error(`Unsupported shock distribution: ${String(entry.dist)}`);
   }
   return {
-    key: vars,
+    target: vars,
     dist: entry.dist,
-    multivar,
     seed: entry.seed ?? null,
-    dist_args: [],
     dist_kwargs: distKwargs,
   };
 }

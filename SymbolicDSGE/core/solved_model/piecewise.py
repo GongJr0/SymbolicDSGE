@@ -7,10 +7,10 @@ from numpy.typing import NDArray
 
 from .base import SolvedModel, NDF
 from .first_order import FirstOrderSolvedModel
-from ..shock.spec import simulation_shock_matrix
+from ..shock.generators import Shock, ShockPath
+from ..shock.spec import ShockSpec, simulation_shock_matrix
 from ..solver_backend import PiecewiseSolution
 from ..compiled_model import CompiledModel
-from ..shock.generators import Shock
 from ..sim_result import OccBinDiagnostics, SimResult, StatePath
 from ..._ckernels.occbin import occbin_sim
 
@@ -34,7 +34,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     def _simulate_state_matrix(
         self,
         T: int,
-        shocks: Mapping[str | Sequence[str], Shock | NDF] | None = None,
+        shocks: ShockSpec | None = None,
         shock_scale: float = 1,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         *,
@@ -93,7 +93,11 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     def sim(
         self,
         T: int,
-        shocks: Mapping[str | Sequence[str], Shock | NDF] | None = None,
+        shocks: (
+            Mapping[str | Sequence[str], Shock | NDF]
+            | Sequence[Shock | ShockPath]
+            | None
+        ) = None,
         shock_scale: float = 1.0,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         observables: bool = False,
@@ -206,7 +210,11 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     def sim_reference(
         self,
         T: int,
-        shocks: Mapping[str | Sequence[str], Shock | NDF] | None = None,
+        shocks: (
+            Mapping[str | Sequence[str], Shock | NDF]
+            | Sequence[Shock | ShockPath]
+            | None
+        ) = None,
         shock_scale: float = 1.0,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         observables: bool = False,

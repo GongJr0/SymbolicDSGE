@@ -10,7 +10,7 @@ from SymbolicDSGE.core.shock.generators import Shock
 
 
 def test_norm_univariate_round_trips() -> None:
-    shock = Shock(dist="norm", seed=3, dist_kwargs={"loc": 0.5})
+    shock = Shock(dist="norm", seed=3, dist_kwargs={"loc": 0.5}).joint("u")
     payload = shock.to_dict()
     json.dumps(payload)  # must be JSON-safe
 
@@ -18,12 +18,12 @@ def test_norm_univariate_round_trips() -> None:
     assert "T" not in payload
     restored = Shock.from_dict(payload)
     assert restored.to_dict() == payload
-    assert (restored.dist, restored.seed) == ("norm", 3)
+    assert (restored.dist, restored.seed, restored.target) == ("norm", 3, ("u",))
     assert restored.dist_kwargs == {"loc": 0.5}
 
 
 def test_t_distribution_carries_df() -> None:
-    shock = Shock(dist="t", seed=None, dist_kwargs={"loc": 0.0, "df": 5.0})
+    shock = Shock(dist="t", seed=None, dist_kwargs={"loc": 0.0, "df": 5.0}).joint("u")
     restored = Shock.from_dict(shock.to_dict())
     assert restored.seed is None
     assert restored.dist_kwargs == {"loc": 0.0, "df": 5.0}
@@ -34,7 +34,7 @@ def test_numpy_kwargs_are_coerced_to_lists() -> None:
         dist="norm",
         seed=0,
         dist_kwargs={"mean": np.array([0.0, 1.0])},
-    )
+    ).joint("u")
     payload = shock.to_dict()
     assert payload["dist_kwargs"]["mean"] == [0.0, 1.0]
     json.dumps(payload)
@@ -43,7 +43,13 @@ def test_numpy_kwargs_are_coerced_to_lists() -> None:
 def test_from_dict_ignores_a_stored_multivar() -> None:
     # Arity belongs to the spec key the shock is filed under, so a flag written
     # by an older release is read past rather than honored.
-    payload = {"dist": "norm", "seed": 1, "multivar": True, "dist_kwargs": {}}
+    payload = {
+        "target": ["u"],
+        "dist": "norm",
+        "seed": 1,
+        "multivar": True,
+        "dist_kwargs": {},
+    }
     restored = Shock.from_dict(payload)
     assert not hasattr(restored, "multivar")
     assert "multivar" not in restored.to_dict()
@@ -63,6 +69,6 @@ def test_from_dict_rejects_unknown_dist() -> None:
 def test_from_dict_ignores_legacy_T_key() -> None:
     # Bundles authored before the horizon moved to generation time carry a "T";
     # it is silently ignored rather than rejected.
-    restored = Shock.from_dict({"T": 9, "dist": "norm", "seed": 1})
+    restored = Shock.from_dict({"T": 9, "target": ["u"], "dist": "norm", "seed": 1})
     assert not hasattr(restored, "T")
     assert (restored.dist, restored.seed) == ("norm", 1)
