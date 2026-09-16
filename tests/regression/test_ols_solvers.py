@@ -13,12 +13,11 @@ from SymbolicDSGE.regression.ols import OLSResult as ExportedOLSResult
 from SymbolicDSGE.regression.ols import RegressionStatus as ExportedRegressionStatus
 from SymbolicDSGE.regression.ols import ols as exported_ols
 from SymbolicDSGE.regression.ols.diag_utils import (
-    r2,
-    r2_adj,
     se,
     se_from_cholesky,
     se_from_pinv,
 )
+from SymbolicDSGE.regression.result import r2, r2_adj
 from SymbolicDSGE.regression.ols.core import ols
 from SymbolicDSGE.regression.enums import RegressionStatus
 from SymbolicDSGE.regression.ols.ols_result import OLSResult

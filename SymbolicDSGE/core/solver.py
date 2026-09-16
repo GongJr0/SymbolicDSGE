@@ -682,7 +682,6 @@ class DSGESolver:
         risk correction into a :class:`SecondOrderSolution`. Requires the native
         extension.
         """
-        calib = compiled.config.calibration
         pert = sgu_solve(
             compiled.construct_objective_cfunc(),
             compiled.construct_objective_cfunc_bicomplex(),

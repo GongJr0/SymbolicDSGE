@@ -7,7 +7,7 @@ import io
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Callable, Mapping, Sequence, cast
+from typing import Any, Mapping, Sequence, cast
 
 # Set non-interactive backend before any user code can import pyplot.
 try:

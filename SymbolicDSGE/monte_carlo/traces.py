@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 
-import numpy as np
 from numpy.typing import NDArray
 
 from SymbolicDSGE._diag_tests.result import MCTestResult

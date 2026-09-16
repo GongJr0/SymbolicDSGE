@@ -10,7 +10,6 @@ from typing import (
     Callable,
     Mapping,
     Sequence,
-    Union,
     cast,
 )
 
@@ -22,7 +21,6 @@ from ..core.sim_result import SimResult, OccBinDiagnostics
 from ..kalman.filter import FilterResult, UnscentedFilterResult
 from .._diag_tests.result import MCTestResult
 from .._diag_tests.status import TestStatus
-from ..core.shock.generators import Shock
 from ..core.shock.spec import _normalized_spec, shock_from_json
 from ..regression.enums import RegressionStatus
 from .postproc import Artifact

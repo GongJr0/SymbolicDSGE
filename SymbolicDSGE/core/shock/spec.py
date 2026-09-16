@@ -7,7 +7,7 @@ assembled covariance and its factor all depend on the model and the spec alone.
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence, Tuple, Union, Any
+from typing import Mapping, Sequence, Any
 
 import numpy as np
 from numpy import asarray, float64, ndarray

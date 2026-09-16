@@ -17,7 +17,7 @@ from numpy.linalg import cholesky, solve
 
 from numba import njit
 
-from typing import Literal, cast
+from typing import Literal
 
 NDF = NDArray[float64]
 

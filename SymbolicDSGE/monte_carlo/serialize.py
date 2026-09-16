@@ -22,7 +22,6 @@ from numpy.typing import NDArray
 
 from .mc_constructs import MCDataGenResult, MCFilterResult, MCPipelineResult
 from .postproc import Artifact
-from .._ckernels.monte_carlo._arenas import resolve_retention
 from .._diag_tests.result import MCTestResult
 from ..regression.result import MCRegressionResult
 from .spec import (

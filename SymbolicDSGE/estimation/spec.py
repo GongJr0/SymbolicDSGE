@@ -14,10 +14,9 @@ metadata at load time, mirroring the
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
-from typing import Any, Literal, get_args, TypedDict
+from dataclasses import dataclass
+from typing import Any, TypedDict
 from numpy.typing import NDArray
 
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import json
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, Sequence, TypedDict, get_args
 from numpy.typing import NDArray

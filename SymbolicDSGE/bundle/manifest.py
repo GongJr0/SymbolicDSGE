@@ -16,8 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, get_args
 
-import numpy as np
-from numpy import float64, ndarray
+from numpy import ndarray
 
 from ..core.shock.generators import ShockParameters, ShockPathParameters
 from ..core.shock.spec import shock_from_json

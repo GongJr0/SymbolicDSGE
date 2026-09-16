@@ -47,13 +47,12 @@ from __future__ import annotations
 import argparse
 import csv
 import io
-import json
 import math
 import shutil
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray

@@ -1,21 +1,13 @@
 """Shock generator and Array-shock handlers for DSGE simulations."""
 
-from scipy.stats import (
-    norm,
-    multivariate_normal as mnorm,
-    t,
-    multivariate_t as mt,
-    uniform,
-)
 from scipy.stats._distn_infrastructure import rv_generic
 from scipy.stats._multivariate import multi_rv_generic
 import numpy as np
-from numpy import asarray, ndarray, float64, random, zeros, generic
+from numpy import asarray, ndarray, float64, random, generic
 from numpy.linalg import cholesky, eigh, LinAlgError
 from numpy.typing import NDArray
 from typing import Any, Callable, Literal, Mapping, TypedDict, cast, get_args
 import copy
-import warnings
 
 #: The built-in families a spec may name.
 ShockDistribution = Literal["norm", "t", "uni"]

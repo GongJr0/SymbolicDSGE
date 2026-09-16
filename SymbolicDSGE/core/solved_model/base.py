@@ -6,11 +6,9 @@ from abc import ABC, abstractmethod
 from functools import cached_property
 from typing import (
     Any,
-    Callable,
     Tuple,
     TypeVar,
     Generic,
-    Union,
     Literal,
     Mapping,
     Sequence,

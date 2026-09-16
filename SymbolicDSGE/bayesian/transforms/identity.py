@@ -5,7 +5,7 @@ such as the Normal distribution. These distributions do not need their draws map
 """
 
 from .transform import Transform, TransformMethod
-from ..support import Support, OutOfSupportError
+from ..support import Support
 from typing import overload
 
 import numpy as np

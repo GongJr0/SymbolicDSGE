@@ -1,11 +1,10 @@
 """First-order (Klein) solved model."""
 
 from __future__ import annotations
-from typing import Mapping, Callable, Sequence
 from numpy import float64, ndarray
 import numpy as np
 
-from .base import SolvedModel, NDF
+from .base import SolvedModel
 from ..shock.spec import ShockSpec, simulation_shock_matrix
 from ..solver_backend import FirstOrderSolution
 from ..compiled_model import CompiledModel

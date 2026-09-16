@@ -15,7 +15,6 @@ reads the raw spec alone, so planning never has to resolve a model.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any, Mapping, NamedTuple, Sequence
 

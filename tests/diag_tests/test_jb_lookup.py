@@ -11,6 +11,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from SymbolicDSGE._ckernels.diag import (
+    jb_find_hilo_ascending,
+    jb_find_hilo_descending,
+)
 from SymbolicDSGE._diag_tests import jb_lookup as J
 
 
@@ -18,18 +22,18 @@ from SymbolicDSGE._diag_tests import jb_lookup as J
 def test_find_hilo_ascending_branches():
     grid = J.JB_N_GRID
     # below the grid -> (0, 0)
-    assert J._find_hilo_ascending(1, grid) == (0, 0)
+    assert jb_find_hilo_ascending(1, grid) == (0, 0)
     # above the grid -> (last, last)
-    assert J._find_hilo_ascending(10_000_000, grid) == (
+    assert jb_find_hilo_ascending(10_000_000, grid) == (
         grid.shape[0] - 1,
         grid.shape[0] - 1,
     )
     # exact grid hit -> (idx, idx)
     hit = int(grid[3])
-    assert J._find_hilo_ascending(hit, grid) == (3, 3)
+    assert jb_find_hilo_ascending(hit, grid) == (3, 3)
     # strictly between two nodes -> (idx-1, idx)
     mid = int((grid[3] + grid[4]) // 2)
-    lo, hi = J._find_hilo_ascending(mid, grid)
+    lo, hi = jb_find_hilo_ascending(mid, grid)
     assert lo + 1 == hi
 
 
@@ -39,17 +43,17 @@ def test_find_hilo_descending_branches():
     arr = J.JB_SMALL_N_CRITICAL_VALUES[:, 0]
     assert arr[0] > arr[-1]
     # above the largest value -> (0, 0)
-    assert J._find_hilo_descending(np.float64(arr[0] + 10.0), arr) == (0, 0)
+    assert jb_find_hilo_descending(np.float64(arr[0] + 10.0), arr) == (0, 0)
     # below the smallest value -> (last, last)
-    assert J._find_hilo_descending(np.float64(arr[-1] - 1.0), arr) == (
+    assert jb_find_hilo_descending(np.float64(arr[-1] - 1.0), arr) == (
         arr.shape[0] - 1,
         arr.shape[0] - 1,
     )
     # exact hit
-    assert J._find_hilo_descending(np.float64(arr[5]), arr) == (5, 5)
+    assert jb_find_hilo_descending(np.float64(arr[5]), arr) == (5, 5)
     # between two nodes
     mid = np.float64((arr[5] + arr[6]) / 2.0)
-    lo, hi = J._find_hilo_descending(mid, arr)
+    lo, hi = jb_find_hilo_descending(mid, arr)
     assert lo + 1 == hi
 
 

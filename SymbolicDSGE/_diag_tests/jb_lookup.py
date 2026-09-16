@@ -13,8 +13,6 @@ from scipy.stats._distn_infrastructure import rv_frozen
 # this module is hard-native: the constant tables below are mirrored in
 # _ckernels/diag/jb_lookup.c and the parity tests pin the two copies together.
 from .._ckernels.diag import (
-    jb_find_hilo_ascending as _find_hilo_ascending,
-    jb_find_hilo_descending as _find_hilo_descending,
     jb_isf_interp as _isf_interp,
     jb_isf_interp_arr as _isf_interp_array,
     jb_pval_interp as _pval_interp,
@@ -99,11 +97,6 @@ JB_SMALL_N_CRITICAL_VALUES: NDF = np.ascontiguousarray(
     ], dtype=np.float64)
 )
 # fmt: on
-# The lookup/interpolation kernels (``_find_hilo_ascending`` /
-# ``_find_hilo_descending`` / ``_isf_interp`` / ``_pval_interp`` and the ``_array``
-# forms) are imported from the native ``_ckernels.diag`` extension at the top of
-# this module. The tables above are kept only for the small-N boundary check in
-# ``JarqueBeraDist`` and the parity tests; the kernels read their own C copies.
 
 
 def _as_distribution_output(value: Any) -> DistributionOutput:

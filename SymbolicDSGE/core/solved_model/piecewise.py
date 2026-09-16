@@ -1,7 +1,7 @@
 """Piecewise-linear (OccBin) solved model."""
 
 from __future__ import annotations
-from typing import Mapping, Callable, Sequence
+from typing import Mapping, Sequence
 from numpy import float64, int64, ndarray
 from numpy.typing import NDArray
 

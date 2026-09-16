@@ -11,7 +11,7 @@ import numpy as np
 from numpy import float64
 from scipy.special import ndtr, ndtri
 from numba import njit
-from typing import TypedDict, overload, cast
+from typing import TypedDict, overload
 
 
 class LogNormalParams(TypedDict):

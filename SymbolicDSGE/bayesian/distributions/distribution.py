@@ -3,8 +3,6 @@
 All distributions implement the generic :class:`Distribution` interface and their own parameterization spec.
 """
 
-from sympy.core import parameters
-
 from ..support import Support
 
 from abc import ABC, abstractmethod

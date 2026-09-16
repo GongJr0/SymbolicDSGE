@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, NamedTuple, cast, Sequence
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple, Sequence
 
 import numpy as np
 from numpy.typing import NDArray

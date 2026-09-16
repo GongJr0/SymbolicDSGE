@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast
 
 from ..monte_carlo.serialize import serialize_pipeline_result
 from ..monte_carlo.spec import pipeline_meta

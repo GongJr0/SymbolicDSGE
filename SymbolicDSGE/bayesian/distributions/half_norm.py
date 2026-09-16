@@ -6,7 +6,7 @@ The distribution is one of the choices for standard deviation or autocorrelation
 
 from .distribution import Distribution, DistributionFamily, Size, RandomState, VecF64
 from ..support import OutOfSupportError, Support
-from typing import TypedDict, overload, Callable, cast
+from typing import TypedDict, overload, cast
 
 import numpy as np
 from numpy import float64

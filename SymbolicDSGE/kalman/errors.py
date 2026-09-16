@@ -1,6 +1,5 @@
 """Error types raised by the Kalman filter implementation."""
 
-from numpy import float64
 from enum import IntEnum
 import numpy as np
 from typing import Any
@@ -18,7 +17,7 @@ class MatrixConditionError(Exception):
     """Raised when a matrix is ill-conditioned in the Kalman filter implementation."""
 
     def __init__(self) -> None:
-        message = f"Matrix(s) is ill-conditioned."
+        message = "Matrix(s) is ill-conditioned."
         super().__init__(message)
 
 
