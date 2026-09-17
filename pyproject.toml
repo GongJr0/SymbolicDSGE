@@ -97,7 +97,7 @@ include = ["SymbolicDSGE*"]
 include = ["SymbolicDSGE/**/*.py"]
 
 [tool.ruff.lint]
-select = ["D"]
+select = ["D", "F"]
 ignore = [
     # Missing-docstring family. Tracked as a tiered sweep; re-enable a code
     # once its tier is clear so new API cannot land undocumented.

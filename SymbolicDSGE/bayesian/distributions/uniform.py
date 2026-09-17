@@ -11,7 +11,7 @@ import numpy as np
 from numpy import float64
 from numba import njit
 
-from typing import TypedDict, cast, overload
+from typing import TypedDict, overload
 
 
 class UniformParams(TypedDict):

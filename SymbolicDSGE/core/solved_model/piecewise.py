@@ -1,16 +1,16 @@
 """Piecewise-linear (OccBin) solved model."""
 
 from __future__ import annotations
-from typing import Mapping, Callable, Union
+from typing import Mapping, Sequence
 from numpy import float64, int64, ndarray
 from numpy.typing import NDArray
 
 from .base import SolvedModel, NDF
 from .first_order import FirstOrderSolvedModel
-from .shocks import simulation_shock_matrix
+from ..shock.generators import Shock, ShockPath
+from ..shock.spec import ShockSpec, simulation_shock_matrix
 from ..solver_backend import PiecewiseSolution
 from ..compiled_model import CompiledModel
-from ..shock_generators import Shock
 from ..sim_result import OccBinDiagnostics, SimResult, StatePath
 from ..._ckernels.occbin import occbin_sim
 
@@ -34,9 +34,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     def _simulate_state_matrix(
         self,
         T: int,
-        shocks: (
-            Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
-        ) = None,
+        shocks: ShockSpec | None = None,
         shock_scale: float = 1,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         *,
@@ -95,7 +93,11 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     def sim(
         self,
         T: int,
-        shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
+        shocks: (
+            Mapping[str | Sequence[str], Shock | NDF]
+            | Sequence[Shock | ShockPath]
+            | None
+        ) = None,
         shock_scale: float = 1.0,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         observables: bool = False,
@@ -124,14 +126,16 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         T : int
             Number of time periods to simulate.
 
-        shocks : Mapping[str, Shock | Callable[[float], ndarray] | ndarray], optional
-            Maps each exogenous variable name to its shock. A ``"a,b"`` key is a
-            joint (multivar) shock over those variables. Each value may be a
-            :class:`Shock` distribution spec (materialized into a ``T``-horizon
-            draw here), a ``callable`` taking the shock scale and returning a
-            ``(T,)``/``(T, k)`` array, or a raw ndarray path of that shape. When
-            ``None``, all shocks are zero. Each date's innovation is a surprise:
-            agents solve as though no further shock arrives.
+        shocks : Mapping[str | Sequence[str], Shock | ndarray] | Sequence[Shock | ShockPath], optional
+            The shock spec, in either shape. A mapping keys each entry from the
+            outside: a key naming one shock or several (drawn jointly), against
+            a :class:`Shock` to draw from or a raw ``(T,)``/``(T, k)`` path. A
+            sequence takes entries that name themselves, each a :class:`Shock`
+            bound by :meth:`~Shock.joint` or :meth:`~Shock.independent`, or a
+            :class:`ShockPath`. When ``None``, all shocks are zero.
+
+            Each date's innovation is a surprise: agents solve as though no
+            further shock arrives.
 
         shock_scale : float, optional
             A scaling factor applied to all shocks. The response is not
@@ -208,7 +212,11 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
     def sim_reference(
         self,
         T: int,
-        shocks: Mapping[str, Shock | Callable[[float | NDF], NDF] | NDF] | None = None,
+        shocks: (
+            Mapping[str | Sequence[str], Shock | NDF]
+            | Sequence[Shock | ShockPath]
+            | None
+        ) = None,
         shock_scale: float = 1.0,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         observables: bool = False,
@@ -220,13 +228,13 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         T : int
             Number of time periods to simulate.
 
-        shocks : Mapping[str, Shock | Callable[[float], ndarray] | ndarray], optional
-            Maps each exogenous variable name to its shock. A ``"a,b"`` key is a
-            joint (multivar) shock over those variables. Each value may be a
-            :class:`Shock` distribution spec (materialized into a ``T``-horizon
-            draw here), a ``callable`` taking the shock scale and returning a
-            ``(T,)``/``(T, k)`` array, or a raw ndarray path of that shape. When
-            ``None``, all shocks are zero.
+        shocks : Mapping[str | Sequence[str], Shock | ndarray] | Sequence[Shock | ShockPath], optional
+            The shock spec, in either shape. A mapping keys each entry from the
+            outside: a key naming one shock or several (drawn jointly), against
+            a :class:`Shock` to draw from or a raw ``(T,)``/``(T, k)`` path. A
+            sequence takes entries that name themselves, each a :class:`Shock`
+            bound by :meth:`~Shock.joint` or :meth:`~Shock.independent`, or a
+            :class:`ShockPath`. When ``None``, all shocks are zero.
 
         shock_scale : float, optional
             A scaling factor applied to all shocks.

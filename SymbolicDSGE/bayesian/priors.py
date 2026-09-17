@@ -5,7 +5,6 @@ and the transformation to an unconstrained sampling space. Priors are required f
 """
 
 from __future__ import annotations
-import warnings
 
 from .transforms.transform import TransformMethod, Transform
 from .transforms.transform_dispatch import get_transform

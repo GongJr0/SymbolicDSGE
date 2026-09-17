@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 
 from dataclasses import dataclass, asdict, field
 from functools import cached_property
-from typing import Callable, Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from sympy.logic.boolalg import Boolean
 

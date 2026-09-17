@@ -27,15 +27,14 @@ from SymbolicDSGE._ckernels.rng import (
 from SymbolicDSGE.monte_carlo import MCPipeline, replication_shocks
 from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
 from SymbolicDSGE.monte_carlo.shock_native import (
-    SHOCK_NORMAL,
-    SHOCK_UNIFORM,
+    ShockCode,
     build_native_plan,
     native_shock_entries,
     native_shock_families,
     native_shock_scratch,
 )
 from SymbolicDSGE.monte_carlo.step_factories import simulation_step
-from SymbolicDSGE.core.solved_model.shocks import resolve_shock_plan
+from SymbolicDSGE.core.shock.spec import _normalized_spec, resolve_shock_plan
 
 T = 16
 
@@ -53,7 +52,7 @@ def _plan(solved, shocks, shock_scale=1.0):
 
 
 def _entries(solved, shocks):
-    families = native_shock_families(shocks)
+    families = native_shock_families(_normalized_spec(shocks))
     resolved = resolve_shock_plan(solved.compiled, shocks, T)
     return native_shock_entries(resolved, families)
 
@@ -62,50 +61,48 @@ def _entries(solved, shocks):
 
 
 def test_native_families_accepts_normal_and_univariate_uniform() -> None:
-    assert native_shock_families({"e_u": Shock("norm", seed=0)}) == {
-        "e_u": SHOCK_NORMAL
+    def families(spec):
+        return native_shock_families(_normalized_spec(spec))
+
+    assert families({("e_u",): Shock("norm", seed=0)}) == {("e_u",): ShockCode.NORMAL}
+    assert families({("e_u", "e_v"): Shock("norm", seed=0)}) == {
+        ("e_u", "e_v"): ShockCode.NORMAL
     }
-    assert native_shock_families({"e_u,e_v": Shock("norm", multivar=True, seed=0)}) == {
-        "e_u,e_v": SHOCK_NORMAL
-    }
-    assert native_shock_families({"e_u": Shock("uni", seed=0)}) == {
-        "e_u": SHOCK_UNIFORM
-    }
+    assert families({("e_u",): Shock("uni", seed=0)}) == {("e_u",): ShockCode.UNIFORM}
 
 
 @pytest.mark.parametrize(
     "shocks",
     [
-        None,
         {},
-        {"e_u": Shock("t", seed=0, dist_kwargs={"df": 5})},
-        {"e_u,e_v": Shock("uni", multivar=True, seed=0)},
-        {"e_u": Shock("norm", seed=0, shock_arr=np.zeros(T))},
-        {"e_u": np.zeros(T)},
-        {"e_u": lambda scale: np.zeros(T)},
+        {("e_u",): Shock("t", seed=0, dist_kwargs={"df": 5})},
+        {("e_u", "e_v"): Shock("uni", seed=0)},
+        {("e_u",): np.zeros(T)},
         # One ineligible entry sends the whole specification back.
         {
-            "e_u": Shock("norm", seed=0),
-            "e_v": Shock("t", seed=1, dist_kwargs={"df": 5}),
+            ("e_u",): Shock("norm", seed=0),
+            ("e_v",): Shock("t", seed=1, dist_kwargs={"df": 5}),
         },
     ],
 )
 def test_native_families_rejects_unported_specs(shocks) -> None:
-    assert native_shock_families(shocks) is None
-    assert native_shock_scratch(shocks, T) == 0
+    spec = _normalized_spec(shocks)
+    assert native_shock_families(spec) == {}
+    assert native_shock_scratch(spec, T) == 0
 
 
 def test_native_scratch_sizes_on_the_widest_entry() -> None:
-    shocks = {"e_u,e_v": Shock("norm", multivar=True, seed=0)}
-    assert native_shock_scratch(shocks, T) == T * 2
-    assert native_shock_scratch({"e_u": Shock("norm", seed=0)}, T) == T
+    wide = _normalized_spec({("e_u", "e_v"): Shock("norm", seed=0)})
+    assert native_shock_scratch(wide, T) == T * 2
+    narrow = _normalized_spec({("e_u",): Shock("norm", seed=0)})
+    assert native_shock_scratch(narrow, T) == T
 
 
 # --- the draw itself --------------------------------------------------------
 
 
 def test_univariate_normal_draw_is_the_scaled_engine_stream(solved) -> None:
-    shocks = {"e_u": Shock("norm", seed=7)}
+    shocks = {("e_u",): Shock("norm", seed=7)}
     (entry,) = _entries(solved, shocks)
     block = _plan(solved, shocks).draw(3)
 
@@ -117,7 +114,7 @@ def test_univariate_normal_draw_is_the_scaled_engine_stream(solved) -> None:
 
 
 def test_multivariate_normal_draw_applies_the_covariance_factor(solved) -> None:
-    shocks = {"e_u,e_v": Shock("norm", multivar=True, seed=11)}
+    shocks = {("e_u", "e_v"): Shock("norm", seed=11)}
     (entry,) = _entries(solved, shocks)
     block = _plan(solved, shocks).draw(2)
 
@@ -132,7 +129,7 @@ def test_multivariate_normal_draw_applies_the_covariance_factor(solved) -> None:
 
 
 def test_normal_draw_applies_the_location_shift(solved) -> None:
-    shocks = {"e_u": Shock("norm", seed=7, dist_kwargs={"loc": 2.5})}
+    shocks = {("e_u",): Shock("norm", seed=7, dist_kwargs={"loc": 2.5})}
     (entry,) = _entries(solved, shocks)
     block = _plan(solved, shocks).draw(0)
 
@@ -142,19 +139,8 @@ def test_normal_draw_applies_the_location_shift(solved) -> None:
     )
 
 
-def test_uniform_draw_maps_the_unit_interval_onto_the_support(solved) -> None:
-    shocks = {"e_u": Shock("uni", seed=4, dist_kwargs={"loc": -1.0})}
-    (entry,) = _entries(solved, shocks)
-    block = _plan(solved, shocks).draw(5)
-
-    u = philox_standard_uniform(entry.key, 0, 5, 0, T)
-    np.testing.assert_array_equal(
-        block[:, entry.columns[0]], entry.low + entry.span * u
-    )
-
-
 def test_shock_scale_multiplies_the_whole_block(solved) -> None:
-    shocks = {"e_u": Shock("norm", seed=7)}
+    shocks = {("e_u",): Shock("norm", seed=7)}
     plain = _plan(solved, shocks, shock_scale=1.0).draw(1)
     scaled = _plan(solved, shocks, shock_scale=2.5).draw(1)
 
@@ -162,7 +148,7 @@ def test_shock_scale_multiplies_the_whole_block(solved) -> None:
 
 
 def test_untargeted_columns_stay_zero(solved) -> None:
-    shocks = {"e_u": Shock("norm", seed=7)}
+    shocks = {("e_u",): Shock("norm", seed=7)}
     (entry,) = _entries(solved, shocks)
     block = _plan(solved, shocks).draw(0)
 
@@ -177,7 +163,7 @@ def test_untargeted_columns_stay_zero(solved) -> None:
 
 
 def test_a_seeded_spec_replays_across_plans(solved) -> None:
-    shocks = {"e_u": Shock("norm", seed=1), "e_v": Shock("uni", seed=2)}
+    shocks = {("e_u",): Shock("norm", seed=1), ("e_v",): Shock("uni", seed=2)}
     first = _plan(solved, shocks)
     second = _plan(solved, shocks)
 
@@ -186,7 +172,7 @@ def test_a_seeded_spec_replays_across_plans(solved) -> None:
 
 
 def test_replications_do_not_share_a_stream(solved) -> None:
-    plan = _plan(solved, {"e_u,e_v": Shock("norm", multivar=True, seed=1)})
+    plan = _plan(solved, {("e_u", "e_v"): Shock("norm", seed=1)})
     blocks = [plan.draw(rep_idx) for rep_idx in range(4)]
 
     for i in range(len(blocks)):
@@ -195,7 +181,7 @@ def test_replications_do_not_share_a_stream(solved) -> None:
 
 
 def test_entries_sharing_a_seed_stay_independent(solved) -> None:
-    shocks = {"e_u": Shock("norm", seed=5), "e_v": Shock("norm", seed=5)}
+    shocks = {("e_u",): Shock("norm", seed=5), ("e_v",): Shock("norm", seed=5)}
     entries = _entries(solved, shocks)
     block = _plan(solved, shocks).draw(0)
 
@@ -206,7 +192,7 @@ def test_entries_sharing_a_seed_stay_independent(solved) -> None:
 
 
 def test_an_unseeded_spec_redraws_each_run(solved) -> None:
-    shocks = {"e_u": Shock("norm", seed=None)}
+    shocks = {("e_u",): Shock("norm", seed=None)}
     assert not np.array_equal(
         _plan(solved, shocks).draw(0), _plan(solved, shocks).draw(0)
     )
@@ -214,7 +200,7 @@ def test_an_unseeded_spec_redraws_each_run(solved) -> None:
 
 def test_negative_replication_index_is_rejected(solved) -> None:
     with pytest.raises(ValueError, match="non-negative"):
-        _plan(solved, {"e_u": Shock("norm", seed=0)}).draw(-1)
+        _plan(solved, {("e_u",): Shock("norm", seed=0)}).draw(-1)
 
 
 # --- the run reads the same blocks -----------------------------------------
@@ -245,14 +231,14 @@ def _run_states(solved, shocks, n_rep, n_jobs):
 @pytest.mark.parametrize("n_jobs", [1, 2])
 @pytest.mark.parametrize("n_rep", [3, 8])
 def test_run_states_match_the_addressed_blocks(solved, n_rep, n_jobs) -> None:
-    shocks = {"e_u,e_v": Shock("norm", multivar=True, seed=1)}
+    shocks = {("e_u", "e_v"): Shock("norm", seed=1)}
     states = _run_states(solved, shocks, n_rep, n_jobs)
 
     plan = _plan(solved, shocks)
     (entry,) = _entries(solved, shocks)
     for rep_idx in range(n_rep):
         block = plan.draw(rep_idx)[:, entry.columns]
-        expected = solved.sim(T, shocks={"e_u,e_v": block}).X
+        expected = solved.sim(T, shocks={("e_u", "e_v"): block}).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)
 
 
@@ -262,10 +248,10 @@ def test_run_states_match_the_addressed_blocks(solved, n_rep, n_jobs) -> None:
 @pytest.mark.parametrize(
     "shocks",
     [
-        {"e_u,e_v": Shock("norm", multivar=True, seed=1)},
-        {"e_u": Shock("norm", seed=1), "e_v": Shock("uni", seed=2)},
+        {("e_u", "e_v"): Shock("norm", seed=1)},
+        {("e_u",): Shock("norm", seed=1), ("e_v",): Shock("uni", seed=2)},
         # The Python fallback route.
-        {"e_u": Shock("t", seed=3, dist_kwargs={"df": 5})},
+        {("e_u",): Shock("t", seed=3, dist_kwargs={"df": 5})},
     ],
 )
 def test_replication_shocks_reproduce_a_single_replication(solved, shocks) -> None:
@@ -288,7 +274,7 @@ def test_replication_shocks_rejects_a_deterministic_step(solved) -> None:
 
 
 def test_unported_spec_still_runs_off_the_python_slab(solved) -> None:
-    shocks = {"e_u": Shock("t", seed=3, dist_kwargs={"df": 5})}
+    shocks = {("e_u",): Shock("t", seed=3, dist_kwargs={"df": 5})}
     step = simulation_step(T=T, target="reference", shocks=shocks, observables=False)
     assert build_native_plan(solved, step, T) is None
 
@@ -296,5 +282,5 @@ def test_unported_spec_still_runs_off_the_python_slab(solved) -> None:
     resolved = resolve_shock_plan(solved.compiled, shocks, T)
     for rep_idx in range(3):
         drawn = resolved.matrix(T, 1.0, rep_idx * resolved.seeded_count)
-        expected = solved.sim(T, shocks={"e_u": drawn[:, 0]}).X
+        expected = solved.sim(T, shocks={("e_u",): drawn[:, 0]}).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)

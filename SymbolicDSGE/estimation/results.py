@@ -1,7 +1,7 @@
 """Optimization and MCMC result containers for DSGE model estimation."""
 
-from dataclasses import dataclass, field, field
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 from numpy import float64

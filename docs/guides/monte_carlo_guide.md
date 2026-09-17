@@ -104,10 +104,10 @@ datagen_step = simulation_step(
     T=T,
     target="dgp",  # (1)!
     n_retain=-1,  # (2)!
-    shocks={
-        "e_g,e_z": Shock(dist="norm", multivar=True, seed=0),
-        "e_r": Shock(dist="norm", seed=1),
-    },
+    shocks=[
+        Shock(dist="norm", seed=0).joint("e_g", "e_z"),
+        Shock(dist="norm", seed=1).joint("e_r"),
+    ],
     observables=True,
 )
 ```
@@ -119,8 +119,9 @@ datagen_step = simulation_step(
 
     A seeded specification replays bit for bit across runs, and the result does not depend on `n_rep` or `n_jobs`. A specification with `seed=None` draws from a fresh key each run.
 
-`simulation_step` forwards `T`, `shocks`, `shock_scale`, `x0`, and `observables` to `SolvedModel.sim(...)`. It adds `target`, which selects the model role.
-The `shocks` argument follows the same dictionary convention as `SolvedModel.sim(...)`. Each MC iteration runs the selected model with this specification and passes the output data downstream.
+`simulation_step` forwards `T`, `shocks`, `shock_scale`, `x0`, and `observables` identical to `SolvedModel.sim(...)`. It adds `target`, which selects the model role.
+
+The `shocks` argument follows the same convention as `SolvedModel.sim(...)`. Each MC iteration runs the selected model with this specification and passes the output data downstream.
 
 To inspect one replication on its own, `replication_shocks` hands back the exact shock paths that replication saw, keyed the same way the specification is:
 

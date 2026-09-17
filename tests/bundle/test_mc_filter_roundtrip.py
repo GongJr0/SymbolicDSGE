@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE import DSGESolver, ModelParser
-from SymbolicDSGE.bundle import BundleBuilder, build_from
+from SymbolicDSGE.bundle import BundleBuilder, load_bundle
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.config import KalmanConfig
 from SymbolicDSGE.monte_carlo import MCPipeline
@@ -86,7 +86,7 @@ def _roundtrip(
         .add_mc(pipeline, result=result, as_parquet=as_parquet)
         .write(tmp_path / "filters.sdsge")
     )
-    loaded = build_from(target)
+    loaded = load_bundle(target)
     assert loaded.mc is not None and loaded.mc.result is not None
     return dict(result.filter_outputs), dict(loaded.mc.result.filter_outputs)
 

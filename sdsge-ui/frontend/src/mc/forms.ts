@@ -11,51 +11,63 @@ import type { ShockRegistryEntry } from "../types";
 const BANDWIDTH_KEYWORDS = new Set(["andrews", "wooldridge", "auto"]);
 
 interface SerializedShock {
+  // The shocks this entry drives. An entry names one or more of them, which a
+  // JSON object cannot be keyed by, so each entry carries its own targets and a
+  // spec travels as a list.
+  target: string[];
   dist: string;
-  multivar: boolean;
   seed: number | null;
-  dist_args: unknown[];
   dist_kwargs: Record<string, unknown>;
 }
 
 // One registry entry becomes one shock, joint when it selects more than one
 // variable. Uniform is univariate only, so a `uni` entry takes exactly one.
+//
+// `loc` travels as the vector the entry holds. The library resolves `mean` and
+// `loc` identically at every width and requires one value per target, so there
+// is no spelling to pick and nothing to broadcast: a short vector is incomplete
+// input and is refused here rather than filled in.
 function shockFor(entry: ShockRegistryEntry): SerializedShock {
   const vars = entry.vars.map(String);
   const n = vars.length;
-  const multivar = n > 1;
-  const loc = Number(entry.loc ?? 0);
+  const loc = (entry.loc ?? []).map(Number);
   const df = Number(entry.df ?? 5);
-  if (entry.dist === "uni" && multivar) {
+  if (entry.dist === "uni" && n > 1) {
     throw new Error(
       "A 'uni' shock is univariate; select exactly one variable per uniform " +
         "entry (use separate entries for independent uniform shocks).",
     );
   }
-  let distKwargs: Record<string, unknown>;
-  if (entry.dist === "norm") {
-    distKwargs = multivar ? { mean: Array(n).fill(loc) } : { loc };
-  } else if (entry.dist === "t") {
-    distKwargs = multivar ? { loc: Array(n).fill(loc), df } : { loc, df };
-  } else if (entry.dist === "uni") {
-    distKwargs = { loc };
-  } else {
+  if (loc.length !== n) {
+    throw new Error(
+      `Shock entry '${vars.join(", ")}' needs one location per variable; ` +
+        `got ${loc.length} for ${n}.`,
+    );
+  }
+  if (loc.some((value) => !Number.isFinite(value))) {
+    throw new Error(
+      `Shock entry '${vars.join(", ")}' has a non-numeric location.`,
+    );
+  }
+  if (entry.dist !== "norm" && entry.dist !== "t" && entry.dist !== "uni") {
     throw new Error(`Unsupported shock distribution: ${String(entry.dist)}`);
   }
+  const distKwargs: Record<string, unknown> =
+    entry.dist === "t" ? { loc, df } : { loc };
   return {
+    target: vars,
     dist: entry.dist,
-    multivar,
     seed: entry.seed ?? null,
-    dist_args: [],
     dist_kwargs: distKwargs,
   };
 }
 
 export function shocksFromRegistry(
   registry: ShockRegistryEntry[],
-): Record<string, SerializedShock> | null {
+): SerializedShock[] | null {
   if (registry.length === 0) return null;
-  const shocks: Record<string, SerializedShock> = {};
+  const shocks: SerializedShock[] = [];
+  const seen = new Set<string>();
   for (const entry of registry) {
     const vars = entry.vars.map(String);
     if (vars.length === 0) {
@@ -63,11 +75,16 @@ export function shocksFromRegistry(
         "Each shock registry entry must select at least one variable.",
       );
     }
-    const key = vars.join(",");
-    if (key in shocks) {
-      throw new Error(`Duplicate shock entry for '${key}' in the registry.`);
+    // A list cannot deduplicate its own entries the way an object key did, so
+    // the same selection twice is caught here.
+    const seenKey = vars.join("\u0000");
+    if (seen.has(seenKey)) {
+      throw new Error(
+        `Duplicate shock entry for '${vars.join(", ")}' in the registry.`,
+      );
     }
-    shocks[key] = shockFor(entry);
+    seen.add(seenKey);
+    shocks.push(shockFor(entry));
   }
   return shocks;
 }

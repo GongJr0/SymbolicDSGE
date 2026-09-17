@@ -16,7 +16,7 @@ from typing import Any, Callable, Literal, NamedTuple, cast
 
 import numpy as np
 
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.core.shock.generators import Shock
 from .operations.core import reference_filter_step, simulation_step
 from .operations.postproc import kde_step
 from .operations.regressions import regression_step

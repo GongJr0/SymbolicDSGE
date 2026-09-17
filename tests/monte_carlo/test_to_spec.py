@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pytest
 
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.core.shock.generators import Shock
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc, PandasCustomFunc
 from SymbolicDSGE.monte_carlo.postproc import run_kde
@@ -77,8 +77,14 @@ def test_to_spec_structure_and_sources() -> None:
     assert by_name["w"]["source_args"][0]["field"] == "std_innov"
     # kwargs are stored as the step holds them; no form-shaped renaming
     assert by_name["w"]["kwargs"]["target"] == [0.0]
-    # shocks are serialized to JSON-safe dicts
-    assert by_name["dgp"]["kwargs"]["shocks"]["u"]["dist"] == "norm"
+    # a shock spec travels as a list of entries, each naming its own shocks
+    (entry,) = by_name["dgp"]["kwargs"]["shocks"]
+    assert entry == {
+        "target": ("u",),
+        "dist": "norm",
+        "seed": 0,
+        "dist_kwargs": {"loc": 0.0},
+    }
     # the meta half is the document a bundle writes, and it is JSON on its own
     json.dumps(pipeline_meta(spec))
 
@@ -92,30 +98,22 @@ def test_to_spec_is_a_fixed_point_under_rebuild() -> None:
     assert pipeline_meta(rebuilt.to_spec()) == pipeline_meta(spec1)
 
 
-def test_to_spec_rejects_shock_generators_with_actionable_message() -> None:
-    # `.shock_generator()` returns an opaque callable the runtime accepts but
-    # that cannot be serialized; to_spec must say how to fix it.
-    pipe = MCPipeline(
-        [
-            simulation_step(
-                "dgp",
-                T=8,
-                shocks={"u": Shock(dist="norm", seed=0).shock_generator(8)},
-            ),
-            jarque_bera_test_step("jb", source="dgp", field="observables"),
-        ]
-    )
-    with pytest.raises(TypeError, match="callable"):
-        pipe.to_spec()
-
-
 def test_rebuilt_simulation_recovers_live_shocks() -> None:
     pipe = _simulation_pipeline()
     rebuilt = MCPipeline.from_spec(pipe.to_spec())
 
-    shock = rebuilt.replication_steps[0].kwargs["shocks"]["u"]
+    # The author's mapping is kept verbatim on the step; it is the serialized
+    # form that is the list of entries, so a rebuild comes back bound and in
+    # normal form whatever spelling the author used.
+    authored = pipe.replication_steps[0].kwargs["shocks"]["u"]
+    (shock,) = rebuilt.replication_steps[0].kwargs["shocks"]
     assert isinstance(shock, Shock)
-    assert shock.to_dict() == pipe.replication_steps[0].kwargs["shocks"]["u"].to_dict()
+    assert shock.target == ("u",)
+    assert (shock.dist, shock.seed, shock.dist_kwargs) == (
+        authored.dist,
+        authored.seed,
+        authored.dist_kwargs,
+    )
 
 
 def test_to_spec_lifts_bulk_arrays_out_of_the_meta() -> None:

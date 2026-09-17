@@ -119,17 +119,20 @@ class _FakeSolvedModel:
         self.kalman_calls: list[dict] = []
         self.sim_shocks: list[dict[str, np.ndarray]] = []
 
-    def _draw_shocks(self, shocks=None) -> None:
+    def _draw_shocks(self, T, shocks=None) -> None:
         shock_draws = {}
         if shocks is not None:
             for name, shock in shocks.items():
-                if callable(shock):
-                    scale = (
-                        np.eye(len(name.split(",")), dtype=np.float64)
-                        if "," in name
-                        else np.float64(1.0)
+                if isinstance(shock, Shock):
+                    width = len(name) if isinstance(name, tuple) else 1
+                    # Stands in for the calibration a real model would resolve:
+                    # a unit factor, so the draw is the standardized variate.
+                    shock_draws[name] = np.asarray(
+                        shock.draw_fn(T, width > 1)(
+                            np.zeros(width), np.eye(width), shock.seed
+                        ),
+                        dtype=np.float64,
                     )
-                    shock_draws[name] = np.asarray(shock(scale), dtype=np.float64)
                 else:
                     shock_draws[name] = np.asarray(shock, dtype=np.float64)
         self.sim_shocks.append(shock_draws)
@@ -142,7 +145,7 @@ class _FakeSolvedModel:
         x0=None,
     ):
         del shock_scale, x0
-        self._draw_shocks(shocks)
+        self._draw_shocks(T, shocks)
         t = np.arange(1, T + 1, dtype=np.float64)
         shock_path = np.zeros((T, self.compiled.n_exog), dtype=np.float64)
         return StatePath(
@@ -1057,8 +1060,8 @@ def test_simulation_step_can_advance_seeded_shock_spec_as_stream() -> None:
     reference = _FakeSolvedModel()
     dgp = _FakeSolvedModel(offset=1.0)
     shocks = {
-        "g,z": Shock("norm", multivar=True, seed=0),
-        "r": Shock("norm", multivar=False, seed=1),
+        ("g", "z"): Shock("norm", seed=0),
+        ("r",): Shock("norm", seed=1),
     }
     pipeline = MCPipeline(
         [
@@ -1074,14 +1077,14 @@ def test_simulation_step_can_advance_seeded_shock_spec_as_stream() -> None:
 
     expected_seeds = [(0, 1), (2, 3), (4, 5)]
     for rep_idx, (gz_seed, r_seed) in enumerate(expected_seeds):
-        expected_gz = Shock("norm", multivar=True, seed=gz_seed).shock_generator(T)(
-            np.eye(2, dtype=np.float64)
+        expected_gz = Shock("norm", seed=gz_seed).draw_fn(T, True)(
+            np.zeros(2), np.eye(2, dtype=np.float64), gz_seed
         )
-        expected_r = Shock("norm", multivar=False, seed=r_seed).shock_generator(T)(
-            np.float64(1.0)
+        expected_r = Shock("norm", seed=r_seed).draw_fn(T, False)(
+            np.zeros(1), np.eye(1), r_seed
         )
-        np.testing.assert_allclose(dgp.sim_shocks[rep_idx]["g,z"], expected_gz)
-        np.testing.assert_allclose(dgp.sim_shocks[rep_idx]["r"], expected_r)
+        np.testing.assert_allclose(dgp.sim_shocks[rep_idx][("g", "z")], expected_gz)
+        np.testing.assert_allclose(dgp.sim_shocks[rep_idx][("r",)], expected_r)
 
 
 def test_simulate_dgp_fast_path_for_real_solved_model() -> None:
@@ -1821,27 +1824,6 @@ def test_mc_operation_utils_validate_seeded_shock_specs() -> None:
 
     with pytest.raises(ValueError, match="non-negative"):
         _resolve_seed_increment({"eps": Shock("norm", seed=5)}, -1)
-    with pytest.raises(ValueError, match="generator-style"):
-        _clone_or_pass_shocks(
-            {"eps": Shock("norm", seed=5, shock_arr=np.zeros(2))},
-            T=2,
-            rep_idx=0,
-            seed_increment="auto",
-        )
-    with pytest.raises(ValueError, match="multivar=True"):
-        _clone_or_pass_shocks(
-            {"eps,z": Shock("norm", multivar=False, seed=5)},
-            T=2,
-            rep_idx=0,
-            seed_increment="auto",
-        )
-    with pytest.raises(ValueError, match="multivar=False"):
-        _clone_or_pass_shocks(
-            {"eps": Shock("norm", multivar=True, seed=5)},
-            T=2,
-            rep_idx=0,
-            seed_increment="auto",
-        )
 
 
 def test_mc_operation_utils_resolve_context_and_raw_arrays() -> None:

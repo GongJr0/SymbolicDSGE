@@ -34,10 +34,7 @@ from SymbolicDSGE.kalman.resolvers import resolve_linear_args
 from SymbolicDSGE.core.solved_model.measurement import (
     non_affine_measurement,
 )
-from SymbolicDSGE.core.solved_model.shocks import (
-    shock_unpack,
-    simulation_shock_matrix,
-)
+from SymbolicDSGE.core.shock.spec import simulation_shock_matrix
 
 
 def _filter_result(T: int = 3, n: int = 1, m: int = 2) -> FilterResult:
@@ -427,68 +424,6 @@ def test_solved_model_build_C_d_from_observables(solved_test):
 
     assert C.shape == (m, n)
     assert d.shape == (m,)
-
-
-def test_solved_model_shock_unpack_multivar_key_order_is_canonical(solved_test):
-    T = 6
-
-    def mv_shock(cov):
-        # deterministic mapping from covariance -> shock matrix
-        base = np.array([cov[0, 0], cov[1, 1]], dtype=float)
-        return np.tile(base, (T, 1))
-
-    unpack_1 = shock_unpack(solved_test.compiled, {"e_u,e_v": mv_shock})
-    unpack_2 = shock_unpack(solved_test.compiled, {"e_v,e_u": mv_shock})
-
-    idx_to_vec_1 = {idx: vec for idx, vec in unpack_1}
-    idx_to_vec_2 = {idx: vec for idx, vec in unpack_2}
-
-    assert idx_to_vec_1.keys() == idx_to_vec_2.keys()
-    for k in idx_to_vec_1:
-        assert np.array_equal(idx_to_vec_1[k], idx_to_vec_2[k])
-
-
-def test_solved_model_shock_unpack_univariate_callable_and_errors(solved_test):
-    out = shock_unpack(
-        solved_test.compiled, {"e_u": lambda sig: np.full((4,), sig, dtype=np.float64)}
-    )
-
-    assert out[0][0] == solved_test.compiled.shock_idx["e_u"]
-    assert np.array_equal(out[0][1], np.full((4,), 0.50, dtype=np.float64))
-
-    with pytest.raises(ValueError, match="is not a model shock"):
-        shock_unpack(solved_test.compiled, {"Pi": np.ones((4,), dtype=np.float64)})
-
-    with pytest.raises(TypeError, match="must be a callable or ndarray"):
-        shock_unpack(solved_test.compiled, {"e_u": "bad-shock"})
-
-
-def test_solved_model_shock_unpack_multivariate_error_paths(solved_test):
-    def bad_shape(_cov):
-        return np.ones((3, 1), dtype=np.float64)
-
-    with pytest.raises(ValueError, match="must return array with shape"):
-        shock_unpack(solved_test.compiled, {"e_u,e_v": bad_shape})
-
-    with pytest.raises(TypeError, match="must be a callable or ndarray"):
-        shock_unpack(solved_test.compiled, {"e_u,e_v": "bad-shock"})
-
-
-def test_solved_model_shock_unpack_names_unknown_multivar_member(solved_test):
-    # An unknown member of a multivar key is named alongside the entry it came
-    # from, so a typo is traceable to the exact grouped spec.
-    arr = np.zeros((4, 2), dtype=np.float64)
-    with pytest.raises(ValueError, match=r"'Pi'.*entry 'e_u,Pi'"):
-        shock_unpack(solved_test.compiled, {"e_u,Pi": arr})
-
-
-def test_solved_model_shock_unpack_rejects_shock_in_two_entries(solved_test):
-    # 'e_u' is driven by both a multivar and a univariate entry: each shock may
-    # appear in at most one entry, caught by the single pass.
-    mv = np.zeros((4, 2), dtype=np.float64)
-    uni = np.zeros((4,), dtype=np.float64)
-    with pytest.raises(ValueError, match=r"'e_u' is driven by more than one"):
-        shock_unpack(solved_test.compiled, {"e_u,e_v": mv, "e_u": uni})
 
 
 def test_solved_model_kalman_smoke(solved_post82):

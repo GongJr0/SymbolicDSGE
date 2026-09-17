@@ -490,15 +490,16 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 8,
-                    "shocks": {
-                        "e_u,e_v": {
+                    "shocks": [
+                        {
+                            "target": ["e_u", "e_v"],
                             "dist": "norm",
                             "multivar": True,
                             "seed": 10,
                             "dist_args": [],
                             "dist_kwargs": {"mean": [0.0, 0.0]},
                         }
-                    },
+                    ],
                 },
             }
         ],
@@ -557,15 +558,16 @@ _POSTPROC_PIPELINE = {
             "name": "datagen",
             "params": {
                 "T": 8,
-                "shocks": {
-                    "e_u,e_v": {
+                "shocks": [
+                    {
+                        "target": ["e_u", "e_v"],
                         "dist": "norm",
                         "multivar": True,
                         "seed": 10,
                         "dist_args": [],
                         "dist_kwargs": {"mean": [0.0, 0.0]},
                     }
-                },
+                ],
             },
         },
         {
@@ -786,15 +788,16 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 20,
-                    "shocks": {
-                        "e_u,e_v": {
+                    "shocks": [
+                        {
+                            "target": ["e_u", "e_v"],
                             "dist": "norm",
                             "multivar": True,
                             "seed": 0,
                             "dist_args": [],
                             "dist_kwargs": {"mean": [0.0, 0.0]},
                         }
-                    },
+                    ],
                 },
             },
             {
@@ -858,15 +861,16 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 20,
-                    "shocks": {
-                        "e_u,e_v": {
+                    "shocks": [
+                        {
+                            "target": ["e_u", "e_v"],
                             "dist": "norm",
                             "multivar": True,
                             "seed": 0,
                             "dist_args": [],
                             "dist_kwargs": {"mean": [0.0, 0.0]},
                         }
-                    },
+                    ],
                 },
             },
             {
@@ -930,15 +934,16 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 30,
-                    "shocks": {
-                        "e_u,e_v": {
+                    "shocks": [
+                        {
+                            "target": ["e_u", "e_v"],
                             "dist": "norm",
                             "multivar": True,
                             "seed": 0,
                             "dist_args": [],
                             "dist_kwargs": {"mean": [0.0, 0.0]},
                         }
-                    },
+                    ],
                 },
             },
             {
@@ -1000,15 +1005,16 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 30,
-                    "shocks": {
-                        "e_u,e_v": {
+                    "shocks": [
+                        {
+                            "target": ["e_u", "e_v"],
                             "dist": "norm",
                             "multivar": True,
                             "seed": 0,
                             "dist_args": [],
                             "dist_kwargs": {"mean": [0.0, 0.0]},
                         }
-                    },
+                    ],
                 },
             },
             {
@@ -1070,15 +1076,16 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 30,
-                    "shocks": {
-                        "e_u,e_v": {
+                    "shocks": [
+                        {
+                            "target": ["e_u", "e_v"],
                             "dist": "norm",
                             "multivar": True,
                             "seed": 0,
                             "dist_args": [],
                             "dist_kwargs": {"mean": [0.0, 0.0]},
                         }
-                    },
+                    ],
                 },
             },
             {
@@ -1309,15 +1316,16 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 8,
-                    "shocks": {
-                        "e_u,e_v": {
+                    "shocks": [
+                        {
+                            "target": ["e_u", "e_v"],
                             "dist": "norm",
                             "multivar": True,
                             "seed": 1,
                             "dist_args": [],
                             "dist_kwargs": {"mean": [0.0, 0.0]},
                         }
-                    },
+                    ],
                 },
             },
             {
@@ -1381,15 +1389,16 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 8,
-                    "shocks": {
-                        "e_u,e_v": {
+                    "shocks": [
+                        {
+                            "target": ["e_u", "e_v"],
                             "dist": "norm",
                             "multivar": True,
                             "seed": 1,
                             "dist_args": [],
                             "dist_kwargs": {"mean": [0.0, 0.0]},
                         }
-                    },
+                    ],
                 },
             },
             {

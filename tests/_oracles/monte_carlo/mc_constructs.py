@@ -19,7 +19,7 @@ from numpy.typing import NDArray
 
 from .legacy_test_result import MCResult, TestResult
 from SymbolicDSGE._diag_tests.status import TestStatus
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.core.shock.generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
 from SymbolicDSGE.regression.enums import RegressionStatus

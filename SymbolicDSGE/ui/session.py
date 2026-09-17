@@ -7,7 +7,7 @@ import io
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Callable, Mapping, cast
+from typing import Any, Mapping, Sequence, cast
 
 # Set non-interactive backend before any user code can import pyplot.
 try:
@@ -21,12 +21,12 @@ import numpy as np
 from numpy.typing import NDArray
 from sympy import Symbol
 
-from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.core.compiled_model import CompiledModel
-from SymbolicDSGE.core.config import ModelConfig
-from SymbolicDSGE.core.shock_generators import Shock
-from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.kalman.config import KalmanConfig
+from ..core import DSGESolver, ModelParser
+from ..core.compiled_model import CompiledModel
+from ..core.config import ModelConfig
+from ..core.shock.generators import Shock
+from ..core.solved_model.base import SolvedModel
+from ..kalman.config import KalmanConfig
 
 from .schemas import (
     ArrayEnvelope,
@@ -37,8 +37,8 @@ from .schemas import (
     ShockParamUpdate,
     WorkspaceTab,
 )
-from SymbolicDSGE.bundle.manifest import SimSpec
-from SymbolicDSGE.estimation.spec import EstimatorParams, EstimatorSpec
+from ..bundle.manifest import SimSpec
+from ..estimation.spec import EstimatorParams, EstimatorSpec
 
 from .estimation import (
     build_estimation_inputs,
@@ -292,7 +292,6 @@ class UISession:
         shock_arrays = self._decode_shocks(shocks)
         generated_shocks = self._generate_shocks(
             slot=slot,
-            T=T,
             generation=shock_generation,
             raw_shocks=shock_arrays,
         )
@@ -643,11 +642,15 @@ class UISession:
     def _generate_shocks(
         *,
         slot: ModelSlot,
-        T: int,
         generation: ShockGenerationRequest | None,
         raw_shocks: Mapping[str, NDArray[np.float64]],
-    ) -> dict[str, NDArray[np.float64] | Callable[..., NDArray[np.float64]]]:
-        out: dict[str, NDArray[np.float64] | Callable[..., NDArray[np.float64]]] = {
+    ) -> dict[str | Sequence[str], NDArray[np.float64] | Shock]:
+        """The shock spec a simulation takes, as unresolved specs.
+
+        The horizon is the simulation's to supply. The specs travel unresolved
+        and :func:`resolve_shock_plan` binds them to ``T`` once.
+        """
+        out: dict[str | Sequence[str], NDArray[np.float64] | Shock] = {
             name: value for name, value in raw_shocks.items()
         }
         if generation is None or slot.solved is None:
@@ -661,7 +664,7 @@ class UISession:
 
         seed = generation.seed
         if generation.dist in {"norm", "t"} and len(pending) > 1:
-            key = ",".join(pending)
+            key = tuple(pending)
             dist_kwargs: dict[str, Any]
             if generation.dist == "t":
                 dist_kwargs = {
@@ -672,10 +675,9 @@ class UISession:
                 dist_kwargs = {"mean": [generation.loc] * len(pending)}
             out[key] = Shock(
                 dist=generation.dist,
-                multivar=True,
                 seed=seed,
                 dist_kwargs=dist_kwargs,
-            ).shock_generator(T)
+            )
             return out
 
         for i, name in enumerate(pending):
@@ -685,10 +687,9 @@ class UISession:
             shock_seed = None if seed is None else seed + i
             out[name] = Shock(
                 dist=generation.dist,
-                multivar=False,
                 seed=shock_seed,
                 dist_kwargs=uni_kwargs,
-            ).shock_generator(T)
+            )
         return out
 
 

@@ -14,8 +14,8 @@ import pytest
 from SymbolicDSGE.bundle.builder import BundleBuilder, _observed_to_csv
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.step_factories import simulation_step
-from SymbolicDSGE.bundle.container import BundleArchive, write_bundle
-from SymbolicDSGE.bundle.loader import _stack_observed, build_from
+from SymbolicDSGE.bundle.container import write_bundle
+from SymbolicDSGE.bundle.loader import _stack_observed, load_bundle
 from SymbolicDSGE.bundle.manifest import Manifest, Member
 from SymbolicDSGE.bundle.parquet import (
     collapse_columns,
@@ -28,7 +28,6 @@ from SymbolicDSGE.estimation.results import MCMCResult
 from SymbolicDSGE.estimation.spec import (
     EstimatorParams,
     EstimatorSpec,
-    MCMCResultMeta,
 )
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
@@ -164,7 +163,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
         .write(tmp_path / "csv.sdsge")
     )
 
-    loaded = build_from(target)
+    loaded = load_bundle(target)
     assert loaded.estimation is not None
     np.testing.assert_allclose(np.asarray(loaded.estimation.estimator.y), observed)
     assert isinstance(loaded.estimation.result, MCMCResult)
@@ -212,7 +211,7 @@ def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
     archive_path = tmp_path / "hand.sdsge"
     write_bundle(archive_path, manifest, files)
 
-    loaded = build_from(archive_path)
+    loaded = load_bundle(archive_path)
     assert loaded.estimation is not None
     np.testing.assert_allclose(
         np.asarray(loaded.estimation.estimator.y),

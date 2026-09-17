@@ -23,6 +23,7 @@ from .._ckernels.monte_carlo._runner import (
     DEFAULT_WINDOW,
 )
 from ..core.solved_model import SolvedModel
+from ..core.shock.spec import _normalized_spec
 from .defaults import (
     DEFAULT_FILTER_MODE,
     DEFAULT_REGRESSION_KIND,
@@ -308,7 +309,8 @@ def _resolve_datagen_input_asize(
     )
     # A step that draws its own shocks needs scratch past the simulation arena.
     # Lowering decides the same way, off the same spec, so the two agree.
-    scratch = native_shock_scratch(step.kwargs.get("shocks"), T)
+    shocks = _normalized_spec(step.kwargs.get("shocks"))
+    scratch = native_shock_scratch(shocks, T)
     if scratch:
         size = ArenaSize(n_float=size.n_float + scratch, n_int=size.n_int)
     return size

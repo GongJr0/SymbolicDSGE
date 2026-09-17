@@ -15,14 +15,18 @@ from ..._ckernels.monte_carlo._runner import (
     simulate2_step,
 )
 from ...core.solved_model import SolvedModel
-from ...core.solved_model.shocks import resolve_shock_plan, simulation_shock_matrix
+from ...core.shock.spec import (
+    _normalized_spec,
+    resolve_shock_plan,
+    simulation_shock_matrix,
+)
 from ..defaults import (
     DEFAULT_SHOCK_SCALE,
     DEFAULT_SIMULATION_OBSERVABLES,
     DEFAULT_SIMULATION_TARGET,
 )
 from ..mc_constructs import MCStep
-from ..shock_native import build_native_plan, validate_shock_specs
+from ..shock_native import build_native_plan
 from .utils import (
     NDF,
     FloatInputBinding,
@@ -208,12 +212,11 @@ def _simulation_shocks(
     Cholesky are not repeated. Each replication shifts every base seed by the
     number of seeded entries, which keeps entries that share a run apart.
     """
-    shocks = step.kwargs.get("shocks")
+    shocks = _normalized_spec(step.kwargs.get("shocks"))
     shock_scale = float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE))
-    if shocks is None:
+    if not shocks:
         return _array_shocks(model, T, shock_scale), False
 
-    validate_shock_specs(shocks)
     plan = resolve_shock_plan(model.compiled, shocks, T)
 
     values = np.zeros((n_rep, T, model.compiled.n_exog), dtype=np.float64)

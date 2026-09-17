@@ -1,16 +1,14 @@
 """First-order (Klein) solved model."""
 
 from __future__ import annotations
-from typing import Mapping, Callable, Union
 from numpy import float64, ndarray
 import numpy as np
 
-from .base import SolvedModel, NDF
-from .shocks import simulation_shock_matrix
+from .base import SolvedModel
+from ..shock.spec import ShockSpec, simulation_shock_matrix
 from ..solver_backend import FirstOrderSolution
 from ..compiled_model import CompiledModel
 from ..sim_result import StatePath
-from ..shock_generators import Shock
 
 from ..._ckernels.core import simulate_linear_states_into
 
@@ -32,9 +30,7 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
     def _simulate_state_matrix(
         self,
         T: int,
-        shocks: (
-            Mapping[str, Shock | Union[Callable[[float | NDF], NDF], NDF]] | None
-        ) = None,
+        shocks: ShockSpec | None = None,
         shock_scale: float = 1,
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
     ) -> StatePath:

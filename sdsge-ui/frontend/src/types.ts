@@ -14,7 +14,6 @@ export interface NamedArray {
 
 export interface ShockSpec {
   shock: string;
-  target: string;
   std_param: string | null;
   std_value: number | null;
 }
@@ -209,7 +208,8 @@ export interface SimSpecWire {
   x0: number[] | null;
   observables: boolean;
   shock_scale: number;
-  shocks: Record<string, unknown> | null;
+  /** One self-describing entry per spec entry, each carrying its own `target`. */
+  shocks: Array<Record<string, unknown>> | null;
 }
 
 export interface SimResult {
@@ -361,7 +361,7 @@ export type MCFieldType =
 export interface ShockRegistryEntry {
   vars: string[];
   dist: ShockDistribution;
-  loc: number;
+  loc: number[];
   df: number;
   seed: number | null;
 }

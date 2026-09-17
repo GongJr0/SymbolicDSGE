@@ -16,19 +16,19 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, get_args
 
-import numpy as np
-from numpy import float64, ndarray
+from numpy import ndarray
 
-from ..core.shock_generators import Shock, ShockParameters
+from ..core.shock.generators import ShockParameters, ShockPathParameters
+from ..core.shock.spec import shock_from_json
 
 #: Bundle format version. Bump on every manifest change.
-SDSGE_FORMAT_VERSION = 6
+SDSGE_FORMAT_VERSION = 8
 
 #: The version at which the format last broke. A reader rejects bundles older
 #: than this, and each bundle records its own so a reader can tell a version it
 #: predates from a version that postdates it: a bump that breaks nothing
 #: leaves this alone and stays readable by older versions.
-SDSGE_LAST_BREAKING_VERSION = 6
+SDSGE_LAST_BREAKING_VERSION = 8
 
 MemberKind = Literal[
     "model_config",
@@ -100,9 +100,11 @@ class SimSpec:
     x0: Mapping[str, float] | list[float] | ndarray | None = None
     observables: bool = False
     shock_scale: float = 1.0
-    #: Per key, either a ``Shock.to_dict()`` mapping or a raw path as a nested
-    #: list. Both are what ``SolvedModel.sim`` accepts, in JSON-safe form.
-    shocks: dict[str, ShockParameters | list[Any]] | None = None
+    #: The shock spec as a list of self-describing entries: each carries its own
+    #: ``target``, plus either a ``Shock.to_dict()``'s fields or a raw path under
+    #: ``path``. A list rather than an object because one entry may name several
+    #: shocks, which a JSON object cannot be keyed by.
+    shocks: list[ShockParameters | ShockPathParameters] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """The JSON-serializable form: shocks stay as parameters or raw paths."""
@@ -117,15 +119,13 @@ class SimSpec:
     def to_sim_kwargs(self) -> dict[str, Any]:
         """The ``SolvedModel.sim`` keyword form: ``model.sim(**spec.to_sim_kwargs())``.
 
-        Each shock parameter mapping becomes a live :class:`Shock`, which ``sim``
-        materializes into its horizon-bound draw; each raw path becomes the array
-        ``sim`` passes through unchanged.
+        An entry without ``path`` becomes a bound :class:`Shock`, which ``sim``
+        materializes into its horizon-bound draw; one with ``path`` becomes a
+        :class:`ShockPath` holding the array ``sim`` passes through unchanged.
         """
         out = self.to_dict()
         out["shocks"] = (
-            {key: _shock_from_json(value) for key, value in self.shocks.items()}
-            if self.shocks
-            else None
+            [shock_from_json(entry) for entry in self.shocks] if self.shocks else None
         )
         return out
 
@@ -160,13 +160,6 @@ def _x0_to_json(x0: Mapping[str, float] | list[float] | ndarray | None) -> Any:
     if isinstance(x0, Mapping):
         return {str(name): float(value) for name, value in x0.items()}
     return [float(value) for value in x0]
-
-
-def _shock_from_json(value: ShockParameters | list[Any]) -> Any:
-    """One stored shock as ``sim`` takes it: a :class:`Shock` or a raw path."""
-    if isinstance(value, Mapping):
-        return Shock.from_dict(value)
-    return np.asarray(value, dtype=float64)
 
 
 @dataclass

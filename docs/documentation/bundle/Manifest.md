@@ -11,6 +11,9 @@ class Manifest()
 
 `Manifest` is the schema for `manifest.json` at the root of every `.sdsge` archive. It indexes the included members, records provenance, and (optionally) carries the simulation prefill inline.
 
+You will never need to construct a `Manifest` or write one to disk manually. Writers generate it and loaders parse it.
+However, it is available for inspection and cerries top-level metadata. The fields are documented here for reference.
+
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
@@ -23,38 +26,12 @@ __Fields:__
 | simulation | `#!python dict[str, SimSpec] | None` | Inline simulation prefills keyed by role (no separate member). |
 | checksums | `#!python dict[str, str]` | SHA-256 hex digests keyed by member path. |
 
-__Methods:__
-
-```python
-Manifest.members_by_kind(
-    kind: str,
-) -> list[Member]
-```
-
-Return every member with the given `kind` (e.g. `"model_config"`, `"estimation_data"`).
-
-```python
-Manifest.model_member(
-    role: str,
-) -> Member | None
-```
-
-Convenience accessor. Return the `model_config` member with the given `role` (`"reference"` or `"dgp"`), or `None` if absent.
-
-```python
-Manifest.to_dict() -> dict[str, Any]
-Manifest.to_json(*, indent: int | None = 2) -> str
-
-@classmethod
-Manifest.from_dict(data: Mapping[str, Any]) -> Manifest
-@classmethod
-Manifest.from_json(text: str) -> Manifest
-```
-
-Round-trippable JSON shape. `from_dict` / `from_json` validate the version pair and raise `ValueError` on either side of a break.
+???+ note "Simulation prefills"
+    Prefills are keyed by name and a bundle can incldue multiple.
+    The values unpack directly as `SolvedModel.sim(**prefill)`.
 
 ???+ warning "Forward / backward compatibility"
-    Compatibility is judged against breaks, not against version equality. A reader rejects a bundle older than its own `SDSGE_LAST_BREAKING_VERSION`, and rejects one whose `last_breaking_version` exceeds its `SDSGE_FORMAT_VERSION`. A newer bundle from a bump that broke nothing reads fine.
+    The version pair is validated when a bundle is read, and an incompatible one raises `ValueError`. Compatibility is judged against breaks, not against version equality: a reader rejects a bundle older than its own `SDSGE_LAST_BREAKING_VERSION`, and rejects one whose `last_breaking_version` exceeds its `SDSGE_FORMAT_VERSION`. A newer bundle from a bump that broke nothing reads fine.
 
 ## `Member`
 
@@ -70,83 +47,11 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | path | `#!python str` | POSIX path inside the archive (e.g. `model/reference.yaml`). |
-| kind | `#!python str` | Semantic kind. One of `MEMBER_KINDS` (see below). |
-| format | `#!python str` | `"yaml"` / `"json"` / `"csv"` / `"parquet"` / `"pickle"`. Inferred from `path` extension when omitted on construction. |
+| kind | `#!python str` | Semantic kind, e.g. `model_config`, `estimation_data`, `mc_pipeline`. Drawn from `MEMBER_KINDS`; the builder sets it. |
+| format | `#!python str` | `"yaml"` / `"json"` / `"csv"` / `"parquet"` / `"pickle"`. Inferred from the `path` extension. |
 | role | `#!python str | None` | `"reference"` / `"dgp"` for model members. |
 | columns | `#!python list[str] | None` | Column names for tabular members (e.g. observable names on `estimation_data`). |
-| options | `#!python dict[str, Any]` | Kind-specific metadata. For `model_config` this carries `compile_kwargs` / `solve_kwargs`. |
-
-__Recognized kinds (`MEMBER_KINDS`):__
-
-| Kind | Purpose |
-| --- | --- |
-| `model_config` | YAML configuration for a role. |
-| `raw_data` | Raw observable file (CSV or Parquet). |
-| `estimation_spec` | `EstimatorSpec.params` (`EstimatorParams`) JSON. |
-| `estimation_result` | Wrapped `{"type": "mle" | "map" | "mcmc", "data": {...}}`. |
-| `estimation_data` | Observed `y` matrix (CSV or Parquet). |
-| `estimation_trace` | MCMC posterior columns (CSV or Parquet). |
-| `mc_pipeline` | `PipelineSpec` JSON. |
-| `mc_raw_model_data` | Raw model data arrays referenced by MC `raw_model_data` nodes. |
-| `mc_custom_op` | Bundle-safe custom operation referenced by `transform:custom` or `postproc:custom` specs. |
-| `mc_result_meta` | The run's own metadata: counts, timings, failures, and the `run_config` that reproduces it. |
-| `mc_test_steps` | Every test step's meta, keyed by step name (JSON). |
-| `mc_test_traces` | Every test step's trace columns in one block (CSV or Parquet). |
-| `mc_regression_steps` | Every regression step's meta, keyed by step name (JSON). |
-| `mc_regression_traces` | Every regression step's trace columns in one block (CSV or Parquet). |
-| `mc_transform_steps` | Every transform step's meta, keyed by step name (JSON). |
-| `mc_transform_trace` | One transform array: a payload or its retained rep indices (CSV or Parquet). |
-| `mc_postproc_steps` | Every post-loop step's meta and inline `summary`, keyed by step name (JSON). |
-| `mc_postproc_raw` | One post-loop step's bulk `Raw` array (CSV or Parquet). |
-
-???+ note "One member per step kind, plus one per unpacked array"
-    Tests and regressions pack every step's columns into a single block, qualified `{step}.{field}` and extended to `{step}.{field}.{idx}` where a column is 2-D. Transform payloads and postproc `Raw` arrays share no shape with anything, so each takes a member of its own and carries its `name` and `field` in `Member.options`.
-
-???+ note "Kind whitelist"
-    `Member.__post_init__` raises `ValueError` for any kind outside `MEMBER_KINDS`.
-
-## Example
-
-```python
-from SymbolicDSGE.bundle import Manifest, Member, SimSpec
-
-manifest = Manifest(
-    created_by="experiment-1",
-    members=[
-        Member(
-            path="model/reference.yaml",
-            kind="model_config",
-            role="reference",
-            options={"compile_kwargs": {"linearize": False}},
-        ),
-        Member(
-            path="estimation/spec.json",
-            kind="estimation_spec",
-        ),
-        Member(
-            path="estimation/observed.csv",
-            kind="estimation_data",
-            columns=["Infl", "Rate"],
-        ),
-    ],
-    simulation={
-        "reference": SimSpec(
-            T=25,
-            shocks={
-                "u": {
-                    "dist": "norm",
-                    "multivar": False,
-                    "seed": 42,
-                    "dist_args": [],
-                    "dist_kwargs": {"loc": 0.0},
-                }
-            },
-        ),
-    },
-)
-
-print(manifest.to_json())
-```
+| options | `#!python dict[str, Any]` | Kind-specific metadata. `model_config` carries `compile_kwargs` / `solve_kwargs`; an unpacked MC array carries the `name` and `field` it came from. |
 
 ## See also
 

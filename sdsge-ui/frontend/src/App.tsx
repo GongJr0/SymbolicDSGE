@@ -209,7 +209,7 @@ export default function App() {
     setShockInputs((current) => {
       const next: Record<string, string> = {};
       for (const spec of shockSpecs) {
-        next[spec.target] = current[spec.target] ?? "";
+        next[spec.shock] = current[spec.shock] ?? "";
       }
       return next;
     });
@@ -256,21 +256,21 @@ export default function App() {
   function buildShockPayload(): Record<string, ReturnType<typeof encodeArray>> {
     const payload: Record<string, ReturnType<typeof encodeArray>> = {};
     for (const spec of shockSpecs) {
-      const raw = shockInputs[spec.target]?.trim();
+      const raw = shockInputs[spec.shock]?.trim();
       if (!raw) continue;
       const values = raw
         .split(/[\s,;]+/)
         .filter(Boolean)
         .map((value) => Number(value));
       if (values.some((value) => !Number.isFinite(value))) {
-        throw new Error(`Shock path for ${spec.target} contains a non-numeric value.`);
+        throw new Error(`Shock path for ${spec.shock} contains a non-numeric value.`);
       }
       if (values.length !== simT) {
         throw new Error(
-          `Shock path for ${spec.target} has ${values.length} values; expected ${simT}.`,
+          `Shock path for ${spec.shock} has ${values.length} values; expected ${simT}.`,
         );
       }
-      payload[spec.target] = encodeArray(new Float64Array(values));
+      payload[spec.shock] = encodeArray(new Float64Array(values));
     }
     return payload;
   }
@@ -760,15 +760,15 @@ function SpecView({
                 <span className="muted">none</span>
               ) : (
                 shockSpecs.map((spec) => (
-                  <label key={spec.target}>
-                    {spec.shock} {"->"} {spec.target}
+                  <label key={spec.shock}>
+                    {spec.shock}
                     <textarea
                       className="shock-input"
-                      value={shockInputs[spec.target] ?? ""}
+                      value={shockInputs[spec.shock] ?? ""}
                       onChange={(event) =>
                         setShockInputs((current) => ({
                           ...current,
-                          [spec.target]: event.target.value,
+                          [spec.shock]: event.target.value,
                         }))
                       }
                       placeholder="0 0 1 0"

@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, NamedTuple, cast, Sequence
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -34,7 +34,13 @@ from ..estimation.spec import (
     MAPResultSpec,
     MCMCResultMeta,
 )
-from ..core.shock_generators import Shock
+from ..core.shock.generators import (
+    Shock,
+    ShockPath,
+    ShockParameters,
+    ShockPathParameters,
+)
+from ..core.shock.spec import ShockSpec, _normalized_spec
 from ..estimation.results import MLEResult, MAPResult
 
 from ..monte_carlo.core import MCPipeline
@@ -566,7 +572,11 @@ class BundleBuilder:
         role: str,
         *,
         T: int,
-        shocks: Mapping[str, Shock | NDF] | None = None,
+        shocks: (
+            Mapping[str | Sequence[str], Shock | NDF]
+            | Sequence[Shock | ShockPath]
+            | None
+        ) = None,
         shock_scale: float = 1.0,
         x0: Mapping[str, float] | Sequence[float] | NDF | None = None,
         observables: bool = False,
@@ -674,30 +684,21 @@ def _prefill_x0(
 
 
 def _prefill_shocks(
-    shocks: Mapping[str, Shock | NDF] | None,
-) -> dict[str, Any] | None:
+    shocks: ShockSpec | None,
+) -> list[ShockParameters | ShockPathParameters] | None:
     """Lower each shock to its stored shape: parameters, or a raw path.
 
     A :class:`Shock` travels as its parameters so the receiver redraws it under
     the author's seed. An array travels as itself. A callable is rejected: only
     the path it returned would survive, which is not the same run.
+
+    The spec travels as a list because a grouped key names several shocks, which
+    a JSON object cannot be keyed by; each entry carries its own ``key``. This is
+    the form a replication step's ``shocks`` kwarg is stored in too.
     """
     if shocks is None:
         return None
-    lowered: dict[str, Any] = {}
-    for key, shock in shocks.items():
-        if isinstance(shock, Shock):
-            lowered[key] = shock.to_dict()
-        elif isinstance(shock, np.ndarray):
-            lowered[key] = shock.tolist()
-        else:
-            raise TypeError(
-                f"Shock {key!r} must be a Shock or a raw path array; got "
-                f"{type(shock).__name__}. A callable is rejected here too: only "
-                f"the path it returned would travel, and the receiver could not "
-                f"redraw it."
-            )
-    return lowered
+    return [shock.to_dict() for shock in _normalized_spec(shocks)]
 
 
 def _observed_to_csv(

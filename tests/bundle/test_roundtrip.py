@@ -11,8 +11,8 @@ import numpy as np
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.step_factories import simulation_step
 from SymbolicDSGE.bundle.builder import BundleBuilder
-from SymbolicDSGE.bundle.loader import build_from
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.bundle.loader import load_bundle
+from SymbolicDSGE.core.shock.generators import Shock
 from SymbolicDSGE.bundle.parquet import collapse_columns, from_parquet_columns
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
@@ -80,7 +80,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
     )
     target = builder.write(tmp_path / "model.sdsge")
 
-    loaded = build_from(target)
+    loaded = load_bundle(target)
 
     # model rebuilt and usable
     assert isinstance(loaded.reference, SolvedModel)
@@ -113,7 +113,9 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
     assert loaded.simulation is not None
     prefill = loaded.simulation["reference"]
     assert prefill["T"] == 8
-    assert prefill["shocks"]["u"].seed == 42
+    (prefill_shock,) = prefill["shocks"]
+    assert prefill_shock.target == ("u",)
+    assert prefill_shock.seed == 42
 
     # manifest integrity
     assert loaded.manifest.created_by == "test-suite"

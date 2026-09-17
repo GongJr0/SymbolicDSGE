@@ -7,93 +7,101 @@ tags:
 ```python
 class Shock(
     dist: Literal["norm", "t", "uni"] | rv_generic | multi_rv_generic | None = None,
-    multivar: bool = False,
     seed: int | None = 0,
-    dist_args: tuple = (),
     dist_kwargs: dict | None = None,
-    shock_arr: ndarray | None = None,
 )
 ```
 
-`Shock` is a horizon independent shock specification. Pass it directly inside `SolvedModel.sim(..., shocks={...})`, or materialize it manually with `shock_generator(T)`.
+`Shock` is a horizon independent shock specification. Pass it directly inside `SolvedModel.sim(..., shocks={...})`; the simulation supplies the horizon and the calibration.
 
 __Inputs:__
 
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| dist | Distribution family (`"norm"`, `"t"`, `"uni"`) or a scipy distribution object. |
-| multivar | If `True`, the generated callable expects a covariance or shape matrix and returns a two dimensional shock array. |
-| seed | Random seed. Pass `None` for unseeded draws. |
-| dist_args | Positional arguments passed to the distribution draw method. |
+| __Name__    |                                                                                                     __Description__ |
+|:------------|--------------------------------------------------------------------------------------------------------------------:|
+| dist        |                                      Distribution family (`"norm"`, `"t"`, `"uni"`) or a scipy distribution object. |
+| seed        |                                                                        Random seed. Pass `None` for unseeded draws. |
 | dist_kwargs | Keyword arguments passed to the distribution draw method. Do not pass `scale`; simulation supplies the model scale. |
-| shock_arr | Optional materialized shock array used by `place_shocks(...)`. |
 
-???+ warning "Scale Is Model Supplied"
-    A generator style `Shock` stores distribution shape and location parameters, but the shock standard deviation or covariance comes from the `SolvedModel` calibration at simulation time.
+???+ warning "Scale is model supplied"
+    A `Shock` stores distribution shape and location parameters only. The standard deviation of a single shock, and the covariance of a grouped one, come from the `SolvedModel` calibration at simulation time.
 
-## `shock_generator`
+&nbsp;
 
 ```python
-Shock.shock_generator(T: int) -> Callable[[float | ndarray], ndarray]
+Shock.joint(*keys : str) -> Shock
 ```
 
-Build a callable for a fixed simulation horizon.
+Bind one or more shock names to the `Shock` instance for a joint draw. A non-zero correlation among the group is exercised when present.
+`joint` returns a new `Shock` instance and the original instance the call was made from remains usable for binding a separate shock(s).
 
 __Inputs:__
 
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| T | Number of simulated periods. |
+| __Name__ |                                          __Description__ |
+|:---------|---------------------------------------------------------:|
+| keys     | One or more shock names to bind to the `Shock` instance. |
 
-__Returns:__
-
-| __Type__ | __Description__ |
-|:---------|----------------:|
-| `#!python Callable[[float], ndarray]` | Univariate generator accepting one shock standard deviation. |
-| `#!python Callable[[ndarray], ndarray]` | Multivariate generator accepting a covariance or shape matrix. |
-
-## `place_shocks`
+&nbsp;
 
 ```python
-Shock.place_shocks(
-    shock_spec: dict[int, float] | dict[tuple[int, int], float],
-    T: int,
-) -> ndarray
+Shock.independent(*keys : str, offset_seeds: bool = True) -> list[Shock]
 ```
 
-Return a materialized shock array with selected entries replaced by `shock_spec` values.
+Return separate shock instances with a shared distribution specification. Binds multiple shock names at the same time but disregards any correlation the model configuration may imply. Returns a list of __new__ `Shock` instances, keeping the caller's instance usable for binding a separate shock(s). `offset_seeds` increments the seed for each instance so specifications don't return identical draws.
 
 __Inputs:__
 
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| shock_spec | Univariate `{time_idx: value}` or multivariate `{(time_idx, column_idx): value}` placement map. |
-| T | Number of simulated periods. |
+| __Name__     |                                          __Description__ |
+|:-------------|---------------------------------------------------------:|
+| keys         | One or more shock names to bind to the `Shock` instance. |
+| offset_seeds |         Whether to increment the seed for each instance. |
 
-__Returns:__
+&nbsp;
 
-| __Type__ | __Description__ |
-|:---------|----------------:|
-| `#!python ndarray` | Shock array with specified entries replaced. |
+```python
+class ShockPath(path: ndarray, *keys: str)
+```
 
-???+ warning "Multivariate Shape Inference"
-    If `shock_arr` is absent and `multivar=True`, the number of columns is inferred from the largest column index in `shock_spec`.
+A pre-materialized `ndarray` path bound to `*keys` specified at the constructor. `path` column count must match the number of `*keys` and keys should be specified in the order the appear in `path`.
+
+## Shock specs
+
+A simulation takes a sequence of entries that name their own targets. Two forms are accepted, and both leave the horizon to the simulation:
+
+| __Form__              |                                                                         __Meaning__ |
+|:----------------------|------------------------------------------------------------------------------------:|
+| `#!python Shock(...)` | Draw this family, reseeded per Monte Carlo replication, using the calibrated scale. |
+| `#!python ShockPath(...)`    |  Use  `ShockPath.path` verbatim, shaped `(T,)`/`(T, 1)` for one shock or `(T, k)` for a grouped key. |
+
+```python
+sol.sim(T=10, shocks=[Shock(dist="norm", seed=1).joint("e_z")])
+sol.sim(T=10, shocks=[Shock(dist="norm", seed=1).joint("e_g", "e_z")])
+
+# IRF replicated with a simulation using a pre-materialized path
+path = np.zeros(10)
+path[0] = sol.config.calibration.parameters["sig_g"]
+sol.sim(T=10, shocks=[ShockPath(path, "e_g")])
+```
+
+???+ warning "Mapping Specs Are Deprecated"
+    A simulation still accepts the older shape, a mapping keyed from the outside:
+
+    ```python
+    sol.sim(T=10, shocks={"e_g": Shock(dist="norm", seed=1)})            # key binds the Shock
+    sol.sim(T=10, shocks={("e_g", "e_z"): Shock(dist="norm", seed=1)})   # tuple key binds a group
+    sol.sim(T=10, shocks={"e_g": path})                                  # key names a bare array
+    ```
+
+    `Shock`s must be unbound in the deprecated spec and `ShockPath`s are not accepted.
+
 
 ## Serialization
 
 ```python
 Shock.to_dict() -> ShockParameters
 Shock.from_dict(data: Mapping[str, Any]) -> Shock
+
+ShockPath.to_dict() -> ShockPathParameters
+ShockPath.from_dict(data: Mapping[str, Any]) -> ShockPath
 ```
 
-`to_dict()` serializes generator style shocks with string distribution families. It does not serialize scipy distribution objects or materialized `shock_arr` arrays.
-
-__Examples:__
-
-```python
-shock = Shock(dist="norm", seed=1)
-generator = shock.shock_generator(T=10)
-
-placed = Shock().place_shocks({0: 1.0, 3: -0.5}, T=10)
-joint = Shock(multivar=True).place_shocks({(0, 0): 1.0, (0, 1): 2.0}, T=10)
-```
+`to_dict()` serializes shocks with string distribution families. A live scipy distribution object cannot be faithfully reproduced from JSON and is rejected.

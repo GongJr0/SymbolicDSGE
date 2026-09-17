@@ -42,10 +42,7 @@ __Methods:__
     All step factories live in `SymbolicDSGE.monte_carlo.step_factories`: data generation, filtering, transforms, tests, regressions, and post-processing.
 
 ???+ warning "What `to_spec()` refuses"
-    Only what cannot travel as data: a replication step carrying a `func` that is not a custom transform, and a `shocks` entry that is a callable. Everything else projects, including a `None` `step_type`, which no pipeline can run anyway. Post-loop steps are exempt from the `func` rule, since every post-loop kind either names its own callable or ships one.
-
-???+ note "`shocks`"
-    A kwarg named `shocks` holding a mapping is read as one shock spec per name, whichever step carries it. Each entry is either a generator spec, which serializes itself, or a shock path, which travels as nested lists and comes back as an array. `raw_model_data` passes `shocks` as a bare array rather than a mapping, so it rides `StepSpec.arrays` like the other bulk kwargs.
+    A replication step carrying a `func` that is not a custom transform. Everything else projects, including a `None` `step_type`, which no pipeline can run. Post-loop steps are exempt from the `func` rule, since every post-loop kind either names its own callable or ships one.
 
 &nbsp;
 

@@ -19,6 +19,7 @@ from .._ckernels.monte_carlo._arenas import resolve_n_workers
 from .allocation import BufferPlan
 from .defaults import DEFAULT_SIMULATION_TARGET
 from .mc_constructs import MCStep, OpType
+from ..core.shock.spec import _normalized_spec
 from .shock_native import native_shock_families
 
 if TYPE_CHECKING:
@@ -320,10 +321,10 @@ class MCMemoryProfiler:
         step = self._steps[0]
         if step.op_type is not OpType.DATAGEN or step.step_type != "simulation":
             return 0
-        shocks = step.kwargs.get("shocks")
-        if shocks is None:
+        shocks = _normalized_spec(step.kwargs.get("shocks"))
+        if not shocks:
             return 0  # A single (T, n_exog) matrix, shared by every replication.
-        if native_shock_families(shocks) is not None:
+        if native_shock_families(shocks):
             return 0
         target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
         model = self._reference if target == "reference" else self._dgp

@@ -34,20 +34,6 @@ from numpy.typing import NDArray
 
 import parquet_engine
 
-__all__ = [
-    "to_parquet",
-    "from_parquet",
-    "columns_to_parquet",
-    "columns_from_parquet",
-    "csv_to_json",
-    "trace_to_csv",
-    "from_parquet_columns",
-    "csv_to_columns",
-    "collapse_columns",
-    "arrays_to_parquet",
-    "frame_to_json",
-]
-
 #: The engine's dtype tag for each numeric column type it accepts.
 _DTYPE_TAGS: dict[Any, str] = {
     np.dtype(np.float64): "f8",

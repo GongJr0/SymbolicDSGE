@@ -10,7 +10,6 @@ from typing import (
     Callable,
     Mapping,
     Sequence,
-    Union,
     cast,
 )
 
@@ -22,7 +21,7 @@ from ..core.sim_result import SimResult, OccBinDiagnostics
 from ..kalman.filter import FilterResult, UnscentedFilterResult
 from .._diag_tests.result import MCTestResult
 from .._diag_tests.status import TestStatus
-from ..core.shock_generators import Shock
+from ..core.shock.spec import _normalized_spec, shock_from_json
 from ..regression.enums import RegressionStatus
 from .postproc import Artifact
 from ..regression.result import MCRegressionResult
@@ -34,8 +33,6 @@ NDI = NDArray[np.int_]
 NDB = NDArray[np.bool_]
 ColumnSelector = int | Sequence[int] | slice | NDArray[Any] | None
 CompiledColumnSelector = Sequence[int] | slice | None
-ShockValue = Union[Shock, Callable[[float | NDF], NDF], NDF]
-
 
 MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "shocks", "observables")
 DYNAMIC_SOURCE_FIELDS: tuple[str, ...] = ("payload",)
@@ -252,11 +249,12 @@ class MCStep:
         kwargs: dict[str, Any] = {}
         for key, value in self.kwargs.items():
             name = str(key)
-            if name == "shocks" and isinstance(value, Mapping):
-                kwargs[name] = {
-                    str(shock): _shock_spec(str(shock), entry)
-                    for shock, entry in value.items()
-                }
+
+            if name == "shocks" and self.step_type == "simulation":
+                # The kwarg holds the spec as authored, which may be a mapping
+                # keyed from the outside and carrying unbound shocks. Only the
+                # normal form can serialize: every entry names its own targets.
+                kwargs[name] = [shock.to_dict() for shock in _normalized_spec(value)]
             elif isinstance(value, np.ndarray):
                 if value.size <= 50:  # ~1kB if float64 with UTF-8 JSON
                     kwargs[name] = _jsonable(value)
@@ -282,17 +280,15 @@ class MCStep:
         """Rebuild a step from the form :meth:`to_spec` records.
 
         The arrays go back under the kwarg names they were lifted from. A
-        ``shocks`` mapping is read as one, whichever step carries it, because
-        :meth:`Shock.to_dict` leaves a plain mapping that nothing else about the
-        value distinguishes.
+        simulation's ``shocks`` is the one kwarg needing more than that: it
+        records as a list of entry dicts, and :func:`shock_from_json` reads each
+        back as the :class:`Shock` or :class:`ShockPath` it was.
         """
         meta = spec.meta
         kwargs: dict[str, Any] = {**meta["kwargs"], **spec.arrays}
-        shocks = kwargs.get("shocks")
-        if isinstance(shocks, Mapping):
-            kwargs["shocks"] = {
-                str(name): _restore_shock(entry) for name, entry in shocks.items()
-            }
+        if meta["step_type"] == "simulation" and "shocks" in kwargs:
+            kwargs["shocks"] = [shock_from_json(s) for s in kwargs["shocks"]]
+
         return cls(
             name=meta["name"],
             op_type=OpType(meta["op_type"]),
@@ -323,33 +319,6 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, np.generic):
         return value.item()
     return value
-
-
-def _shock_spec(name: str, shock: Any) -> Any:
-    """One named simulation shock as data.
-
-    A generator spec serializes itself and a bare shock path travels as nested
-    lists. A callable travels as nothing.
-    """
-    if callable(shock):
-        raise TypeError(
-            f"Shock {name!r} is a callable, which cannot be serialized. Pass the "
-            f"`Shock` itself rather than the generator it produces."
-        )
-    return _jsonable(shock)
-
-
-def _restore_shock(value: Any) -> Shock | NDF:
-    """One named shock as a simulation takes it.
-
-    A mapping is a generator spec; anything else is a shock path, which the walk
-    out left as nested lists.
-    """
-    if isinstance(value, Shock):
-        return value
-    if isinstance(value, Mapping):
-        return Shock.from_dict(value)
-    return np.asarray(value, dtype=float64)
 
 
 def _compile_source_args(

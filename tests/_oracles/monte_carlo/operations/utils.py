@@ -5,7 +5,7 @@ from .types import NDF
 
 import numpy as np
 
-from SymbolicDSGE.core.shock_generators import Shock
+from SymbolicDSGE.core.shock.generators import Shock
 from ..mc_constructs import (
     MCContext,
     SeedIncrement,
@@ -20,29 +20,19 @@ def _clone_or_pass_shocks(
     T: int,
     rep_idx: int,
     seed_increment: SeedIncrement,
-) -> Mapping[str, Callable[[float | NDF], NDF] | NDF] | None:
+) -> Mapping[str, Shock | NDF] | None:
     if shocks is None:
         return None
-    out: dict[str, Callable[[float | NDF], NDF] | NDF] = {}
+    out: dict[str, Shock | NDF] = {}
     seed_offset = rep_idx * _resolve_seed_increment(shocks, seed_increment)
     for name, shock in shocks.items():
         if isinstance(shock, Shock):
-            if shock.shock_arr is not None:
-                raise ValueError(
-                    "MC simulation requires generator-style Shock instances."
-                )
-            if ("," in name) != shock.multivar:
-                raise ValueError(
-                    f"Shock '{name}' must set multivar={',' in name} to match its specification."
-                )
             seed = None if shock.seed is None else int(shock.seed) + seed_offset
             out[name] = Shock(
                 dist=shock.dist,  # pyright: ignore
-                multivar=shock.multivar,
                 seed=seed,
-                dist_args=shock.dist_args,
                 dist_kwargs=shock.dist_kwargs.copy(),
-            ).shock_generator(T)
+            )
         else:
             out[name] = shock
     return out

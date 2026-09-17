@@ -36,7 +36,7 @@ from typing import cast
 loaded = load_bundle("experiment-1.sdsge")  # (1)!
 ```
 
-1. `load_bundle` is available from `SymbolicDSGE`; it calls `SymbolicDSGE.bundle.build_from`. Both names are interchangeable.
+1. `load_bundle` is available in top-level `SymbolicDSGE` and `SymbolicDSGE.bundle`. 
 
 `loaded` is a [`LoadedBundle`](../documentation/bundle/LoadedBundle.md). Every component is reachable through a typed field.
 
@@ -152,11 +152,11 @@ mc_repro = pipeline.run(
 ```
 
 ```text
->>> MC run concluded successfully in 0.00s with 810569.85 it/s.
+>>> MC run concluded successfully in 0.00s with 755524.40 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 71328.71 worker it/s (0.01 worker-s), 810569.85 wall it/s.
-    jb_test: 0 failures, 1265982.35 worker it/s (0.00 worker-s), 810569.85 wall it/s.
+    datagen: 0 failures, 133343.00 worker it/s (0.01 worker-s), 755524.40 wall it/s.
+    jb_test: 0 failures, 2631307.40 worker it/s (0.00 worker-s), 755524.40 wall it/s.
 ```
 
 ```python

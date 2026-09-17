@@ -4,7 +4,6 @@ import numpy as np
 from numpy import float64, asarray
 from numpy.typing import NDArray
 from numba import njit
-from ..result import r2, r2_adj
 
 NDF = NDArray[float64]
 
