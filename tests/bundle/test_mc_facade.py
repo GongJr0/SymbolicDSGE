@@ -8,7 +8,7 @@ from SymbolicDSGE.monte_carlo.postproc import Raw, Summary
 import pandas as pd
 import pytest
 
-from SymbolicDSGE.bundle import BundleBuilder, build_from
+from SymbolicDSGE.bundle import BundleBuilder, load_bundle
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.custom_op import (
@@ -85,7 +85,7 @@ def test_add_mc_ships_raw_model_data_member_and_loader_rehydrates(tmp_path) -> N
         BundleBuilder(created_by="mc-test").add_mc(pipe).write(tmp_path / "raw.sdsge")
     )
 
-    loaded = build_from(target)
+    loaded = load_bundle(target)
     assert loaded.mc is not None
     # The parquet side-channel member exists and rehydrated under data_ref.
     assert any(m.kind == "mc_data" for m in loaded.manifest.members)
@@ -121,7 +121,7 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
         .write(tmp_path / "custom.sdsge")
     )
 
-    loaded = build_from(target)
+    loaded = load_bundle(target)
     assert loaded.mc is not None
     assert any(m.kind == "mc_func" for m in loaded.manifest.members)
 
@@ -151,7 +151,7 @@ def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
         .write(tmp_path / "pp.sdsge")
     )
 
-    loaded = build_from(target)
+    loaded = load_bundle(target)
     assert loaded.mc is not None
     # The bulk array artifact rides its own member; the scalar summary inlines.
     assert any(m.kind == "mc_postproc_raw" for m in loaded.manifest.members)
@@ -182,7 +182,7 @@ def test_add_mc_bundles_native_result_without_legacy_retention_flags(
         .add_mc(pipe, result=result)
         .write(tmp_path / "native-result.sdsge")
     )
-    assert build_from(target).mc is not None
+    assert load_bundle(target).mc is not None
 
 
 def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
@@ -206,7 +206,7 @@ def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
         .write(tmp_path / "kde.sdsge")
     )
 
-    loaded = build_from(target)
+    loaded = load_bundle(target)
     assert loaded.mc is not None
     # The Raw curve rides a member; the descriptives frame inlines in the meta
     # and comes back as the frame the op returned.
@@ -242,7 +242,7 @@ def test_add_mc_ships_pandas_postproc_op_under_pandas_namespace(tmp_path) -> Non
         .write(tmp_path / "pandas_pp.sdsge")
     )
 
-    loaded = build_from(target)
+    loaded = load_bundle(target)
     assert loaded.mc is not None
     # The post-loop op was wrapped under the pandas namespace and round-trips.
     func = {s.name: s for s in loaded.mc.pipeline.postproc_steps}["ptab"].func
@@ -275,7 +275,7 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
         .add_mc(pipe, result=result)
         .write(tmp_path / "pp_full.sdsge")
     )
-    loaded = build_from(target)
+    loaded = load_bundle(target)
     assert loaded.mc is not None
 
     # The bulk slot plus the custom-op blob shipped.

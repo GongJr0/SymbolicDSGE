@@ -109,13 +109,13 @@ class SolvedModel(ABC, Generic[Policy]):
         T : int
             Number of time periods to simulate.
 
-        shocks : Mapping[str, Shock | ndarray], optional
-            Maps each exogenous variable name to its shock. A ``"a,b"`` key is a
-            joint (multivar) shock over those variables. Each value may be a
-            :class:`Shock` distribution spec (materialized into a ``T``-horizon
-            draw here), a ``callable`` taking the shock scale and returning a
-            ``(T,)``/``(T, k)`` array, or a raw ndarray path of that shape. When
-            ``None``, all shocks are zero.
+        shocks : Mapping[str | Sequence[str], Shock | ndarray] | Sequence[Shock | ShockPath], optional
+            The shock spec, in either shape. A mapping keys each entry from the
+            outside: a key naming one shock or several (drawn jointly), against
+            a :class:`Shock` to draw from or a raw ``(T,)``/``(T, k)`` path. A
+            sequence takes entries that name themselves, each a :class:`Shock`
+            bound by :meth:`~Shock.joint` or :meth:`~Shock.independent`, or a
+            :class:`ShockPath`. When ``None``, all shocks are zero.
 
         shock_scale : float, optional
             A scaling factor applied to all shocks.
@@ -179,13 +179,14 @@ class SolvedModel(ABC, Generic[Policy]):
             )
         conf = self.compiled.config
 
-        shock_spec: dict[str | Sequence[str], Shock | NDF] = {}
+        # An impulse is a literal path, not a draw, which is what ShockPath is
+        # for: one entry per shock, each naming its own target.
         sig_map = conf.calibration.shock_std
+        shock_spec: list[Shock | ShockPath] = []
         for s in shocks:
-            sig = conf.calibration.parameters[sig_map[s]]
             arr = np.zeros((T,), dtype=float64)
-            arr[0] = sig
-            shock_spec[s] = arr
+            arr[0] = conf.calibration.parameters[sig_map[s]]
+            shock_spec.append(ShockPath(arr, s))
 
         X, shock_path, regimes, diagnostics = self._simulate_state_matrix(
             T=T, shocks=shock_spec, shock_scale=scale, x0=None

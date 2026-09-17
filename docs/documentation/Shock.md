@@ -8,7 +8,6 @@ tags:
 class Shock(
     dist: Literal["norm", "t", "uni"] | rv_generic | multi_rv_generic | None = None,
     seed: int | None = 0,
-    dist_args: tuple = (),
     dist_kwargs: dict | None = None,
 )
 ```
@@ -17,67 +16,92 @@ class Shock(
 
 __Inputs:__
 
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| dist | Distribution family (`"norm"`, `"t"`, `"uni"`) or a scipy distribution object. |
-| seed | Random seed. Pass `None` for unseeded draws. |
-| dist_args | Positional arguments passed to the distribution draw method. |
+| __Name__    |                                                                                                     __Description__ |
+|:------------|--------------------------------------------------------------------------------------------------------------------:|
+| dist        |                                      Distribution family (`"norm"`, `"t"`, `"uni"`) or a scipy distribution object. |
+| seed        |                                                                        Random seed. Pass `None` for unseeded draws. |
 | dist_kwargs | Keyword arguments passed to the distribution draw method. Do not pass `scale`; simulation supplies the model scale. |
 
-???+ warning "Scale And Arity Are Model Supplied"
-    A `Shock` stores distribution shape and location parameters only. The standard deviation of a single shock, and the covariance of a grouped one, come from the `SolvedModel` calibration at simulation time. Arity comes from the spec key: a key naming several shocks draws them jointly, and the same `Shock` serves either way.
+???+ warning "Scale is model supplied"
+    A `Shock` stores distribution shape and location parameters only. The standard deviation of a single shock, and the covariance of a grouped one, come from the `SolvedModel` calibration at simulation time.
 
-## Shock specs
-
-A simulation takes a mapping of shock names to specifications. Two forms are accepted, and both leave the horizon to the simulation:
-
-| __Form__ | __Meaning__ |
-|:---------|------------:|
-| `#!python Shock(...)` | Draw this family, reseeded per Monte Carlo replication, using the calibrated scale. |
-| `#!python ndarray` | Use this path verbatim, shaped `(T,)` for one shock or `(T, k)` for a grouped key. |
+&nbsp;
 
 ```python
-sol.sim(T=10, shocks={"e_g": Shock(dist="norm", seed=1)})
-sol.sim(T=10, shocks={"e_g,e_z": Shock(dist="norm", seed=1)})
-
-# A deterministic impulse is just a path.
-path = np.zeros(10)
-path[0] = sol.config.calibration.parameters["sig_g"]
-sol.sim(T=10, shocks={"e_g": path})
+Shock.joint(*keys : str) -> Shock
 ```
 
-???+ warning "Callables Are Not Specs"
-    A callable cannot be reseeded per replication, cannot lower to the native Monte Carlo draw, and cannot be serialized into a bundle, since only the one path it returned would travel. Pass a `Shock` to be redrawn, or an array to be used as given.
-
-## `draw_fn`
-
-```python
-Shock.draw_fn(T: int, multivar: bool) -> Callable[[float | ndarray, int | None, ndarray | None], ndarray]
-```
-
-Resolve the distribution family once for a fixed horizon. The resolution is what a plan caches: a caller that redraws under many seeds pays for it once. Family validation is eager: an unknown family, a Student-t without `df`, or a multivariate uniform raises here rather than at draw time.
+Bind one or more shock names to the `Shock` instance for a joint draw. A non-zero correlation among the group is exercised when present.
+`joint` returns a new `Shock` instance and the original instance the call was made from remains usable for binding a separate shock(s).
 
 __Inputs:__
 
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| T | Number of simulated periods. |
-| multivar | Whether the entry draws jointly. Resolution passes `len(columns) > 1` off the spec key; a direct caller states it. Required, with no default: one spec covering every shock jointly is as ordinary as one spec per shock. |
+| __Name__ |                                          __Description__ |
+|:---------|---------------------------------------------------------:|
+| keys     | One or more shock names to bind to the `Shock` instance. |
 
-__Returns:__
+&nbsp;
 
-| __Type__ | __Description__ |
-|:---------|----------------:|
-| `#!python Callable[[scale, seed, factor], ndarray]` | `scale` is a standard deviation for one shock or a covariance/shape matrix for a group, `seed` varies the draw, and `factor` is an optional precomputed matrix `F` with `F @ F.T == scale` that skips refactorizing an unchanged covariance. |
+```python
+Shock.independent(*keys : str, offset_seeds: bool = True) -> list[Shock]
+```
 
-???+ tip "Prefer Passing The Shock"
-    `draw_fn` exists for callers that hold the resolution themselves. A spec handed to `sim` needs none of it: the resolution binds the horizon, reads the calibration, and precomputes the factor in one pass.
+Return separate shock instances with a shared distribution specification. Binds multiple shock names at the same time but disregards any correlation the model configuration may imply. Returns a list of __new__ `Shock` instances, keeping the caller's instance usable for binding a separate shock(s). `offset_seeds` increments the seed for each instance so specifications don't return identical draws.
+
+__Inputs:__
+
+| __Name__     |                                          __Description__ |
+|:-------------|---------------------------------------------------------:|
+| keys         | One or more shock names to bind to the `Shock` instance. |
+| offset_seeds |         Whether to increment the seed for each instance. |
+
+&nbsp;
+
+```python
+class ShockPath(path: ndarray, *keys: str)
+```
+
+A pre-materialized `ndarray` path bound to `*keys` specified at the constructor. `path` column count must match the number of `*keys` and keys should be specified in the order the appear in `path`.
+
+## Shock specs
+
+A simulation takes a sequence of entries that name their own targets. Two forms are accepted, and both leave the horizon to the simulation:
+
+| __Form__              |                                                                         __Meaning__ |
+|:----------------------|------------------------------------------------------------------------------------:|
+| `#!python Shock(...)` | Draw this family, reseeded per Monte Carlo replication, using the calibrated scale. |
+| `#!python ShockPath(...)`    |  Use  `ShockPath.path` verbatim, shaped `(T,)`/`(T, 1)` for one shock or `(T, k)` for a grouped key. |
+
+```python
+sol.sim(T=10, shocks=[Shock(dist="norm", seed=1).joint("e_z")])
+sol.sim(T=10, shocks=[Shock(dist="norm", seed=1).joint("e_g", "e_z")])
+
+# IRF replicated with a simulation using a pre-materialized path
+path = np.zeros(10)
+path[0] = sol.config.calibration.parameters["sig_g"]
+sol.sim(T=10, shocks=[ShockPath(path, "e_g")])
+```
+
+???+ warning "Mapping Specs Are Deprecated"
+    A simulation still accepts the older shape, a mapping keyed from the outside:
+
+    ```python
+    sol.sim(T=10, shocks={"e_g": Shock(dist="norm", seed=1)})            # key binds the Shock
+    sol.sim(T=10, shocks={("e_g", "e_z"): Shock(dist="norm", seed=1)})   # tuple key binds a group
+    sol.sim(T=10, shocks={"e_g": path})                                  # key names a bare array
+    ```
+
+    `Shock`s must be unbound in the deprecated spec and `ShockPath`s are not accepted.
+
 
 ## Serialization
 
 ```python
 Shock.to_dict() -> ShockParameters
 Shock.from_dict(data: Mapping[str, Any]) -> Shock
+
+ShockPath.to_dict() -> ShockPathParameters
+ShockPath.from_dict(data: Mapping[str, Any]) -> ShockPath
 ```
 
 `to_dict()` serializes shocks with string distribution families. A live scipy distribution object cannot be faithfully reproduced from JSON and is rejected.

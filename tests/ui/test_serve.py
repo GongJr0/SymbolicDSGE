@@ -12,13 +12,11 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE import DSGESolver, ModelParser, BundleBuilder
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.step_factories import simulation_step
-from SymbolicDSGE.bundle.builder import BundleBuilder
-from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.estimation import Estimator
-from SymbolicDSGE.bundle.loader import build_from
+from SymbolicDSGE.bundle.loader import load_bundle
 from SymbolicDSGE.core.shock.generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult, MAPResult
@@ -32,7 +30,7 @@ from SymbolicDSGE.ui.estimation import (
     emit_estimation_wire,
     serialize_estimation_result,
 )
-from SymbolicDSGE.ui.session import TabState, UISession, Workspace
+from SymbolicDSGE.ui.session import TabState, Workspace
 
 _MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
 
@@ -324,7 +322,7 @@ def test_session_summary_drops_unset_workspace_slots() -> None:
 
 
 def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
-    loaded = build_from(_hydrated_bundle(tmp_path))
+    loaded = load_bundle(_hydrated_bundle(tmp_path))
     ws = build_workspace(loaded)
 
     # The bundle's own two members, carried over untouched by the GUI shape.
@@ -426,7 +424,7 @@ def test_build_workspace_keeps_gui_shape_out_of_the_bundle_slot(
     inferred ``method``, none of which an ``EstimatorSpec`` has. Keeping them
     out is what lets a bundle write take this slot as it stands.
     """
-    ws = build_workspace(build_from(_hydrated_bundle(tmp_path)))
+    ws = build_workspace(load_bundle(_hydrated_bundle(tmp_path)))
 
     assert ws.estimation.spec is not None
     assert set(ws.estimation.spec) == {"y", "params"}
@@ -441,7 +439,7 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None
     is reading the slot and handing it over. If the GUI shape had leaked in,
     this would need a reverse mapping to strip it.
     """
-    ws = build_workspace(build_from(_hydrated_bundle(tmp_path)))
+    ws = build_workspace(load_bundle(_hydrated_bundle(tmp_path)))
     assert ws.estimation.spec is not None
 
     written = (
@@ -458,7 +456,7 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None
         .write(tmp_path / "round-trip.sdsge")
     )
 
-    reloaded = build_from(written)
+    reloaded = load_bundle(written)
     assert reloaded.estimation is not None
     assert reloaded.estimation.estimator.estimated_params == ["beta", "sigma"]
     assert len(reloaded.estimation.estimator.y) == 10
@@ -474,7 +472,7 @@ def test_bundled_simulation_replays_into_an_output(tmp_path: Path) -> None:
     are spec fields, so without this there is nothing on screen to show a
     simulation is in the bundle at all.
     """
-    loaded = build_from(_hydrated_bundle(tmp_path))
+    loaded = load_bundle(_hydrated_bundle(tmp_path))
     app = create_app(
         reference=loaded.reference,
         dgp=loaded.dgp,
@@ -497,7 +495,7 @@ def test_bundled_simulation_replay_reproduces_rather_than_redraws(
     tmp_path: Path,
 ) -> None:
     """The spec pins the seed, so two replays of it agree."""
-    loaded = build_from(_hydrated_bundle(tmp_path))
+    loaded = load_bundle(_hydrated_bundle(tmp_path))
 
     first = create_app(reference=loaded.reference, workspace=build_workspace(loaded))
     second = create_app(reference=loaded.reference, workspace=build_workspace(loaded))
@@ -513,7 +511,7 @@ def test_a_simulation_that_cannot_replay_leaves_the_session_usable(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """One bad spec must not cost the tabs that had nothing to do with it."""
-    loaded = build_from(_hydrated_bundle(tmp_path))
+    loaded = load_bundle(_hydrated_bundle(tmp_path))
     workspace = build_workspace(loaded)
     assert workspace.simulation["reference"].spec is not None
     workspace.simulation["reference"].spec["shocks"] = [
@@ -649,7 +647,7 @@ def test_preloaded_model_reports_its_source_and_yaml(tmp_path: Path) -> None:
     seeds its editor from.
     """
     bundle = _hydrated_bundle(tmp_path)
-    loaded = build_from(bundle)
+    loaded = load_bundle(bundle)
     app = create_app(
         reference=loaded.reference,
         dgp=loaded.dgp,

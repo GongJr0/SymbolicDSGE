@@ -143,66 +143,77 @@ array([0.64 , 0.544, 0.462, 0.393, 0.334, 0.284, 0.241, 0.205, 0.174,
 `#!python SolvedModel` also supplies a `#!python .sim()` method for simulations.
 The method simulates `T` periods given an initial state and a shock specification.
 
-Shock specifications can take three basic forms.
+Shock specifications can take two forms.
 
 - A `#!python Shock` distribution spec
-- A callable returning the complete shock array: `#!python Callable[[float | ndarray], ndarray]`
-- A `#!python np.ndarray` of innovations
+- A `#!python ShockPath` containing an array of shocks and the targeted shock symbols.
 
-Each dictionary key is a shock symbol, such as `"e_r"`. A comma-separated key such as `"e_g,e_z"` supplies one joint specification for that group. In correlated cases, `Shock` and callable values receive the model covariance matrix, while array values must have shape `(T, n_correlated_shocks)`.
+Shocks are specified as a sequence, where `#!python Shock` and `#!python ShockPath` can be mixed.
+`Shock` takes a distribution name or a scipy distribution implementing `rvs(...)`; `dist_kwargs` serve the parameters and `seed` handles reproducibility.
+`{"norm", "uni", "t"}` are built in distributions that `dist` can take as a string. A multivatiate uniform is not supported.
+Standard deviations and correlations come from the model configuration, and any `scale` or equivalent `dist_kwargs` are not accepted.
+A `Shock` is bound to target variable(s) after construction via the `.joint(*keys)` and `.independent(*keys)` methods.
+A joint bind for multiple variables encode the correlation structure of the shock, while independent bind returns a sequence of uncorrelated shocks.
+Binding a single variable is independent by construction, therefore a single variable `.joint(...)` call will not exercise any correlation structure.
+Each method returns a new `Shock` instance(s) and a single `Shock` instance can be used to bind multiple variables separately.
 
-`SymbolicDSGE.Shock` is an interface simplifying the shock generation process. It can be passed directly to `.sim`, which materializes a `T` period draw at simulation time. The class supports the built-in distributions and compatible SciPy distributions.
+`ShockPath` takes a `ndarray` and declares the variable(s) it binds to at construction as `ShockPath(path=arr, *keys)`.
+
+???+ warning "Deprecated `Mapping` shock specification"
+    The guide and examples below follow the current, intended shock specification interface.
+    A `Mapping` specification accepting a `str` or `tuple[str, ...]` key against a `Shock` or `ndarray` value
+    is supported but planned for removal in a future release.
+
+__Spec Examples:__
 
 ```python
-T = 200
-multi_shock_spec = lambda seed: Shock(
-    dist="norm",
-    multivar=True,
-    seed=seed,
-    dist_kwargs={
-        "mean": [0.0, 0.0],
-    },  # loc=0.0 is the default behavior, shown here for clarity.
-)
+# Current Spec (Drawn Shocks)
+[Shock(...).joint("e_g", "e_z"), Shock(...).joint("e_r")]
+Shock(...).independent("e_g", "e_z", "e_r")  # Returns a sequence of uncorrelated drawn shocks
 
-uni_shock_spec = lambda seed: Shock(
-    dist="norm",
-    multivar=False,
-    seed=seed,
-    dist_kwargs={
-        "loc": 0.0,
-    },
-)
+# Current Spec (Array Shocks)
+[ShockPath(path=arr1, "e_g", "e_z"), ShockPath(path=arr2, "e_r")] 
 
-sim_shocks = {
-    "e_g,e_z": multi_shock_spec(seed=1),
-    "e_r": uni_shock_spec(seed=2),
-}  # Generate multivariate shocks for 'g' and 'z' (rho_gz != 0)
+# Deprecated Spec (Drawn and Array)
+{("e_g", "e_z"): Shock(...), "e_r": arr2}
+```
+
+__Simulation Call:__
+
+```python
+shocks = [
+    Shock("norm", dist_kwargs={"mean": 0.0}, seed=42).joint("e_g", "e_z"),
+    Shock("norm", dist_kwargs={"mean": 0.0}, seed=43).joint("e_r"),
+]
 sim_data = sol.sim(
     T=T,
-    x0=[0.0, 0.0, 0.0, 0.0, 0.0],  # Start at steady state
-    shocks=sim_shocks,
-    shock_scale=1.0,
+    x0=[0.0, 0.0, 0.0, 0.0, 0.0], # (1)!
+    shocks=shocks,
+    shock_scale=1.0, # (2)!
     observables=True,
-)
+) 
 
 sim_df = pd.DataFrame(sim_data.states  | sim_data.observables)
 sim_df.head(10).round(3)
 ```
 
+1. Initial state in __levels__. For the test config, which is in gaps (linearized as written), the steady state corresponds to a zero vector.
+2. Scale factor for the shocks, draws are multiplied by this value directly.
+
 Each value in `sim_shocks` is a `Shock` specification. `sim` supplies the horizon and uses the model's shock standard deviations and correlations to materialize it. The lambda keeps two otherwise identical specifications separate by seed. `SimResult.states` and `SimResult.observables` expose the named columns used to construct the DataFrame.
 
 |    |      g |      z |      r |      x |     Pi |   OutGap |   Infl |   Rate |
 |---:|-------:|-------:|-------:|-------:|-------:|---------:|-------:|-------:|
-|  0 |  0.062 |  0.570 |  0.001 |  0.472 | -0.080 |    0.472 | 3.110 | 6.445 |
-|  1 |  0.111 | -0.217 |  0.020 |  0.128 |  0.274 |    0.128 | 4.527 | 6.518 |
-|  2 |  0.255 |  0.290 |  0.053 |  0.634 |  0.270 |    0.634 | 4.509 | 6.652 |
-|  3 |  0.115 |  0.470 | -0.118 |  1.319 |  0.674 |    1.319 | 6.127 | 5.969 |
-|  4 |  0.161 |  0.659 |  0.094 |  0.264 | -0.319 |    0.264 | 2.156 | 6.817 |
-|  5 |  0.139 |  0.893 |  0.094 |  0.312 | -0.467 |    0.312 | 1.563 | 6.815 |
-|  6 | -0.017 |  0.492 | -0.027 |  0.350 | -0.114 |    0.350 | 2.974 | 6.334 |
-|  7 | -0.101 |  0.665 | -0.033 |  0.207 | -0.365 |    0.207 | 1.969 | 6.308 |
-|  8 | -0.077 |  0.400 | -0.041 |  0.204 | -0.156 |    0.204 | 2.806 | 6.275 |
-|  9 | -0.204 |  0.006 | -0.116 |  0.059 |  0.045 |    0.059 | 3.609 | 5.976 |
+|  0 |  0.062 |  0.570 |  0.001 |  0.472 | -0.080 |    0.472 | 3.110  | 6.445  |
+|  1 |  0.111 | -0.217 |  0.020 |  0.128 |  0.274 |    0.128 | 4.527  | 6.518  |
+|  2 |  0.255 |  0.290 |  0.053 |  0.634 |  0.270 |    0.634 | 4.509  | 6.652  |
+|  3 |  0.115 |  0.470 | -0.118 |  1.319 |  0.674 |    1.319 | 6.127  | 5.969  |
+|  4 |  0.161 |  0.659 |  0.094 |  0.264 | -0.319 |    0.264 | 2.156  | 6.817  |
+|  5 |  0.139 |  0.893 |  0.094 |  0.312 | -0.467 |    0.312 | 1.563  | 6.815  |
+|  6 | -0.017 |  0.492 | -0.027 |  0.350 | -0.114 |    0.350 | 2.974  | 6.334  |
+|  7 | -0.101 |  0.665 | -0.033 |  0.207 | -0.365 |    0.207 | 1.969  | 6.308  |
+|  8 | -0.077 |  0.400 | -0.041 |  0.204 | -0.156 |    0.204 | 2.806  | 6.275  |
+|  9 | -0.204 |  0.006 | -0.116 |  0.059 |  0.045 |    0.059 | 3.609  | 5.976  |
 
 Alternative to a DataFrame, we can also plot the simulated paths:
 

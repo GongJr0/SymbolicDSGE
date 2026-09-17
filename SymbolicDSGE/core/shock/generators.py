@@ -176,10 +176,7 @@ class Shock:
     dist : ShockDistribution | rv_generic | multi_rv_generic | None
         Distribution to draw shocks from. Can be a family name ("norm", "t",
         "uni") or a scipy.stats distribution object. Alternatively, a custom class
-        implementing ``rvs`` can be passed in. Mutually exclusive with ``path``.
-    path : NDArray[float64] | None
-        Pre-generated shock array to use instead of drawing from a distribution.
-        Mutually exclusive with ``dist``.
+        implementing ``rvs`` can be passed in.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
     dist_kwargs : dict | None
@@ -189,8 +186,6 @@ class Shock:
     ----------
     dist : ShockDistribution | rv_generic | multi_rv_generic | None
         The configured distribution.
-    path : NDArray[float64] | None
-        The pre-generated shock array.
     seed : int | None
         The configured random seed.
     dist_kwargs : dict | None
@@ -199,9 +194,11 @@ class Shock:
     Notes
     -----
     A ``Shock`` names no shock variable of its own: it is an unbound template
-    until one of :meth:`at`, :meth:`joint`, or :meth:`independent` binds a copy
-    of it to one or more targets. The same template therefore serves any model,
-    whatever that model names its shocks.
+    until :meth:`joint` or :meth:`independent` binds a copy of it to one or more
+    targets. The same template therefore serves any model, whatever that model
+    names its shocks. A bound ``Shock`` cannot be rebound. A supplied path is
+    not a ``Shock`` at all; it is a :class:`ShockPath`, which names its targets
+    at construction.
 
     The bind also decides where the scale comes from. :meth:`joint` draws one
     entry from the targets' covariance block, so the correlations declared in
@@ -232,11 +229,10 @@ class Shock:
         """The shock variables this spec drives, once it has been bound."""
         if self._target is None:
             raise ValueError(
-                "This ``Shock`` instance has not been bound to any variables "
-                "yet. Use ``.at(key)`` for a single shock, ``.joint(*keys)`` to "
-                "draw several from their calibrated covariance, or "
-                "``.independent(*keys)`` to draw each from its own standard "
-                "deviation."
+                "This `Shock` instance has not been bound to any variables "
+                "yet. Use `.joint(*keys) to draw them from their calibrated "
+                "covariance, or `.independent(*keys)` to draw each from its "
+                "own standard deviation."
             )
         return self._target
 
@@ -249,14 +245,18 @@ class Shock:
         """A copy of this spec bound to ``keys``.
 
         Binding copies rather than mutating, which is what lets one template be
-        bound many times: ``[s.at("e_g"), s.at("e_z")]`` is two specs, not one
-        object rebound twice. ``path`` is shared by reference, since it is
-        read-only bulk data, while ``dist_kwargs`` is copied so two binds of one
-        template cannot drift into each other.
+        bound many times: ``s.independent("e_g", "e_z")`` is two specs, not one
+        object rebound twice. ``dist_kwargs`` is copied with it, since two binds
+        of one template must not drift into each other.
 
-        The copy skips ``__init__``, so a ``path`` spec carrying an ignored seed
-        warns once where the user wrote it rather than again at every bind.
+        Raises :class:`ValueError` when this spec is already bound.
         """
+        if self.is_bound:
+            raise ValueError(
+                f"{self!r} is already bound to {self.target!r} and cannot rebind to {keys!r}. "
+                "Maybe you passed a bound `Shock` in a mapping-style shock specification? "
+                "If so, use a sequence-style spec or pass the unbound templates as values."
+            )
         bound = copy.copy(self)
         bound.dist_kwargs = dict(self.dist_kwargs)
         bound._target = keys
@@ -279,6 +279,12 @@ class Shock:
         -------
         Shock
             A copy of this spec, bound to ``keys`` as one entry.
+
+        Raises
+        ------
+        ValueError
+            When ``keys`` is empty, or when this spec is already bound. Bind
+            from the unbound template instead.
         """
         if not keys:
             raise ValueError("``joint`` needs at least one shock variable.")
@@ -306,6 +312,12 @@ class Shock:
         list[Shock]
             One bound copy per target, in the order given. Slicing the result is
             a valid spec, since every element stands alone.
+
+        Raises
+        ------
+        ValueError
+            When this spec is already bound. Bind from the unbound template
+            instead.
         """
         out: list[Shock] = []
         for i, key in enumerate(keys):
@@ -318,19 +330,12 @@ class Shock:
     def draw_fn(self, T: int, multivar: bool) -> ShockDrawFn:
         """Resolve the distribution family once for a ``T``-period horizon.
 
-        ``multivar`` is the arity of the entry being resolved, which the spec key
-        fixes. The native families no longer branch on it, since one factor
-        expression covers both widths; it survives for the scipy route, which
-        hands scipy a covariance and picks a different distribution object and a
-        different keyword per arity.
+        ``multivar`` is the arity of the entry being resolved. It's required
+        for the scipy route while native handles both arities uniformly.
 
-        The returned callable is ``f(factor, seed)``, returning ``(T, width)``.
-        ``factor`` is the entry's scale in every family and at every width: the
-        1x1 holding a standard deviation, or the covariance block's factor.
-        Resolving the family, its keyword arguments, and (on the scipy route)
-        the distribution object costs the same whether one path or a hundred
-        thousand are drawn, so callers that redraw under varying seeds resolve
-        once and call many times.
+        The returned callable is ``f(loc, factor, seed)``, returning ``(T, width)``.
+        ``factor`` is the entry's scale with standard deviations represented as a
+        1x1.
 
         Family validation is eager: an unknown family, a Student-t without
         ``df``, or a multivariate uniform raises here rather than at draw time.
@@ -450,10 +455,10 @@ class Shock:
     def from_dict(cls, data: Mapping[str, Any]) -> "Shock":
         """Rebuild a generator-style Shock from :meth:`to_dict` output.
 
-        A ``multivar`` or ``dist_args`` written by an older release is ignored:
-        the spec key the shock is filed under fixes its arity, and every scipy
-        family takes its parameters by keyword, so a positional list carries
-        nothing a keyword does not.
+        A ``multivar`` or ``dist_args`` written by an older release is ignored.
+        Arity is fixed by the entry's own ``target``, and every scipy family
+        takes its parameters by keyword; a positional list carries nothing a
+        keyword does not.
         """
         dist = data["dist"]
         if dist not in get_args(ShockDistribution):
@@ -467,6 +472,9 @@ class Shock:
             seed=None if seed is None else int(seed),
             dist_kwargs=dict(data.get("dist_kwargs") or {}),
         ).joint(*data["target"])
+
+    def __repr__(self) -> str:
+        return f"Shock({','.join(self.target)!r}, dist={self.dist!r})"
 
 
 class ShockPath:
@@ -518,6 +526,9 @@ class ShockPath:
         path = asarray(data["path"], dtype=float64)
         keys = tuple(data["target"])
         return cls(path, *keys)
+
+    def __repr__(self) -> str:
+        return f"ShockPath({','.join(self.target)!r}, T={self.path.shape[0]})"
 
 
 def _jsonable(value: Any) -> Any:

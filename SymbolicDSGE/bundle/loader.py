@@ -1,6 +1,6 @@
 """Reconstruct in-code objects from a ``.sdsge`` bundle.
 
-:func:`build_from` opens a bundle and rebuilds what it carries: the
+:func:`load_bundle` opens a bundle and rebuilds what it carries: the
 :class:`SolvedModel`(s) (re-parsed and re-solved from the stored YAML using the
 recorded compile/solve options), the estimation artifacts, the Monte-Carlo
 pipeline/result, and the simulation prefill. The read counterpart to
@@ -106,7 +106,7 @@ class LoadedBundle:
     simulation: dict[str, dict[str, Any]] | None = None
 
 
-def build_from(path: str | Path) -> LoadedBundle:
+def load_bundle(path: str | Path) -> LoadedBundle:
     """Open a ``.sdsge`` bundle and rebuild its in-code objects."""
     archive = BundleArchive.open(path)
     manifest = archive.manifest

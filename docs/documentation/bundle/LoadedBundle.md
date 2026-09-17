@@ -9,7 +9,7 @@ tags:
 class LoadedBundle()
 ```
 
-`LoadedBundle` is the return value of `load_bundle` (and the underlying `bundle.loader.build_from`). Each field is `None` when the corresponding component is absent from the archive.
+`LoadedBundle` is the return value of `load_bundle`. Each field is `None` when the corresponding component is absent from the archive.
 
 __Fields:__
 

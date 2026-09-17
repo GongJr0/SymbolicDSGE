@@ -36,7 +36,7 @@ from typing import cast
 loaded = load_bundle("experiment-1.sdsge")  # (1)!
 ```
 
-1. `load_bundle` is available from `SymbolicDSGE`; it calls `SymbolicDSGE.bundle.build_from`. Both names are interchangeable.
+1. `load_bundle` is available in top-level `SymbolicDSGE` and `SymbolicDSGE.bundle`. 
 
 `loaded` is a [`LoadedBundle`](../documentation/bundle/LoadedBundle.md). Every component is reachable through a typed field.
 

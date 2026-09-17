@@ -10,8 +10,7 @@ def load_bundle(
 ) -> LoadedBundle
 ```
 
-Open a `.sdsge` archive and reconstruct its components. Equivalent to `SymbolicDSGE.bundle.build_from`; `load_bundle` is the friendlier top-level alias.
-
+Open a `.sdsge` archive and reconstruct its components. 
 `load_bundle` is re-exported at `SymbolicDSGE` root.
 
 __Inputs:__

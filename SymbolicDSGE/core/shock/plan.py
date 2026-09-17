@@ -1,17 +1,8 @@
 """Resolved shock specifications, separated from the draws they produce.
 
-Turning a ``{name: Shock | ndarray}`` mapping into a shock matrix has two
-halves. One half depends only on the model and the spec: which exogenous
-columns an entry targets, the canonical order of a grouped (multivariate) entry,
-the standard deviations and correlations pulled from the calibration, the
-covariance assembled from them, and its factorization. The other half is the
-draw itself, which is the only part that varies with the seed.
-
-A :class:`ShockPlan` is the first half, resolved once. Callers that redraw the
+A :class:`ShockPlan` is the first half of resolution. Callers that redraw the
 same spec under many seeds (the Monte Carlo lowering materializes one path per
-replication) resolve a plan and then call :meth:`ShockPlan.fill` per draw, so the
-calibration lookups, the covariance assembly, and the Cholesky are paid once
-rather than once per replication.
+replication) resolve a plan and then call :meth:`ShockPlan.fill` per draw.
 """
 
 from dataclasses import dataclass
@@ -34,14 +25,11 @@ class ShockEntry:
     ``draw`` is the entry's family resolved for one horizon, and it computes
     ``loc + factor @ v`` over that family's standardized variate. ``factor`` is
     the scale at any width: the 1x1 holding a standard deviation, or the
-    covariance block's factor. ``loc`` is the ``width``-long location. Both are
-    resolved once here rather than read from the spec at each boundary, which is
-    what keeps the Python draw and the native lowering from interpreting one
-    spec two ways. ``base_seed`` is the spec's own seed, which :meth:`unpack`
-    shifts per draw.
+    covariance block's factor. ``loc`` is the ``width``-long location.
+    ``base_seed`` is the spec's own seed, which :meth:`unpack` shifts per draw.
 
-    ``kwargs`` carries what is neither location nor scale, which today is the
-    Student-t's ``df``, forward for the native lowering.
+    ``kwargs`` carries what is neither location nor scale forward for the native
+    lowering.
     """
 
     key: tuple[str, ...]
@@ -159,9 +147,10 @@ def validate_shock_targets(
 ) -> None:
     """Check every entry names model shocks, each owned by one entry.
 
-    Runs as one pass over the spec so a shock shared across two grouped keys
-    (for example ``"e_g,e_z"`` and ``"e_g,e_r"``) is caught. An exact duplicate
-    key cannot reach here because the mapping deduplicates it upstream.
+    One pass over the spec, which is what catches a shock shared across two
+    grouped entries (``("e_g", "e_z")`` and ``("e_g", "e_r")``). An exact
+    duplicate is caught by the same pass: the sequence shape can repeat an
+    entry, unlike the mapping shape, whose keys deduplicate upstream.
     """
     shock_set = set(shock_names)
     owner: dict[str, str | Sequence[str]] = {}

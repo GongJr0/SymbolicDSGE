@@ -208,7 +208,7 @@ export interface SimSpecWire {
   x0: number[] | null;
   observables: boolean;
   shock_scale: number;
-  /** One self-describing entry per spec key, each carrying its own `key`. */
+  /** One self-describing entry per spec entry, each carrying its own `target`. */
   shocks: Array<Record<string, unknown>> | null;
 }
 

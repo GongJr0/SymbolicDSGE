@@ -4,7 +4,6 @@ import json
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 from numpy import float64
 from sympy import Symbol
 

@@ -38,17 +38,18 @@ __Methods:__
 ```python
 SolvedModel.sim(
     T: int,
-    shocks: Mapping[str | Sequence[str], Shock | Callable | np.ndarray] | None = None, # (1)!
+    shocks: Mapping[str | Sequence[str], Shock | np.ndarray] | Sequence[Shock | ShockPath] | None = None, # (1)!
     shock_scale: float = 1.0, # (2)!
     x0: dict[str, float] | list[float] | np.ndarray | None = None,
     observables: bool = False
 ) -> SimResult
 ```
 
- 1. The dictionary values can be populated by:
-   - A [`#!python Shock`](./Shock.md) distribution spec. `sim` materializes it into a `T` period draw at call time.
-   - An array of shocks `(T, 1) | (T,)` when shocks are for a single variable and `(T, K)` when drawing correlated shocks simultaneously.
-   - A callable accepting either a shock standard deviation or a covariance matrix depending on univariate or multivariate requirements. The callable should return arrays shaped as described above. Per period generators are not supported.
+ 1. Two shapes are accepted. The preferred one is a sequence of entries that name their own targets:
+   - A [`#!python Shock`](./Shock.md) bound by `#!python .joint(...)` or `#!python .independent(...)`. `sim` materializes it into a `T` period draw at call time.
+   - A [`#!python ShockPath`](./Shock.md) carrying a materialized array, `(T,)` or `(T, 1)` for one shock and `(T, k)` for a group.
+
+   A mapping is also accepted, keyed from the outside: an innovation symbol, or a tuple of them for a joint draw, against an __unbound__ `#!python Shock` or a bare array. See the deprecation note below.
 
    When omitted (or `#!python None`), all shocks are zero.
 2. Shocks are drawn from the specified distribution and all elements in the arrays are scaled by this parameter.
@@ -56,25 +57,34 @@ SolvedModel.sim(
  Returns the simulated path defined by the given inputs.
 
 ???+ info "Univariate Shock Syntax"
-    A univariate shock is defined as a dictionary entry for the innovation symbol. For example, if a model specifies a variable `x`
-    and a shock symbol `e_x`, the dictionary expects `#!python {"e_x": ...}` where `...` is populated by a `ndarray` of shape
-    `(T,)` or `(T,1)`, a univariate `Shock`, or a univariate generator callable.
+    A univariate entry names one innovation symbol. For a model with a variable `x` and a shock symbol `e_x`:
+
+    ```python
+    sol.sim(T=10, shocks=[Shock(dist="norm").joint("e_x")])
+    sol.sim(T=10, shocks=[ShockPath(path, "e_x")])            # path shaped (10,) or (10, 1)
+    ```
+
+    `#!python .independent("e_x", "e_y")` returns one such entry per symbol, each drawn from its own calibrated standard deviation. Splice the list into the spec.
 
 ???+ info "Correlated Shock Syntax"
-    To define innovations with nonzero covariance, use a shared dictionary entry. For example, a multivariate
-    shock from `e_x` and `e_y` should be defined as `#!python {"e_x,e_y": ...}` where `...` is populated by a multivariate `Shock`, a `(T, 2)` array, or a multivariate generator callable.
+    To draw innovations with nonzero covariance, one entry names the whole group:
 
-    Details regarding the dictionary key scheme:
+    ```python
+    sol.sim(T=10, shocks=[Shock(dist="norm").joint("e_x", "e_y")])
+    sol.sim(T=10, shocks=[ShockPath(path, "e_x", "e_y")])      # path shaped (10, 2)
+    ```
 
-    - Shock symbols are parsed by splitting on commas; surrounding whitespace is stripped.
-    - Multiple shock symbols can be chained as required. There is no limit on their number.
-    - The ordering of shock symbols in the key does __not__ affect simulation results.
+    Details regarding grouped entries:
+
+    - A group may name any number of symbols. Each shock may appear in at most one entry across the whole spec.
+    - For a drawn entry, the ordering of symbols does __not__ affect simulation results.
+    - For a `ShockPath`, the ordering __is__ meaningful: it says which column of `path` drives which shock. `#!python ShockPath(arr, "e_y", "e_x")` means `#!python arr[:, 0]` is `e_y`, whichever order the model declares the two in.
     - Shock realizations are always aligned with the innovation ordering defined at model configuration or compilation (`B` matrix order).
 
 ??? info "Multivariate Shock Canonicalization and Reproducibility"
-    When multivariate `Shock` specs or generators are used, variables are __internally reordered to a canonical model-defined order before sampling__.
+    When a grouped `Shock` entry is drawn, variables are __internally reordered to a canonical model-defined order before sampling__.
     This ensures that simulations are __reproducible under a fixed random seed__, regardless of the order in which variables are specified
-    in the shock dictionary key (e.g. `"g,z"` vs `"z,g"`).
+    in a grouped entry (e.g. `#!python .joint("e_g", "e_z")` vs `#!python .joint("e_z", "e_g")`).
 
     This behavior is required because multivariate sampling methods (e.g. Cholesky-based Gaussian draws) are __order-dependent at the
     realization level__, even when the underlying covariance structure is permutation-invariant.
@@ -85,20 +95,19 @@ SolvedModel.sim(
     - Sampling is performed in this canonical order.
     - Shock realizations are then mapped to the correct innovation indices used by the model.
 
-    As a result, variable ordering in multivariate shock keys does **not** affect either the statistical properties
+    As a result, variable ordering in a grouped entry does **not** affect either the statistical properties
     *or the realized sample paths* of the simulation when the random seed is fixed.
 
-??? warning "Custom Shock Generators"
-    While it is technically possible to replicate the internal generator factory’s behavior, this is __strongly discouraged__.
-    Custom shock distributions and array manipulations are supported via the `#!python Shock` class (see the [docs](./Shock.md)).
-    Bypassing the shock interface may lead to unexpected or unstable behavior.
+???+ warning "Mapping Specs Are Deprecated"
+    The mapping shape predates entries that name themselves. It is kept for compatibility and gives identical results; prefer the sequence.
+    `Shock`s must be unbound in the deprecated spec and `ShockPath`s are not accepted.
 
 __Inputs:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | T | Number of periods to simulate. The result has `T` rows. |
-| shocks | `Shock`, array, or callable shock mapping keyed by innovation symbol or comma-separated multivariate group. |
+| shocks | A sequence of bound `Shock` or `ShockPath` entries, or a mapping keyed by innovation symbol or tuple of symbols. |
 | shock_scale | Scaling factor for the shocks. |
 | x0 | Initial level state at `t - 1`. A dense sequence covers all compiled variables in declaration order, including generated lags. A mapping may specify only selected variables; omitted variables start at their steady state. |
 | observables | Include observable paths in the result if `#!python True`. |
@@ -116,7 +125,7 @@ __Returns:__
 ```python
 SolvedModel[PiecewiseSolution].sim_reference(
     T: int,
-    shocks: Mapping[str, Shock | Callable | np.ndarray] | None = None,
+    shocks: Mapping[str | Sequence[str], Shock | np.ndarray] | Sequence[Shock | ShockPath] | None = None,
     shock_scale: float = 1.0,
     x0: dict[str, float] | list[float] | np.ndarray | None = None,
     observables: bool = False,

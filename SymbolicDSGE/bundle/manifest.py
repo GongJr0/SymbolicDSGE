@@ -100,10 +100,10 @@ class SimSpec:
     x0: Mapping[str, float] | list[float] | ndarray | None = None
     observables: bool = False
     shock_scale: float = 1.0
-    #: The shock spec as a list of self-describing entries: each carries the
-    #: ``key`` it is filed under, plus either a ``Shock.to_dict()``'s fields or
-    #: a raw path under ``path``. A list rather than an object because a grouped
-    #: key names several shocks, which a JSON object cannot be keyed by.
+    #: The shock spec as a list of self-describing entries: each carries its own
+    #: ``target``, plus either a ``Shock.to_dict()``'s fields or a raw path under
+    #: ``path``. A list rather than an object because one entry may name several
+    #: shocks, which a JSON object cannot be keyed by.
     shocks: list[ShockParameters | ShockPathParameters] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -119,9 +119,9 @@ class SimSpec:
     def to_sim_kwargs(self) -> dict[str, Any]:
         """The ``SolvedModel.sim`` keyword form: ``model.sim(**spec.to_sim_kwargs())``.
 
-        Each shock parameter mapping becomes a live :class:`Shock`, which ``sim``
-        materializes into its horizon-bound draw; each raw path becomes the array
-        ``sim`` passes through unchanged.
+        An entry without ``path`` becomes a bound :class:`Shock`, which ``sim``
+        materializes into its horizon-bound draw; one with ``path`` becomes a
+        :class:`ShockPath` holding the array ``sim`` passes through unchanged.
         """
         out = self.to_dict()
         out["shocks"] = (

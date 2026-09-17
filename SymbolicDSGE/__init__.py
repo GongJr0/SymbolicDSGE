@@ -14,12 +14,13 @@ from .core import (
     ModelConfig,
     ModelParser,
     Shock,
+    ShockPath,
     linearize_model,
     SolvedModel,
 )
 from .kalman import KalmanFilter
 from .estimation import Estimator
-from .bundle import BundleBuilder, build_from as load_bundle
+from .bundle import BundleBuilder, load_bundle
 from . import utils
 
 __all__ = [
@@ -30,6 +31,7 @@ __all__ = [
     "KalmanFilter",
     "Estimator",
     "Shock",
+    "ShockPath",
     "utils",
     "linearize_model",
     # .sdsge bundle API

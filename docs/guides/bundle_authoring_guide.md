@@ -136,8 +136,8 @@ from SymbolicDSGE.monte_carlo.step_factories import (  # (1)!
     simulation_step,
 )
 
-gz_shock = Shock(seed=0, dist="norm")
-r_shock = Shock(seed=1, dist="t", dist_kwargs={"df": 3})
+gz_shock = Shock(seed=0, dist="norm").joint("e_g", "e_z")
+r_shock = Shock(seed=1, dist="t", dist_kwargs={"df": 3}).joint("e_r")
 
 mc_pipeline = MCPipeline(
     [
@@ -146,7 +146,7 @@ mc_pipeline = MCPipeline(
             n_retain=100,
             target="dgp",
             T=200,
-            shocks={"e_g,e_z": gz_shock, "e_r": r_shock},
+            shocks=[gz_shock, r_shock],
         ),
         jarque_bera_test_step(
             "jb_test",
@@ -183,9 +183,9 @@ bundle.set_simulation(
     T=200,
     observables=True,
     shock_scale=1.0,
-    shocks={
-        "e_r": Shock(seed=42, dist="norm", dist_kwargs={"loc": 0.0}).to_dict(),  # (1)!
-    },
+    shocks=[
+        Shock(seed=42, dist="norm").joint("e_r"), # (1)!
+    ],
 )
 ```
 

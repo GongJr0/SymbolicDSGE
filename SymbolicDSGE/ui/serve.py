@@ -66,9 +66,9 @@ def serve_from(
             f"serve_from: bundle path does not exist or is not a file: {path}"
         )
 
-    from SymbolicDSGE.bundle.loader import build_from
+    from SymbolicDSGE.bundle.loader import load_bundle
 
-    loaded = build_from(path)
+    loaded = load_bundle(path)
     workspace = build_workspace(loaded)
     run_server(
         reference=loaded.reference,

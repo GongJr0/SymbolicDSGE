@@ -41,8 +41,8 @@ def test_numpy_kwargs_are_coerced_to_lists() -> None:
 
 
 def test_from_dict_ignores_a_stored_multivar() -> None:
-    # Arity belongs to the spec key the shock is filed under, so a flag written
-    # by an older release is read past rather than honored.
+    # Arity belongs to the entry's own target, which is why a flag written by
+    # an older release is read past rather than honored.
     payload = {
         "target": ["u"],
         "dist": "norm",

@@ -155,20 +155,11 @@ def resolve_shock_plan(
 ) -> ShockPlan:
     """Resolve a shock spec against a model into a reusable plan.
 
-    The plan holds everything the spec and the model fix between them: which
-    exogenous columns each entry targets, the standard deviations and
-    correlations read off the calibration, and the covariance factor a joint
-    entry draws through. Drawing is separate, so one plan serves many draws.
+    The plan collects distributional info from shocks and model-dependent info
+    from the ``CompiledModel`` to create a container + callable that materializes
+    shock matrices.
 
-    The calibration is plan-invariant: the covariance is assembled at most once
-    here and each grouped entry indexes its own block out of it. Entry columns are
-    positions in ``config.shocks`` (``shock_names`` is built from it, and
-    ``shock_idx`` from that), which is the order the covariance is assembled in,
-    letting an entry's indices slice it directly. A spec of single shocks reads
-    its standard deviations straight off the calibration and never assembles one,
-    which is also what keeps correlations out of a spec that declares no groups.
-
-    ``T`` is required only when the mapping carries live :class:`Shock` specs,
+    ``T`` is required only when the spec carries live :class:`Shock` entries,
     which resolve their distribution family against a horizon.
     """
     calib = compiled.config.calibration

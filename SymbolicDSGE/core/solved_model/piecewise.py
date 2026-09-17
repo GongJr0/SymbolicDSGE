@@ -126,14 +126,16 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         T : int
             Number of time periods to simulate.
 
-        shocks : Mapping[str, Shock | ndarray], optional
-            Maps each exogenous variable name to its shock. A ``"a,b"`` key is a
-            joint (multivar) shock over those variables. Each value may be a
-            :class:`Shock` distribution spec (materialized into a ``T``-horizon
-            draw here), a ``callable`` taking the shock scale and returning a
-            ``(T,)``/``(T, k)`` array, or a raw ndarray path of that shape. When
-            ``None``, all shocks are zero. Each date's innovation is a surprise:
-            agents solve as though no further shock arrives.
+        shocks : Mapping[str | Sequence[str], Shock | ndarray] | Sequence[Shock | ShockPath], optional
+            The shock spec, in either shape. A mapping keys each entry from the
+            outside: a key naming one shock or several (drawn jointly), against
+            a :class:`Shock` to draw from or a raw ``(T,)``/``(T, k)`` path. A
+            sequence takes entries that name themselves, each a :class:`Shock`
+            bound by :meth:`~Shock.joint` or :meth:`~Shock.independent`, or a
+            :class:`ShockPath`. When ``None``, all shocks are zero.
+
+            Each date's innovation is a surprise: agents solve as though no
+            further shock arrives.
 
         shock_scale : float, optional
             A scaling factor applied to all shocks. The response is not
@@ -226,13 +228,13 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         T : int
             Number of time periods to simulate.
 
-        shocks : Mapping[str, Shock | ndarray], optional
-            Maps each exogenous variable name to its shock. A ``"a,b"`` key is a
-            joint (multivar) shock over those variables. Each value may be a
-            :class:`Shock` distribution spec (materialized into a ``T``-horizon
-            draw here), a ``callable`` taking the shock scale and returning a
-            ``(T,)``/``(T, k)`` array, or a raw ndarray path of that shape. When
-            ``None``, all shocks are zero.
+        shocks : Mapping[str | Sequence[str], Shock | ndarray] | Sequence[Shock | ShockPath], optional
+            The shock spec, in either shape. A mapping keys each entry from the
+            outside: a key naming one shock or several (drawn jointly), against
+            a :class:`Shock` to draw from or a raw ``(T,)``/``(T, k)`` path. A
+            sequence takes entries that name themselves, each a :class:`Shock`
+            bound by :meth:`~Shock.joint` or :meth:`~Shock.independent`, or a
+            :class:`ShockPath`. When ``None``, all shocks are zero.
 
         shock_scale : float, optional
             A scaling factor applied to all shocks.

@@ -28,7 +28,7 @@ from SymbolicDSGE.bundle.cli import (
     main_compile,
     main_decompile,
 )
-from SymbolicDSGE.bundle.loader import build_from
+from SymbolicDSGE.bundle.loader import load_bundle
 from SymbolicDSGE.core.shock.generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
@@ -102,12 +102,12 @@ def test_decompile_then_compile_returns_the_same_bytes(tmp_path: Path) -> None:
 
 def test_round_tripped_bundle_still_loads(tmp_path: Path) -> None:
     bundle = _bundle(tmp_path)
-    original = build_from(bundle)
+    original = load_bundle(bundle)
 
     packed = compile_directory(
         decompile_bundle(bundle, tmp_path / "flat"), tmp_path / "out.sdsge"
     )
-    loaded = build_from(packed)
+    loaded = load_bundle(packed)
 
     assert loaded.reference is not None
     assert loaded.simulation is not None and loaded.simulation["reference"]["T"] == 8
@@ -126,14 +126,14 @@ def test_csv_mode_round_trips_into_a_readable_bundle(tmp_path: Path) -> None:
     assert not any(extracted.rglob("*.parquet"))
 
     packed = compile_directory(extracted, tmp_path / "out.sdsge")
-    loaded = build_from(packed)
+    loaded = load_bundle(packed)
 
     assert [
         m.format for m in loaded.manifest.members if m.kind == "mc_test_traces"
     ] == ["csv"]
     np.testing.assert_array_equal(
         loaded.mc.result.test_summaries["jb"].statistic_trace,
-        build_from(bundle).mc.result.test_summaries["jb"].statistic_trace,
+        load_bundle(bundle).mc.result.test_summaries["jb"].statistic_trace,
     )
 
 
@@ -144,7 +144,7 @@ def test_model_config_moves_to_the_root_and_back(tmp_path: Path) -> None:
     assert (extracted / "reference.yaml").exists()
 
     packed = compile_directory(extracted, tmp_path / "out.sdsge")
-    member = build_from(packed).manifest.model_member("reference")
+    member = load_bundle(packed).manifest.model_member("reference")
     assert member is not None and member.path == "model/reference.yaml"
     # The options the loader rebuilds the model with survive the round trip.
     assert member.options["compile_kwargs"] == {"linearize": False}
@@ -237,7 +237,7 @@ def test_main_compile_carries_created_by_from_the_manifest(tmp_path: Path) -> No
 
     packed = compile_directory(extracted, tmp_path / "out.sdsge")
 
-    assert build_from(packed).manifest.created_by == "cli-test"
+    assert load_bundle(packed).manifest.created_by == "cli-test"
 
 
 def test_main_compile_returns_nonzero_on_error(
@@ -259,7 +259,7 @@ def test_simulation_prefill_survives_the_round_trip(tmp_path: Path) -> None:
     assert written["simulation"]["reference"]["T"] == 8
 
     packed = compile_directory(extracted, tmp_path / "out.sdsge")
-    loaded = build_from(packed)
+    loaded = load_bundle(packed)
 
     assert loaded.simulation is not None
     (prefill_shock,) = loaded.simulation["reference"]["shocks"]

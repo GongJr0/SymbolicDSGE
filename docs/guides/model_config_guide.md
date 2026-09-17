@@ -289,7 +289,7 @@ The shocks section maps shock (co)variances to the corresponding terms in model 
     To align with `SciPy` distributions' signatures, the standard deviations of stochastic terms are used instead of the variance.
 
 ???+ info "Shock Selection at Simulations"
-    At simulation time, shocks are specified by the name of the shock itself (e.g., `e_g`, `e_z` instead of `g`, `z`) or by grouped keys (`#!python "e_g,e_z"`). The latter allows a multivariate distribution to be specified for all, or a subset of, the shocks in the model.
+    At simulation time, shocks are referred to by the name of the shock itself (e.g., `e_g`, `e_z` instead of `g`, `z`). 
 
 ```yaml
 calibration:

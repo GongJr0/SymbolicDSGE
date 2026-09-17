@@ -280,9 +280,9 @@ class MCStep:
         """Rebuild a step from the form :meth:`to_spec` records.
 
         The arrays go back under the kwarg names they were lifted from. A
-        ``shocks`` mapping is read as one, whichever step carries it, because
-        :meth:`Shock.to_dict` leaves a plain mapping that nothing else about the
-        value distinguishes.
+        simulation's ``shocks`` is the one kwarg needing more than that: it
+        records as a list of entry dicts, and :func:`shock_from_json` reads each
+        back as the :class:`Shock` or :class:`ShockPath` it was.
         """
         meta = spec.meta
         kwargs: dict[str, Any] = {**meta["kwargs"], **spec.arrays}

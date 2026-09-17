@@ -1,16 +1,9 @@
 """Deciding whether a shock spec can be drawn inside the native loop (#374).
 
-The Monte Carlo hot loop draws its own shocks from ``rep_idx``, which removes
-the per-replication Python that used to materialize an ``(n_rep, T, n_exog)``
-slab before the run. Only some specs can be reproduced in C: the native draw
-covers the normal and uniform families over the counter-based engine, and
-anything else (Student-t, arbitrary scipy distribution objects, user callables,
-literal arrays) stays on the Python prematerialization route.
-
-That decision is needed twice and must agree both times. Arena planning runs
-before lowering and has to size the draw's scratch, while lowering builds the
-plan the kernel reads. Both go through :func:`native_shock_families` here, which
-reads the raw spec alone, so planning never has to resolve a model.
+Only some specs can be reproduced in C: the native draw covers the normal and
+uniform families over the counter-based engine, and anything else (Student-t,
+arbitrary scipy distribution objects, literal arrays) stays on the Python
+prematerialization route.
 """
 
 from __future__ import annotations
@@ -207,20 +200,15 @@ def replication_shocks(
     step: MCStep,
     rep_idx: int,
 ) -> dict[tuple[str, ...], NDF]:
-    """The shock paths one Monte Carlo replication saw, keyed by spec name.
+    """The shock paths one Monte Carlo replication saw, keyed by entry target.
 
-    A Monte Carlo replication is not reproducible by rerunning the pipeline with
-    a smaller ``n_rep``, because the loop addresses its own stream per
-    replication rather than replaying a shared one. This is the way back to a
-    single replication: the result feeds straight into
-    ``model.sim(T, shocks=..., shock_scale=1.0)``, which reproduces exactly what
-    replication ``rep_idx`` simulated. Scaling is already applied, hence the
-    ``shock_scale=1.0``.
+    Reproduces a specific replication regardless of whether the replication was
+    retained in the output. Index based seed incrementation allows resolving the
+    exact ``Shock`` specification a simulation ``MCStep`` produced in-run for a
+    given replication index. Only seeded entries are reproducible.
 
-    ``step`` must be the same simulation step the run used, and ``model`` the
-    role it targeted. Only specifications carrying a seed are reproducible: one
-    with ``seed=None`` was drawn from a key the run discarded, so what comes
-    back for it is a fresh path rather than the one that ran.
+    For retained replications, MCDataGenResult.replication(retained_idx) returns
+    a live ``SimResult`` including the shocks.
     """
     T = int(step.kwargs["T"])
     shocks = _normalized_spec(step.kwargs.get("shocks"))

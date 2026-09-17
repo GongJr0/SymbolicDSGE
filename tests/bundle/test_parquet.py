@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pytest
 
-from SymbolicDSGE.bundle import (
+from SymbolicDSGE.bundle.parquet import (
     arrays_to_parquet,
     collapse_columns,
     columns_from_parquet,

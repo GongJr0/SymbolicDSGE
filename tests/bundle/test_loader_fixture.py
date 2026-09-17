@@ -15,7 +15,7 @@ from SymbolicDSGE.bundle.loader import (
     LoadedBundle,
     LoadedEstimation,
     LoadedMC,
-    build_from,
+    load_bundle,
 )
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
@@ -37,8 +37,8 @@ def _compiled_reference():
     return DSGESolver(model, kalman).compile()
 
 
-def test_build_from_fixture_end_to_end():
-    loaded = build_from(FIXTURE)
+def test_load_bundle_fixture_end_to_end():
+    loaded = load_bundle(FIXTURE)
     assert isinstance(loaded, LoadedBundle)
     # models re-parsed + re-solved
     assert isinstance(loaded.reference, SolvedModel)
