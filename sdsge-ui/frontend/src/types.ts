@@ -361,7 +361,7 @@ export type MCFieldType =
 export interface ShockRegistryEntry {
   vars: string[];
   dist: ShockDistribution;
-  loc: number;
+  loc: number[];
   df: number;
   seed: number | null;
 }

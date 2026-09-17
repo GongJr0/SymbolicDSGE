@@ -22,28 +22,38 @@ interface SerializedShock {
 
 // One registry entry becomes one shock, joint when it selects more than one
 // variable. Uniform is univariate only, so a `uni` entry takes exactly one.
+//
+// `loc` travels as the vector the entry holds. The library resolves `mean` and
+// `loc` identically at every width and requires one value per target, so there
+// is no spelling to pick and nothing to broadcast: a short vector is incomplete
+// input and is refused here rather than filled in.
 function shockFor(entry: ShockRegistryEntry): SerializedShock {
   const vars = entry.vars.map(String);
   const n = vars.length;
-  const multivar = n > 1;
-  const loc = Number(entry.loc ?? 0);
+  const loc = (entry.loc ?? []).map(Number);
   const df = Number(entry.df ?? 5);
-  if (entry.dist === "uni" && multivar) {
+  if (entry.dist === "uni" && n > 1) {
     throw new Error(
       "A 'uni' shock is univariate; select exactly one variable per uniform " +
         "entry (use separate entries for independent uniform shocks).",
     );
   }
-  let distKwargs: Record<string, unknown>;
-  if (entry.dist === "norm") {
-    distKwargs = multivar ? { mean: Array(n).fill(loc) } : { loc };
-  } else if (entry.dist === "t") {
-    distKwargs = multivar ? { loc: Array(n).fill(loc), df } : { loc, df };
-  } else if (entry.dist === "uni") {
-    distKwargs = { loc };
-  } else {
+  if (loc.length !== n) {
+    throw new Error(
+      `Shock entry '${vars.join(", ")}' needs one location per variable; ` +
+        `got ${loc.length} for ${n}.`,
+    );
+  }
+  if (loc.some((value) => !Number.isFinite(value))) {
+    throw new Error(
+      `Shock entry '${vars.join(", ")}' has a non-numeric location.`,
+    );
+  }
+  if (entry.dist !== "norm" && entry.dist !== "t" && entry.dist !== "uni") {
     throw new Error(`Unsupported shock distribution: ${String(entry.dist)}`);
   }
+  const distKwargs: Record<string, unknown> =
+    entry.dist === "t" ? { loc, df } : { loc };
   return {
     target: vars,
     dist: entry.dist,

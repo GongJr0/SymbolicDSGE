@@ -59,6 +59,14 @@ export function StepInspector({
   availableTraces: string[];
   exogByRole: Record<Role, string[]>;
 }) {
+  // Discarded shock paths, keyed by step id so switching steps cannot offer one
+  // step's paths back to another. Session-lived and deliberately not on the
+  // node: a restored path belongs in the compiled spec, an undo buffer does
+  // not. Declared above the early return, since a hook cannot be conditional.
+  const [discardedPaths, setDiscardedPaths] = useState<Record<string, unknown[]>>(
+    {},
+  );
+
   if (node === null) {
     return (
       <div className="mc-empty">
@@ -66,6 +74,23 @@ export function StepInspector({
       </div>
     );
   }
+
+  const stashedPaths = discardedPaths[node.id] ?? [];
+
+  const isPathEntry = (entry: unknown) =>
+    entry !== null && typeof entry === "object" && "path" in entry;
+
+  // The undo expires on the first registry edit. Anything the user adds over a
+  // variable the discarded path drove would collide with it on restore, so the
+  // offer is withdrawn rather than allowed to rebuild a spec the backend
+  // refuses.
+  const dropStash = () =>
+    setDiscardedPaths((current) => {
+      if (!(node.id in current)) return current;
+      const next = { ...current };
+      delete next[node.id];
+      return next;
+    });
 
   const updateParam = (key: string, value: unknown) => {
     onChange({
@@ -89,15 +114,53 @@ export function StepInspector({
     });
   };
 
-  // Writing the registry replaces any bundle-serialized `shocks` map so the
+  // Writing the registry replaces any bundle-serialized `shocks` list so the
   // backend compiles from the user's explicit entries, not a stale compiled form.
+  // Reachable only once the step carries no supplied paths, since the panel is
+  // read-only while any remain, so there is nothing here left to drop.
   const setRegistry = (entries: ShockRegistryEntry[]) => {
     const params: Record<string, unknown> = {
       ...node.data.params,
       shock_registry: entries,
     };
     delete params.shocks;
+    dropStash();
     onChange({ ...node, data: { ...node.data, params } });
+  };
+
+  // Drop the supplied paths and keep every drawn entry, which the panel then
+  // renders as an editable registry. The arrays are held in session state so the
+  // step can take them back until an edit makes that meaningless.
+  const discardPaths = () => {
+    const shocks = node.data.params.shocks;
+    if (!Array.isArray(shocks)) return;
+    const paths = shocks.filter(isPathEntry);
+    if (paths.length === 0) return;
+    setDiscardedPaths((current) => ({ ...current, [node.id]: paths }));
+    onChange({
+      ...node,
+      data: {
+        ...node.data,
+        params: { ...node.data.params, shocks: shocks.filter((entry) => !isPathEntry(entry)) },
+      },
+    });
+  };
+
+  // Put the stashed paths back, after the drawn entries: the native draw keys on
+  // `(seed, entry index)`, and prepending them would move every drawn entry's
+  // stream. Restoring re-freezes the panel, which is the state discard left.
+  const restorePaths = () => {
+    if (stashedPaths.length === 0) return;
+    const shocks = node.data.params.shocks;
+    const kept = Array.isArray(shocks) ? shocks : [];
+    onChange({
+      ...node,
+      data: {
+        ...node.data,
+        params: { ...node.data.params, shocks: [...kept, ...stashedPaths] },
+      },
+    });
+    dropStash();
   };
 
   const isCustom =
@@ -122,7 +185,11 @@ export function StepInspector({
             target={targetRole}
             exogVars={exogByRole[targetRole] ?? []}
             entries={registryFromParams(step.data.params)}
+            pathCount={pathsFromParams(step.data.params).length}
+            restorableCount={stashedPaths.length}
             onChange={setRegistry}
+            onDiscardPaths={discardPaths}
+            onRestorePaths={restorePaths}
           />,
         );
         continue;
@@ -242,16 +309,27 @@ function ShockRegistryEditor({
   target,
   exogVars,
   entries,
+  pathCount,
+  restorableCount,
   onChange,
+  onDiscardPaths,
+  onRestorePaths,
 }: {
   target: Role;
   exogVars: string[];
   entries: ShockRegistryEntry[];
+  pathCount: number;
+  restorableCount: number;
   onChange: (entries: ShockRegistryEntry[]) => void;
+  onDiscardPaths: () => void;
+  onRestorePaths: () => void;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [dist, setDist] = useState<ShockDistribution>("norm");
-  const [loc, setLoc] = useState("0");
+  // Keyed by variable, not positional: `commitEntry` reorders the selection
+  // into the model's own variable order, and a positional list would hand each
+  // location to the wrong shock.
+  const [locs, setLocs] = useState<Record<string, string>>({});
   const [df, setDf] = useState("5");
   const [seed, setSeed] = useState("");
   const [error, setError] = useState("");
@@ -263,6 +341,8 @@ function ShockRegistryEditor({
   const usedVars = new Set(
     entries.flatMap((entry, index) => (index === editIndex ? [] : entry.vars)),
   );
+  const frozen = pathCount > 0;
+  const locFor = (name: string) => locs[name] ?? "0";
   const multivarUni = dist === "uni" && selected.length > 1;
   const multivarJoint = dist !== "uni" && selected.length > 1;
 
@@ -270,7 +350,7 @@ function ShockRegistryEditor({
     setEditIndex(null);
     setSelected([]);
     setDist("norm");
-    setLoc("0");
+    setLocs({});
     setDf("5");
     setSeed("");
     setError("");
@@ -291,7 +371,11 @@ function ShockRegistryEditor({
     setEditIndex(index);
     setSelected(entry.vars);
     setDist(entry.dist);
-    setLoc(String(entry.loc));
+    setLocs(
+      Object.fromEntries(
+        entry.vars.map((name, position) => [name, String(entry.loc[position] ?? 0)]),
+      ),
+    );
     setDf(String(entry.df));
     setSeed(entry.seed === null ? "" : String(entry.seed));
     setError("");
@@ -313,10 +397,23 @@ function ShockRegistryEditor({
     }
     // Order the key by the model's variable order for a stable identity.
     const vars = exogVars.filter((name) => selected.includes(name));
+    // One location per variable, in that same order. An untouched box is the
+    // form's own default of zero; anything else that is not a number is an
+    // error rather than a silent zero.
+    const loc: number[] = [];
+    for (const name of vars) {
+      const raw = locFor(name).trim();
+      const value = raw === "" ? 0 : Number(raw);
+      if (!Number.isFinite(value)) {
+        setError(`Location for '${name}' is not a number.`);
+        return;
+      }
+      loc.push(value);
+    }
     const entry: ShockRegistryEntry = {
       vars,
       dist,
-      loc: Number(loc) || 0,
+      loc,
       df: Number(df) || 5,
       seed: seed.trim() === "" ? null : Number(seed),
     };
@@ -341,6 +438,31 @@ function ShockRegistryEditor({
         <span className="mc-shock-registry-label">Shocks</span>
         <span className="mc-shock-registry-target">from {target}</span>
       </div>
+      {frozen && (
+        <div className="mc-shock-frozen">
+          <span>
+            This step supplies {pathCount} shock {pathCount === 1 ? "path" : "paths"},
+            which this panel cannot edit. The drawn entries below are read-only
+            until the paths are discarded.
+          </span>
+          <button className="secondary" onClick={onDiscardPaths}>
+            Discard {pathCount === 1 ? "path" : "paths"}
+          </button>
+        </div>
+      )}
+      {!frozen && restorableCount > 0 && (
+        <div className="mc-shock-frozen">
+          <span>
+            {restorableCount} discarded shock{" "}
+            {restorableCount === 1 ? "path is" : "paths are"} still held for this
+            session. Editing an entry gives {restorableCount === 1 ? "it" : "them"}{" "}
+            up.
+          </span>
+          <button className="secondary" onClick={onRestorePaths}>
+            Restore {restorableCount === 1 ? "path" : "paths"}
+          </button>
+        </div>
+      )}
       {entries.length > 0 ? (
         <ul className="mc-shock-list">
           {entries.map((entry, index) => (
@@ -350,8 +472,8 @@ function ShockRegistryEditor({
             >
               <button
                 className="mc-shock-entry-select"
-                title="Edit shock"
-                disabled={exogVars.length === 0}
+                title={frozen ? "Discard the supplied paths to edit" : "Edit shock"}
+                disabled={frozen || exogVars.length === 0}
                 onClick={() => startEdit(index)}
               >
                 <div className="mc-shock-entry-body">
@@ -366,7 +488,8 @@ function ShockRegistryEditor({
               </button>
               <button
                 className="icon-button"
-                title="Remove shock"
+                title={frozen ? "Discard the supplied paths to edit" : "Remove shock"}
+                disabled={frozen}
                 onClick={() => removeEntry(index)}
               >
                 <Trash2 size={13} />
@@ -379,7 +502,7 @@ function ShockRegistryEditor({
           No shocks configured; this simulation runs deterministically.
         </p>
       )}
-      {exogVars.length === 0 ? (
+      {frozen ? null : exogVars.length === 0 ? (
         <p className="mc-shock-empty">
           Load and solve the {target} model to choose its exogenous shocks.
         </p>
@@ -420,14 +543,23 @@ function ShockRegistryEditor({
                 <option value="uni">Uniform</option>
               </select>
             </label>
-            <label>
-              Location
-              <input
-                type="number"
-                value={loc}
-                onChange={(event) => setLoc(event.target.value)}
-              />
-            </label>
+            {exogVars
+              .filter((name) => selected.includes(name))
+              .map((name) => (
+                <label key={`loc:${name}`}>
+                  {selected.length > 1 ? `Location (${name})` : "Location"}
+                  <input
+                    type="number"
+                    value={locFor(name)}
+                    onChange={(event) =>
+                      setLocs((current) => ({
+                        ...current,
+                        [name]: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              ))}
             {dist === "t" && (
               <label>
                 Degrees of freedom
@@ -482,7 +614,7 @@ function ShockRegistryEditor({
 }
 
 function describeEntry(entry: ShockRegistryEntry): string {
-  const parts = [DIST_LABEL[entry.dist], `loc ${entry.loc}`];
+  const parts = [DIST_LABEL[entry.dist], `loc ${entry.loc.join(", ")}`];
   if (entry.dist === "t") parts.push(`df ${entry.df}`);
   parts.push(entry.seed === null ? "seed none" : `seed ${entry.seed}`);
   return parts.join(", ");
@@ -512,10 +644,11 @@ function registryFromParams(
 
 function normalizeEntry(raw: unknown): ShockRegistryEntry {
   const entry = (raw ?? {}) as Record<string, unknown>;
+  const vars = Array.isArray(entry.vars) ? entry.vars.map(String) : [];
   return {
-    vars: Array.isArray(entry.vars) ? entry.vars.map(String) : [],
+    vars,
     dist: asDist(entry.dist),
-    loc: Number(entry.loc ?? 0),
+    loc: locVector(entry.loc, vars.length),
     df: Number(entry.df ?? 5),
     seed:
       entry.seed === null || entry.seed === undefined ? null : Number(entry.seed),
@@ -523,23 +656,47 @@ function normalizeEntry(raw: unknown): ShockRegistryEntry {
 }
 
 // Invert `shockFor`: recover the registry entry from a serialized Shock dict.
-// `loc` lives under `mean`/`loc` (scalar or per-variable list) by dist and shape.
+// The library reads `mean` and `loc` identically and prefers `mean` when a spec
+// carries both, so this reads them in that order and keeps the whole vector. A
+// bundle-authored entry may name a different location per variable, and
+// collapsing that to one number would silently rewrite the spec on the next
+// edit.
 function entryFromShock(dict: Record<string, unknown>): ShockRegistryEntry {
   const vars = Array.isArray(dict.target) ? dict.target.map(String) : [];
   const dist = asDist(dict.dist);
-  const multivar = vars.length > 1;
   const kwargs = (dict.dist_kwargs ?? {}) as Record<string, unknown>;
-  const first = (value: unknown) =>
-    Array.isArray(value) ? Number(value[0] ?? 0) : Number(value ?? 0);
-  const loc =
-    dist === "norm" && multivar ? first(kwargs.mean) : first(kwargs.loc);
+  const declared = "mean" in kwargs ? kwargs.mean : kwargs.loc;
   return {
     vars,
     dist,
-    loc,
+    loc: locVector(declared, vars.length),
     df: dist === "t" ? Number(kwargs.df ?? 5) : 5,
     seed: dict.seed === null || dict.seed === undefined ? null : Number(dict.seed),
   };
+}
+
+// A declared location as one value per target. An omitted location takes the
+// library's own default of zeros; a scalar is a width-1 vector and nothing
+// more. A length that disagrees with the target count is incomplete input and
+// is carried through as given, for `shockFor` to refuse at compile time.
+function locVector(declared: unknown, width: number): number[] {
+  if (declared === undefined || declared === null) {
+    return Array.from({ length: width }, () => 0);
+  }
+  if (Array.isArray(declared)) return declared.map(Number);
+  return [Number(declared)];
+}
+
+// The supplied-path entries of a serialized spec, which the registry cannot
+// represent. Their presence freezes the panel: the drawn entries stay visible
+// and uneditable until the paths are discarded, which is what keeps a user from
+// authoring a second entry over a variable a path already drives.
+function pathsFromParams(params: Record<string, unknown>): unknown[] {
+  const shocks = params.shocks;
+  if (!Array.isArray(shocks)) return [];
+  return shocks.filter(
+    (entry) => entry !== null && typeof entry === "object" && "path" in entry,
+  );
 }
 
 function asDist(value: unknown): ShockDistribution {
