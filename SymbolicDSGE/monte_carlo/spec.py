@@ -4,86 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from collections.abc import Callable, Mapping
-from typing import Any, Literal, Sequence, TypedDict, get_args
+from typing import Any, Sequence, TypedDict
 from numpy.typing import NDArray
 from numpy import float64, int_
 
 NDF = NDArray[float64]
 NDI = NDArray[int_]
-
-MCStepKind = Literal[
-    # datagen / filter
-    "simulation",
-    "raw_model_data",
-    "filter",
-    # terminal: tests
-    "wald",
-    "ljung_box",
-    "jarque_bera",
-    "breusch_pagan",
-    "breusch_godfrey",
-    "cusum",
-    "cusumsq",
-    "chow",
-    # terminal: regression
-    "regression",
-    # transforms
-    "standardize",
-    "log",
-    "log_diff",
-    "diff",
-    "rolling_mean",
-    "rolling_std",
-    "rolling_var",
-    "payload",
-    # post-processing (post-loop ops over across-rep traces)
-    "kde",
-    # custom (user-supplied ops, shipped as cloudpickle bundle members); the
-    # prefix records the op role since a custom op may be a transform or a postproc.
-    "transform:custom",
-    "postproc:custom",
-]
-
-#: Authoritative set of valid step-type strings. Every kind here must appear in
-#: :data:`OP_TYPES`; ``tests/monte_carlo/test_from_spec.py`` enforces the parity.
-STEP_KINDS: frozenset[str] = frozenset(get_args(MCStepKind))
-
-#: Post-loop step kinds. A postproc is a *terminal reduction* over the assembled
-#: across-rep traces, so it lives in :attr:`PipelineSpec.postproc_steps`, never in
-#: :attr:`PipelineSpec.replication_steps`.
-PostprocStepKind = Literal["kde", "postproc:custom"]
-POSTPROC_KINDS: frozenset[str] = frozenset(get_args(PostprocStepKind))
-
-
-#: The op kind each step kind is. This is what a step *is*, not how a form renders
-#: it, so it stays here beside the rest of the kind taxonomy. A client declares a
-#: step's ``op_type``; native lowering dispatches on it and then on the step kind
-#: within it, so a pair this map does not name has no branch to land in.
-OP_TYPES: dict[str, str] = {
-    "simulation": "datagen",
-    "raw_model_data": "datagen",
-    "filter": "filter",
-    "payload": "transform",
-    "standardize": "transform",
-    "log": "transform",
-    "log_diff": "transform",
-    "diff": "transform",
-    "rolling_mean": "transform",
-    "rolling_std": "transform",
-    "rolling_var": "transform",
-    "transform:custom": "transform",
-    "wald": "test",
-    "ljung_box": "test",
-    "jarque_bera": "test",
-    "breusch_pagan": "test",
-    "breusch_godfrey": "test",
-    "cusum": "test",
-    "cusumsq": "test",
-    "chow": "test",
-    "regression": "regression",
-    "kde": "postproc",
-    "postproc:custom": "postproc",
-}
 
 
 class SourceSpec(TypedDict):

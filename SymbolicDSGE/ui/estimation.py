@@ -66,17 +66,17 @@ def build_estimation_inputs(
     :meth:`SymbolicDSGE.core.solver.DSGESolver.estimate` expects. The GUI never
     offers the reserved matrix keys, so every row here is a scalar parameter.
     """
-    active = [parameter for parameter in parameters if parameter.estimate]
+    active = [parameter for parameter in parameters if parameter["estimate"]]
     if not active:
         raise ValueError("Select at least one parameter to estimate.")
 
-    names = [parameter.name for parameter in active]
+    names = [parameter["name"] for parameter in active]
     if len(set(names)) != len(names):
         raise ValueError("Estimated parameter names must be unique.")
 
-    theta0 = {parameter.name: float(parameter.initial) for parameter in active}
+    theta0 = {parameter["name"]: float(parameter["initial"]) for parameter in active}
 
-    bounds = [(parameter.lower, parameter.upper) for parameter in active]
+    bounds = [(parameter["lower"], parameter["upper"]) for parameter in active]
     bound_arg = (
         bounds
         if any(low is not None or high is not None for low, high in bounds)
@@ -87,17 +87,12 @@ def build_estimation_inputs(
     if routine in {"map", "mcmc"}:
         priors = {}
         for parameter in active:
-            if parameter.prior is None:
+            if parameter["prior"] is None:
                 raise ValueError(
-                    f"Parameter '{parameter.name}' requires a prior for "
+                    f"Parameter '{parameter['name']}' requires a prior for "
                     f"{routine.upper()}."
                 )
-            priors[parameter.name] = make_prior(
-                distribution=parameter.prior.distribution,
-                parameters=dict(parameter.prior.parameters),
-                transform=parameter.prior.transform,
-                transform_kwargs=dict(parameter.prior.transform_kwargs),
-            )
+            priors[parameter["name"]] = make_prior(**parameter["prior"])
 
     return names, theta0, priors, bound_arg
 
@@ -283,39 +278,37 @@ def _bounds_from_result(
     return {}
 
 
-#: View field <- the option key an optimization run recorded it under.
-#: ``cov`` and the two ``cov_fd_*`` scalars have no control on a fresh form;
-#: they are carried so a bundled run re-runs as it ran.
-_OPTIMIZER_VIEW_KNOBS = {
-    "maxIter": "maxiter",
-    "maxFun": "maxfun",
-    "m": "m",
-    "maxLs": "maxls",
-    "factr": "factr",
-    "pgtol": "pgtol",
-    "fdStep": "fd_step",
-    "xatol": "xatol",
-    "fatol": "fatol",
-    "cov": "cov",
-    "jacobian": "jacobian",
-    "covFdStepScale": "cov_fd_step_scale",
-    "covFdAbsoluteFloor": "cov_fd_absolute_floor",
-}
+#: The optimizer options a run records that the form re-posts.
+_OPTIMIZER_KNOBS = [
+    "maxiter",
+    "maxfun",
+    "m",
+    "maxls",
+    "factr",
+    "pgtol",
+    "fd_step",
+    "xatol",
+    "fatol",
+    "cov",
+    "jacobian",
+    "cov_fd_step_scale",
+    "cov_fd_absolute_floor",
+]
 
-#: View field <- the argument an MCMC run recorded it under. ``mapOptions``
-#: and ``proposalCov`` are the two that cannot be a scalar control.
-_SAMPLER_VIEW_KNOBS = {
-    "seed": "random_state",
-    "proposalScale": "proposal_scale",
-    "adapt": "adapt",
-    "adaptStart": "adapt_start",
-    "adaptEpsilon": "adapt_epsilon",
-    "computeMap": "compute_map",
-    "mapOptions": "map_options",
-    "proposalCov": "proposal_cov",
-    "covFdStepScale": "cov_fd_step_scale",
-    "covFdAbsoluteFloor": "cov_fd_absolute_floor",
-}
+#: The same for the arguments an MCMC run records. ``map_options`` and
+#: ``proposal_cov`` are the two that cannot be a scalar control.
+_SAMPLER_KNOBS = [
+    "random_state",
+    "proposal_scale",
+    "adapt",
+    "adapt_start",
+    "adapt_epsilon",
+    "compute_map",
+    "map_options",
+    "proposal_cov",
+    "cov_fd_step_scale",
+    "cov_fd_absolute_floor",
+]
 
 
 def _run_config(
@@ -332,7 +325,7 @@ def _run_config(
 def _knobs_from_result(
     result: MLEResult | MAPResult | MCMCResult | None,
 ) -> dict[str, Any]:
-    """A run's own settings, in the view's field names.
+    """A run's own settings, under the names the estimator took them by.
 
     A bundle reproduces only if the form re-posts what the run was made with,
     down to the options it renders no control for. A key the run did not
@@ -341,23 +334,15 @@ def _knobs_from_result(
     """
     config = _run_config(result)
     if isinstance(result, MCMCResult):
-        knobs = {
-            view: config[key]
-            for view, key in _SAMPLER_VIEW_KNOBS.items()
-            if key in config
-        }
+        knobs = {key: config[key] for key in _SAMPLER_KNOBS if key in config}
         # Draw counts live on the result itself, not among the call arguments.
         return knobs | {
-            "nDraws": int(result.n_draws),
-            "burnIn": int(result.burn_in),
+            "n_draws": int(result.n_draws),
+            "burn_in": int(result.burn_in),
             "thin": int(result.thin),
         }
     options = config.get("options") or {}
-    knobs = {
-        view: options[key]
-        for view, key in _OPTIMIZER_VIEW_KNOBS.items()
-        if key in options
-    }
+    knobs = {key: options[key] for key in _OPTIMIZER_KNOBS if key in options}
     if (method := config.get("method")) is not None:
         knobs["optimizer"] = method
     return knobs
@@ -436,7 +421,7 @@ def build_estimation_prefill(
     # form renders neither, and the view does not restate what it cannot edit.
     observable_names = list(params["observables"] or [])
     return {
-        "method": _method_from_result(result) or "mle",
+        "routine": _method_from_result(result) or "mle",
         "parameters": rows,
         "selected": rows[0]["name"] if rows else None,
         "observables": ", ".join(observable_names),

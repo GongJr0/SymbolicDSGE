@@ -10,7 +10,6 @@
 import type {
   MCFieldSpec,
   MCFieldType,
-  MCSourceSpec,
   MCStepCatalogItem,
   MCStepCategory,
   MCStepType,
@@ -129,10 +128,7 @@ const CATEGORY: Record<MCOpType, MCStepCategory> = {
 function step(stepType: MCStepType, body: StepBody): MCStepDefinition {
   const windowed =
     body.legs.length > 0
-      ? [
-          field("burn_in", "Burn-in", "number", 0, { minimum: 0 }),
-          field("drop_initial", "Drop initial", "boolean", false),
-        ]
+      ? [field("burn_in", "Burn-in", "number", 0, { minimum: 0 })]
       : [];
   return {
     step_type: stepType,
@@ -452,37 +448,9 @@ export function stepDefinition(
   return BY_STEP_TYPE.get(stepType);
 }
 
-// Lift a node's source legs out of the flat form params, in declaration order.
-// The window is shared, so each leg carries the step's single burn-in.
-export function splitSources(
-  definition: MCStepDefinition,
-  params: Record<string, unknown>,
-): MCSourceSpec[] {
-  const burnIn = Number(params.burn_in ?? 0) || 0;
-  const dropInitial = Boolean(params.drop_initial ?? false);
-  return definition.legs.map((l) => ({
-    arg: l.arg,
-    source_step: String(params[l.sourceKey] ?? ""),
-    field: String(params[l.fieldKey] ?? ""),
-    columns: asColumns(params[l.columnsKey]),
-    burn_in: burnIn,
-    drop_initial: dropInitial,
-  }));
-}
-
-// The keys a node's params drop once its legs and window have been lifted out.
-export function sourceParamKeys(definition: MCStepDefinition): string[] {
-  const keys = definition.legs.flatMap((l) => [
-    l.sourceKey,
-    l.fieldKey,
-    l.columnsKey,
-  ]);
-  return definition.legs.length > 0
-    ? [...keys, "burn_in", "drop_initial"]
-    : keys;
-}
-
-function asColumns(value: unknown): number[] | null {
+// A columns box as the selector a leg carries: an empty one means every column,
+// which travels as null rather than an empty list.
+export function asColumns(value: unknown): number[] | null {
   if (value === null || value === undefined || value === "") return null;
   const list = Array.isArray(value) ? value : [value];
   const columns = list.map(Number).filter((n) => Number.isFinite(n));

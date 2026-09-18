@@ -1,9 +1,9 @@
 """Compile and validate Monte-Carlo pipelines from the core :class:`PipelineSpec`.
 
 Lifted out of ``ui.mc`` so a pipeline can be graph-validated, compiled into an
-:class:`MCPipeline`, and run without the ``[ui]`` extra. Operates on the
-pydantic-free core dataclasses (:class:`NodeSpec`/:class:`PipelineSpec`); the UI
-keeps thin wrappers that convert its request models via ``to_core()``.
+:class:`MCPipeline`, and run without the ``[ui]`` extra. Operates on the core
+dataclasses (:class:`NodeSpec`/:class:`PipelineSpec`); the UI keeps thin
+wrappers over them.
 
 Compilation is driven entirely by :data:`SymbolicDSGE.monte_carlo.catalog.STEP_CATALOG`
 There is no per-step branching here.

@@ -1,9 +1,7 @@
 export type Role = "reference" | "dgp";
 
 export interface ArrayEnvelope {
-  dtype: "float64";
   shape: number[];
-  order: "C";
   data_b64: string;
 }
 
@@ -12,32 +10,7 @@ export interface NamedArray {
   array: ArrayEnvelope;
 }
 
-export interface ShockSpec {
-  shock: string;
-  std_param: string | null;
-  std_value: number | null;
-}
-
-export interface ShockCorrSpec {
-  pair: string[];
-  key: string;
-  corr_param: string;
-  corr_value: number | null;
-}
-
 export type ShockDistribution = "norm" | "t" | "uni";
-
-export interface ShockGeneration {
-  dist: ShockDistribution;
-  seed: number | null;
-  loc: number;
-  df: number;
-}
-
-export interface ShockParamUpdate {
-  std: Record<string, number>;
-  corr: Record<string, number>;
-}
 
 export interface ModelSummary {
   role: Role;
@@ -50,8 +23,7 @@ export interface ModelSummary {
   observables?: string[];
   parameters?: string[];
   parameter_values?: Record<string, number>;
-  shock_specs?: ShockSpec[];
-  shock_corr_specs?: ShockCorrSpec[];
+  shocks?: string[];
   n_state?: number;
   n_exog?: number;
   A_shape?: number[];
@@ -83,44 +55,45 @@ export interface MapOptions {
 }
 
 export interface EstimationViewState {
-  method: EstimationMethod;
+  routine: EstimationMethod;
   parameters: EstimationParameterSpec[];
   selected: string | null;
   observables: string;
   dataVectors: Record<string, string>;
+  // Every knob below is spelled the way `Estimator.mle`/`mcmc` takes it, so the
+  // form posts them without translating and a run restores them without a map.
   optimizer: string;
-  maxIter: number;
-  maxFun: number;
+  maxiter: number;
+  maxfun: number;
   m: number;
-  maxLs: number;
+  maxls: number;
   factr: number;
   pgtol: number;
-  fdStep: number;
+  fd_step: number;
   xatol: number;
   fatol: number;
-  nDraws: number;
-  burnIn: number;
+  n_draws: number;
+  burn_in: number;
   thin: number;
-  seed: number;
-  proposalScale: number;
+  random_state: number;
+  proposal_scale: number;
   adapt: boolean;
-  adaptStart: number;
-  adaptEpsilon: number;
-  posteriorPoint: string;
+  adapt_start: number;
+  adapt_epsilon: number;
+  posterior_point: string;
   // No control on a fresh form. A bundle whose run set one away from its
   // default reveals it, so what is on screen is what will run.
   cov: boolean;
   jacobian: boolean;
-  computeMap: boolean;
-  covFdStepScale: number;
-  covFdAbsoluteFloor: number;
-  // The MAP presolve's own optimizer options, passed to the sampler verbatim,
-  // so the keys are the estimator's rather than the form's. Null until
-  // touched, which leaves the estimator on its own defaults. Every field is
-  // optional: a run records only what it was given.
-  mapOptions: MapOptions | null;
+  compute_map: boolean;
+  cov_fd_step_scale: number;
+  cov_fd_absolute_floor: number;
+  // The MAP presolve's own optimizer options, passed to the sampler verbatim.
+  // Null until touched, which leaves the estimator on its own defaults. Every
+  // field is optional: a run records only what it was given.
+  map_options: MapOptions | null;
   // Restored and re-posted, but too structured for a scalar control.
-  proposalCov: number[][] | null;
+  proposal_cov: number[][] | null;
   modeFolded: boolean;
 }
 
@@ -132,10 +105,14 @@ export interface EstimationViewState {
 export interface MCViewState {
   pipeline: MCPipelineSpec;
   positions: Record<string, { x: number; y: number }>;
-  nRep: number;
-  nJobs: number | null;
+  /** The canvas connections, including any drawn before their leg was bound.
+   *  A bound one is recoverable from the pipeline's `source_args`; an unbound
+   *  one exists nowhere else, and it is what makes its producer selectable. */
+  edges: MCEdgeSpec[];
+  n_rep: number;
+  n_jobs: number | null;
   verbosity: number;
-  failFast: boolean;
+  fail_fast: boolean;
 }
 
 /** One tab's slots on the session.
@@ -201,15 +178,35 @@ export interface FigureResult {
   error?: string;
 }
 
-/** A `SimSpec` as a bundle stores it. The tab's controls are two of its
- * fields, which is why the simulation slot carries no separate view. */
+/** One drawn shock family: `ShockParameters` as the library spells it. */
+export interface DrawnShock {
+  // The shocks this entry drives. An entry names one or more of them, which a
+  // JSON object cannot be keyed by, so each entry carries its own targets and a
+  // spec travels as a list.
+  target: string[];
+  dist: string;
+  seed: number | null;
+  dist_kwargs: Record<string, unknown>;
+}
+
+/** One supplied path: `ShockPathParameters`, an array of shape (T, width). */
+export interface PathShock {
+  target: string[];
+  path: number[][];
+}
+
+export type ShockEntry = DrawnShock | PathShock;
+
+/** A `SimSpec` as a bundle stores it, and as a run posts it. The tab's controls
+ * are a subset of its fields, which is why the simulation slot carries no
+ * separate view. */
 export interface SimSpecWire {
   T: number;
-  x0: number[] | null;
+  x0: Record<string, number> | number[] | null;
   observables: boolean;
   shock_scale: number;
   /** One self-describing entry per spec entry, each carrying its own `target`. */
-  shocks: Array<Record<string, unknown>> | null;
+  shocks: ShockEntry[] | null;
 }
 
 export interface SimResult {
@@ -251,7 +248,10 @@ export interface EstimationParameterSpec {
 
 export interface EstimationRunRequest {
   role: Role;
-  method: EstimationMethod;
+  /** Which estimation to run. Named as the library names it, which keeps it
+   *  distinct from `method_kwargs.method`, the optimizer an mle or map run
+   *  hands to the solver. */
+  routine: EstimationMethod;
   y: number[][];
   observables: string[] | null;
   parameters: EstimationParameterSpec[];
@@ -270,7 +270,7 @@ export type EstimationResultWire = EstimationRunResult["result"];
 export interface EstimationRunResult {
   kind: "estimation";
   role: Role;
-  method: EstimationMethod;
+  routine: EstimationMethod;
   solved: boolean;
   result: {
     // Opt results (mle/map) carry no inner kind; only the mcmc wire sets it.
@@ -355,16 +355,32 @@ export type MCFieldType =
   | "text_list"
   | "shock_registry";
 
-// One entry in a simulation step's shock registry: an explicit, free-form shock
-// over a chosen set of the target model's exogenous variables. `vars.length > 1`
-// is a joint (multivar) shock; the joined names form the registry key.
-export interface ShockRegistryEntry {
-  vars: string[];
+// One entry in a simulation step's shock registry, in the form the panel edits.
+// The two kinds mirror the two the spec carries, and are told apart the same
+// way: a drawn entry names a family, a path entry supplies the array. Both name
+// their own innovations under `target`, which is the spec's own field; two
+// entries may not name the same selection.
+
+/** A family drawn over the chosen innovations. `target.length > 1` is one joint
+ *  (multivar) shock, which is what lets the calibrated correlations apply. */
+export interface DrawnRegistryEntry {
+  kind: "drawn";
+  target: string[];
   dist: ShockDistribution;
   loc: number[];
   df: number;
   seed: number | null;
 }
+
+/** An array supplied for the chosen innovations, held as the `(T, width)`
+ *  matrix the spec wants rather than as the text some editor typed. */
+export interface PathRegistryEntry {
+  kind: "path";
+  target: string[];
+  path: number[][];
+}
+
+export type ShockRegistryEntry = DrawnRegistryEntry | PathRegistryEntry;
 
 export interface MCFieldSpec {
   key: string;
@@ -398,16 +414,18 @@ export interface MCSourceSpec {
   field: string;
   columns: number[] | null;
   burn_in: number;
-  drop_initial: boolean;
 }
 
-export interface MCNodeSpec {
-  id: string;
+export interface MCStepSpec {
+  name: string;
   op_type: string;
   step_type: MCStepType;
-  name: string;
-  params: Record<string, unknown>;
-  sources: MCSourceSpec[];
+  kwargs: Record<string, unknown>;
+  source_args: MCSourceSpec[];
+  n_retain: number;
+  /** Custom-op source. Compiled server-side into the step's callable, so it is
+   *  a sibling of `kwargs` and never one of them. */
+  code?: string;
 }
 
 export interface MCEdgeSpec {
@@ -415,18 +433,10 @@ export interface MCEdgeSpec {
   target: string;
 }
 
-// A post-loop op. Not a graph node -- no `id`/edges; it references producers by
-// trace key in `params` and runs once over the assembled traces.
-export interface MCPostprocSpec {
-  step_type: MCStepType;
-  name: string;
-  params: Record<string, unknown>;
-}
 
 export interface MCPipelineSpec {
-  nodes: MCNodeSpec[];
-  edges: MCEdgeSpec[];
-  postprocs: MCPostprocSpec[];
+  replication_steps: MCStepSpec[];
+  postproc_steps: MCStepSpec[];
 }
 
 export interface MCTraceSummary {

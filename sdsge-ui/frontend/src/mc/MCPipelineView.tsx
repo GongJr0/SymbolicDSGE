@@ -44,8 +44,10 @@ import { PanelWorkspace } from "../PanelWorkspace";
 import type { PanelDef } from "../PanelWorkspace";
 import type {
   MCCatalog,
+  MCEdgeSpec,
   MCPipelineResult,
   MCPipelineSpec,
+  MCStepSpec,
   MCViewState,
   MCStepCatalogItem,
   MCStepCategory,
@@ -57,13 +59,9 @@ import { StepNode } from "./StepNode";
 import { MCResultPanel } from "./MCResultPanel";
 import type { MCFlowNode, MCProducer } from "./types";
 
-import {
-  MC_CATALOG,
-  sourceParamKeys,
-  splitSources,
-  stepDefinition,
-} from "./catalog";
-import { compileFormParams } from "./forms";
+import type { MCStepDefinition } from "./catalog";
+import { MC_CATALOG, stepDefinition } from "./catalog";
+import { defaultStep, getField, setField } from "./fields";
 
 const nodeTypes = { mcStep: StepNode };
 
@@ -145,18 +143,20 @@ function MCPipelineBuilder({
         // the canvas is not. Falling back to it is what makes a bundled run
         // visible when no result rode along with it.
         const pipeline = view?.pipeline ?? mc?.spec ?? null;
-        const restored = restoreNodes(pipeline, view?.positions ?? {}, value);
+        const restored = restoreNodes(
+          pipeline,
+          { positions: view?.positions ?? {}, edges: view?.edges ?? [] },
+          value,
+        );
         if (restored !== null) {
           setNodes(restored.nodes);
           setEdges(restored.edges);
-          setNRep(view?.nRep ?? 100);
-          setNJobs(view?.nJobs ?? null);
+          setNRep(view?.n_rep ?? 100);
+          setNJobs(view?.n_jobs ?? null);
           setVerbosity(view?.verbosity ?? 0);
-          setFailFast(view?.failFast ?? true);
+          setFailFast(view?.fail_fast ?? true);
         } else {
-          const simulation = value.steps.find(
-            (step) => step.step_type === "simulation",
-          );
+          const simulation = stepDefinition("simulation");
           if (simulation !== undefined) {
             setNodes([makeNode(simulation, { x: 100, y: 140 }, [])]);
           }
@@ -187,10 +187,10 @@ function MCPipelineBuilder({
     .filter((node) => ancestorIds.has(node.id))
     .map((node) => {
       const kind = sourceProducerKind(node);
-      return kind === null ? null : { name: node.data.name, kind };
+      return kind === null ? null : { name: node.data.step.name, kind };
     })
     .filter((entry): entry is MCProducer => entry !== null);
-  const pipeline = useMemo(() => toPipelineSpec(nodes, edges), [nodes, edges]);
+  const pipeline = useMemo(() => toPipelineSpec(nodes), [nodes]);
 
   // The producible across-rep traces a POSTPROC op can consume. Refreshed from
   // the backend registry whenever the pipeline's producers change (debounced),
@@ -219,7 +219,7 @@ function MCPipelineBuilder({
     () =>
       edges.map((edge) => {
         const source = nodes.find((node) => node.id === edge.source);
-        const color = producerColor(source?.data.stepType);
+        const color = producerColor(source?.data.step.step_type);
         return {
           ...edge,
           style: { ...edge.style, stroke: color, strokeWidth: 2 },
@@ -231,14 +231,12 @@ function MCPipelineBuilder({
   const modelsReady =
     session?.models.reference?.solved === true && session.models.dgp?.solved === true;
 
-  // Exogenous shock variables per model role, sourced from the loaded model
+  // Declared innovation names per model role, sourced from the loaded model
   // configs (independent of the pipeline), for the simulation shock checklist.
-  const exogByRole: Record<Role, string[]> = useMemo(
+  const shockNamesByRole: Record<Role, string[]> = useMemo(
     () => ({
-      reference: (session?.models.reference?.shock_specs ?? []).map(
-        (spec) => spec.shock,
-      ),
-      dgp: (session?.models.dgp?.shock_specs ?? []).map((spec) => spec.shock),
+      reference: session?.models.reference?.shocks ?? [],
+      dgp: session?.models.dgp?.shocks ?? [],
     }),
     [session],
   );
@@ -256,16 +254,20 @@ function MCPipelineBuilder({
         // once a run writes it, and an edited graph has not run yet.
         pipeline,
         positions: Object.fromEntries(
+          // Keyed by name: the document carries no canvas id, so a name is what
+          // a restored step can be looked up by.
           nodes.map((node) => [
-            // Postprocs carry no id in the spec, so key their positions by name.
-            isPostprocNode(node) ? node.data.name : node.id,
+            node.data.step.name,
             { x: node.position.x, y: node.position.y },
           ]),
         ),
-        nRep,
-        nJobs,
+        // Names, for the same reason, and only the pair: the rest of a React
+        // Flow edge is styling this view reapplies on restore.
+        edges: edges.map((edge) => ({ source: edge.source, target: edge.target })),
+        n_rep: nRep,
+        n_jobs: nJobs,
         verbosity,
-        failFast,
+        fail_fast: failFast,
       }).catch((error: unknown) => {
         setNotice(error instanceof Error ? error.message : String(error));
         setNoticeError(true);
@@ -311,12 +313,15 @@ function MCPipelineBuilder({
           "cusumsq",
           "chow",
           "regression",
-        ].includes(source.data.stepType)
+        ].includes(source.data.step.step_type)
       ) {
         return false;
       }
-      if (target?.data.stepType === "simulation") return false;
-      if (target.data.stepType === "filter" && source.data.stepType !== "simulation") {
+      if (target?.data.step.step_type === "simulation") return false;
+      if (
+        target.data.step.step_type === "filter" &&
+        source.data.step.step_type !== "simulation"
+      ) {
         return false;
       }
       // A node may now take several incoming edges — one per input leg (e.g. a
@@ -376,10 +381,12 @@ function MCPipelineBuilder({
   }
 
   function addStep(item: MCStepCatalogItem, position?: { x: number; y: number }) {
+    const definition = stepDefinition(item.step_type);
+    if (definition === undefined) return;
     setNodes((current) => [
       ...current,
       makeNode(
-        item,
+        definition,
         position ?? viewportSpawnPosition(current.length),
         current,
         customTemplateRef.current,
@@ -401,7 +408,7 @@ function MCPipelineBuilder({
     setBusy(true);
     try {
       const response = await validateMCPipeline(pipeline);
-      const total = response.order.length + response.postprocs.length;
+      const total = response.steps.length + response.postprocs.length;
       setNotice(`Valid dependency graph: ${total} executable steps.`);
       setNoticeError(false);
     } catch (error) {
@@ -445,7 +452,7 @@ function MCPipelineBuilder({
   }
 
   function resetPipeline() {
-    const simulation = catalog?.steps.find((step) => step.step_type === "simulation");
+    const simulation = stepDefinition("simulation");
     setNodes(simulation ? [makeNode(simulation, { x: 100, y: 140 }, [])] : []);
     setEdges([]);
     setSelectedId(null);
@@ -502,7 +509,7 @@ function MCPipelineBuilder({
     {
       id: "inspector",
       title: "Step Inspector",
-      badge: selectedNode?.data.name,
+      badge: selectedNode?.data.step.name,
       scrollable: true,
       content: (
         <StepInspector
@@ -512,7 +519,7 @@ function MCPipelineBuilder({
           theme={theme}
           producers={producers}
           availableTraces={availableTraces}
-          exogByRole={exogByRole}
+          shockNamesByRole={shockNamesByRole}
         />
       ),
     },
@@ -680,10 +687,10 @@ function producerKind(stepType: string | undefined): string {
 // (tests/regressions/postprocs). Unlike `producerKind`, this distinguishes
 // non-producers rather than defaulting them to "transform".
 function sourceProducerKind(node: MCFlowNode): MCProducer["kind"] | null {
-  const stepType: string = node.data.stepType;
+  const stepType: string = node.data.step.step_type;
   if (stepType === "simulation" || stepType === "raw_model_data") return "datagen";
   if (stepType === "filter") return "filter";
-  if (node.data.catalog.category === "transforms") return "transform";
+  if (stepDefinition(stepType)?.category === "transforms") return "transform";
   return null;
 }
 
@@ -795,75 +802,49 @@ function ModelPill({ label, ready }: { label: string; ready: boolean }) {
 }
 
 function makeNode(
-  item: MCStepCatalogItem,
+  definition: MCStepDefinition,
   position: { x: number; y: number },
   existing: MCFlowNode[],
   customTemplate = "",
 ): MCFlowNode {
-  const count = existing.filter((node) => node.data.stepType === item.step_type).length;
-  const name = count === 0 ? item.default_name : `${item.default_name}_${count + 1}`;
-  const params =
-    item.step_type === "transform:custom"
-      ? {
-          ...Object.fromEntries(item.fields.map((field) => [field.key, field.default])),
-          code: customTemplate,
-        }
-      : item.step_type === "postproc:custom"
-        ? { code: POSTPROC_CUSTOM_TEMPLATE }
-        : Object.fromEntries(item.fields.map((field) => [field.key, field.default]));
+  const count = existing.filter(
+    (node) => node.data.step.step_type === definition.step_type,
+  ).length;
+  const name =
+    count === 0
+      ? definition.default_name
+      : `${definition.default_name}_${count + 1}`;
+  const code =
+    definition.step_type === "transform:custom"
+      ? customTemplate
+      : definition.step_type === "postproc:custom"
+        ? POSTPROC_CUSTOM_TEMPLATE
+        : "";
   return {
-    id: `${item.step_type}-${crypto.randomUUID()}`,
+    id: `${definition.step_type}-${crypto.randomUUID()}`,
     type: "mcStep",
     position,
-    data: {
-      stepType: item.step_type,
-      name,
-      params,
-      catalog: item,
-    },
+    data: { step: defaultStep(definition, name, code) },
   };
 }
 
 function isPostprocNode(node: MCFlowNode): boolean {
-  return node.data.catalog.category === "postproc";
+  return stepDefinition(node.data.step.step_type)?.category === "postproc";
 }
 
-function toPipelineSpec(nodes: MCFlowNode[], edges: Edge[]): MCPipelineSpec {
-  const perRep = nodes.filter((node) => !isPostprocNode(node));
-  const postprocs = nodes.filter(isPostprocNode);
-  const perRepIds = new Set(perRep.map((node) => node.id));
+/** The canvas as the document the server takes: two step lists and nothing else.
+ *
+ * The phase split reads each step's own `op_type` rather than asking the
+ * catalog what category the node was drawn from, which is the same
+ * discrimination the library makes. Edges do not travel: a step names the
+ * producers it reads in `source_args`, which is what the server orders the
+ * graph from.
+ */
+function toPipelineSpec(nodes: MCFlowNode[]): MCPipelineSpec {
+  const steps = nodes.map((node) => node.data.step);
   return {
-    // Per-replication DAG nodes only.
-    nodes: perRep.map((node) => {
-      const definition = stepDefinition(node.data.stepType);
-      const dropped = new Set(
-        definition ? sourceParamKeys(definition) : [],
-      );
-      const params = compileFormParams(node.data.stepType, node.data.params);
-      return {
-        id: node.id,
-        // The op kind and the source legs are resolved here: a node arrives at
-        // the server already saying what it is and what it reads.
-        op_type: definition?.opType ?? "",
-        step_type: node.data.stepType,
-        name: node.data.name,
-        params: Object.fromEntries(
-          Object.entries(params).filter(([key]) => !dropped.has(key)),
-        ),
-        sources: definition ? splitSources(definition, node.data.params) : [],
-      };
-    }),
-    // Edges never touch a postproc node (they carry no edges), but filter
-    // defensively so a stale edge can't leak into the spec.
-    edges: edges
-      .filter((edge) => perRepIds.has(edge.source) && perRepIds.has(edge.target))
-      .map((edge) => ({ source: edge.source, target: edge.target })),
-    // Post-loop ops: a separate terminal list, no id, no edges.
-    postprocs: postprocs.map((node) => ({
-      step_type: node.data.stepType,
-      name: node.data.name,
-      params: node.data.params,
-    })),
+    replication_steps: steps.filter((step) => step.op_type !== "postproc"),
+    postproc_steps: steps.filter((step) => step.op_type === "postproc"),
   };
 }
 
@@ -873,97 +854,127 @@ function toPipelineSpec(nodes: MCFlowNode[], edges: Edge[]): MCPipelineSpec {
  * restored run arrives with a graph and no coordinates. Layers by longest path
  * from a source, which reads left to right in dependency order.
  */
+/** The dependency pairs a document carries, as `(producer, consumer)` names.
+ *
+ * A step names the producers it reads in its source legs, which is the record
+ * the server orders the graph from. The canvas edge list is a separate thing:
+ * it also holds connections drawn before their leg was bound, which no document
+ * records. Those ride `MCViewState.edges`, and `restoreNodes` lays the two over
+ * each other.
+ */
+function documentEdges(pipeline: MCPipelineSpec): MCEdgeSpec[] {
+  const names = new Set(pipeline.replication_steps.map((step) => step.name));
+  const seen = new Set<string>();
+  const out: MCEdgeSpec[] = [];
+  for (const step of pipeline.replication_steps) {
+    for (const leg of step.source_args) {
+      const key = `${leg.source_step}->${step.name}`;
+      if (!names.has(leg.source_step) || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ source: leg.source_step, target: step.name });
+    }
+  }
+  return out;
+}
+
+/** Somewhere to put a step the canvas has no remembered position for.
+ *
+ * A bundle stores the pipeline that ran, not the canvas it was drawn on, so a
+ * restored run arrives with steps and no coordinates. Layers by longest path
+ * through the source legs, which reads left to right in dependency order.
+ */
 function autoLayout(pipeline: MCPipelineSpec): Record<string, XYPosition> {
   const incoming = new Map<string, string[]>();
-  for (const node of pipeline.nodes) incoming.set(node.id, []);
-  for (const edge of pipeline.edges) incoming.get(edge.target)?.push(edge.source);
+  for (const step of pipeline.replication_steps) incoming.set(step.name, []);
+  for (const edge of documentEdges(pipeline)) incoming.get(edge.target)?.push(edge.source);
 
   const depth = new Map<string, number>();
   const walking = new Set<string>();
-  function depthOf(id: string): number {
-    const cached = depth.get(id);
+  function depthOf(name: string): number {
+    const cached = depth.get(name);
     if (cached !== undefined) return cached;
     // A spec is a DAG; the guard only keeps a malformed one from recursing.
-    if (walking.has(id)) return 0;
-    walking.add(id);
-    const sources = incoming.get(id) ?? [];
+    if (walking.has(name)) return 0;
+    walking.add(name);
+    const sources = incoming.get(name) ?? [];
     const value = sources.length === 0 ? 0 : Math.max(...sources.map(depthOf)) + 1;
-    depth.set(id, value);
+    depth.set(name, value);
     return value;
   }
 
   const filled = new Map<number, number>();
   const positions: Record<string, XYPosition> = {};
-  for (const node of pipeline.nodes) {
-    const column = depthOf(node.id);
+  for (const step of pipeline.replication_steps) {
+    const column = depthOf(step.name);
     const row = filled.get(column) ?? 0;
     filled.set(column, row + 1);
-    positions[node.id] = { x: 100 + column * 260, y: 140 + row * 130 };
+    positions[step.name] = { x: 100 + column * 260, y: 140 + row * 130 };
   }
-  // Postprocs consume the finished run rather than a node, so they trail it.
+  // Postprocs consume the finished run rather than a step, so they trail it.
   const trailing = Math.max(0, ...[...filled.keys()].map((column) => column + 1));
-  (pipeline.postprocs ?? []).forEach((postproc, index) => {
-    positions[postproc.name] = { x: 100 + trailing * 260, y: 140 + index * 130 };
+  pipeline.postproc_steps.forEach((step, index) => {
+    positions[step.name] = { x: 100 + trailing * 260, y: 140 + index * 130 };
   });
   return positions;
 }
 
+/** Canvas nodes for a stored document.
+ *
+ * A step is keyed by its name, since the document carries no canvas id and a
+ * name is unique across a pipeline. The form params are rebuilt from every
+ * place the post scattered them: `kwargs` for the plain fields, `source_args`
+ * for the legs, and the step's own slots for `n_retain` and `code`. Anything
+ * the document does not name stays on its catalogue default.
+ */
 function restoreNodes(
   pipeline: MCPipelineSpec | null,
-  positions: Record<string, XYPosition>,
+  canvas: { positions: Record<string, XYPosition>; edges: MCEdgeSpec[] },
   catalog: MCCatalog,
 ): { nodes: MCFlowNode[]; edges: Edge[] } | null {
   if (pipeline === null) return null;
   // Remembered positions win; anything without one is laid out, so a bundle's
   // graph does not land stacked on a single point.
-  const placed = { ...autoLayout(pipeline), ...positions };
+  const placed = { ...autoLayout(pipeline), ...canvas.positions };
   const nodes: MCFlowNode[] = [];
-  for (const spec of pipeline.nodes) {
-    const item = catalog.steps.find((step) => step.step_type === spec.step_type);
-    if (item === undefined) return null;
+  const steps = [...pipeline.replication_steps, ...pipeline.postproc_steps];
+  for (const step of steps) {
+    const definition = stepDefinition(step.step_type);
+    if (definition === undefined) return null;
+    // Defaults underneath, so a document written before a field existed still
+    // fills the form. `kwargs` is merged rather than replaced, since a shallow
+    // spread would drop every default the document does not mention.
+    const defaults = defaultStep(definition, step.name, "");
     nodes.push({
-      id: spec.id,
+      id: step.name,
       type: "mcStep",
-      position: placed[spec.id] ?? { x: 100, y: 140 },
+      position: placed[step.name] ?? { x: 100, y: 140 },
       data: {
-        stepType: spec.step_type,
-        name: spec.name,
-        params: {
-          ...Object.fromEntries(item.fields.map((field) => [field.key, field.default])),
-          ...spec.params,
+        step: {
+          ...defaults,
+          ...step,
+          kwargs: { ...defaults.kwargs, ...step.kwargs },
         },
-        catalog: item,
       },
     });
   }
-  // Postprocs are a separate spec list with no id; rebuild them as standalone
-  // canvas nodes keyed by name. (`?? []` tolerates a pre-postprocs cached
-  // workspace; any legacy postproc still in `nodes` is re-routed on next save.)
-  for (const pp of pipeline.postprocs ?? []) {
-    const item = catalog.steps.find((step) => step.step_type === pp.step_type);
-    if (item === undefined) return null;
-    nodes.push({
-      id: crypto.randomUUID(),
-      type: "mcStep",
-      position: placed[pp.name] ?? { x: 100, y: 320 },
-      data: {
-        stepType: pp.step_type,
-        name: pp.name,
-        params: {
-          ...Object.fromEntries(item.fields.map((field) => [field.key, field.default])),
-          ...pp.params,
-        },
-        catalog: item,
-      },
-    });
-  }
-  return {
-    nodes,
-    edges: pipeline.edges.map((edge) => ({
+  // The document's dependencies first, then whatever the canvas remembers on
+  // top: the two overlap on every bound leg, and only the canvas holds an edge
+  // drawn before its leg was bound. Both are filtered to steps that still
+  // exist, since either can outlive a deleted one.
+  const present = new Set(nodes.map((node) => node.id));
+  const seen = new Set<string>();
+  const edges: Edge[] = [];
+  for (const edge of [...documentEdges(pipeline), ...canvas.edges]) {
+    const key = `${edge.source}->${edge.target}`;
+    if (seen.has(key)) continue;
+    if (!present.has(edge.source) || !present.has(edge.target)) continue;
+    seen.add(key);
+    edges.push({
       id: `mc-edge-${edge.source}-${edge.target}`,
       source: edge.source,
       target: edge.target,
       type: "smoothstep",
-    })),
-  };
+    });
+  }
+  return { nodes, edges };
 }

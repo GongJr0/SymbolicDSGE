@@ -20,8 +20,6 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     transform_step,
 )
 from SymbolicDSGE.monte_carlo.spec import (
-    OP_TYPES,
-    STEP_KINDS,
     PipelineMeta,
     PipelineSpec,
     StepSpec,
@@ -56,12 +54,6 @@ def _spec(
 
 def _meta(spec: PipelineSpec) -> PipelineMeta:
     return pipeline_meta(spec)
-
-
-def test_every_step_kind_declares_an_op_kind() -> None:
-    # A step states its own op kind, drawn from this map, so a kind missing from
-    # it could never be built.
-    assert set(OP_TYPES) == set(STEP_KINDS)
 
 
 def test_source_kwargs_compile_to_runner_args_once() -> None:
@@ -131,25 +123,6 @@ def test_source_fields_match_the_native_output_channels() -> None:
     assert FILTER_RAW_SOURCE_FIELDS[: len(linear_array_fields)] == linear_array_fields
     assert FILTER_RAW_SOURCE_FIELDS == unscented_array_fields
     assert DYNAMIC_SOURCE_FIELDS == ("payload",)
-
-
-def test_terminal_step_kinds_are_the_tests_and_the_regression() -> None:
-    terminals = {
-        step_type
-        for step_type, op_type in OP_TYPES.items()
-        if op_type in ("test", "regression")
-    }
-    assert terminals == {
-        "wald",
-        "ljung_box",
-        "jarque_bera",
-        "breusch_pagan",
-        "breusch_godfrey",
-        "cusum",
-        "cusumsq",
-        "chow",
-        "regression",
-    }
 
 
 def test_validate_orders_steps_with_explicit_filter_source() -> None:

@@ -358,7 +358,7 @@ label {
   display: grid;
   flex-shrink: 0;
   gap: 14px;
-  grid-template-columns: 120px 160px 140px;
+  grid-template-columns: 120px 120px 160px 140px;
   padding: 10px 14px;
 }
 
@@ -451,22 +451,27 @@ label {
   min-height: 70px;
 }
 
-.shock-controls {
-  align-items: flex-end;
+.x0-panel {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.05);
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 10px;
+  padding: 10px 14px;
 }
 
-.shock-controls > label {
-  flex: 1;
+.x0-panel > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
-.shock-controls > .shock-num {
-  flex: 0 0 auto;
-}
-
-.shock-controls .shock-num input {
-  width: 64px;
+.x0-panel > summary .muted {
+  margin-left: 8px;
 }
 
 .param-grid {
@@ -1630,6 +1635,18 @@ button.mc-palette-tab.active .mc-palette-tab-count {
   font-size: 10px;
 }
 
+/* A supplied path carries an array rather than a family, which is a different
+   kind of entry rather than a lesser one: the dashed border tells them apart. */
+.mc-shock-entry-path {
+  background: #f1f5f9;
+  border-style: dashed;
+}
+
+.mc-shock-entry-path .mc-shock-badge {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .mc-shock-badge {
   background: #e0e7ff;
   border-radius: 4px;
@@ -1698,21 +1715,26 @@ button.mc-palette-tab.active .mc-palette-tab-count {
   font-size: 10px;
 }
 
-.mc-shock-frozen {
-  align-items: flex-start;
-  background: rgba(180, 83, 9, 0.08);
-  border: 1px solid rgba(180, 83, 9, 0.35);
-  border-radius: 4px;
-  color: #b45309;
+.mc-shock-path {
   display: flex;
   flex-direction: column;
-  font-size: 10px;
-  gap: 6px;
-  padding: 8px;
+  gap: 4px;
+}
+
+.mc-shock-path textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-height: 84px;
+  resize: vertical;
+  width: 100%;
 }
 
 .mc-shock-error {
   font-size: 10px;
+}
+
+.shock-registry-error {
+  font-size: 11px;
+  max-width: none;
 }
 
 .mc-shock-add {
@@ -2284,10 +2306,6 @@ button.mc-palette-tab.active .mc-palette-tab-count {
     grid-template-columns: 1fr;
   }
 
-  .shock-controls {
-    flex-direction: column;
-  }
-
   .builder-toolbar {
     align-items: stretch;
     flex-direction: column;
@@ -2370,6 +2388,7 @@ button.mc-palette-tab.active .mc-palette-tab-count {
 .theme-dark .shock-panel,
 .theme-dark .results,
 .theme-dark .output-panel,
+.theme-dark .x0-panel,
 .theme-dark .run-panel {
   background: #1e293b;
   border-color: #334155;
@@ -2738,6 +2757,15 @@ button.mc-palette-tab.active .mc-palette-tab-count {
 
 .theme-dark .mc-shock-entry {
   background: #1e293b;
+}
+
+.theme-dark .mc-shock-entry-path {
+  background: #0f172a;
+}
+
+.theme-dark .mc-shock-entry-path .mc-shock-badge {
+  background: #78350f;
+  color: #fde68a;
 }
 
 .theme-dark .mc-shock-check {

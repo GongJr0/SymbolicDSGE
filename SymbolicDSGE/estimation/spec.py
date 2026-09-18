@@ -1,15 +1,7 @@
 """Serializable estimation specification + result metadata (text only).
 
-Stdlib dataclasses — the core ``estimation`` module must stay pydantic-free
-(pydantic is only present transitively under the ``[ui]`` extra). The UI keeps
-its pydantic request models in :mod:`SymbolicDSGE.ui.schemas` and converts via
-:meth:`EstimationRunRequest.to_core`. This is the text representation a
-``.sdsge`` bundle stores for the estimation tab.
-
 Bulk arrays (observed data ``y``, MCMC ``samples``, ``logpost_trace``, and ``logjac_trace``) are
-not carried here — they ride sibling Parquet members and pair with this
-metadata at load time, mirroring the
-:mod:`SymbolicDSGE.monte_carlo.serialize` split.
+carried as Parquet members and pair with this metadata at load time.
 """
 
 from __future__ import annotations

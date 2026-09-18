@@ -9,7 +9,37 @@ from __future__ import annotations
 
 from typing import Any
 
-from SymbolicDSGE.monte_carlo.spec import OP_TYPES, POSTPROC_KINDS, SourceSpec, StepMeta
+from SymbolicDSGE.monte_carlo.spec import SourceSpec, StepMeta
+
+#: The op kind each step kind is. A catalogue is a client concern: the library
+#: resolves a kind through literal branches that raise on anything they do not
+#: name, and never reads a table to do it. This lives here because the module is
+#: the client stand-in, not because the package exports it.
+OP_TYPES: dict[str, str] = {
+    "simulation": "datagen",
+    "raw_model_data": "datagen",
+    "filter": "filter",
+    "payload": "transform",
+    "standardize": "transform",
+    "log": "transform",
+    "log_diff": "transform",
+    "diff": "transform",
+    "rolling_mean": "transform",
+    "rolling_std": "transform",
+    "rolling_var": "transform",
+    "transform:custom": "transform",
+    "wald": "test",
+    "ljung_box": "test",
+    "jarque_bera": "test",
+    "breusch_pagan": "test",
+    "breusch_godfrey": "test",
+    "cusum": "test",
+    "cusumsq": "test",
+    "chow": "test",
+    "regression": "regression",
+    "kde": "postproc",
+    "postproc:custom": "postproc",
+}
 
 
 def source(
@@ -96,13 +126,12 @@ def _posted_step(raw: dict[str, Any]) -> dict[str, Any]:
     n_retain = int(params.pop("n_retain", -1))
 
     legs: dict[str, dict[str, Any]] = {}
-    if step_type not in POSTPROC_KINDS:
-        for key in list(params):
-            split = _leg_key(key)
-            if split is None:
-                continue
-            arg, role = split
-            legs.setdefault(arg, {})[role] = params.pop(key)
+    for key in list(params):
+        split = _leg_key(key)
+        if split is None:
+            continue
+        arg, role = split
+        legs.setdefault(arg, {})[role] = params.pop(key)
 
     sources = [
         source(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -13,8 +14,8 @@ from SymbolicDSGE.ui.estimation import (
     serialize_estimation_result,
 )
 from SymbolicDSGE.ui.mc import build_pipeline, serialize_pipeline_result
-from SymbolicDSGE.ui.mc_schemas import MCPipelineSpec
-from SymbolicDSGE.ui.schemas import ArrayEnvelope, EstimationParameterSpec
+from SymbolicDSGE.estimation.spec import PriorSpec
+from SymbolicDSGE.ui.schemas import EstimationParameterSpec
 from SymbolicDSGE.ui.serializers import decode_array, encode_array
 
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
@@ -33,7 +34,7 @@ from tests._spec_helpers import as_posted
 def test_array_envelope_round_trips_float64_payload() -> None:
     arr = np.arange(6, dtype=np.float64).reshape(2, 3)
 
-    envelope = ArrayEnvelope.model_validate(encode_array(arr))
+    envelope = encode_array(arr)
     out = decode_array(envelope)
 
     assert out.dtype == np.float64
@@ -65,9 +66,13 @@ def _simulate(client: TestClient, *, observables: bool) -> dict:
         "/api/run/sim",
         json={
             "role": "reference",
-            "T": 20,
-            "observables": observables,
-            "shock_scale": 1.0,
+            "spec": {
+                "T": 20,
+                "x0": None,
+                "observables": observables,
+                "shock_scale": 1.0,
+                "shocks": None,
+            },
         },
     ).json()
 
@@ -156,13 +161,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     assert loaded_body["solved"] is False
     assert loaded_body["name"] == "TEST"
     assert 'name: "TEST"' in loaded_body["raw_yaml"]
-    # A shock declares no target: which variables it moves is the shock
-    # jacobian's answer, so the card carries the innovation and its std alone.
-    assert loaded_body["shock_specs"] == [
-        {"shock": "e_u", "std_param": "sig_u", "std_value": 0.5},
-        {"shock": "e_v", "std_param": "sig_v", "std_value": 0.25},
-    ]
-    assert loaded_body["shock_corr_specs"] == []
+    assert loaded_body["shocks"] == ["e_u", "e_v"]
 
     solved = client.post(
         "/api/model/solve",
@@ -180,7 +179,16 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
 
     simulated = client.post(
         "/api/run/sim",
-        json={"role": "reference", "T": 5, "observables": True},
+        json={
+            "role": "reference",
+            "spec": {
+                "T": 5,
+                "x0": None,
+                "observables": True,
+                "shock_scale": 1.0,
+                "shocks": None,
+            },
+        },
     )
     assert simulated.status_code == 200
     sim_body = simulated.json()
@@ -190,32 +198,52 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     assert "_X" in names
 
     x_series = next(series for series in sim_body["series"] if series["name"] == "_X")
-    x_arr = decode_array(ArrayEnvelope.model_validate(x_series["array"]))
+    x_arr = decode_array(x_series["array"])
     assert x_arr.shape == (5, solved_body["A_shape"][0])
 
     shocked = client.post(
         "/api/run/sim",
         json={
             "role": "reference",
-            "T": 5,
-            "observables": False,
-            "shocks": {"e_u": encode_array(np.array([1.0, 0.0, 0.0, 0.0, 0.0]))},
+            "spec": {
+                "T": 5,
+                "x0": None,
+                "observables": False,
+                # A supplied path travels inline, shaped (T, width) like every
+                # other one the library takes.
+                "shocks": [
+                    {"target": ["e_u"], "path": [[1.0], [0.0], [0.0], [0.0], [0.0]]}
+                ],
+                "shock_scale": 1.0,
+            },
         },
     )
     assert shocked.status_code == 200
     shock_body = shocked.json()
     u_series = next(series for series in shock_body["series"] if series["name"] == "u")
-    u_arr = decode_array(ArrayEnvelope.model_validate(u_series["array"]))
+    u_arr = decode_array(u_series["array"])
     assert np.max(np.abs(u_arr)) > 0.0
 
     generated = client.post(
         "/api/run/sim",
         json={
             "role": "reference",
-            "T": 5,
-            "observables": False,
-            "shock_generation": {"dist": "norm", "seed": 10, "loc": 0.0},
-            "shock_params": {"std": {"e_u": 2.0, "e_v": 1.0}, "corr": {}},
+            "spec": {
+                "T": 5,
+                "x0": None,
+                "observables": False,
+                # One entry over both shocks is one joint family, which is what
+                # the list shape exists to express.
+                "shocks": [
+                    {
+                        "target": ["e_u", "e_v"],
+                        "dist": "norm",
+                        "seed": 10,
+                        "dist_kwargs": {"mean": [0.0, 0.0]},
+                    }
+                ],
+                "shock_scale": 1.0,
+            },
         },
     )
     assert generated.status_code == 200
@@ -223,16 +251,27 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     generated_u = next(
         series for series in generated_body["series"] if series["name"] == "u"
     )
-    generated_u_arr = decode_array(ArrayEnvelope.model_validate(generated_u["array"]))
+    generated_u_arr = decode_array(generated_u["array"])
     assert np.max(np.abs(generated_u_arr)) > 0.0
 
     generated_t = client.post(
         "/api/run/sim",
         json={
             "role": "reference",
-            "T": 5,
-            "observables": False,
-            "shock_generation": {"dist": "t", "seed": 10, "loc": 0.0, "df": 5.0},
+            "spec": {
+                "T": 5,
+                "x0": None,
+                "observables": False,
+                "shocks": [
+                    {
+                        "target": ["e_u", "e_v"],
+                        "dist": "t",
+                        "seed": 10,
+                        "dist_kwargs": {"loc": [0.0, 0.0], "df": 5.0},
+                    }
+                ],
+                "shock_scale": 1.0,
+            },
         },
     )
     assert generated_t.status_code == 200
@@ -251,7 +290,16 @@ def test_ui_backend_loads_yaml_content_and_reports_user_errors() -> None:
 
     unsolved_sim = client.post(
         "/api/run/sim",
-        json={"role": "dgp", "T": 3, "observables": False},
+        json={
+            "role": "dgp",
+            "spec": {
+                "T": 3,
+                "x0": None,
+                "observables": False,
+                "shock_scale": 1.0,
+                "shocks": None,
+            },
+        },
     )
     assert unsolved_sim.status_code == 400
     detail = unsolved_sim.json()["detail"]
@@ -269,52 +317,20 @@ def test_ui_backend_loads_yaml_content_and_reports_user_errors() -> None:
     assert missing_run.status_code == 404
 
 
-def test_ui_backend_reports_configured_shock_correlations() -> None:
-    client = TestClient(create_app())
-
-    loaded = client.post(
-        "/api/model/load-yaml",
-        json={"role": "reference", "path": "MODELS/POST82.yaml"},
-    )
-
-    assert loaded.status_code == 200
-    assert loaded.json()["shock_corr_specs"] == [
-        {
-            "pair": ["e_g", "e_z"],
-            "key": "e_g,e_z",
-            "corr_param": "rho_gz",
-            "corr_value": 0.36,
-        },
-        {
-            "pair": ["e_g", "e_r"],
-            "key": "e_g,e_r",
-            "corr_param": "rho_gr",
-            "corr_value": 0.0,
-        },
-        {
-            "pair": ["e_z", "e_r"],
-            "key": "e_z,e_r",
-            "corr_param": "rho_zr",
-            "corr_value": 0.0,
-        },
-    ]
-
-
 def test_ui_estimation_inputs_build_scalar_priors_and_validate_selection() -> None:
     parameters = [
-        EstimationParameterSpec.model_validate(
-            {
-                "name": "beta",
-                "estimate": True,
-                "initial": 0.99,
-                "lower": 0.9,
-                "upper": 1.0,
-                "prior": {
-                    "distribution": "normal",
-                    "parameters": {"mean": 0.99, "std": 0.01},
-                    "transform": "identity",
-                },
-            }
+        EstimationParameterSpec(
+            name="beta",
+            estimate=True,
+            initial=0.99,
+            lower=0.9,
+            upper=1.0,
+            prior=PriorSpec(
+                distribution="normal",
+                parameters={"mean": 0.99, "std": 0.01},
+                transform="identity",
+                transform_kwargs={},
+            ),
         ),
         EstimationParameterSpec(name="sigma", estimate=False, initial=1.0),
     ]
@@ -329,7 +345,16 @@ def test_ui_estimation_inputs_build_scalar_priors_and_validate_selection() -> No
 
     with np.testing.assert_raises_regex(ValueError, "Select at least one parameter"):
         build_estimation_inputs(
-            [EstimationParameterSpec(name="beta", initial=0.99)],
+            [
+                EstimationParameterSpec(
+                    name="beta",
+                    estimate=False,
+                    initial=0.99,
+                    lower=None,
+                    upper=None,
+                    prior=None,
+                )
+            ],
             routine="mle",
         )
 
@@ -404,7 +429,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     monkeypatch.setattr(slot.solver, "estimate", fake_estimate)
     request = {
         "role": "reference",
-        "method": "mle",
+        "routine": "mle",
         "y": [[3.2, 0.1], [3.3, 0.2]],
         "observables": ["Infl", "Rate"],
         "parameters": [
@@ -417,6 +442,10 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
             }
         ],
         "method_kwargs": {"maxiter": 25, "method": "Nelder-Mead", "cov": True},
+        "compile_kwargs": {},
+        "ss_seed": None,
+        "posterior_point": "mean",
+        "estimate_and_solve": False,
     }
     response = client.post("/api/run/estimation", json=request)
 
@@ -1208,39 +1237,37 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
 
 
 def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
-    spec = MCPipelineSpec.model_validate(
-        as_posted(
-            {
-                "nodes": [
-                    {
-                        "id": "sim",
-                        "step_type": "simulation",
-                        "name": "datagen",
-                        "params": {
-                            "T": 8,
-                        },
+    spec = as_posted(
+        {
+            "nodes": [
+                {
+                    "id": "sim",
+                    "step_type": "simulation",
+                    "name": "datagen",
+                    "params": {
+                        "T": 8,
                     },
-                    {"id": "filter", "step_type": "filter", "name": "renamed_filter"},
-                    {
-                        "id": "test",
-                        "step_type": "breusch_pagan",
-                        "name": "diagnostic",
-                        "params": {
-                            "residuals_source": "renamed_filter",
-                            "residuals_field": "std_innov",
-                            "X_source": "datagen",
-                            "X_field": "observables",
-                            "residuals_column": [0],
-                            "X_columns": [0],
-                        },
+                },
+                {"id": "filter", "step_type": "filter", "name": "renamed_filter"},
+                {
+                    "id": "test",
+                    "step_type": "breusch_pagan",
+                    "name": "diagnostic",
+                    "params": {
+                        "residuals_source": "renamed_filter",
+                        "residuals_field": "std_innov",
+                        "X_source": "datagen",
+                        "X_field": "observables",
+                        "residuals_column": [0],
+                        "X_columns": [0],
                     },
-                ],
-                "edges": [
-                    {"source": "sim", "target": "filter"},
-                    {"source": "filter", "target": "test"},
-                ],
-            }
-        )
+                },
+            ],
+            "edges": [
+                {"source": "sim", "target": "filter"},
+                {"source": "filter", "target": "test"},
+            ],
+        }
     )
 
     pipeline = build_pipeline(spec)
@@ -1257,14 +1284,14 @@ def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
     )
     assert residuals.source_step == "renamed_filter"
 
-    missing = spec.model_copy(deep=True)
-    # The leg is what names the producer; params carry the step's own kwargs.
+    missing = copy.deepcopy(spec)
+    # The leg is what names the producer; kwargs carry the step's own arguments.
     residuals_leg = next(
         leg
-        for leg in missing.replication_steps[-1].source_args
-        if leg.arg == "residuals"
+        for leg in missing["replication_steps"][-1]["source_args"]
+        if leg["arg"] == "residuals"
     )
-    residuals_leg.source_step = "missing_filter"
+    residuals_leg["source_step"] = "missing_filter"
     with np.testing.assert_raises_regex(ValueError, "unknown producer"):
         build_pipeline(missing)
 
@@ -1419,8 +1446,8 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
     assert "zscore" in run.json()["detail"]["message"]
 
 
-@pytest.mark.parametrize("method", ["mle", "map"])
-def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, method):
+@pytest.mark.parametrize("routine", ["mle", "map"])
+def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, routine):
     """The kwargs the form posts must bind to the method that receives them.
 
     ``DSGESolver.estimate`` declares ``**method_kwargs``, so a fake standing in
@@ -1471,7 +1498,7 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, metho
         "/api/run/estimation",
         json={
             "role": "reference",
-            "method": method,
+            "routine": routine,
             "y": [[0.1], [0.2], [0.3]],
             "observables": ["Obs"],
             "parameters": [
@@ -1491,6 +1518,10 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, metho
             ],
             # The shape EstimationView.tsx posts for mle and map.
             "method_kwargs": {"maxiter": 25},
+            "compile_kwargs": {},
+            "ss_seed": None,
+            "posterior_point": "mean",
+            "estimate_and_solve": False,
         },
     )
     assert response.status_code == 200
@@ -1501,5 +1532,5 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, metho
     forwarded = {k: v for k, v in captured.items() if k not in own}
     assert forwarded, "nothing was forwarded, so the binding below proves nothing"
 
-    target = Estimator.mle if method == "mle" else Estimator.map
+    target = Estimator.mle if routine == "mle" else Estimator.map
     inspect.signature(target).bind_partial(Estimator, **forwarded)

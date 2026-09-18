@@ -21,7 +21,6 @@ from tests._oracles.monte_carlo import (
     build_pipeline,
     validate_pipeline_spec,
 )
-from tests._oracles.monte_carlo.operations.core import simulation_step
 from tests._oracles.monte_carlo.operations.transforms import (
     diff_step,
     log_diff_step,
@@ -618,15 +617,6 @@ def test_terminal_can_read_an_earlier_transform_via_explicit_source() -> None:
     assert jb.params["field"] == "payload"
 
 
-def test_every_step_kind_declares_an_op_kind() -> None:
-    """A node states its own op kind and `build_pipeline` holds it to `OP_TYPES`,
-    so a kind absent from that map could never be built, and one present but not
-    a valid `STEP_KIND` would be rejected at the door."""
-    from SymbolicDSGE.monte_carlo.spec import OP_TYPES, STEP_KINDS
-
-    assert set(OP_TYPES) == set(STEP_KINDS)
-
-
 def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     """Authoring a transform-containing pipeline and re-opening it from a
     bundle preserves every node and its bound params."""
@@ -635,7 +625,6 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     from SymbolicDSGE import BundleBuilder, load_bundle
     from SymbolicDSGE.monte_carlo import MCPipeline
     from SymbolicDSGE.ui.mc import build_pipeline as build_live_pipeline
-    from SymbolicDSGE.ui.mc_schemas import MCPipelineSpec
     from tests._spec_helpers import as_posted
 
     yaml_text = pathlib.Path("MODELS/test.yaml").read_text(encoding="utf-8")
@@ -644,48 +633,46 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     # module drives.
     # Authored the way the GUI posts it, then lowered through the UI boundary,
     # which is what resolves op kinds, source legs and the wald target field.
-    pipeline = MCPipelineSpec(
-        **as_posted(
-            {
-                "nodes": [
-                    {
-                        "id": "sim",
-                        "step_type": "simulation",
-                        "name": "datagen",
-                        "params": {"T": 50},
+    pipeline = as_posted(
+        {
+            "nodes": [
+                {
+                    "id": "sim",
+                    "step_type": "simulation",
+                    "name": "datagen",
+                    "params": {"T": 50},
+                },
+                {
+                    "id": "std",
+                    "step_type": "standardize",
+                    "name": "standardize",
+                    "params": {"source": "datagen", "field": "observables"},
+                },
+                {
+                    "id": "rm",
+                    "step_type": "rolling_mean",
+                    "name": "rmean",
+                    "params": {
+                        "source": "standardize",
+                        "field": "payload",
+                        "window": 3,
                     },
-                    {
-                        "id": "std",
-                        "step_type": "standardize",
-                        "name": "standardize",
-                        "params": {"source": "datagen", "field": "observables"},
+                },
+                {
+                    "id": "wm",
+                    "step_type": "wald",
+                    "name": "wald_mean",
+                    "params": {
+                        "kind": "mean",
+                        "source": "rmean",
+                        "field": "payload",
+                        "target_vector": [0.0],
                     },
-                    {
-                        "id": "rm",
-                        "step_type": "rolling_mean",
-                        "name": "rmean",
-                        "params": {
-                            "source": "standardize",
-                            "field": "payload",
-                            "window": 3,
-                        },
-                    },
-                    {
-                        "id": "wm",
-                        "step_type": "wald",
-                        "name": "wald_mean",
-                        "params": {
-                            "kind": "mean",
-                            "source": "rmean",
-                            "field": "payload",
-                            "target_vector": [0.0],
-                        },
-                    },
-                ],
-                "edges": [],
-                "postprocs": [],
-            }
-        )
+                },
+            ],
+            "edges": [],
+            "postprocs": [],
+        }
     )
 
     target = (
