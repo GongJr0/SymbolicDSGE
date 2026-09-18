@@ -5,8 +5,9 @@ from typing import Any, cast
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.monte_carlo.spec import pipeline_meta
+from ..core.solved_model import SolvedModel
+from ..monte_carlo.spec import pipeline_meta
+from ..bundle.manifest import SimSpec
 
 from .mc import (
     build_pipeline,
@@ -22,7 +23,6 @@ from .schemas import (
     WorkspaceViewUpdate,
     LoadYamlRequest,
     Role,
-    SimRunRequest,
     SolveModelRequest,
     SubmitFunctionRequest,
 )
@@ -61,7 +61,7 @@ def create_app(
         return ui_session.summary()
 
     @app.put("/api/session/workspace")
-    def update_workspace_view(request: WorkspaceViewUpdate) -> dict[str, str]:
+    def update_workspace_view(request: dict[str, Any]) -> dict[str, Any]:
         """Hold a tab's on-screen state for the life of the process.
 
         This is what a refresh restores from: the client posts what it has,
@@ -69,8 +69,12 @@ def create_app(
         of anything the browser kept. Acknowledges only, since the caller is
         the one that already has the state.
         """
-        ui_session.set_workspace_view(request.tab, request.view)
-        return {"tab": request.tab}
+        try:
+            ui_session.set_workspace_view(**cast(WorkspaceViewUpdate, request))
+            return {"tab": request["tab"]}
+
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
 
     @app.get("/api/mc/custom/template")
     def monte_carlo_custom_template() -> dict[str, str]:
@@ -135,13 +139,9 @@ def create_app(
             raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
 
     @app.post("/api/model/load-yaml")
-    def load_yaml(request: LoadYamlRequest) -> dict[str, Any]:
+    def load_yaml(request: dict[str, Any]) -> dict[str, Any]:
         try:
-            return ui_session.load_yaml(
-                role=request.role,
-                path=request.path,
-                content=request.content,
-            )
+            return ui_session.load_yaml(**cast(LoadYamlRequest, request))
         except (TypeError, ValueError, FileNotFoundError) as exc:
             raise HTTPException(
                 status_code=400,
@@ -149,13 +149,9 @@ def create_app(
             ) from exc
 
     @app.post("/api/model/solve")
-    def solve_model(request: SolveModelRequest) -> dict[str, Any]:
+    def solve_model(request: dict[str, Any]) -> dict[str, Any]:
         try:
-            return ui_session.solve_model(
-                role=request.role,
-                compile_kwargs=request.compile_kwargs,
-                solve_kwargs=request.solve_kwargs,
-            )
+            return ui_session.solve_model(**cast(SolveModelRequest, request))
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(
                 status_code=400,
@@ -173,17 +169,11 @@ def create_app(
             ) from exc
 
     @app.post("/api/run/sim")
-    def run_simulation(request: SimRunRequest) -> dict[str, Any]:
+    def run_simulation(request: dict[str, Any]) -> dict[str, Any]:
         try:
-            return ui_session.run_simulation(
-                role=request.role,
-                T=request.T,
-                observables=request.observables,
-                shock_scale=request.shock_scale,
-                shocks=request.shocks,
-                shock_generation=request.shock_generation,
-                shock_params=request.shock_params,
-            )
+            role = request["role"]
+            spec = SimSpec.from_dict(request["spec"])
+            return ui_session.run_simulation_spec(role, spec)
         except (KeyError, ValueError) as exc:
             raise HTTPException(
                 status_code=400,
@@ -191,13 +181,9 @@ def create_app(
             ) from exc
 
     @app.post("/api/code/submit")
-    def submit_function(request: SubmitFunctionRequest) -> dict[str, Any]:
+    def submit_function(request: dict[str, Any]) -> dict[str, Any]:
         try:
-            return ui_session.submit_function(
-                role=request.role,
-                code=request.code,
-                kind=request.kind,
-            )
+            return ui_session.submit_function(**cast(SubmitFunctionRequest, request))
         except (SyntaxError, ValueError) as exc:
             raise HTTPException(
                 status_code=400,

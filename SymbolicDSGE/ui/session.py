@@ -7,7 +7,7 @@ import io
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Mapping, Sequence, cast
+from typing import Any, Mapping, cast
 
 # Set non-interactive backend before any user code can import pyplot.
 try:
@@ -19,22 +19,17 @@ except Exception:
 
 import numpy as np
 from numpy.typing import NDArray
-from sympy import Symbol
 
 from ..core import DSGESolver, ModelParser
 from ..core.compiled_model import CompiledModel
 from ..core.config import ModelConfig
-from ..core.shock.generators import Shock
 from ..core.solved_model.base import SolvedModel
 from ..kalman.config import KalmanConfig
 
 from .schemas import (
-    ArrayEnvelope,
     EstimationRunRequest,
     FunctionKind,
     Role,
-    ShockGenerationRequest,
-    ShockParamUpdate,
     WorkspaceTab,
 )
 from ..bundle.manifest import SimSpec
@@ -46,7 +41,6 @@ from .estimation import (
     serialize_estimation_result,
 )
 from .serializers import (
-    decode_array,
     empty_model_summary,
     encode_named_arrays,
     summarize_parsed_model,
@@ -272,36 +266,6 @@ class UISession:
         if slot.raw_yaml is not None:
             summary["raw_yaml"] = slot.raw_yaml
         return summary
-
-    def run_simulation(
-        self,
-        *,
-        role: Role,
-        T: int,
-        observables: bool,
-        shock_scale: float,
-        shocks: Mapping[str, ArrayEnvelope] | None = None,
-        shock_generation: ShockGenerationRequest | None = None,
-        shock_params: ShockParamUpdate | None = None,
-    ) -> dict[str, Any]:
-        slot = self._slot(role)
-        if slot.solved is None:
-            raise ValueError(f"Role '{role}' does not have a solved model.")
-        if shock_params is not None:
-            self._apply_shock_params(slot, shock_params)
-        shock_arrays = self._decode_shocks(shocks)
-        generated_shocks = self._generate_shocks(
-            slot=slot,
-            generation=shock_generation,
-            raw_shocks=shock_arrays,
-        )
-        sim = slot.solved.sim(
-            T=T,
-            shocks=generated_shocks,
-            shock_scale=shock_scale,
-            observables=observables,
-        )
-        return self._record_sim_run(role=role, sim=sim, T=T, observables=observables)
 
     def _record_sim_run(
         self, *, role: Role, sim: Any, T: int, observables: bool
@@ -608,93 +572,3 @@ class UISession:
             return ModelParser(tmp_path)
         finally:
             tmp_path.unlink(missing_ok=True)
-
-    @staticmethod
-    def _decode_shocks(
-        shocks: Mapping[str, ArrayEnvelope] | None,
-    ) -> dict[str, NDArray[np.float64]]:
-        if shocks is None:
-            return {}
-        return {name: decode_array(envelope) for name, envelope in shocks.items()}
-
-    @staticmethod
-    def _apply_shock_params(slot: ModelSlot, params: ShockParamUpdate) -> None:
-        if slot.model_config is None:
-            raise ValueError("Cannot update shock parameters before loading a model.")
-        conf = slot.model_config
-        for shock_name, value in params.std.items():
-            shock = Symbol(shock_name)
-            if shock not in conf.calibration.shock_std:
-                raise ValueError(f"Unknown shock std parameter for '{shock_name}'.")
-            param = conf.calibration.shock_std[shock]
-            conf.calibration.parameters[param] = np.float64(value)
-
-        for pair_key, value in params.corr.items():
-            pair = _parse_corr_pair(pair_key)
-            if pair not in conf.calibration.shock_corr:
-                raise ValueError(
-                    f"Unknown shock correlation parameter for '{pair_key}'."
-                )
-            param = conf.calibration.shock_corr[pair]
-            conf.calibration.parameters[param] = np.float64(value)
-
-    @staticmethod
-    def _generate_shocks(
-        *,
-        slot: ModelSlot,
-        generation: ShockGenerationRequest | None,
-        raw_shocks: Mapping[str, NDArray[np.float64]],
-    ) -> dict[str | Sequence[str], NDArray[np.float64] | Shock]:
-        """The shock spec a simulation takes, as unresolved specs.
-
-        The horizon is the simulation's to supply. The specs travel unresolved
-        and :func:`resolve_shock_plan` binds them to ``T`` once.
-        """
-        out: dict[str | Sequence[str], NDArray[np.float64] | Shock] = {
-            name: value for name, value in raw_shocks.items()
-        }
-        if generation is None or slot.solved is None:
-            return out
-
-        conf = slot.solved.config
-        # A spec is keyed by the shock, not by the variable the shock drives.
-        pending = [str(shock) for shock in conf.shocks if str(shock) not in raw_shocks]
-        if not pending:
-            return out
-
-        seed = generation.seed
-        if generation.dist in {"norm", "t"} and len(pending) > 1:
-            key = tuple(pending)
-            dist_kwargs: dict[str, Any]
-            if generation.dist == "t":
-                dist_kwargs = {
-                    "loc": [generation.loc] * len(pending),
-                    "df": generation.df,
-                }
-            else:
-                dist_kwargs = {"mean": [generation.loc] * len(pending)}
-            out[key] = Shock(
-                dist=generation.dist,
-                seed=seed,
-                dist_kwargs=dist_kwargs,
-            )
-            return out
-
-        for i, name in enumerate(pending):
-            uni_kwargs: dict[str, float] = {"loc": generation.loc}
-            if generation.dist == "t":
-                uni_kwargs["df"] = generation.df
-            shock_seed = None if seed is None else seed + i
-            out[name] = Shock(
-                dist=generation.dist,
-                seed=shock_seed,
-                dist_kwargs=uni_kwargs,
-            )
-        return out
-
-
-def _parse_corr_pair(pair_key: str) -> frozenset[Symbol]:
-    parts = [part.strip() for part in pair_key.split(",") if part.strip()]
-    if len(parts) != 2:
-        raise ValueError("Correlation keys must have the form 'shock_a,shock_b'.")
-    return frozenset(Symbol(part) for part in parts)

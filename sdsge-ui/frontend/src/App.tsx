@@ -24,7 +24,6 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, Dispatch, PointerEvent, SetStateAction } from "react";
 import {
   decodeArray,
-  encodeArray,
   getSession,
   loadYamlContent,
   loadYamlPath,
@@ -41,16 +40,16 @@ import { OutputWorkspace } from "./OutputWorkspace";
 import { EstimationView } from "./EstimationView";
 import { PanelWorkspace } from "./PanelWorkspace";
 import type { PanelDef } from "./PanelWorkspace";
+import { ShockRegistryEditor } from "./shocks/ShockRegistryEditor";
+import { useShockRegistry } from "./shocks/useShockRegistry";
+import type { ShockRegistryState } from "./shocks/useShockRegistry";
 import type {
   ModelSummary,
   Role,
   SessionSummary,
-  ShockCorrSpec,
-  ShockDistribution,
-  ShockGeneration,
-  ShockParamUpdate,
-  ShockSpec,
+  ShockEntry,
   SimResult,
+  SimSpecWire,
 } from "./types";
 
 ChartJS.register(
@@ -78,7 +77,6 @@ const SERIES_COLORS = [
 const MCPipelineView = lazy(() => import("./mc/MCPipelineView"));
 
 type View = "builder" | "spec" | "outputs" | "estimation" | "mc";
-type ShockMode = "raw" | "generated";
 
 export default function App() {
   const [session, setSession] = useState<SessionSummary | null>(null);
@@ -87,17 +85,15 @@ export default function App() {
   const [content, setContent] = useState("");
   const [linearize, setLinearize] = useState(false);
   const [simT, setSimT] = useState(100);
+  const [shockScale, setShockScale] = useState(1);
   const [includeObs, setIncludeObs] = useState(true);
+  // Initial levels as typed, keyed by variable. Text rather than numbers so a
+  // half-entered value stays as written, and blank stays distinct from zero: a
+  // variable the dict omits starts at its steady state, which zero would not.
+  const [x0Text, setX0Text] = useState<Record<string, string>>({});
   const [result, setResult] = useState<SimResult | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [shockInputs, setShockInputs] = useState<Record<string, string>>({});
-  const [shockMode, setShockMode] = useState<ShockMode>("generated");
-  const [shockDist, setShockDist] = useState<ShockDistribution>("norm");
-  const [shockSeed, setShockSeed] = useState("0");
-  const [shockLoc, setShockLoc] = useState("0");
-  const [shockDf, setShockDf] = useState("5");
-  const [shockStdParams, setShockStdParams] = useState<Record<string, string>>({});
-  const [shockCorrParams, setShockCorrParams] = useState<Record<string, string>>({});
+  const [simShocks, setSimShocks] = useState<ShockEntry[] | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [view, setView] = useState<View>(initialView);
   const [message, setMessage] = useState("");
@@ -108,14 +104,25 @@ export default function App() {
   const [mcMounted, setMcMounted] = useState(() => initialView() === "mc");
 
   const activeModel = session?.models[role] ?? { role, loaded: false, solved: false };
-  const shockSpecs = useMemo(
-    () => activeModel.shock_specs ?? [],
-    [activeModel.shock_specs],
+  const shockNames = useMemo(
+    () => activeModel.shocks ?? [],
+    [activeModel.shocks],
   );
-  const shockCorrSpecs = useMemo(
-    () => activeModel.shock_corr_specs ?? [],
-    [activeModel.shock_corr_specs],
+  const variables = useMemo(
+    () => activeModel.variables ?? [],
+    [activeModel.variables],
   );
+  // The simulation's shocks, edited through the same panel the Monte Carlo
+  // simulation step uses. The list is component state rather than anything the
+  // session holds, which is what the tab's shock form was too.
+  const registry = useShockRegistry(simShocks, setSimShocks);
+  // An entry names one model's declared innovations, and the other model need
+  // not declare them, so switching role drops the list rather than carrying a
+  // spec the new model cannot run.
+  useEffect(() => {
+    setSimShocks(null);
+    setX0Text({});
+  }, [role]);
   const graphSeries = useMemo(
     () =>
       result?.series.filter(
@@ -205,32 +212,6 @@ export default function App() {
     setSelected(graphSeries.map((series) => series.name));
   }, [result, graphSeries]);
 
-  useEffect(() => {
-    setShockInputs((current) => {
-      const next: Record<string, string> = {};
-      for (const spec of shockSpecs) {
-        next[spec.shock] = current[spec.shock] ?? "";
-      }
-      return next;
-    });
-  }, [shockSpecs]);
-
-  useEffect(() => {
-    const next: Record<string, string> = {};
-    for (const spec of shockSpecs) {
-      next[spec.shock] = String(spec.std_value ?? 1.0);
-    }
-    setShockStdParams(next);
-  }, [shockSpecs]);
-
-  useEffect(() => {
-    const next: Record<string, string> = {};
-    for (const spec of shockCorrSpecs) {
-      next[spec.key] = String(spec.corr_value ?? 0.0);
-    }
-    setShockCorrParams(next);
-  }, [shockCorrSpecs]);
-
   const chartData = useMemo(() => {
     const series = graphSeries.filter((item) => selected.includes(item.name));
     let maxLen = 0;
@@ -253,53 +234,23 @@ export default function App() {
     };
   }, [graphSeries, selected]);
 
-  function buildShockPayload(): Record<string, ReturnType<typeof encodeArray>> {
-    const payload: Record<string, ReturnType<typeof encodeArray>> = {};
-    for (const spec of shockSpecs) {
-      const raw = shockInputs[spec.shock]?.trim();
-      if (!raw) continue;
-      const values = raw
-        .split(/[\s,;]+/)
-        .filter(Boolean)
-        .map((value) => Number(value));
-      if (values.some((value) => !Number.isFinite(value))) {
-        throw new Error(`Shock path for ${spec.shock} contains a non-numeric value.`);
+  // Only the variables someone typed a level for travel. The rest are omitted,
+  // which the library reads as the steady state, and an all-blank grid posts
+  // null so the run starts from the steady state throughout. Reading the model's
+  // variable list rather than the form's keys leaves a level typed against an
+  // earlier model inert instead of sending an unknown name.
+  function buildX0(): Record<string, number> | null {
+    const levels: Record<string, number> = {};
+    for (const name of variables) {
+      const raw = (x0Text[name] ?? "").trim();
+      if (raw === "") continue;
+      const value = Number(raw);
+      if (!Number.isFinite(value)) {
+        throw new Error(`Initial level for ${name} is not a number.`);
       }
-      if (values.length !== simT) {
-        throw new Error(
-          `Shock path for ${spec.shock} has ${values.length} values; expected ${simT}.`,
-        );
-      }
-      payload[spec.shock] = encodeArray(new Float64Array(values));
+      levels[name] = value;
     }
-    return payload;
-  }
-
-  function buildShockParams(): ShockParamUpdate {
-    const std: Record<string, number> = {};
-    const corr: Record<string, number> = {};
-    for (const spec of shockSpecs) {
-      std[spec.shock] = parseFinite(
-        shockStdParams[spec.shock] ?? String(spec.std_value ?? 1.0),
-        `std for ${spec.shock}`,
-      );
-    }
-    for (const spec of shockCorrSpecs) {
-      corr[spec.key] = parseFinite(
-        shockCorrParams[spec.key] ?? String(spec.corr_value ?? 0.0),
-        `corr for ${spec.key}`,
-      );
-    }
-    return { std, corr };
-  }
-
-  function buildShockGeneration(): ShockGeneration {
-    return {
-      dist: shockDist,
-      seed: shockSeed.trim() === "" ? null : parseInteger(shockSeed, "seed"),
-      loc: parseFinite(shockLoc, "loc"),
-      df: parseFinite(shockDf, "df"),
-    };
+    return Object.keys(levels).length === 0 ? null : levels;
   }
 
   function startSidebarResize(event: PointerEvent<HTMLDivElement>) {
@@ -486,24 +437,8 @@ export default function App() {
           role={role}
           theme={theme}
           activeModel={activeModel}
-          shockSpecs={shockSpecs}
-          shockCorrSpecs={shockCorrSpecs}
-          shockMode={shockMode}
-          setShockMode={setShockMode}
-          shockDist={shockDist}
-          setShockDist={setShockDist}
-          shockSeed={shockSeed}
-          setShockSeed={setShockSeed}
-          shockLoc={shockLoc}
-          setShockLoc={setShockLoc}
-          shockDf={shockDf}
-          setShockDf={setShockDf}
-          shockInputs={shockInputs}
-          setShockInputs={setShockInputs}
-          shockStdParams={shockStdParams}
-          setShockStdParams={setShockStdParams}
-          shockCorrParams={shockCorrParams}
-          setShockCorrParams={setShockCorrParams}
+          shockNames={shockNames}
+          registry={registry}
         />
         <OutputsView
           hidden={view !== "outputs"}
@@ -511,18 +446,21 @@ export default function App() {
           activeModel={activeModel}
           simT={simT}
           setSimT={setSimT}
+          shockScale={shockScale}
+          setShockScale={setShockScale}
+          x0Text={x0Text}
+          setX0Text={setX0Text}
           includeObs={includeObs}
           setIncludeObs={setIncludeObs}
           runSimulationAction={() =>
             runAction(async () => {
-              const sim = await runSimulation(
-                role,
-                simT,
-                includeObs,
-                shockMode === "raw" ? buildShockPayload() : undefined,
-                shockMode === "generated" ? buildShockGeneration() : undefined,
-                buildShockParams(),
-              );
+              const sim = await runSimulation(role, {
+                T: simT,
+                x0: buildX0(),
+                shock_scale: shockScale,
+                observables: includeObs,
+                shocks: simShocks,
+              } satisfies SimSpecWire);
               setResult(sim);
             }, "Simulation complete.")
           }
@@ -632,47 +570,15 @@ function SpecView({
   role,
   theme,
   activeModel,
-  shockSpecs,
-  shockCorrSpecs,
-  shockMode,
-  setShockMode,
-  shockDist,
-  setShockDist,
-  shockSeed,
-  setShockSeed,
-  shockLoc,
-  setShockLoc,
-  shockDf,
-  setShockDf,
-  shockInputs,
-  setShockInputs,
-  shockStdParams,
-  setShockStdParams,
-  shockCorrParams,
-  setShockCorrParams,
+  shockNames,
+  registry,
 }: {
   hidden?: boolean;
   role: Role;
   theme: "light" | "dark";
   activeModel: ModelSummary;
-  shockSpecs: ShockSpec[];
-  shockCorrSpecs: ShockCorrSpec[];
-  shockMode: ShockMode;
-  setShockMode: Dispatch<SetStateAction<ShockMode>>;
-  shockDist: ShockDistribution;
-  setShockDist: Dispatch<SetStateAction<ShockDistribution>>;
-  shockSeed: string;
-  setShockSeed: Dispatch<SetStateAction<string>>;
-  shockLoc: string;
-  setShockLoc: Dispatch<SetStateAction<string>>;
-  shockDf: string;
-  setShockDf: Dispatch<SetStateAction<string>>;
-  shockInputs: Record<string, string>;
-  setShockInputs: Dispatch<SetStateAction<Record<string, string>>>;
-  shockStdParams: Record<string, string>;
-  setShockStdParams: Dispatch<SetStateAction<Record<string, string>>>;
-  shockCorrParams: Record<string, string>;
-  setShockCorrParams: Dispatch<SetStateAction<Record<string, string>>>;
+  shockNames: string[];
+  registry: ShockRegistryState;
 }) {
   const overviewPanels: PanelDef[] = [
     {
@@ -701,113 +607,16 @@ function SpecView({
       scrollable: true,
       content: (
         <>
-          <div className="shock-controls">
-            <label>
-              Source
-              <select
-                value={shockMode}
-                onChange={(event) => setShockMode(event.target.value as ShockMode)}
-              >
-                <option value="generated">Shock</option>
-                <option value="raw">Raw</option>
-              </select>
-            </label>
-
-            {shockMode === "generated" && (
-              <>
-                <label>
-                  Distribution
-                  <select
-                    value={shockDist}
-                    onChange={(event) =>
-                      setShockDist(event.target.value as ShockDistribution)
-                    }
-                  >
-                    <option value="norm">normal</option>
-                    <option value="t">student-t</option>
-                    <option value="uni">uniform</option>
-                  </select>
-                </label>
-                <label className="shock-num">
-                  Seed
-                  <input
-                    value={shockSeed}
-                    onChange={(event) => setShockSeed(event.target.value)}
-                  />
-                </label>
-                <label className="shock-num">
-                  Loc
-                  <input
-                    value={shockLoc}
-                    onChange={(event) => setShockLoc(event.target.value)}
-                  />
-                </label>
-                <label className="shock-num">
-                  DF
-                  <input
-                    value={shockDf}
-                    disabled={shockDist !== "t"}
-                    onChange={(event) => setShockDf(event.target.value)}
-                  />
-                </label>
-              </>
-            )}
-          </div>
-
-          {shockMode === "raw" ? (
-            <div className="param-grid">
-              {shockSpecs.length === 0 ? (
-                <span className="muted">none</span>
-              ) : (
-                shockSpecs.map((spec) => (
-                  <label key={spec.shock}>
-                    {spec.shock}
-                    <textarea
-                      className="shock-input"
-                      value={shockInputs[spec.shock] ?? ""}
-                      onChange={(event) =>
-                        setShockInputs((current) => ({
-                          ...current,
-                          [spec.shock]: event.target.value,
-                        }))
-                      }
-                      placeholder="0 0 1 0"
-                    />
-                  </label>
-                ))
-              )}
-            </div>
-          ) : (
-            <div className="param-grid">
-              {shockSpecs.map((spec) => (
-                <label key={spec.shock}>
-                  {spec.shock} std {spec.std_param ? `(${spec.std_param})` : ""}
-                  <input
-                    value={shockStdParams[spec.shock] ?? ""}
-                    onChange={(event) =>
-                      setShockStdParams((current) => ({
-                        ...current,
-                        [spec.shock]: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-              ))}
-              {shockCorrSpecs.map((spec) => (
-                <label key={spec.key}>
-                  {spec.key} corr ({spec.corr_param})
-                  <input
-                    value={shockCorrParams[spec.key] ?? ""}
-                    onChange={(event) =>
-                      setShockCorrParams((current) => ({
-                        ...current,
-                        [spec.key]: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-              ))}
-            </div>
+          <ShockRegistryEditor
+            role={role}
+            shockNames={shockNames}
+            entries={registry.entries}
+            onChange={registry.setRegistry}
+          />
+          {registry.error !== "" && (
+            <span className="status error shock-registry-error">
+              {registry.error}
+            </span>
           )}
         </>
       ),
@@ -874,6 +683,10 @@ function OutputsView({
   activeModel,
   simT,
   setSimT,
+  shockScale,
+  setShockScale,
+  x0Text,
+  setX0Text,
   includeObs,
   setIncludeObs,
   runSimulationAction,
@@ -888,6 +701,10 @@ function OutputsView({
   activeModel: ModelSummary;
   simT: number;
   setSimT: Dispatch<SetStateAction<number>>;
+  shockScale: number;
+  setShockScale: Dispatch<SetStateAction<number>>;
+  x0Text: Record<string, string>;
+  setX0Text: Dispatch<SetStateAction<Record<string, string>>>;
   includeObs: boolean;
   setIncludeObs: Dispatch<SetStateAction<boolean>>;
   runSimulationAction: () => void;
@@ -921,6 +738,15 @@ function OutputsView({
             onChange={(event) => setSimT(Number(event.target.value))}
           />
         </label>
+        <label>
+          Shock scale
+          <input
+            type="number"
+            step={0.1}
+            value={shockScale}
+            onChange={(event) => setShockScale(Number(event.target.value))}
+          />
+        </label>
         <label className="switch-row">
           <span>Observables</span>
           <input
@@ -934,6 +760,12 @@ function OutputsView({
           Simulate
         </button>
       </section>
+
+      <X0Panel
+        variables={activeModel.variables ?? []}
+        x0Text={x0Text}
+        setX0Text={setX0Text}
+      />
 
       {(result?.transform_errors ?? []).length > 0 && (
         <section className="transform-errors">
@@ -980,20 +812,53 @@ function colorForSeries(name: string): string {
   return SERIES_COLORS[Math.abs(hash) % SERIES_COLORS.length];
 }
 
-function parseFinite(value: string | undefined, label: string): number {
-  const out = Number(value);
-  if (!Number.isFinite(out)) {
-    throw new Error(`${label} must be numeric.`);
-  }
-  return out;
-}
-
-function parseInteger(value: string, label: string): number {
-  const out = Number(value);
-  if (!Number.isInteger(out)) {
-    throw new Error(`${label} must be an integer.`);
-  }
-  return out;
+function X0Panel({
+  variables,
+  x0Text,
+  setX0Text,
+}: {
+  variables: string[];
+  x0Text: Record<string, string>;
+  setX0Text: Dispatch<SetStateAction<Record<string, string>>>;
+}) {
+  const set = variables.filter((name) => (x0Text[name] ?? "").trim() !== "").length;
+  return (
+    <details className="x0-panel">
+      <summary>
+        Initial state
+        <span className="muted">
+          {set === 0 ? "steady state" : `${set} set`}
+        </span>
+      </summary>
+      {variables.length === 0 ? (
+        <span className="muted">Solve the model to set initial levels.</span>
+      ) : (
+        <>
+          <span className="muted">
+            Levels, not deviations. A variable left blank starts at its steady
+            state.
+          </span>
+          <div className="param-grid">
+            {variables.map((name) => (
+              <label key={name}>
+                {name}
+                <input
+                  type="number"
+                  value={x0Text[name] ?? ""}
+                  onChange={(event) =>
+                    setX0Text((current) => ({
+                      ...current,
+                      [name]: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </details>
+  );
 }
 
 function ModelStatus({ model }: { model: ModelSummary }) {

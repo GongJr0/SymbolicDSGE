@@ -1,9 +1,7 @@
 export type Role = "reference" | "dgp";
 
 export interface ArrayEnvelope {
-  dtype: "float64";
   shape: number[];
-  order: "C";
   data_b64: string;
 }
 
@@ -12,32 +10,7 @@ export interface NamedArray {
   array: ArrayEnvelope;
 }
 
-export interface ShockSpec {
-  shock: string;
-  std_param: string | null;
-  std_value: number | null;
-}
-
-export interface ShockCorrSpec {
-  pair: string[];
-  key: string;
-  corr_param: string;
-  corr_value: number | null;
-}
-
 export type ShockDistribution = "norm" | "t" | "uni";
-
-export interface ShockGeneration {
-  dist: ShockDistribution;
-  seed: number | null;
-  loc: number;
-  df: number;
-}
-
-export interface ShockParamUpdate {
-  std: Record<string, number>;
-  corr: Record<string, number>;
-}
 
 export interface ModelSummary {
   role: Role;
@@ -50,8 +23,7 @@ export interface ModelSummary {
   observables?: string[];
   parameters?: string[];
   parameter_values?: Record<string, number>;
-  shock_specs?: ShockSpec[];
-  shock_corr_specs?: ShockCorrSpec[];
+  shocks?: string[];
   n_state?: number;
   n_exog?: number;
   A_shape?: number[];
@@ -206,15 +178,35 @@ export interface FigureResult {
   error?: string;
 }
 
-/** A `SimSpec` as a bundle stores it. The tab's controls are two of its
- * fields, which is why the simulation slot carries no separate view. */
+/** One drawn shock family: `ShockParameters` as the library spells it. */
+export interface DrawnShock {
+  // The shocks this entry drives. An entry names one or more of them, which a
+  // JSON object cannot be keyed by, so each entry carries its own targets and a
+  // spec travels as a list.
+  target: string[];
+  dist: string;
+  seed: number | null;
+  dist_kwargs: Record<string, unknown>;
+}
+
+/** One supplied path: `ShockPathParameters`, an array of shape (T, width). */
+export interface PathShock {
+  target: string[];
+  path: number[][];
+}
+
+export type ShockEntry = DrawnShock | PathShock;
+
+/** A `SimSpec` as a bundle stores it, and as a run posts it. The tab's controls
+ * are a subset of its fields, which is why the simulation slot carries no
+ * separate view. */
 export interface SimSpecWire {
   T: number;
-  x0: number[] | null;
+  x0: Record<string, number> | number[] | null;
   observables: boolean;
   shock_scale: number;
   /** One self-describing entry per spec entry, each carrying its own `target`. */
-  shocks: Array<Record<string, unknown>> | null;
+  shocks: ShockEntry[] | null;
 }
 
 export interface SimResult {
@@ -363,16 +355,32 @@ export type MCFieldType =
   | "text_list"
   | "shock_registry";
 
-// One entry in a simulation step's shock registry: an explicit, free-form shock
-// over a chosen set of the target model's exogenous variables. `vars.length > 1`
-// is a joint (multivar) shock; the joined names form the registry key.
-export interface ShockRegistryEntry {
-  vars: string[];
+// One entry in a simulation step's shock registry, in the form the panel edits.
+// The two kinds mirror the two the spec carries, and are told apart the same
+// way: a drawn entry names a family, a path entry supplies the array. Both name
+// their own innovations under `target`, which is the spec's own field; two
+// entries may not name the same selection.
+
+/** A family drawn over the chosen innovations. `target.length > 1` is one joint
+ *  (multivar) shock, which is what lets the calibrated correlations apply. */
+export interface DrawnRegistryEntry {
+  kind: "drawn";
+  target: string[];
   dist: ShockDistribution;
   loc: number[];
   df: number;
   seed: number | null;
 }
+
+/** An array supplied for the chosen innovations, held as the `(T, width)`
+ *  matrix the spec wants rather than as the text some editor typed. */
+export interface PathRegistryEntry {
+  kind: "path";
+  target: string[];
+  path: number[][];
+}
+
+export type ShockRegistryEntry = DrawnRegistryEntry | PathRegistryEntry;
 
 export interface MCFieldSpec {
   key: string;

@@ -219,6 +219,12 @@ class MCStep:
         if self.n_retain < -1:
             raise ValueError("MCStep n_retain must be -1 (retain all) or non-negative.")
 
+        if self.op_type is OpType.POSTPROC and self.n_retain != -1:
+            raise ValueError(
+                "POSTPROC steps run in the post-loop retained traces. "
+                "`n_retain` is not applicable and must be left at its default value of -1."
+            )
+
         if (
             isinstance(self.func, PandasCustomFunc)
             and self.op_type is not OpType.POSTPROC
@@ -287,7 +293,8 @@ class MCStep:
         meta = spec.meta
         kwargs: dict[str, Any] = {**meta["kwargs"], **spec.arrays}
         if meta["step_type"] == "simulation" and "shocks" in kwargs:
-            kwargs["shocks"] = [shock_from_json(s) for s in kwargs["shocks"]]
+            if kwargs["shocks"]:
+                kwargs["shocks"] = [shock_from_json(s) for s in kwargs["shocks"]]
 
         return cls(
             name=meta["name"],

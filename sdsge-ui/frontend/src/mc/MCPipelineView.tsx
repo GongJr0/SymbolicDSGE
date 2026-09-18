@@ -231,14 +231,12 @@ function MCPipelineBuilder({
   const modelsReady =
     session?.models.reference?.solved === true && session.models.dgp?.solved === true;
 
-  // Exogenous shock variables per model role, sourced from the loaded model
+  // Declared innovation names per model role, sourced from the loaded model
   // configs (independent of the pipeline), for the simulation shock checklist.
-  const exogByRole: Record<Role, string[]> = useMemo(
+  const shockNamesByRole: Record<Role, string[]> = useMemo(
     () => ({
-      reference: (session?.models.reference?.shock_specs ?? []).map(
-        (spec) => spec.shock,
-      ),
-      dgp: (session?.models.dgp?.shock_specs ?? []).map((spec) => spec.shock),
+      reference: session?.models.reference?.shocks ?? [],
+      dgp: session?.models.dgp?.shocks ?? [],
     }),
     [session],
   );
@@ -521,7 +519,7 @@ function MCPipelineBuilder({
           theme={theme}
           producers={producers}
           availableTraces={availableTraces}
-          exogByRole={exogByRole}
+          shockNamesByRole={shockNamesByRole}
         />
       ),
     },

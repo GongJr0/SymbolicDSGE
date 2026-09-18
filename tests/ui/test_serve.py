@@ -573,7 +573,7 @@ def test_workspace_view_cannot_write_the_bundle_bound_slots() -> None:
         json={"tab": "estimation", "view": {}, "spec": {"y": []}},
     )
 
-    assert refused.status_code == 422
+    assert refused.status_code == 400
 
 
 def test_workspace_view_clears_when_set_to_null() -> None:

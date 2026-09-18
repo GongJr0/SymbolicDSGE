@@ -1,9 +1,8 @@
 """Serializable Monte Carlo pipeline specification (graph form).
 
-Stdlib dataclasses. The core ``monte_carlo`` module must stay pydantic-free
-(pydantic is only present transitively under the ``[ui]`` extra). The UI keeps its
-pydantic request models and converts via :meth:`PipelineSpec.from_dict`. This is the
-text representation a ``.sdsge`` bundle stores for the MC pipeline.
+Stdlib dataclasses. The UI converts a request body via
+:meth:`PipelineSpec.from_dict`. This is the text representation a ``.sdsge``
+bundle stores for the MC pipeline.
 """
 
 from __future__ import annotations

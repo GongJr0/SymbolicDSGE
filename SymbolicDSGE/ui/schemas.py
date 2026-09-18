@@ -2,18 +2,15 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from ..estimation.spec import PriorSpec
 
 Role = Literal["reference", "dgp"]
-ShockDistribution = Literal["norm", "t", "uni"]
 FunctionKind = Literal["array", "figure"]
 EstimationMethod = Literal["mle", "map", "mcmc"]
 WorkspaceTab = Literal["estimation", "mc"]
 
 
-class WorkspaceViewUpdate(BaseModel):
+class WorkspaceViewUpdate(TypedDict):
     """A tab's on-screen state, PUT by the client as it edits.
 
     ``view`` is opaque on purpose: it is the GUI's own shape, so a new control
@@ -22,57 +19,31 @@ class WorkspaceViewUpdate(BaseModel):
     unable to write them.
     """
 
-    model_config = ConfigDict(extra="forbid")
-
     tab: WorkspaceTab
-    view: dict[str, Any] | None = None
+    view: dict[str, Any] | None
 
 
-class ArrayEnvelope(BaseModel):
-    dtype: Literal["float64"] = "float64"
+class ArrayEnvelope(TypedDict):
     shape: list[int]
-    order: Literal["C"] = "C"
     data_b64: str
 
 
-class LoadYamlRequest(BaseModel):
-    role: Role = "reference"
-    path: str | None = None
-    content: str | None = None
+class LoadYamlRequest(TypedDict):
+    role: Role
+    path: str | None
+    content: str | None
 
 
-class SolveModelRequest(BaseModel):
-    role: Role = "reference"
-    compile_kwargs: dict[str, Any] = Field(default_factory=dict)
-    solve_kwargs: dict[str, Any] = Field(default_factory=dict)
+class SolveModelRequest(TypedDict):
+    role: Role
+    compile_kwargs: dict[str, Any]
+    solve_kwargs: dict[str, Any]
 
 
-class ShockGenerationRequest(BaseModel):
-    dist: ShockDistribution = "norm"
-    seed: int | None = 0
-    loc: float = 0.0
-    df: float = Field(default=5.0, gt=0.0)
-
-
-class ShockParamUpdate(BaseModel):
-    std: dict[str, float] = Field(default_factory=dict)
-    corr: dict[str, float] = Field(default_factory=dict)
-
-
-class SimRunRequest(BaseModel):
-    role: Role = "reference"
-    T: int = Field(gt=0)
-    observables: bool = True
-    shock_scale: float = 1.0
-    shocks: dict[str, ArrayEnvelope] | None = None
-    shock_generation: ShockGenerationRequest | None = None
-    shock_params: ShockParamUpdate | None = None
-
-
-class SubmitFunctionRequest(BaseModel):
+class SubmitFunctionRequest(TypedDict):
     role: Role
     code: str
-    kind: FunctionKind = "array"
+    kind: FunctionKind
 
 
 class EstimationParameterSpec(TypedDict):

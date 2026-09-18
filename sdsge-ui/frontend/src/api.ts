@@ -13,9 +13,8 @@ import type {
   MCStepType,
   Role,
   SessionSummary,
-  ShockGeneration,
-  ShockParamUpdate,
   SimResult,
+  SimSpecWire,
   WorkspaceTab,
 } from "./types";
 
@@ -92,22 +91,11 @@ export function solveModel(
 
 export function runSimulation(
   role: Role,
-  T: number,
-  observables: boolean,
-  shocks?: Record<string, ArrayEnvelope>,
-  shockGeneration?: ShockGeneration,
-  shockParams?: ShockParamUpdate,
+  spec: SimSpecWire,
 ): Promise<SimResult> {
   return requestJson<SimResult>("/api/run/sim", {
     method: "POST",
-    body: JSON.stringify({
-      role,
-      T,
-      observables,
-      shocks,
-      shock_generation: shockGeneration,
-      shock_params: shockParams,
-    }),
+    body: JSON.stringify({ role, spec }),
   });
 }
 
@@ -206,20 +194,6 @@ export function runMCPipeline(
       verbosity,
     }),
   });
-}
-
-export function encodeArray(values: Float64Array): ArrayEnvelope {
-  const bytes = new Uint8Array(values.buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 1) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return {
-    dtype: "float64",
-    shape: [values.length],
-    order: "C",
-    data_b64: btoa(binary),
-  };
 }
 
 export function decodeArray(envelope: ArrayEnvelope): Float64Array {
