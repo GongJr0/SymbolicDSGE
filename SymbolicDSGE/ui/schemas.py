@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from ..estimation.spec import PriorSpec
 
 Role = Literal["reference", "dgp"]
 ShockDistribution = Literal["norm", "t", "uni"]
@@ -73,40 +75,23 @@ class SubmitFunctionRequest(BaseModel):
     kind: FunctionKind = "array"
 
 
-class PriorSpec(BaseModel):
-    distribution: str = "normal"
-    parameters: dict[str, float | int] = Field(default_factory=dict)
-    transform: str = "identity"
-    transform_kwargs: dict[str, float | int] = Field(default_factory=dict)
-
-
-class EstimationParameterSpec(BaseModel):
-    name: str = Field(min_length=1)
-    estimate: bool = False
+class EstimationParameterSpec(TypedDict):
+    name: str
+    estimate: bool
     initial: float
-    lower: float | None = None
-    upper: float | None = None
-    prior: PriorSpec | None = None
+    lower: float | None
+    upper: float | None
+    prior: PriorSpec | None
 
 
-class EstimationRunRequest(BaseModel):
-    """A run request from the estimation tab.
-
-    ``routine`` arrives on the wire as ``method``, the name the frontend has
-    always posted. The alias keeps that contract while freeing ``method`` inside
-    ``method_kwargs`` to mean what the library means by it: the optimizer that
-    :meth:`Estimator.mle` and :meth:`Estimator.map` take.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    role: Role = "reference"
-    routine: EstimationMethod = Field(default="mle", alias="method")
-    y: list[list[float]] = Field(min_length=1)
-    observables: list[str] | None = None
-    parameters: list[EstimationParameterSpec] = Field(min_length=1)
-    method_kwargs: dict[str, Any] = Field(default_factory=dict)
-    compile_kwargs: dict[str, Any] = Field(default_factory=dict)
-    ss_seed: list[float] | None = None
-    posterior_point: str = "mean"
-    estimate_and_solve: bool = False
+class EstimationRunRequest(TypedDict):
+    role: Role
+    routine: EstimationMethod
+    y: list[list[float]]
+    observables: list[str] | None
+    parameters: list[EstimationParameterSpec]
+    method_kwargs: dict[str, Any]
+    compile_kwargs: dict[str, Any]
+    ss_seed: list[float] | None
+    posterior_point: str
+    estimate_and_solve: bool

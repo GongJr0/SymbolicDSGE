@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -92,9 +92,9 @@ def create_app(
         return estimation_catalog()
 
     @app.post("/api/run/estimation")
-    def run_estimation(request: EstimationRunRequest) -> dict[str, Any]:
+    def run_estimation(request: dict[str, Any]) -> dict[str, Any]:
         try:
-            return ui_session.run_estimation(request)
+            return ui_session.run_estimation(cast(EstimationRunRequest, request))
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
 

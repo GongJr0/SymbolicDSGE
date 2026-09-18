@@ -21,47 +21,64 @@ import type {
 // `Estimator.mle`/`map`/`mcmc` would run. `nDraws` has no library default.
 const DEFAULTS = {
   optimizer: "L-BFGS-B",
-  maxIter: 15000,
-  maxFun: 15000,
+  maxiter: 15000,
+  maxfun: 15000,
   m: 10,
-  maxLs: 20,
+  maxls: 20,
   factr: 1e7,
   pgtol: 1e-5,
-  fdStep: 0,
+  fd_step: 0,
   xatol: 1e-4,
   fatol: 1e-4,
-  nDraws: 1000,
-  burnIn: 1000,
+  n_draws: 1000,
+  burn_in: 1000,
   thin: 1,
-  seed: 0,
-  proposalScale: 0.1,
+  random_state: 0,
+  proposal_scale: 0.1,
   adapt: true,
-  adaptStart: 100,
-  adaptEpsilon: 1e-8,
-  posteriorPoint: "mean",
+  adapt_start: 100,
+  adapt_epsilon: 1e-8,
+  posterior_point: "mean",
   cov: true,
   jacobian: false,
-  computeMap: true,
-  covFdStepScale: 1.0,
-  covFdAbsoluteFloor: 0.1,
-  mapOptions: null as MapOptions | null,
-  proposalCov: null as number[][] | null,
+  compute_map: true,
+  cov_fd_step_scale: 1.0,
+  cov_fd_absolute_floor: 0.1,
+  map_options: null as MapOptions | null,
+  proposal_cov: null as number[][] | null,
 };
+
+//: The kwargs each routine takes, mirroring `_SAMPLER_KNOBS` and
+//: `_OPTIMIZER_KNOBS` on the server. `adapt` gates its own two, and the
+//: optimizer picks which of the last two sets applies.
+const SAMPLER_KWARGS = [
+  "n_draws",
+  "burn_in",
+  "thin",
+  "random_state",
+  "proposal_scale",
+  "adapt",
+  "compute_map",
+  "cov_fd_step_scale",
+  "cov_fd_absolute_floor",
+] as const;
+const ADAPT_KWARGS = ["adapt_start", "adapt_epsilon"] as const;
+const OPTIMIZER_KWARGS = [
+  "maxiter",
+  "maxfun",
+  "cov",
+  "cov_fd_step_scale",
+  "cov_fd_absolute_floor",
+] as const;
+const LBFGS_KWARGS = ["m", "maxls", "factr", "pgtol", "fd_step"] as const;
+const NELDER_KWARGS = ["xatol", "fatol"] as const;
 
 // What the sampler falls back to for the MAP presolve when `map_options` is
 // absent. Shares the optimizer defaults above, under the estimator's own key
 // names, since the dict reaches `run_mcmc` unmapped.
 const MAP_OPTION_DEFAULTS: Required<Omit<MapOptions, "bounds">> = {
   method: DEFAULTS.optimizer,
-  m: DEFAULTS.m,
-  maxiter: DEFAULTS.maxIter,
-  maxfun: DEFAULTS.maxFun,
-  maxls: DEFAULTS.maxLs,
-  factr: DEFAULTS.factr,
-  pgtol: DEFAULTS.pgtol,
-  fd_step: DEFAULTS.fdStep,
-  xatol: DEFAULTS.xatol,
-  fatol: DEFAULTS.fatol,
+  ...pick(DEFAULTS, [...LBFGS_KWARGS, ...NELDER_KWARGS, "maxiter", "maxfun"]),
 };
 
 // `cov_status` codes from _ckernels/estimation/estimation.h, as reasons.
@@ -70,6 +87,37 @@ const COV_STATUS_REASONS: Record<number, string> = {
   [-1801]: "the Hessian at the optimum could not be formed",
   [-1802]: "the Hessian at the optimum is not positive definite",
 };
+
+type Knobs = typeof DEFAULTS;
+
+const KNOB_KEYS = Object.keys(DEFAULTS) as (keyof Knobs)[];
+
+/** The knobs a stored view carries, over the defaults for anything it omits.
+ *
+ * A view written before a control existed, or by a bundle that could only
+ * speak to some of them, leaves the rest on their defaults rather than
+ * undefined.
+ */
+function knobsFrom(view: Partial<Knobs>): Knobs {
+  const out: Record<string, unknown> = { ...DEFAULTS };
+  for (const key of KNOB_KEYS) {
+    if (view[key] !== undefined) out[key] = view[key];
+  }
+  return out as Knobs;
+}
+
+/** The named subset of the knobs, as the kwargs a routine takes. */
+function pick<K extends keyof Knobs>(
+  knobs: Knobs,
+  keys: readonly K[],
+): Pick<Knobs, K> {
+  return Object.fromEntries(keys.map((key) => [key, knobs[key]])) as Pick<
+    Knobs,
+    K
+  >;
+}
+
+
 
 export function EstimationView({
   hidden,
@@ -85,39 +133,18 @@ export function EstimationView({
   onSessionRefresh: () => Promise<void>;
 }) {
   const [catalog, setCatalog] = useState<EstimationCatalog | null>(null);
-  const [method, setMethod] = useState<EstimationMethod>("mle");
+  const [routine, setRoutine] = useState<EstimationMethod>("mle");
   const [parameters, setParameters] = useState<EstimationParameterSpec[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [observables, setObservables] = useState("");
   const [dataVectors, setDataVectors] = useState<Record<string, string>>({});
-  const [optimizer, setOptimizer] = useState(DEFAULTS.optimizer);
-  const [maxIter, setMaxIter] = useState(DEFAULTS.maxIter);
-  const [maxFun, setMaxFun] = useState(DEFAULTS.maxFun);
-  const [m, setM] = useState(DEFAULTS.m);
-  const [maxLs, setMaxLs] = useState(DEFAULTS.maxLs);
-  const [factr, setFactr] = useState(DEFAULTS.factr);
-  const [pgtol, setPgtol] = useState(DEFAULTS.pgtol);
-  const [fdStep, setFdStep] = useState(DEFAULTS.fdStep);
-  const [xatol, setXatol] = useState(DEFAULTS.xatol);
-  const [fatol, setFatol] = useState(DEFAULTS.fatol);
-  const [nDraws, setNDraws] = useState(DEFAULTS.nDraws);
-  const [burnIn, setBurnIn] = useState(DEFAULTS.burnIn);
-  const [thin, setThin] = useState(DEFAULTS.thin);
-  const [seed, setSeed] = useState(DEFAULTS.seed);
-  const [proposalScale, setProposalScale] = useState(DEFAULTS.proposalScale);
-  const [adapt, setAdapt] = useState(DEFAULTS.adapt);
-  const [adaptStart, setAdaptStart] = useState(DEFAULTS.adaptStart);
-  const [adaptEpsilon, setAdaptEpsilon] = useState(DEFAULTS.adaptEpsilon);
-  const [posteriorPoint, setPosteriorPoint] = useState(DEFAULTS.posteriorPoint);
-  const [cov, setCov] = useState(DEFAULTS.cov);
-  const [jacobian, setJacobian] = useState(DEFAULTS.jacobian);
-  const [computeMap, setComputeMap] = useState(DEFAULTS.computeMap);
-  const [covFdStepScale, setCovFdStepScale] = useState(DEFAULTS.covFdStepScale);
-  const [covFdAbsoluteFloor, setCovFdAbsoluteFloor] = useState(
-    DEFAULTS.covFdAbsoluteFloor,
-  );
-  const [mapOptions, setMapOptions] = useState(DEFAULTS.mapOptions);
-  const [proposalCov, setProposalCov] = useState(DEFAULTS.proposalCov);
+  // Every run setting in one place. They are spelled the way the estimator
+  // takes them, so the form posts them by name and a restored run lands on them
+  // by name; splitting them into a `useState` apiece only restated the list at
+  // every site that touches the block.
+  const [knobs, setKnobs] = useState<Knobs>(DEFAULTS);
+  const setKnob = <K extends keyof Knobs>(key: K, value: Knobs[K]) =>
+    setKnobs((current) => ({ ...current, [key]: value }));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState(false);
@@ -161,7 +188,7 @@ export function EstimationView({
     const stored = viewsRef.current[role];
     const base: EstimationViewState = {
       ...DEFAULTS,
-      method: "mle",
+      routine: "mle",
       parameters: Object.entries(values).map(([name, value]) =>
         makeParameter(name, value, catalog),
       ),
@@ -185,74 +212,24 @@ export function EstimationView({
 
   function currentView(): EstimationViewState {
     return {
-      method,
+      routine,
       parameters,
       selected,
       observables,
       dataVectors,
-      optimizer,
-      maxIter,
-      maxFun,
-      m,
-      maxLs,
-      factr,
-      pgtol,
-      fdStep,
-      xatol,
-      fatol,
-      nDraws,
-      burnIn,
-      thin,
-      seed,
-      proposalScale,
-      adapt,
-      adaptStart,
-      adaptEpsilon,
-      posteriorPoint,
-      cov,
-      jacobian,
-      computeMap,
-      covFdStepScale,
-      covFdAbsoluteFloor,
-      mapOptions,
-      proposalCov,
       modeFolded,
+      ...knobs,
     };
   }
 
   function applyView(view: EstimationViewState) {
-    setMethod(view.method);
+    setRoutine(view.routine);
     setParameters(view.parameters);
     setSelected(view.selected);
     setObservables(view.observables);
     setDataVectors(view.dataVectors);
-    setOptimizer(view.optimizer);
-    setMaxIter(view.maxIter);
-    setMaxFun(view.maxFun);
-    setM(view.m);
-    setMaxLs(view.maxLs);
-    setFactr(view.factr);
-    setPgtol(view.pgtol);
-    setFdStep(view.fdStep);
-    setXatol(view.xatol);
-    setFatol(view.fatol);
-    setNDraws(view.nDraws);
-    setBurnIn(view.burnIn);
-    setThin(view.thin);
-    setSeed(view.seed);
-    setProposalScale(view.proposalScale);
-    setAdapt(view.adapt);
-    setAdaptStart(view.adaptStart);
-    setAdaptEpsilon(view.adaptEpsilon);
-    setPosteriorPoint(view.posteriorPoint);
-    setCov(view.cov);
-    setJacobian(view.jacobian);
-    setComputeMap(view.computeMap);
-    setCovFdStepScale(view.covFdStepScale);
-    setCovFdAbsoluteFloor(view.covFdAbsoluteFloor);
-    setMapOptions(view.mapOptions);
-    setProposalCov(view.proposalCov);
     setModeFolded(view.modeFolded);
+    setKnobs(knobsFrom(view));
   }
 
   useEffect(() => {
@@ -268,40 +245,15 @@ export function EstimationView({
     }, 250);
     return () => window.clearTimeout(timeout);
   }, [
-    adapt,
-    adaptEpsilon,
-    adaptStart,
-    burnIn,
-    computeMap,
-    cov,
-    covFdAbsoluteFloor,
-    covFdStepScale,
     dataVectors,
-    factr,
-    fatol,
-    fdStep,
     hydrated,
-    jacobian,
-    m,
-    mapOptions,
-    maxFun,
-    maxIter,
-    maxLs,
-    method,
+    knobs,
     modeFolded,
-    nDraws,
     observables,
-    optimizer,
     parameters,
-    pgtol,
-    posteriorPoint,
-    proposalCov,
-    proposalScale,
     role,
-    seed,
+    routine,
     selected,
-    thin,
-    xatol,
   ]);
 
   const active = parameters.find((parameter) => parameter.name === selected) ?? null;
@@ -339,44 +291,39 @@ export function EstimationView({
     try {
       const output = await runEstimation({
         role,
-        method,
+        routine,
         y: matrixFromVectors(observableNames, dataVectors),
         observables: observableNames,
         parameters,
         method_kwargs:
-          method === "mcmc"
+          routine === "mcmc"
             ? {
-                n_draws: nDraws,
-                burn_in: burnIn,
-                thin,
-                random_state: seed,
-                proposal_scale: proposalScale,
-                adapt,
-                ...(adapt
-                  ? { adapt_start: adaptStart, adapt_epsilon: adaptEpsilon }
-                  : {}),
-                compute_map: computeMap,
-                cov_fd_step_scale: covFdStepScale,
-                cov_fd_absolute_floor: covFdAbsoluteFloor,
-                ...(mapOptions === null ? {} : { map_options: mapOptions }),
-                ...(proposalCov === null ? {} : { proposal_cov: proposalCov }),
+                ...pick(knobs, SAMPLER_KWARGS),
+                ...(knobs.adapt ? pick(knobs, ADAPT_KWARGS) : {}),
+                ...(knobs.map_options === null
+                  ? {}
+                  : { map_options: knobs.map_options }),
+                ...(knobs.proposal_cov === null
+                  ? {}
+                  : { proposal_cov: knobs.proposal_cov }),
               }
             : {
-                method: optimizer,
-                maxiter: maxIter,
-                maxfun: maxFun,
-                ...(optimizer === "Nelder-Mead"
-                  ? { xatol, fatol }
-                  : { m, maxls: maxLs, factr, pgtol, fd_step: fdStep }),
-                cov,
-                cov_fd_step_scale: covFdStepScale,
-                cov_fd_absolute_floor: covFdAbsoluteFloor,
+                // The optimizer is `method` to the estimator; the view calls it
+                // `optimizer` because `method` reads as the routine on a form.
+                method: knobs.optimizer,
+                ...pick(knobs, OPTIMIZER_KWARGS),
+                ...pick(
+                  knobs,
+                  knobs.optimizer === "Nelder-Mead"
+                    ? NELDER_KWARGS
+                    : LBFGS_KWARGS,
+                ),
                 // Only MAP takes it; mle has no such parameter.
-                ...(method === "map" ? { jacobian } : {}),
+                ...(routine === "map" ? { jacobian: knobs.jacobian } : {}),
               },
         compile_kwargs: {},
         ss_seed: null,
-        posterior_point: posteriorPoint,
+        posterior_point: knobs.posterior_point,
         estimate_and_solve: estimateAndSolve,
       });
       setResult(output.result);
@@ -420,39 +367,14 @@ export function EstimationView({
   async function clearWorkspace() {
     const values = model.parameter_values ?? {};
     const names = model.observables ?? [];
-    setMethod("mle");
+    setRoutine("mle");
     setParameters(
       Object.entries(values).map(([name, value]) => makeParameter(name, value, catalog)),
     );
     setSelected(Object.keys(values)[0] ?? null);
     setObservables(names.join(", "));
     setDataVectors(Object.fromEntries(names.map((name) => [name, ""])));
-    setOptimizer(DEFAULTS.optimizer);
-    setMaxIter(DEFAULTS.maxIter);
-    setMaxFun(DEFAULTS.maxFun);
-    setM(DEFAULTS.m);
-    setMaxLs(DEFAULTS.maxLs);
-    setFactr(DEFAULTS.factr);
-    setPgtol(DEFAULTS.pgtol);
-    setFdStep(DEFAULTS.fdStep);
-    setXatol(DEFAULTS.xatol);
-    setFatol(DEFAULTS.fatol);
-    setNDraws(DEFAULTS.nDraws);
-    setBurnIn(DEFAULTS.burnIn);
-    setThin(DEFAULTS.thin);
-    setSeed(DEFAULTS.seed);
-    setProposalScale(DEFAULTS.proposalScale);
-    setAdapt(DEFAULTS.adapt);
-    setAdaptStart(DEFAULTS.adaptStart);
-    setAdaptEpsilon(DEFAULTS.adaptEpsilon);
-    setPosteriorPoint(DEFAULTS.posteriorPoint);
-    setCov(DEFAULTS.cov);
-    setJacobian(DEFAULTS.jacobian);
-    setComputeMap(DEFAULTS.computeMap);
-    setCovFdStepScale(DEFAULTS.covFdStepScale);
-    setCovFdAbsoluteFloor(DEFAULTS.covFdAbsoluteFloor);
-    setMapOptions(DEFAULTS.mapOptions);
-    setProposalCov(DEFAULTS.proposalCov);
+    setKnobs(DEFAULTS);
     setResult(null);
     setModeFolded(false);
     setWorkspaceRevision((current) => current + 1);
@@ -481,30 +403,48 @@ export function EstimationView({
               {(["mle", "map", "mcmc"] as EstimationMethod[]).map((item) => (
                 <button
                   key={item}
-                  className={method === item ? "active" : ""}
-                  onClick={() => setMethod(item)}
+                  className={routine === item ? "active" : ""}
+                  onClick={() => setRoutine(item)}
                 >
                   {item.toUpperCase()}
                 </button>
               ))}
             </div>
             <div className="estimation-method-fields">
-              {method === "mcmc" ? (
+              {routine === "mcmc" ? (
                 <>
-                  <NumberField label="Draws" value={nDraws} onChange={setNDraws} />
-                  <NumberField label="Burn-in" value={burnIn} onChange={setBurnIn} />
-                  <NumberField label="Thin" value={thin} onChange={setThin} />
-                  <NumberField label="Seed" value={seed} onChange={setSeed} />
+                  <NumberField
+                    label="Draws"
+                    value={knobs.n_draws}
+                    onChange={(value) => setKnob("n_draws", value)}
+                  />
+                  <NumberField
+                    label="Burn-in"
+                    value={knobs.burn_in}
+                    onChange={(value) => setKnob("burn_in", value)}
+                  />
+                  <NumberField
+                    label="Thin"
+                    value={knobs.thin}
+                    onChange={(value) => setKnob("thin", value)}
+                  />
+                  <NumberField
+                    label="Seed"
+                    value={knobs.random_state}
+                    onChange={(value) => setKnob("random_state", value)}
+                  />
                   <NumberField
                     label="Proposal scale"
-                    value={proposalScale}
-                    onChange={setProposalScale}
+                    value={knobs.proposal_scale}
+                    onChange={(value) => setKnob("proposal_scale", value)}
                   />
                   <label>
                     Posterior point
                     <select
-                      value={posteriorPoint}
-                      onChange={(event) => setPosteriorPoint(event.target.value)}
+                      value={knobs.posterior_point}
+                      onChange={(event) =>
+                        setKnob("posterior_point", event.target.value)
+                      }
                     >
                       {(catalog?.posterior_points ?? ["mean", "map", "last"]).map(
                         (point) => <option key={point}>{point}</option>,
@@ -515,36 +455,38 @@ export function EstimationView({
                     <span>Adapt proposal</span>
                     <input
                       type="checkbox"
-                      checked={adapt}
-                      onChange={(event) => setAdapt(event.target.checked)}
+                      checked={knobs.adapt}
+                      onChange={(event) => setKnob("adapt", event.target.checked)}
                     />
                   </label>
-                  {adapt && (
+                  {knobs.adapt && (
                     <>
                       <NumberField
                         label="Adapt start"
-                        value={adaptStart}
-                        onChange={setAdaptStart}
+                        value={knobs.adapt_start}
+                        onChange={(value) => setKnob("adapt_start", value)}
                       />
                       <NumberField
                         label="Adapt epsilon"
-                        value={adaptEpsilon}
-                        onChange={setAdaptEpsilon}
+                        value={knobs.adapt_epsilon}
+                        onChange={(value) => setKnob("adapt_epsilon", value)}
                       />
                     </>
                   )}
-                  {computeMap !== DEFAULTS.computeMap && (
+                  {knobs.compute_map !== DEFAULTS.compute_map && (
                     <SwitchField
                       label="Start from MAP"
-                      value={computeMap}
-                      onChange={setComputeMap}
+                      value={knobs.compute_map}
+                      onChange={(value) => setKnob("compute_map", value)}
                     />
                   )}
                   <CovarianceFields
-                    stepScale={covFdStepScale}
-                    absoluteFloor={covFdAbsoluteFloor}
-                    onStepScale={setCovFdStepScale}
-                    onAbsoluteFloor={setCovFdAbsoluteFloor}
+                    stepScale={knobs.cov_fd_step_scale}
+                    absoluteFloor={knobs.cov_fd_absolute_floor}
+                    onStepScale={(value) => setKnob("cov_fd_step_scale", value)}
+                    onAbsoluteFloor={(value) =>
+                      setKnob("cov_fd_absolute_floor", value)
+                    }
                   />
                 </>
               ) : (
@@ -552,8 +494,8 @@ export function EstimationView({
                   <label>
                     Optimizer
                     <select
-                      value={optimizer}
-                      onChange={(event) => setOptimizer(event.target.value)}
+                      value={knobs.optimizer}
+                      onChange={(event) => setKnob("optimizer", event.target.value)}
                     >
                       {(catalog?.optimizer_methods ?? [DEFAULTS.optimizer]).map(
                         (name) => <option key={name}>{name}</option>,
@@ -562,71 +504,97 @@ export function EstimationView({
                   </label>
                   <NumberField
                     label="Max iterations"
-                    value={maxIter}
-                    onChange={setMaxIter}
+                    value={knobs.maxiter}
+                    onChange={(value) => setKnob("maxiter", value)}
                   />
                   <NumberField
                     label="Max evaluations"
-                    value={maxFun}
-                    onChange={setMaxFun}
+                    value={knobs.maxfun}
+                    onChange={(value) => setKnob("maxfun", value)}
                   />
-                  {optimizer === "Nelder-Mead" ? (
+                  {knobs.optimizer === "Nelder-Mead" ? (
                     <>
-                      <NumberField label="xatol" value={xatol} onChange={setXatol} />
-                      <NumberField label="fatol" value={fatol} onChange={setFatol} />
+                      <NumberField
+                        label="xatol"
+                        value={knobs.xatol}
+                        onChange={(value) => setKnob("xatol", value)}
+                      />
+                      <NumberField
+                        label="fatol"
+                        value={knobs.fatol}
+                        onChange={(value) => setKnob("fatol", value)}
+                      />
                     </>
                   ) : (
                     <>
-                      <NumberField label="History size" value={m} onChange={setM} />
+                      <NumberField
+                        label="History size"
+                        value={knobs.m}
+                        onChange={(value) => setKnob("m", value)}
+                      />
                       <NumberField
                         label="Max line search"
-                        value={maxLs}
-                        onChange={setMaxLs}
+                        value={knobs.maxls}
+                        onChange={(value) => setKnob("maxls", value)}
                       />
-                      <NumberField label="factr" value={factr} onChange={setFactr} />
-                      <NumberField label="pgtol" value={pgtol} onChange={setPgtol} />
-                      <NumberField label="FD step" value={fdStep} onChange={setFdStep} />
+                      <NumberField
+                        label="factr"
+                        value={knobs.factr}
+                        onChange={(value) => setKnob("factr", value)}
+                      />
+                      <NumberField
+                        label="pgtol"
+                        value={knobs.pgtol}
+                        onChange={(value) => setKnob("pgtol", value)}
+                      />
+                      <NumberField
+                        label="FD step"
+                        value={knobs.fd_step}
+                        onChange={(value) => setKnob("fd_step", value)}
+                      />
                     </>
                   )}
-                  {cov !== DEFAULTS.cov && (
+                  {knobs.cov !== DEFAULTS.cov && (
                     <SwitchField
                       label="Standard errors"
-                      value={cov}
-                      onChange={setCov}
+                      value={knobs.cov}
+                      onChange={(value) => setKnob("cov", value)}
                     />
                   )}
-                  {method === "map" && jacobian !== DEFAULTS.jacobian && (
+                  {routine === "map" && knobs.jacobian !== DEFAULTS.jacobian && (
                     <SwitchField
                       label="Include log-jacobian"
-                      value={jacobian}
-                      onChange={setJacobian}
+                      value={knobs.jacobian}
+                      onChange={(value) => setKnob("jacobian", value)}
                     />
                   )}
                   <CovarianceFields
-                    stepScale={covFdStepScale}
-                    absoluteFloor={covFdAbsoluteFloor}
-                    onStepScale={setCovFdStepScale}
-                    onAbsoluteFloor={setCovFdAbsoluteFloor}
+                    stepScale={knobs.cov_fd_step_scale}
+                    absoluteFloor={knobs.cov_fd_absolute_floor}
+                    onStepScale={(value) => setKnob("cov_fd_step_scale", value)}
+                    onAbsoluteFloor={(value) =>
+                      setKnob("cov_fd_absolute_floor", value)
+                    }
                   />
                 </>
               )}
             </div>
-            {method === "mcmc" && computeMap && (
+            {routine === "mcmc" && knobs.compute_map && (
               <MapOptionsPanel
-                options={{ ...MAP_OPTION_DEFAULTS, ...(mapOptions ?? {}) }}
+                options={{ ...MAP_OPTION_DEFAULTS, ...(knobs.map_options ?? {}) }}
                 optimizers={catalog?.optimizer_methods ?? [DEFAULTS.optimizer]}
-                bounds={mapOptions?.bounds ?? null}
+                bounds={knobs.map_options?.bounds ?? null}
                 estimatedNames={estimatedNames}
                 onChange={(update) =>
-                  setMapOptions({ ...(mapOptions ?? {}), ...update })
+                  setKnob("map_options", { ...(knobs.map_options ?? {}), ...update })
                 }
               />
             )}
-            {method === "mcmc" && (
+            {routine === "mcmc" && (
               <ProposalCovariance
-                value={proposalCov}
+                value={knobs.proposal_cov}
                 names={estimatedNames}
-                computeMap={computeMap}
+                computeMap={knobs.compute_map}
               />
             )}
           </div>
@@ -740,7 +708,7 @@ export function EstimationView({
       content: active ? (
         <ParameterDetails
           parameter={active}
-          method={method}
+          routine={routine}
           catalog={catalog}
           result={result}
           solved={model.solved ?? false}
@@ -780,7 +748,7 @@ export function EstimationView({
 
 function ParameterDetails({
   parameter,
-  method,
+  routine,
   catalog,
   result,
   solved,
@@ -789,7 +757,7 @@ function ParameterDetails({
   onPriorChange,
 }: {
   parameter: EstimationParameterSpec;
-  method: EstimationMethod;
+  routine: EstimationMethod;
   catalog: EstimationCatalog | null;
   result: EstimationResultWire | null;
   solved: boolean;
@@ -823,7 +791,7 @@ function ParameterDetails({
           value={parameter.initial}
           onChange={(initial) => onChange({ initial })}
         />
-        {method !== "mcmc" && (
+        {routine !== "mcmc" && (
           <>
             <OptionalNumberField
               label="Lower bound"
@@ -838,7 +806,7 @@ function ParameterDetails({
           </>
         )}
       </div>
-      {method !== "mle" && prior !== null && catalog !== null && (
+      {routine !== "mle" && prior !== null && catalog !== null && (
         <>
           <h3>Prior</h3>
           <div className="estimation-form-grid">
@@ -908,7 +876,7 @@ function ParameterDetails({
         <section className="estimation-result">
           <h3>Latest Result</h3>
           <div className="estimation-result-grid">
-            <ResultValue label="Method" value={methodOf(result).toUpperCase()} />
+            <ResultValue label="Routine" value={routineOf(result).toUpperCase()} />
             <ResultValue label="Estimate" value={format(estimatedValue)} />
             {standardErrors !== undefined && (
               <ResultValue
@@ -946,7 +914,7 @@ function ParameterDetails({
               }.`}
             </span>
           )}
-          {methodOf(result) === "mcmc" && (
+          {routineOf(result) === "mcmc" && (
             <MCMCCharts
               key={`${chartRevision}:${parameter.name}`}
               chartRevision={chartRevision}
@@ -1175,10 +1143,10 @@ function CovarianceFields({
 }) {
   return (
     <>
-      {stepScale !== DEFAULTS.covFdStepScale && (
+      {stepScale !== DEFAULTS.cov_fd_step_scale && (
         <NumberField label="Cov FD scale" value={stepScale} onChange={onStepScale} />
       )}
-      {absoluteFloor !== DEFAULTS.covFdAbsoluteFloor && (
+      {absoluteFloor !== DEFAULTS.cov_fd_absolute_floor && (
         <NumberField
           label="Cov FD floor"
           value={absoluteFloor}
@@ -1238,7 +1206,7 @@ function OptionalNumberField({
  * Only the MCMC wire names itself; a point estimate is told apart by which
  * objective it carries, exactly as the emitter decides which one to write.
  */
-function methodOf(result: EstimationResultWire): EstimationMethod {
+function routineOf(result: EstimationResultWire): EstimationMethod {
   if (result.kind === "mcmc") return "mcmc";
   return result.logpost === undefined ? "mle" : "map";
 }

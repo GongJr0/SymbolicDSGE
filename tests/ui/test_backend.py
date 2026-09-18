@@ -14,6 +14,7 @@ from SymbolicDSGE.ui.estimation import (
     serialize_estimation_result,
 )
 from SymbolicDSGE.ui.mc import build_pipeline, serialize_pipeline_result
+from SymbolicDSGE.estimation.spec import PriorSpec
 from SymbolicDSGE.ui.schemas import ArrayEnvelope, EstimationParameterSpec
 from SymbolicDSGE.ui.serializers import decode_array, encode_array
 
@@ -302,19 +303,18 @@ def test_ui_backend_reports_configured_shock_correlations() -> None:
 
 def test_ui_estimation_inputs_build_scalar_priors_and_validate_selection() -> None:
     parameters = [
-        EstimationParameterSpec.model_validate(
-            {
-                "name": "beta",
-                "estimate": True,
-                "initial": 0.99,
-                "lower": 0.9,
-                "upper": 1.0,
-                "prior": {
-                    "distribution": "normal",
-                    "parameters": {"mean": 0.99, "std": 0.01},
-                    "transform": "identity",
-                },
-            }
+        EstimationParameterSpec(
+            name="beta",
+            estimate=True,
+            initial=0.99,
+            lower=0.9,
+            upper=1.0,
+            prior=PriorSpec(
+                distribution="normal",
+                parameters={"mean": 0.99, "std": 0.01},
+                transform="identity",
+                transform_kwargs={},
+            ),
         ),
         EstimationParameterSpec(name="sigma", estimate=False, initial=1.0),
     ]
@@ -329,7 +329,16 @@ def test_ui_estimation_inputs_build_scalar_priors_and_validate_selection() -> No
 
     with np.testing.assert_raises_regex(ValueError, "Select at least one parameter"):
         build_estimation_inputs(
-            [EstimationParameterSpec(name="beta", initial=0.99)],
+            [
+                EstimationParameterSpec(
+                    name="beta",
+                    estimate=False,
+                    initial=0.99,
+                    lower=None,
+                    upper=None,
+                    prior=None,
+                )
+            ],
             routine="mle",
         )
 
@@ -404,7 +413,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     monkeypatch.setattr(slot.solver, "estimate", fake_estimate)
     request = {
         "role": "reference",
-        "method": "mle",
+        "routine": "mle",
         "y": [[3.2, 0.1], [3.3, 0.2]],
         "observables": ["Infl", "Rate"],
         "parameters": [
@@ -417,6 +426,10 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
             }
         ],
         "method_kwargs": {"maxiter": 25, "method": "Nelder-Mead", "cov": True},
+        "compile_kwargs": {},
+        "ss_seed": None,
+        "posterior_point": "mean",
+        "estimate_and_solve": False,
     }
     response = client.post("/api/run/estimation", json=request)
 
@@ -1417,8 +1430,8 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
     assert "zscore" in run.json()["detail"]["message"]
 
 
-@pytest.mark.parametrize("method", ["mle", "map"])
-def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, method):
+@pytest.mark.parametrize("routine", ["mle", "map"])
+def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, routine):
     """The kwargs the form posts must bind to the method that receives them.
 
     ``DSGESolver.estimate`` declares ``**method_kwargs``, so a fake standing in
@@ -1469,7 +1482,7 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, metho
         "/api/run/estimation",
         json={
             "role": "reference",
-            "method": method,
+            "routine": routine,
             "y": [[0.1], [0.2], [0.3]],
             "observables": ["Obs"],
             "parameters": [
@@ -1489,6 +1502,10 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, metho
             ],
             # The shape EstimationView.tsx posts for mle and map.
             "method_kwargs": {"maxiter": 25},
+            "compile_kwargs": {},
+            "ss_seed": None,
+            "posterior_point": "mean",
+            "estimate_and_solve": False,
         },
     )
     assert response.status_code == 200
@@ -1499,5 +1516,5 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, metho
     forwarded = {k: v for k, v in captured.items() if k not in own}
     assert forwarded, "nothing was forwarded, so the binding below proves nothing"
 
-    target = Estimator.mle if method == "mle" else Estimator.map
+    target = Estimator.mle if routine == "mle" else Estimator.map
     inspect.signature(target).bind_partial(Estimator, **forwarded)

@@ -83,44 +83,45 @@ export interface MapOptions {
 }
 
 export interface EstimationViewState {
-  method: EstimationMethod;
+  routine: EstimationMethod;
   parameters: EstimationParameterSpec[];
   selected: string | null;
   observables: string;
   dataVectors: Record<string, string>;
+  // Every knob below is spelled the way `Estimator.mle`/`mcmc` takes it, so the
+  // form posts them without translating and a run restores them without a map.
   optimizer: string;
-  maxIter: number;
-  maxFun: number;
+  maxiter: number;
+  maxfun: number;
   m: number;
-  maxLs: number;
+  maxls: number;
   factr: number;
   pgtol: number;
-  fdStep: number;
+  fd_step: number;
   xatol: number;
   fatol: number;
-  nDraws: number;
-  burnIn: number;
+  n_draws: number;
+  burn_in: number;
   thin: number;
-  seed: number;
-  proposalScale: number;
+  random_state: number;
+  proposal_scale: number;
   adapt: boolean;
-  adaptStart: number;
-  adaptEpsilon: number;
-  posteriorPoint: string;
+  adapt_start: number;
+  adapt_epsilon: number;
+  posterior_point: string;
   // No control on a fresh form. A bundle whose run set one away from its
   // default reveals it, so what is on screen is what will run.
   cov: boolean;
   jacobian: boolean;
-  computeMap: boolean;
-  covFdStepScale: number;
-  covFdAbsoluteFloor: number;
-  // The MAP presolve's own optimizer options, passed to the sampler verbatim,
-  // so the keys are the estimator's rather than the form's. Null until
-  // touched, which leaves the estimator on its own defaults. Every field is
-  // optional: a run records only what it was given.
-  mapOptions: MapOptions | null;
+  compute_map: boolean;
+  cov_fd_step_scale: number;
+  cov_fd_absolute_floor: number;
+  // The MAP presolve's own optimizer options, passed to the sampler verbatim.
+  // Null until touched, which leaves the estimator on its own defaults. Every
+  // field is optional: a run records only what it was given.
+  map_options: MapOptions | null;
   // Restored and re-posted, but too structured for a scalar control.
-  proposalCov: number[][] | null;
+  proposal_cov: number[][] | null;
   modeFolded: boolean;
 }
 
@@ -136,10 +137,10 @@ export interface MCViewState {
    *  A bound one is recoverable from the pipeline's `source_args`; an unbound
    *  one exists nowhere else, and it is what makes its producer selectable. */
   edges: MCEdgeSpec[];
-  nRep: number;
-  nJobs: number | null;
+  n_rep: number;
+  n_jobs: number | null;
   verbosity: number;
-  failFast: boolean;
+  fail_fast: boolean;
 }
 
 /** One tab's slots on the session.
@@ -255,7 +256,10 @@ export interface EstimationParameterSpec {
 
 export interface EstimationRunRequest {
   role: Role;
-  method: EstimationMethod;
+  /** Which estimation to run. Named as the library names it, which keeps it
+   *  distinct from `method_kwargs.method`, the optimizer an mle or map run
+   *  hands to the solver. */
+  routine: EstimationMethod;
   y: number[][];
   observables: string[] | null;
   parameters: EstimationParameterSpec[];
@@ -274,7 +278,7 @@ export type EstimationResultWire = EstimationRunResult["result"];
 export interface EstimationRunResult {
   kind: "estimation";
   role: Role;
-  method: EstimationMethod;
+  routine: EstimationMethod;
   solved: boolean;
   result: {
     // Opt results (mle/map) carry no inner kind; only the mcmc wire sets it.

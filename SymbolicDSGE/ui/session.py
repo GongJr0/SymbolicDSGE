@@ -368,18 +368,18 @@ class UISession:
         )
 
     def run_estimation(self, request: EstimationRunRequest) -> dict[str, Any]:
-        slot = self._slot(request.role)
+        slot = self._slot(request["role"])
         if slot.solver is None:
-            raise ValueError(f"No model is loaded for role '{request.role}'.")
+            raise ValueError(f"No model is loaded for role '{request['role']}'.")
         if slot.compiled is None:
-            slot.compiled = slot.solver.compile(**dict(request.compile_kwargs))
+            slot.compiled = slot.solver.compile(**dict(request["compile_kwargs"]))
 
-        y = np.asarray(request.y, dtype=np.float64)
+        y = np.asarray(request["y"], dtype=np.float64)
         if y.ndim != 2:
             raise ValueError(
                 "Observed estimation data must be a two-dimensional array."
             )
-        observables = request.observables
+        observables = request["observables"]
         expected = (
             len(observables)
             if observables is not None
@@ -391,8 +391,8 @@ class UISession:
             )
 
         names, theta0, priors, bounds = build_estimation_inputs(
-            request.parameters,
-            routine=request.routine,
+            request["parameters"],
+            routine=request["routine"],
         )
         # Built before the run, not after: the spec describes the estimator
         # about to be constructed, so a prior that cannot be projected says so
@@ -411,7 +411,7 @@ class UISession:
                         if priors is not None
                         else None
                     ),
-                    ss_seed=request.ss_seed,
+                    ss_seed=request["ss_seed"],
                     x0=None,
                     jitter=0.0,
                     symmetrize=True,
@@ -419,7 +419,7 @@ class UISession:
                 ),
             )
         )
-        kwargs = dict(request.method_kwargs)
+        kwargs = dict(request["method_kwargs"])
         reserved = {
             "compiled",
             "estimated_params",
@@ -436,7 +436,7 @@ class UISession:
             raise ValueError(
                 f"Estimation method kwargs cannot override reserved arguments: {overlap}."
             )
-        if bounds is not None and request.routine in {"mle", "map"}:
+        if bounds is not None and request["routine"] in {"mle", "map"}:
             kwargs["bounds"] = bounds
         # JSON has no arrays, so a proposal covariance arrives as nested lists
         # while the sampler takes a memoryview over one.
@@ -448,18 +448,18 @@ class UISession:
         common: dict[str, Any] = {
             "compiled": slot.compiled,
             "y": y,
-            "routine": request.routine,
+            "routine": request["routine"],
             "theta0": theta0,
             "observables": observables,
             "estimated_params": names,
             "priors": priors,
-            "ss_seed": request.ss_seed,
+            "ss_seed": request["ss_seed"],
             **kwargs,
         }
         solved = False
-        if request.estimate_and_solve:
+        if request["estimate_and_solve"]:
             result, model = slot.solver.estimate_and_solve(
-                posterior_point=request.posterior_point,
+                posterior_point=request["posterior_point"],
                 **common,
             )
             slot.solved = model
@@ -470,8 +470,8 @@ class UISession:
         result_wire = serialize_estimation_result(result)
         payload: dict[str, Any] = {
             "kind": "estimation",
-            "role": request.role,
-            "method": request.routine,
+            "role": request["role"],
+            "routine": request["routine"],
             "solved": solved,
             "result": result_wire,
         }

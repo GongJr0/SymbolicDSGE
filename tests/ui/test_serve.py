@@ -337,14 +337,14 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     # The view is the pair projected into the form's own shape, per role.
     assert ws.estimation.view is not None
     view = ws.estimation.view["reference"]
-    assert view["method"] == "mcmc"  # inferred from the result type
+    assert view["routine"] == "mcmc"  # inferred from the result type
     rows = {row["name"]: row for row in view["parameters"]}
     assert rows["beta"]["estimate"] and rows["sigma"]["estimate"]
     # Observed data arrives already split into the form's per-column text.
     assert view["observables"] == "Infl, Rate"
     assert len(view["dataVectors"]["Infl"].splitlines()) == 10
     # The run's own settings come back, so re-running reproduces it.
-    assert (view["nDraws"], view["burnIn"], view["thin"]) == (20, 5, 1)
+    assert (view["n_draws"], view["burn_in"], view["thin"]) == (20, 5, 1)
 
     # A pipeline with no result: the spec is the only evidence of an MC run in
     # the bundle, so it has to carry enough for the canvas to draw the graph.
@@ -400,13 +400,13 @@ def test_prefill_restores_the_settings_a_run_was_made_with() -> None:
 
     view = build_estimation_prefill(spec, result, compiled)
 
-    assert view["method"] == "map"
+    assert view["routine"] == "map"
     assert view["optimizer"] == "Nelder-Mead"
-    assert (view["maxIter"], view["xatol"]) == (250, 1e-7)
+    assert (view["maxiter"], view["xatol"]) == (250, 1e-7)
     # Rendered no control on a fresh form; carried anyway.
     assert view["jacobian"] is True
     assert view["cov"] is False
-    assert view["covFdStepScale"] == 2.5
+    assert view["cov_fd_step_scale"] == 2.5
     # The run's own starting point, not the model's calibration.
     beta = next(row for row in view["parameters"] if row["name"] == "beta")
     assert beta["initial"] == 0.93

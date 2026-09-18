@@ -151,10 +151,10 @@ function MCPipelineBuilder({
         if (restored !== null) {
           setNodes(restored.nodes);
           setEdges(restored.edges);
-          setNRep(view?.nRep ?? 100);
-          setNJobs(view?.nJobs ?? null);
+          setNRep(view?.n_rep ?? 100);
+          setNJobs(view?.n_jobs ?? null);
           setVerbosity(view?.verbosity ?? 0);
-          setFailFast(view?.failFast ?? true);
+          setFailFast(view?.fail_fast ?? true);
         } else {
           const simulation = stepDefinition("simulation");
           if (simulation !== undefined) {
@@ -266,10 +266,10 @@ function MCPipelineBuilder({
         // Names, for the same reason, and only the pair: the rest of a React
         // Flow edge is styling this view reapplies on restore.
         edges: edges.map((edge) => ({ source: edge.source, target: edge.target })),
-        nRep,
-        nJobs,
+        n_rep: nRep,
+        n_jobs: nJobs,
         verbosity,
-        failFast,
+        fail_fast: failFast,
       }).catch((error: unknown) => {
         setNotice(error instanceof Error ? error.message : String(error));
         setNoticeError(true);
