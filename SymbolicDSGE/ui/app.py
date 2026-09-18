@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.monte_carlo.spec import pipeline_meta
 
 from .mc import (
     build_pipeline,
@@ -15,7 +16,6 @@ from .mc import (
     serialize_pipeline_result,
     validate_custom_op,
 )
-from .mc_schemas import MCCustomOpRequest, MCPipelineSpec, MCRunRequest
 from .estimation import estimation_catalog
 from .schemas import (
     EstimationRunRequest,
@@ -77,11 +77,14 @@ def create_app(
         return mc_custom_op_template()
 
     @app.post("/api/mc/custom/validate")
-    def monte_carlo_custom_validate(request: MCCustomOpRequest) -> dict[str, Any]:
-        return validate_custom_op(request.code, step_type=request.step_type)
+    def monte_carlo_custom_validate(request: dict[str, Any]) -> dict[str, Any]:
+        return validate_custom_op(
+            request["code"],
+            step_type=request.get("step_type", "transform:custom"),
+        )
 
     @app.post("/api/mc/traces")
-    def monte_carlo_traces(request: MCPipelineSpec) -> dict[str, list[str]]:
+    def monte_carlo_traces(request: dict[str, Any]) -> dict[str, list[str]]:
         return mc_available_traces(request)
 
     @app.get("/api/estimation/catalog")
@@ -96,7 +99,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
 
     @app.post("/api/mc/validate")
-    def validate_monte_carlo_pipeline(request: MCPipelineSpec) -> dict[str, Any]:
+    def validate_monte_carlo_pipeline(request: dict[str, Any]) -> dict[str, Any]:
         try:
 
             # Compile and catch.
@@ -110,21 +113,22 @@ def create_app(
             raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
 
     @app.post("/api/run/mc")
-    def run_monte_carlo_pipeline(request: MCRunRequest) -> dict[str, Any]:
+    def run_monte_carlo_pipeline(request: dict[str, Any]) -> dict[str, Any]:
         try:
+            pipeline = build_pipeline(request["pipeline"])
             result = run_pipeline(
-                request.pipeline,
+                pipeline,
                 reference=ui_session.solved_model("reference"),
                 dgp=ui_session.solved_model("dgp"),
-                n_rep=request.n_rep,
-                fail_fast=request.fail_fast,
-                n_jobs=request.n_jobs,
-                verbosity=request.verbosity,
+                n_rep=int(request.get("n_rep", 100)),
+                fail_fast=bool(request.get("fail_fast", True)),
+                n_jobs=request.get("n_jobs"),
+                verbosity=int(request.get("verbosity", 0)),
             )
             payload = serialize_pipeline_result(result)
-            # Through the core spec, so the slot matches what a bundle stores
-            # rather than the request model that happened to carry it.
-            ui_session.workspace.mc.spec = dict(request.pipeline.to_core())
+            # Off the built pipeline, not the body that described it: the slot
+            # is what a bundle stores, and only `to_spec` produces that.
+            ui_session.workspace.mc.spec = dict(pipeline_meta(pipeline.to_spec()))
             ui_session.workspace.mc.result = payload
             return payload
         except (KeyError, TypeError, ValueError) as exc:

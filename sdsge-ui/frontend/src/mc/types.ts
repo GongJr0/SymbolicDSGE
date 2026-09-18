@@ -1,11 +1,14 @@
 import type { Node } from "@xyflow/react";
-import type { MCStepCatalogItem, MCStepType } from "../types";
+import type { MCStepSpec } from "../types";
 
+/** What a canvas node carries: the step it is.
+ *
+ * Nothing sits beside it. The kind and the name are the step's own fields, the
+ * catalogue entry is looked up from the kind, and every authored value has a
+ * home on the step already, which `mc/fields` maps a form key onto.
+ */
 export interface MCNodeData extends Record<string, unknown> {
-  stepType: MCStepType;
-  name: string;
-  params: Record<string, unknown>;
-  catalog: MCStepCatalogItem;
+  step: MCStepSpec;
 }
 
 export type MCFlowNode = Node<MCNodeData, "mcStep">;

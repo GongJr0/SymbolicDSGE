@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +14,6 @@ from SymbolicDSGE.ui.estimation import (
     serialize_estimation_result,
 )
 from SymbolicDSGE.ui.mc import build_pipeline, serialize_pipeline_result
-from SymbolicDSGE.ui.mc_schemas import MCPipelineSpec
 from SymbolicDSGE.ui.schemas import ArrayEnvelope, EstimationParameterSpec
 from SymbolicDSGE.ui.serializers import decode_array, encode_array
 
@@ -1208,39 +1208,37 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
 
 
 def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
-    spec = MCPipelineSpec.model_validate(
-        as_posted(
-            {
-                "nodes": [
-                    {
-                        "id": "sim",
-                        "step_type": "simulation",
-                        "name": "datagen",
-                        "params": {
-                            "T": 8,
-                        },
+    spec = as_posted(
+        {
+            "nodes": [
+                {
+                    "id": "sim",
+                    "step_type": "simulation",
+                    "name": "datagen",
+                    "params": {
+                        "T": 8,
                     },
-                    {"id": "filter", "step_type": "filter", "name": "renamed_filter"},
-                    {
-                        "id": "test",
-                        "step_type": "breusch_pagan",
-                        "name": "diagnostic",
-                        "params": {
-                            "residuals_source": "renamed_filter",
-                            "residuals_field": "std_innov",
-                            "X_source": "datagen",
-                            "X_field": "observables",
-                            "residuals_column": [0],
-                            "X_columns": [0],
-                        },
+                },
+                {"id": "filter", "step_type": "filter", "name": "renamed_filter"},
+                {
+                    "id": "test",
+                    "step_type": "breusch_pagan",
+                    "name": "diagnostic",
+                    "params": {
+                        "residuals_source": "renamed_filter",
+                        "residuals_field": "std_innov",
+                        "X_source": "datagen",
+                        "X_field": "observables",
+                        "residuals_column": [0],
+                        "X_columns": [0],
                     },
-                ],
-                "edges": [
-                    {"source": "sim", "target": "filter"},
-                    {"source": "filter", "target": "test"},
-                ],
-            }
-        )
+                },
+            ],
+            "edges": [
+                {"source": "sim", "target": "filter"},
+                {"source": "filter", "target": "test"},
+            ],
+        }
     )
 
     pipeline = build_pipeline(spec)
@@ -1257,14 +1255,14 @@ def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
     )
     assert residuals.source_step == "renamed_filter"
 
-    missing = spec.model_copy(deep=True)
-    # The leg is what names the producer; params carry the step's own kwargs.
+    missing = copy.deepcopy(spec)
+    # The leg is what names the producer; kwargs carry the step's own arguments.
     residuals_leg = next(
         leg
-        for leg in missing.replication_steps[-1].source_args
-        if leg.arg == "residuals"
+        for leg in missing["replication_steps"][-1]["source_args"]
+        if leg["arg"] == "residuals"
     )
-    residuals_leg.source_step = "missing_filter"
+    residuals_leg["source_step"] = "missing_filter"
     with np.testing.assert_raises_regex(ValueError, "unknown producer"):
         build_pipeline(missing)
 

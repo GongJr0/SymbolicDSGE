@@ -1630,6 +1630,18 @@ button.mc-palette-tab.active .mc-palette-tab-count {
   font-size: 10px;
 }
 
+/* A supplied path is something the panel reports, not an entry it edits: the
+   dashed border says so without needing a disabled control to hint at it. */
+.mc-shock-entry-path {
+  background: #f1f5f9;
+  border-style: dashed;
+}
+
+.mc-shock-entry-path .mc-shock-badge {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .mc-shock-badge {
   background: #e0e7ff;
   border-radius: 4px;
@@ -2738,6 +2750,15 @@ button.mc-palette-tab.active .mc-palette-tab-count {
 
 .theme-dark .mc-shock-entry {
   background: #1e293b;
+}
+
+.theme-dark .mc-shock-entry-path {
+  background: #0f172a;
+}
+
+.theme-dark .mc-shock-entry-path .mc-shock-badge {
+  background: #78350f;
+  color: #fde68a;
 }
 
 .theme-dark .mc-shock-check {

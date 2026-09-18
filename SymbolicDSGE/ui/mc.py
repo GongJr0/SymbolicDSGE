@@ -1,20 +1,21 @@
 """HTTP-facing Monte-Carlo adapters.
 
-The catalogue, graph validation, and pipeline compilation now live in the core
-:mod:`SymbolicDSGE.monte_carlo` package (UI-independent). This module is a thin
-seam that accepts the pydantic request models and delegates to the core API via
-``MCPipelineSpec.to_core()``.
+The catalogue, graph validation, and pipeline compilation live in the core
+:mod:`SymbolicDSGE.monte_carlo` package (UI-independent). This module is the
+JSON boundary and nothing else: a request body arrives as untrusted data and
+leaves as library objects, which is why nothing here returns a document.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo.core import MCPipeline
-from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult
+from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult, MCStep
 from SymbolicDSGE.monte_carlo.postproc import builtin_postproc
-from SymbolicDSGE.monte_carlo.spec import PipelineSpec, StepMeta, StepSpec
+from SymbolicDSGE.monte_carlo.spec import PipelineMeta, StepMeta, StepSpec
 from SymbolicDSGE.monte_carlo.traces import _trace_keys
 from SymbolicDSGE.monte_carlo.custom_op import (
     CustomFunc,
@@ -25,8 +26,6 @@ from SymbolicDSGE.monte_carlo.custom_op import (
 from SymbolicDSGE.monte_carlo.serialize import (
     serialize_pipeline_result as serialize_pipeline_result,
 )
-
-from .mc_schemas import MCPipelineSpec, MCStepSpec
 
 #: Pre-fill for the custom-op Monaco editor. numpy is available as ``np`` inside
 #: the safe namespace, so no imports are needed (and the validator rejects them).
@@ -45,13 +44,21 @@ def mc_custom_op_template() -> dict[str, str]:
     return {"template": MC_CUSTOM_OP_TEMPLATE}
 
 
-def mc_available_traces(spec: MCPipelineSpec) -> dict[str, list[str]]:
-    """The across-rep trace keys the pipeline's producers will emit.
+def _step_meta(entry: Mapping[str, Any]) -> StepMeta:
+    """One authored step's data half, taken field by field.
 
-    Feeds the post-loop trace picker (a ``type="trace"`` field) so a POSTPROC op
-    can select which test/regression/transform producer it consumes.
+    Field by field rather than cast, so a key the client invented has nowhere to
+    land. ``code`` is dropped here: a step's source is not one of its kwargs, and
+    the step that owns it reads it in :func:`_step`.
     """
-    return {"traces": _trace_keys(spec.to_core())}
+    return StepMeta(
+        name=entry["name"],
+        op_type=entry["op_type"],
+        step_type=entry["step_type"],
+        kwargs=dict(entry.get("kwargs", {})),
+        source_args=list(entry.get("source_args", [])),
+        n_retain=int(entry.get("n_retain", -1)),
+    )
 
 
 def _custom_func_class(step_type: str) -> type[CustomFunc]:
@@ -75,47 +82,75 @@ def validate_custom_op(
     return {"valid": True, "name": func.name}
 
 
-def _step_func(step: MCStepSpec) -> Any | None:
+def _step_func(step: StepMeta, code: str = "") -> Any | None:
     """The callable a step runs, or ``None`` when its kind names none.
 
     A custom op compiles from the source the editor submitted; a built-in
     post-loop op is looked up by kind. Nothing is inferred: a step whose kind
     owns no callable keeps an empty slot, which is what the library expects.
     """
-    if step.step_type not in ("transform:custom", "postproc:custom"):
-        return builtin_postproc(step.step_type)
-    code = step.code or ""
+    if step["step_type"] not in ("transform:custom", "postproc:custom"):
+        return builtin_postproc(step["step_type"])
     if not code.strip():
-        raise ValueError(f"Custom step {step.name!r} has no source code.")
+        raise ValueError(f"Custom step {step['name']} has no source code.")
     try:
-        return _custom_func_class(step.step_type).from_source(code)
+        return _custom_func_class(step["step_type"]).from_source(code)
     except CustomOpValidationError as exc:
-        raise ValueError(f"Custom step {step.name!r}: {exc}") from exc
+        raise ValueError(f"Custom step {step['name']}: {exc}") from exc
 
 
-def build_pipeline(spec: MCPipelineSpec) -> MCPipeline:
-    """Compile a UI pipeline request into a live :class:`MCPipeline`.
+def _step(entry: Mapping[str, Any]) -> MCStep:
+    """One authored step as a live :class:`MCStep`, its source compiled in place.
 
-    The request is the pipeline as data, which is everything except the
-    callables. Pairing each step's meta with the callable its kind implies is
-    the last thing left before the library can take it.
+    The entry dies here. A step's code arrives on the step that owns it, so
+    there is no name-keyed rejoin to do and nothing downstream needs the
+    document. :meth:`MCStep.from_spec` is what reads ``kwargs["shocks"]`` back
+    into live entries, which is why the meta goes through a :class:`StepSpec`
+    rather than into the constructor.
     """
-    funcs = {step.name: _step_func(step) for step in spec.steps}
-    doc = spec.to_core()
-
-    def step_spec(meta: StepMeta) -> StepSpec:
-        return StepSpec(meta=meta, func=funcs.get(meta["name"]))
-
-    return MCPipeline.from_spec(
-        PipelineSpec(
-            replication_steps=[step_spec(m) for m in doc["replication_steps"]],
-            postproc_steps=[step_spec(m) for m in doc["postproc_steps"]],
-        )
+    meta = _step_meta(entry)
+    return MCStep.from_spec(
+        StepSpec(meta=meta, func=_step_func(meta, entry.get("code") or ""))
     )
 
 
+def build_pipeline(doc: Mapping[str, Any]) -> MCPipeline:
+    """A posted pipeline as a live :class:`MCPipeline`.
+
+    The only place JSON is crossed. The constructor orders the graph and
+    validates the sources, so a pipeline that comes back from here is one the
+    library has already accepted.
+    """
+    return MCPipeline(
+        replication_steps=[_step(entry) for entry in doc["replication_steps"]],
+        postproc_steps=[_step(entry) for entry in doc.get("postproc_steps", [])],
+    )
+
+
+def mc_available_traces(doc: Mapping[str, Any]) -> dict[str, list[str]]:
+    """The across-rep trace keys the pipeline's producers will emit.
+
+    Feeds the post-loop trace picker (a ``type="trace"`` field) so a POSTPROC op
+    can select which test/regression/transform producer it consumes. Reads the
+    steps as data instead of building them, since the picker runs while a
+    pipeline is still being authored and may not yet be constructible.
+    """
+    return {
+        "traces": _trace_keys(
+            PipelineMeta(
+                replication_steps=[
+                    _step_meta(entry) for entry in doc["replication_steps"]
+                ],
+                postproc_steps=[
+                    _step_meta(entry) for entry in doc.get("postproc_steps", [])
+                ],
+            )
+        )
+    }
+
+
 def run_pipeline(
-    spec: MCPipelineSpec,
+    pipeline: MCPipeline,
     *,
     reference: SolvedModel | None,
     dgp: SolvedModel | None,
@@ -124,10 +159,10 @@ def run_pipeline(
     n_jobs: int | None = None,
     verbosity: int = 0,
 ) -> MCPipelineResult:
-    """Validate, compile, and run a UI pipeline request (custom ops included)."""
+    """Run a built pipeline against the session's models."""
     if reference is None:
         raise ValueError("A solved reference model is required.")
-    return build_pipeline(spec).run(
+    return pipeline.run(
         reference=reference,
         dgp=dgp,
         n_rep=n_rep,

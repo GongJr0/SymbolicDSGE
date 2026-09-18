@@ -172,10 +172,15 @@ export function fetchAvailableTraces(
   });
 }
 
+/** Compile the pipeline server-side without running it.
+ *
+ * `steps` comes back in execution order, since the server names them off the
+ * pipeline it just built, and a 400 carries why it could not be.
+ */
 export function validateMCPipeline(
   pipeline: MCPipelineSpec,
-): Promise<{ valid: true; order: string[]; postprocs: string[] }> {
-  return requestJson<{ valid: true; order: string[]; postprocs: string[] }>(
+): Promise<{ valid: true; steps: string[]; postprocs: string[] }> {
+  return requestJson<{ valid: true; steps: string[]; postprocs: string[] }>(
     "/api/mc/validate",
     {
       method: "POST",

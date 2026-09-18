@@ -6,11 +6,15 @@ import { validateCustomOp } from "../api";
 import { registerPythonLsp } from "../lsp/registerPythonLsp";
 import type {
   MCFieldSpec,
+  MCStepSpec,
   MCStepType,
   Role,
   ShockDistribution,
   ShockRegistryEntry,
 } from "../types";
+import { stepDefinition } from "./catalog";
+import { getField, setField } from "./fields";
+import { shocksFromRegistry } from "./forms";
 import type { MCFlowNode, MCProducer } from "./types";
 
 // The two data-step channels; every other catalog source-field option is a
@@ -66,6 +70,10 @@ export function StepInspector({
   const [discardedPaths, setDiscardedPaths] = useState<Record<string, unknown[]>>(
     {},
   );
+  // The registry now compiles as it is edited, so a rejected entry set has to
+  // say so here; before, the same message surfaced only when the pipeline was
+  // posted. Declared above the early return, since a hook cannot be conditional.
+  const [registryError, setRegistryError] = useState("");
 
   if (node === null) {
     return (
@@ -76,6 +84,13 @@ export function StepInspector({
   }
 
   const stashedPaths = discardedPaths[node.id] ?? [];
+  const step = node.data.step;
+  const definition = stepDefinition(step.step_type);
+
+  // Every edit replaces the node's step; `mc/fields` is what knows whether a
+  // form key is a leg, a slot of the step's own, or a kwarg.
+  const putStep = (next: MCStepSpec) =>
+    onChange({ ...node, data: { ...node.data, step: next } });
 
   const isPathEntry = (entry: unknown) =>
     entry !== null && typeof entry === "object" && "path" in entry;
@@ -93,55 +108,55 @@ export function StepInspector({
     });
 
   const updateParam = (key: string, value: unknown) => {
-    onChange({
-      ...node,
-      data: {
-        ...node.data,
-        params: { ...node.data.params, [key]: value },
-      },
-    });
+    if (definition === undefined) return;
+    putStep(setField(definition, step, key, value));
   };
 
-  // Apply several param changes in one node update (a source-leg change may set
+  // Apply several field changes in one node update (a source-leg change may set
   // both the producer and its channel together).
   const updateParams = (patch: Record<string, unknown>) => {
-    onChange({
-      ...node,
-      data: {
-        ...node.data,
-        params: { ...node.data.params, ...patch },
-      },
-    });
+    if (definition === undefined) return;
+    putStep(
+      Object.entries(patch).reduce(
+        (current, [key, value]) => setField(definition, current, key, value),
+        step,
+      ),
+    );
   };
 
-  // Writing the registry replaces any bundle-serialized `shocks` list so the
-  // backend compiles from the user's explicit entries, not a stale compiled form.
-  // Reachable only once the step carries no supplied paths, since the panel is
-  // read-only while any remain, so there is nothing here left to drop.
+  // The registry compiles here rather than on the way out: a step carries
+  // shocks, and the editor commits an entry only once it is complete, so this
+  // is the first moment the entries can become the list the step holds. It
+  // replaces any bundle-serialized one, which is what the user is editing away
+  // from. Reachable only once the step carries no supplied paths, since the
+  // panel is read-only while any remain, so there is nothing left to drop.
   const setRegistry = (entries: ShockRegistryEntry[]) => {
-    const params: Record<string, unknown> = {
-      ...node.data.params,
-      shock_registry: entries,
-    };
-    delete params.shocks;
+    let shocks: unknown;
+    try {
+      shocks = shocksFromRegistry(entries);
+    } catch (error: unknown) {
+      setRegistryError(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    setRegistryError("");
     dropStash();
-    onChange({ ...node, data: { ...node.data, params } });
+    putStep({ ...step, kwargs: { ...step.kwargs, shocks } });
   };
 
   // Drop the supplied paths and keep every drawn entry, which the panel then
   // renders as an editable registry. The arrays are held in session state so the
   // step can take them back until an edit makes that meaningless.
   const discardPaths = () => {
-    const shocks = node.data.params.shocks;
+    const shocks = step.kwargs.shocks;
     if (!Array.isArray(shocks)) return;
     const paths = shocks.filter(isPathEntry);
     if (paths.length === 0) return;
     setDiscardedPaths((current) => ({ ...current, [node.id]: paths }));
-    onChange({
-      ...node,
-      data: {
-        ...node.data,
-        params: { ...node.data.params, shocks: shocks.filter((entry) => !isPathEntry(entry)) },
+    putStep({
+      ...step,
+      kwargs: {
+        ...step.kwargs,
+        shocks: shocks.filter((entry) => !isPathEntry(entry)),
       },
     });
   };
@@ -151,41 +166,53 @@ export function StepInspector({
   // stream. Restoring re-freezes the panel, which is the state discard left.
   const restorePaths = () => {
     if (stashedPaths.length === 0) return;
-    const shocks = node.data.params.shocks;
+    const shocks = step.kwargs.shocks;
     const kept = Array.isArray(shocks) ? shocks : [];
-    onChange({
-      ...node,
-      data: {
-        ...node.data,
-        params: { ...node.data.params, shocks: [...kept, ...stashedPaths] },
-      },
+    putStep({
+      ...step,
+      kwargs: { ...step.kwargs, shocks: [...kept, ...stashedPaths] },
     });
     dropStash();
   };
 
   const isCustom =
-    node.data.stepType === "transform:custom" ||
-    node.data.stepType === "postproc:custom";
+    step.step_type === "transform:custom" ||
+    step.step_type === "postproc:custom";
+
+  // The leg widget reads three fields by key, so it is handed those values
+  // rather than a bag it would have to be trusted not to rummage through.
+  const legValues = (keys: string[]): Record<string, unknown> =>
+    definition === undefined
+      ? {}
+      : Object.fromEntries(
+          keys.map((key) => [key, getField(definition, step, key)]),
+        );
+
+  // The wald moment gates which of its two target widgets renders; every other
+  // kind declares no condition and shows all of its fields.
+  const visibleFields = (definition?.fields ?? []).filter(
+    (field) =>
+      field.when.length === 0 ||
+      field.when.includes(String(step.kwargs.kind ?? "")),
+  );
 
   // Render the step's fields, folding each source binding (a `<leg>_source`
   // text field, its `<leg>_field` channel select, and an optional columns list)
   // into a single source-leg widget. The catalog emits those three
   // consecutively, so we consume them together and render the rest generically.
-  const step = node;
   const renderFields = (fields: MCFieldSpec[]): ReactNode[] => {
     const items: ReactNode[] = [];
     for (let i = 0; i < fields.length; i++) {
       const field = fields[i];
-      const key = `${step.id}:${field.key}`;
+      const key = `${node.id}:${field.key}`;
       if (field.type === "shock_registry") {
-        const targetRole = String(step.data.params.target ?? "dgp") as Role;
+        const targetRole = String(step.kwargs.target ?? "dgp") as Role;
         items.push(
           <ShockRegistryEditor
             key={key}
             target={targetRole}
             exogVars={exogByRole[targetRole] ?? []}
-            entries={registryFromParams(step.data.params)}
-            pathCount={pathsFromParams(step.data.params).length}
+            rows={shockRows(step.kwargs.shocks)}
             restorableCount={stashedPaths.length}
             onChange={setRegistry}
             onDiscardPaths={discardPaths}
@@ -204,7 +231,11 @@ export function StepInspector({
             sourceField={field}
             channelField={channel}
             columnsField={hasColumns ? columns : undefined}
-            params={step.data.params}
+            values={legValues([
+              field.key,
+              channel.key,
+              ...(hasColumns ? [columns.key] : []),
+            ])}
             producers={producers}
             onUpdate={updateParams}
           />,
@@ -216,7 +247,11 @@ export function StepInspector({
         <FieldEditor
           key={key}
           field={field}
-          value={step.data.params[field.key] ?? field.default}
+          value={
+            definition === undefined
+              ? field.default
+              : (getField(definition, step, field.key) ?? field.default)
+          }
           availableTraces={availableTraces}
           onChange={(value) => updateParam(field.key, value)}
         />,
@@ -229,8 +264,8 @@ export function StepInspector({
     <div className="mc-inspector">
       <div className="mc-inspector-title">
         <div>
-          <strong>{node.data.catalog.title}</strong>
-          <span>{node.data.catalog.description}</span>
+          <strong>{definition?.title ?? step.step_type}</strong>
+          <span>{definition?.description ?? ""}</span>
         </div>
         <button
           className="icon-button"
@@ -243,53 +278,39 @@ export function StepInspector({
       <label>
         Step name
         <input
-          value={node.data.name}
-          onChange={(event) =>
-            onChange({
-              ...node,
-              data: { ...node.data, name: event.target.value },
-            })
-          }
+          value={step.name}
+          onChange={(event) => putStep({ ...step, name: event.target.value })}
         />
       </label>
-      {node.data.catalog.category !== "postproc" && (
+      {definition?.category !== "postproc" && (
         <label>
           Retained samples
           <input
             type="number"
             min={-1}
-            value={Number(node.data.params.n_retain ?? -1)}
+            value={step.n_retain}
             onChange={(event) => updateParam("n_retain", Number(event.target.value))}
           />
         </label>
       )}
       {isCustom ? (
         <>
-          {node.data.stepType === "transform:custom" && (
-            <div className="mc-inspector-fields">
-              {renderFields(
-                node.data.catalog.fields.filter((field) =>
-                  fieldVisible(field, node.data.params),
-                ),
-              )}
-            </div>
+          {step.step_type === "transform:custom" && (
+            <div className="mc-inspector-fields">{renderFields(visibleFields)}</div>
           )}
           <CustomOpEditor
             nodeId={node.id}
-            stepType={node.data.stepType}
-            code={String(node.data.params.code ?? "")}
+            stepType={step.step_type}
+            code={step.code ?? ""}
             theme={theme}
             onChange={(value) => updateParam("code", value)}
           />
         </>
       ) : (
-        <div className="mc-inspector-fields">
-          {renderFields(
-            node.data.catalog.fields.filter((field) =>
-              fieldVisible(field, node.data.params),
-            ),
-          )}
-        </div>
+        <div className="mc-inspector-fields">{renderFields(visibleFields)}</div>
+      )}
+      {registryError !== "" && (
+        <p className="mc-inspector-error">{registryError}</p>
       )}
     </div>
   );
@@ -308,8 +329,7 @@ const DIST_LABEL: Record<ShockDistribution, string> = {
 function ShockRegistryEditor({
   target,
   exogVars,
-  entries,
-  pathCount,
+  rows,
   restorableCount,
   onChange,
   onDiscardPaths,
@@ -317,8 +337,7 @@ function ShockRegistryEditor({
 }: {
   target: Role;
   exogVars: string[];
-  entries: ShockRegistryEntry[];
-  pathCount: number;
+  rows: ShockRow[];
   restorableCount: number;
   onChange: (entries: ShockRegistryEntry[]) => void;
   onDiscardPaths: () => void;
@@ -338,10 +357,19 @@ function ShockRegistryEditor({
   // selectable, and Save replaces it in place instead of appending.
   const [editIndex, setEditIndex] = useState<number | null>(null);
 
+  // A path claims its variables as firmly as a drawn entry does, so both are
+  // read off the same rows.
   const usedVars = new Set(
-    entries.flatMap((entry, index) => (index === editIndex ? [] : entry.vars)),
+    rows.flatMap((row) =>
+      row.kind === "path"
+        ? row.vars
+        : row.entryIndex === editIndex
+          ? []
+          : row.entry.vars,
+    ),
   );
-  const frozen = pathCount > 0;
+  const entries = rows.flatMap((row) => (row.kind === "drawn" ? [row.entry] : []));
+  const frozen = rows.some((row) => row.kind === "path");
   const locFor = (name: string) => locs[name] ?? "0";
   const multivarUni = dist === "uni" && selected.length > 1;
   const multivarJoint = dist !== "uni" && selected.length > 1;
@@ -441,12 +469,11 @@ function ShockRegistryEditor({
       {frozen && (
         <div className="mc-shock-frozen">
           <span>
-            This step supplies {pathCount} shock {pathCount === 1 ? "path" : "paths"},
-            which this panel cannot edit. The drawn entries below are read-only
-            until the paths are discarded.
+            A supplied path is data this panel cannot author, so the whole list
+            is read-only while one is present.
           </span>
           <button className="secondary" onClick={onDiscardPaths}>
-            Discard {pathCount === 1 ? "path" : "paths"}
+            Discard paths
           </button>
         </div>
       )}
@@ -463,39 +490,65 @@ function ShockRegistryEditor({
           </button>
         </div>
       )}
-      {entries.length > 0 ? (
+      {rows.length > 0 ? (
         <ul className="mc-shock-list">
-          {entries.map((entry, index) => (
-            <li
-              key={entry.vars.join(",")}
-              className={`mc-shock-entry${editIndex === index ? " editing" : ""}`}
-            >
-              <button
-                className="mc-shock-entry-select"
-                title={frozen ? "Discard the supplied paths to edit" : "Edit shock"}
-                disabled={frozen || exogVars.length === 0}
-                onClick={() => startEdit(index)}
+          {rows.map((row) =>
+            row.kind === "path" ? (
+              // A path is a spec the step carries like any other, so it is a row
+              // like any other. Its array is not something a form can author,
+              // which is all that sets the row apart.
+              <li
+                key={`path:${row.index}`}
+                className="mc-shock-entry mc-shock-entry-path"
               >
                 <div className="mc-shock-entry-body">
                   <strong>
-                    {entry.vars.join(", ")}
-                    {entry.vars.length > 1 && (
+                    {row.vars.length > 0 ? row.vars.join(", ") : "(unnamed)"}
+                    {row.vars.length > 1 && (
                       <span className="mc-shock-badge">joint</span>
                     )}
+                    <span className="mc-shock-badge">path</span>
                   </strong>
-                  <span>{describeEntry(entry)}</span>
+                  <span>
+                    Supplied over {row.periods}{" "}
+                    {row.periods === 1 ? "period" : "periods"}
+                  </span>
                 </div>
-              </button>
-              <button
-                className="icon-button"
-                title={frozen ? "Discard the supplied paths to edit" : "Remove shock"}
-                disabled={frozen}
-                onClick={() => removeEntry(index)}
+              </li>
+            ) : (
+              <li
+                key={`drawn:${row.index}`}
+                className={`mc-shock-entry${
+                  editIndex === row.entryIndex ? " editing" : ""
+                }`}
               >
-                <Trash2 size={13} />
-              </button>
-            </li>
-          ))}
+                <button
+                  className="mc-shock-entry-select"
+                  title={frozen ? "Discard the supplied paths to edit" : "Edit shock"}
+                  disabled={frozen || exogVars.length === 0}
+                  onClick={() => startEdit(row.entryIndex)}
+                >
+                  <div className="mc-shock-entry-body">
+                    <strong>
+                      {row.entry.vars.join(", ")}
+                      {row.entry.vars.length > 1 && (
+                        <span className="mc-shock-badge">joint</span>
+                      )}
+                    </strong>
+                    <span>{describeEntry(row.entry)}</span>
+                  </div>
+                </button>
+                <button
+                  className="icon-button"
+                  title={frozen ? "Discard the supplied paths to edit" : "Remove shock"}
+                  disabled={frozen}
+                  onClick={() => removeEntry(row.entryIndex)}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </li>
+            ),
+          )}
         </ul>
       ) : (
         <p className="mc-shock-empty">
@@ -624,35 +677,47 @@ function describeEntry(entry: ShockRegistryEntry): string {
 // GUI-authored step carries `shock_registry`; a serialized step carries the
 // compiled `shocks` list, which we reconstruct one entry per element with no
 // invented info (`target` alone gives the variables and whether it is joint).
-function registryFromParams(
-  params: Record<string, unknown>,
-): ShockRegistryEntry[] {
-  const registry = params.shock_registry;
-  if (Array.isArray(registry) && registry.length > 0) {
-    return registry.map(normalizeEntry);
-  }
-  const shocks = params.shocks;
-  if (!Array.isArray(shocks)) return [];
-  return shocks
-    .map((value) => (value ?? {}) as Record<string, unknown>)
-    // A supplied path is data, not a family, so it has no registry form. The
-    // two entry kinds are told apart by what the entry declares: `path` is
-    // present on one and absent on the other.
-    .filter((entry) => !("path" in entry))
-    .map(entryFromShock);
-}
+// The registry as the step's compiled shocks describe it. There is no stored
+// draft to prefer: the editor holds the in-progress entry itself and commits a
+// complete one, so the step is the only record.
+/** One row of the shock panel: a drawn family, or a path supplied for it.
+ *
+ * Both are shock specs a step carries, so both are rows. `index` is the entry's
+ * place in `kwargs.shocks`, which is what an action on one row has to address;
+ * `entryIndex` is its place among the drawn ones, which is the list the editor
+ * form emits.
+ */
+type ShockRow =
+  | { kind: "drawn"; index: number; entryIndex: number; entry: ShockRegistryEntry }
+  | { kind: "path"; index: number; vars: string[]; periods: number };
 
-function normalizeEntry(raw: unknown): ShockRegistryEntry {
-  const entry = (raw ?? {}) as Record<string, unknown>;
-  const vars = Array.isArray(entry.vars) ? entry.vars.map(String) : [];
-  return {
-    vars,
-    dist: asDist(entry.dist),
-    loc: locVector(entry.loc, vars.length),
-    df: Number(entry.df ?? 5),
-    seed:
-      entry.seed === null || entry.seed === undefined ? null : Number(entry.seed),
-  };
+// The rows a step's shocks describe. A path carries an array the panel has no
+// way to render, so it reports the variables it drives and how long it is; the
+// two entry kinds are told apart by what the entry declares, since `path` is
+// present on one and absent on the other.
+function shockRows(shocks: unknown): ShockRow[] {
+  if (!Array.isArray(shocks)) return [];
+  const rows: ShockRow[] = [];
+  let entryIndex = 0;
+  shocks.forEach((value, index) => {
+    const entry = (value ?? {}) as Record<string, unknown>;
+    if ("path" in entry) {
+      rows.push({
+        kind: "path",
+        index,
+        vars: Array.isArray(entry.target) ? entry.target.map(String) : [],
+        periods: Array.isArray(entry.path) ? entry.path.length : 0,
+      });
+      return;
+    }
+    rows.push({
+      kind: "drawn",
+      index,
+      entryIndex: entryIndex++,
+      entry: entryFromShock(entry),
+    });
+  });
+  return rows;
 }
 
 // Invert `shockFor`: recover the registry entry from a serialized Shock dict.
@@ -691,14 +756,6 @@ function locVector(declared: unknown, width: number): number[] {
 // represent. Their presence freezes the panel: the drawn entries stay visible
 // and uneditable until the paths are discarded, which is what keeps a user from
 // authoring a second entry over a variable a path already drives.
-function pathsFromParams(params: Record<string, unknown>): unknown[] {
-  const shocks = params.shocks;
-  if (!Array.isArray(shocks)) return [];
-  return shocks.filter(
-    (entry) => entry !== null && typeof entry === "object" && "path" in entry,
-  );
-}
-
 function asDist(value: unknown): ShockDistribution {
   return value === "t" || value === "uni" ? value : "norm";
 }
@@ -710,19 +767,19 @@ function SourceLeg({
   sourceField,
   channelField,
   columnsField,
-  params,
+  values,
   producers,
   onUpdate,
 }: {
   sourceField: MCFieldSpec;
   channelField: MCFieldSpec;
   columnsField?: MCFieldSpec;
-  params: Record<string, unknown>;
+  values: Record<string, unknown>;
   producers: MCProducer[];
   onUpdate: (patch: Record<string, unknown>) => void;
 }) {
-  const sourceValue = String(params[sourceField.key] ?? sourceField.default ?? "");
-  const channelValue = String(params[channelField.key] ?? channelField.default ?? "");
+  const sourceValue = String(values[sourceField.key] ?? sourceField.default ?? "");
+  const channelValue = String(values[channelField.key] ?? channelField.default ?? "");
   const selected = producers.find((producer) => producer.name === sourceValue);
   const channels = channelOptionsFor(selected?.kind, channelField.options);
   // Keep a stale/unknown selection visible instead of silently dropping it.
@@ -780,7 +837,7 @@ function SourceLeg({
       {columnsField && (
         <DraftListEditor
           field={columnsField}
-          value={params[columnsField.key] ?? columnsField.default}
+          value={values[columnsField.key] ?? columnsField.default}
           onChange={(value) => onUpdate({ [columnsField.key]: value })}
         />
       )}
@@ -1023,13 +1080,6 @@ function DraftMatrixEditor({
       />
     </label>
   );
-}
-
-function fieldVisible(
-  field: MCFieldSpec,
-  params: Record<string, unknown>,
-): boolean {
-  return field.when.length === 0 || field.when.includes(String(params.kind ?? ""));
 }
 
 function parseNumberList(value: string): number[] {

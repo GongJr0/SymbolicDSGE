@@ -132,6 +132,10 @@ export interface EstimationViewState {
 export interface MCViewState {
   pipeline: MCPipelineSpec;
   positions: Record<string, { x: number; y: number }>;
+  /** The canvas connections, including any drawn before their leg was bound.
+   *  A bound one is recoverable from the pipeline's `source_args`; an unbound
+   *  one exists nowhere else, and it is what makes its producer selectable. */
+  edges: MCEdgeSpec[];
   nRep: number;
   nJobs: number | null;
   verbosity: number;
@@ -398,16 +402,18 @@ export interface MCSourceSpec {
   field: string;
   columns: number[] | null;
   burn_in: number;
-  drop_initial: boolean;
 }
 
-export interface MCNodeSpec {
-  id: string;
+export interface MCStepSpec {
+  name: string;
   op_type: string;
   step_type: MCStepType;
-  name: string;
-  params: Record<string, unknown>;
-  sources: MCSourceSpec[];
+  kwargs: Record<string, unknown>;
+  source_args: MCSourceSpec[];
+  n_retain: number;
+  /** Custom-op source. Compiled server-side into the step's callable, so it is
+   *  a sibling of `kwargs` and never one of them. */
+  code?: string;
 }
 
 export interface MCEdgeSpec {
@@ -415,18 +421,10 @@ export interface MCEdgeSpec {
   target: string;
 }
 
-// A post-loop op. Not a graph node -- no `id`/edges; it references producers by
-// trace key in `params` and runs once over the assembled traces.
-export interface MCPostprocSpec {
-  step_type: MCStepType;
-  name: string;
-  params: Record<string, unknown>;
-}
 
 export interface MCPipelineSpec {
-  nodes: MCNodeSpec[];
-  edges: MCEdgeSpec[];
-  postprocs: MCPostprocSpec[];
+  replication_steps: MCStepSpec[];
+  postproc_steps: MCStepSpec[];
 }
 
 export interface MCTraceSummary {

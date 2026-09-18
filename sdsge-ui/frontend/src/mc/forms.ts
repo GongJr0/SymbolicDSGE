@@ -1,14 +1,11 @@
-// Adapters from what the widgets produce to what a spec node carries.
+// The shock registry as the list a step carries.
 //
-// A form collects what is convenient to render: a shock registry rather than a
-// shock mapping, the wald target under whichever of two conditional fields the
-// selected moment uses, a bandwidth typed into one box. A node carries the
-// resolved values. Nothing here validates: every value is checked again during
-// lowering, the last point before the native kernels.
+// A form collects what is convenient to render, and a registry entry over
+// several variables is one joint shock. The rest of the form maps onto a step
+// field by field, which `mc/fields` does; this is the one widget whose shape
+// differs enough from its kwarg to need a pass of its own.
 
 import type { ShockRegistryEntry } from "../types";
-
-const BANDWIDTH_KEYWORDS = new Set(["andrews", "wooldridge", "auto"]);
 
 interface SerializedShock {
   // The shocks this entry drives. An entry names one or more of them, which a
@@ -87,62 +84,4 @@ export function shocksFromRegistry(
     shocks.push(shockFor(entry));
   }
   return shocks;
-}
-
-function bandwidth(value: unknown): number | string {
-  if (typeof value === "number") return value;
-  const text = String(value ?? "").trim().toLowerCase();
-  if (BANDWIDTH_KEYWORDS.has(text)) return text;
-  const parsed = Number(text);
-  if (!Number.isFinite(parsed)) {
-    throw new Error(
-      `bandwidth must be an integer or one of: ${[...BANDWIDTH_KEYWORDS]
-        .sort()
-        .join(", ")}.`,
-    );
-  }
-  return parsed;
-}
-
-// Collapse the two conditional target fields onto the single parameter the step
-// carries, and read a typed bandwidth out of its text box.
-function compileWald(params: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...params };
-  if ("target_vector" in out) {
-    out.target = out.target_vector;
-    delete out.target_vector;
-    delete out.target_matrix;
-  } else if ("target_matrix" in out) {
-    out.target = out.target_matrix;
-    delete out.target_matrix;
-  }
-  if ("bandwidth" in out) out.bandwidth = bandwidth(out.bandwidth);
-  return out;
-}
-
-function compileSimulation(
-  params: Record<string, unknown>,
-): Record<string, unknown> {
-  const out = { ...params };
-  const registry = out.shock_registry;
-  delete out.shock_registry;
-  if (out.shocks === undefined || out.shocks === null) {
-    out.shocks = Array.isArray(registry)
-      ? shocksFromRegistry(registry as ShockRegistryEntry[])
-      : null;
-  }
-  return out;
-}
-
-const COMPILERS: Record<
-  string,
-  (params: Record<string, unknown>) => Record<string, unknown>
-> = { wald: compileWald, simulation: compileSimulation };
-
-export function compileFormParams(
-  stepType: string,
-  params: Record<string, unknown>,
-): Record<string, unknown> {
-  const compiler = COMPILERS[stepType];
-  return compiler ? compiler(params) : { ...params };
 }
