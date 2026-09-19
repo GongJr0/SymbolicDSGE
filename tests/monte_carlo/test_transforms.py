@@ -1,620 +1,302 @@
-"""Tests for the built-in transform ops and their graph wiring.
+"""The built-in TRANSFORM steps: numerics, rejections, factories, persistence.
 
-Two layers:
+The transform arithmetic lives in C and the library exports no per-step runner,
+so the pipeline is the interface. One pipeline reaches all the numerics: a
+producer per kind of input, then one transform per case reading a producer
+directly. Nothing chains, which keeps every expected value a function of the
+declared input rather than of an upstream step's parameters, and lets a
+degenerate input be injected for the branches a well-behaved sample never
+enters. See ``conftest.py`` for that fixture.
 
-* Unit tests that drive each ``run_*`` transform directly with a small
-  hand-built :class:`MCContext` — fast and deterministic.
-* Graph tests that exercise the full validate -> compile path through
-  :func:`validate_pipeline_spec` / :func:`build_pipeline`, including the
-  transform auto-binding rules and chain ordering.
+The failure cases build their own pipelines, since a rejection is the result.
+The last test carries the whole thing through a bundle.
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
 
-from tests._oracles.monte_carlo import (
-    TRANSFORM_STEP_TYPES,
-    build_pipeline,
-    validate_pipeline_spec,
-)
-from tests._oracles.monte_carlo.operations.transforms import (
+from SymbolicDSGE.monte_carlo import MCPipeline, OpType
+from SymbolicDSGE.monte_carlo.step_factories import (
+    add_payload_step,
     diff_step,
     log_diff_step,
     log_step,
+    raw_model_data_step,
     rolling_mean_step,
     rolling_std_step,
     rolling_var_step,
     standardize_step,
 )
-from tests._oracles.monte_carlo.mc_constructs import MCContext, MCData, OpType
-from tests._oracles.monte_carlo.operations.transforms.ops import (
-    run_diff,
-    run_log,
-    run_log_diff,
-    run_rolling_mean,
-    run_rolling_std,
-    run_rolling_var,
-    run_standardize,
-)
-from tests._oracles.monte_carlo.spec import EdgeSpec, NodeSpec, PipelineSpec
 
-# ---- fixtures ------------------------------------------------------------
+PERIODS = 20
+COLUMNS = 2
 
 
-class _FakeSolvedModel(SimpleNamespace):
-    """Stand-in for a SolvedModel; only the attributes used by transforms."""
-
-    def __init__(self) -> None:
-        super().__init__(config=SimpleNamespace(shocks=[]))
-
-
-def _context(observables: np.ndarray) -> MCContext:
-    return MCContext(
-        rep_idx=0,
-        reference=_FakeSolvedModel(),
-        dgp=None,
-        data=MCData(states=None, observables=observables),
+def _trailing(sample, window, reduce):
+    """The reduction over every trailing ``window``, as the steps align it."""
+    return np.stack(
+        [
+            reduce(sample[i : i + window], axis=0)
+            for i in range(sample.shape[0] - window + 1)
+        ]
     )
 
 
-# ---- unit tests for the ops ---------------------------------------------
+# ---- numerics --------------------------------------------------------------
 
 
-def test_run_standardize_zero_centers_and_unit_scales_per_column() -> None:
-    obs = np.array(
-        [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0], [4.0, 40.0]], dtype=np.float64
+def test_every_declared_transform_retains_a_payload(transform_run) -> None:
+    assert set(transform_run.out) == {
+        "pos",
+        "zed",
+        "std",
+        "std_zero_var",
+        "log",
+        "log_diff",
+        "diff",
+        "rmean",
+        "rstd",
+        "rvar",
+    }
+
+
+def test_injected_payload_round_trips(transform_run) -> None:
+    np.testing.assert_allclose(transform_run.out["pos"], transform_run.positive)
+    np.testing.assert_allclose(transform_run.out["zed"], transform_run.zeros)
+
+
+def test_standardize_centers_and_scales_per_column(transform_run) -> None:
+    sample = transform_run.observables
+    np.testing.assert_allclose(
+        transform_run.out["std"],
+        (sample - sample.mean(axis=0)) / sample.std(axis=0, ddof=0),
     )
-    out = run_standardize(
-        context=_context(obs),
-        reference=_FakeSolvedModel(),
-        dgp=None,
-        rep_idx=0,
-        sample=obs,
+
+
+def test_standardize_zero_variance_column_returns_zeros(transform_run) -> None:
+    # A constant column has no scale to divide by. The step returns zeros rather
+    # than dividing and propagating NaN into everything downstream.
+    got = transform_run.out["std_zero_var"]
+    assert np.isfinite(got).all()
+    np.testing.assert_array_equal(got, np.zeros_like(got))
+
+
+def test_log_applies_elementwise(transform_run) -> None:
+    np.testing.assert_allclose(transform_run.out["log"], np.log(transform_run.positive))
+
+
+def test_log_diff_is_the_difference_of_logs(transform_run) -> None:
+    got = transform_run.out["log_diff"]
+    assert got.shape == (transform_run.periods - 1, transform_run.columns)
+    np.testing.assert_allclose(got, np.diff(np.log(transform_run.positive), axis=0))
+
+
+def test_diff_applies_the_requested_order(transform_run) -> None:
+    order = transform_run.order
+    got = transform_run.out["diff"]
+    assert got.shape == (transform_run.periods - order, transform_run.columns)
+    np.testing.assert_allclose(got, np.diff(transform_run.observables, n=order, axis=0))
+
+
+def test_rolling_mean_is_a_trailing_window(transform_run) -> None:
+    window = transform_run.window
+    got = transform_run.out["rmean"]
+    assert got.shape == (transform_run.periods - window + 1, transform_run.columns)
+    np.testing.assert_allclose(
+        got, _trailing(transform_run.observables, window, np.mean)
     )
-    np.testing.assert_allclose(out.mean(axis=0), [0.0, 0.0], atol=1e-12)
-    np.testing.assert_allclose(out.std(axis=0), [1.0, 1.0], atol=1e-12)
-    np.testing.assert_allclose(out[:, 0], out[:, 1])  # affine-equivalent columns
-
-
-def test_run_standardize_zero_std_column_returns_zeros_safely() -> None:
-    obs = np.array([[1.0, 7.0], [1.0, 8.0], [1.0, 9.0]], dtype=np.float64)
-    out = run_standardize(
-        context=_context(obs),
-        reference=_FakeSolvedModel(),
-        dgp=None,
-        rep_idx=0,
-        sample=obs,
-    )
-    np.testing.assert_allclose(out[:, 0], 0.0)
-    assert np.isfinite(out).all()
-
-
-def test_run_log_applies_elementwise_with_offset() -> None:
-    obs = np.array([[1.0, np.e], [np.e**2, np.e**3]], dtype=np.float64)
-    out = run_log(
-        context=_context(obs),
-        reference=_FakeSolvedModel(),
-        dgp=None,
-        rep_idx=0,
-        sample=obs,
-        offset=0.0,
-    )
-    np.testing.assert_allclose(out, [[0.0, 1.0], [2.0, 3.0]])
-
-
-def test_run_log_diff_drops_one_row_and_returns_log_returns() -> None:
-    obs = np.array([[1.0], [2.0], [4.0], [8.0]], dtype=np.float64)
-    out = run_log_diff(
-        context=_context(obs),
-        reference=_FakeSolvedModel(),
-        dgp=None,
-        rep_idx=0,
-        sample=obs,
-    )
-    np.testing.assert_allclose(out, np.full((3, 1), np.log(2.0)))
-
-
-def test_run_diff_supports_higher_order() -> None:
-    obs = np.array([[1.0], [3.0], [9.0], [27.0]], dtype=np.float64)
-    out = run_diff(
-        context=_context(obs),
-        reference=_FakeSolvedModel(),
-        dgp=None,
-        rep_idx=0,
-        sample=obs,
-        order=2,
-    )
-    # 1st diff: [2, 6, 18]; 2nd diff: [4, 12].
-    np.testing.assert_allclose(out, [[4.0], [12.0]])
-
-
-def test_run_diff_rejects_non_positive_order() -> None:
-    with pytest.raises(ValueError, match="order must be at least 1"):
-        run_diff(
-            context=_context(np.zeros((3, 1))),
-            reference=_FakeSolvedModel(),
-            dgp=None,
-            rep_idx=0,
-            sample=np.zeros((3, 1), dtype=np.float64),
-            order=0,
-        )
-
-
-def test_run_rolling_mean_window_3() -> None:
-    obs = np.arange(6.0, dtype=np.float64).reshape(6, 1)
-    out = run_rolling_mean(
-        context=_context(obs),
-        reference=_FakeSolvedModel(),
-        dgp=None,
-        rep_idx=0,
-        sample=obs,
-        window=3,
-    )
-    np.testing.assert_allclose(out, [[1.0], [2.0], [3.0], [4.0]])
-
-
-def test_run_rolling_std_and_var_window_3() -> None:
-    obs = np.arange(6.0, dtype=np.float64).reshape(6, 1)
-    std_out = run_rolling_std(
-        context=_context(obs),
-        reference=_FakeSolvedModel(),
-        dgp=None,
-        rep_idx=0,
-        sample=obs,
-        window=3,
-    )
-    var_out = run_rolling_var(
-        context=_context(obs),
-        reference=_FakeSolvedModel(),
-        dgp=None,
-        rep_idx=0,
-        sample=obs,
-        window=3,
-    )
-    np.testing.assert_allclose(std_out**2, var_out)
-
-
-def test_rolling_window_rejects_window_larger_than_input() -> None:
-    obs = np.zeros((3, 1), dtype=np.float64)
-    with pytest.raises(ValueError, match="exceeds input length"):
-        run_rolling_mean(
-            context=_context(obs),
-            reference=_FakeSolvedModel(),
-            dgp=None,
-            rep_idx=0,
-            sample=obs,
-            window=10,
-        )
-
-
-# ---- factory smoke tests -------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "factory, kwargs, expected_runner_kwargs",
+    "name, reduce",
     [
-        (
-            standardize_step,
-            {"source": "datagen", "field": "observables"},
-            {"ddof": 0},
-        ),
-        (
-            log_step,
-            {"source": "datagen", "field": "observables", "offset": 1.0},
-            {"offset": 1.0},
-        ),
-        (
-            log_diff_step,
-            {"source": "datagen", "field": "observables"},
-            {"offset": 0.0},
-        ),
-        (
-            diff_step,
-            {"source": "datagen", "field": "observables", "order": 1},
-            {"order": 1},
-        ),
-        (
-            rolling_mean_step,
-            {"source": "datagen", "field": "observables", "window": 5},
-            {"window": 5},
-        ),
-        (
-            rolling_std_step,
-            {
-                "source": "datagen",
-                "field": "observables",
-                "window": 5,
-            },
-            {"window": 5, "ddof": 0},
-        ),
-        (
-            rolling_var_step,
-            {"source": "datagen", "field": "observables", "window": 5},
-            {"window": 5, "ddof": 0},
-        ),
+        ("rstd", lambda z, axis: z.std(axis=axis, ddof=0)),
+        ("rvar", lambda z, axis: z.var(axis=axis, ddof=0)),
     ],
 )
-def test_transform_factories_produce_transform_mcstep(
-    factory: object, kwargs: dict, expected_runner_kwargs: dict
+def test_rolling_dispersion_is_a_trailing_window(transform_run, name, reduce) -> None:
+    window = transform_run.window
+    got = transform_run.out[name]
+    assert got.shape == (transform_run.periods - window + 1, transform_run.columns)
+    np.testing.assert_allclose(
+        got, _trailing(transform_run.observables, window, reduce)
+    )
+
+
+# ---- failure states --------------------------------------------------------
+#
+# A bad transform is rejected at one of three places, and which one is part of
+# the contract: the factory validates what it can see on its own, ``MCPipeline``
+# validates the graph, and the kernel reports the rest per replication. The
+# cases below pin each tier, and the last two pin inputs that are *not* rejected
+# so a change in that behaviour is visible rather than silent.
+
+
+def _sample(periods: int = PERIODS, columns: int = COLUMNS) -> np.ndarray:
+    return np.zeros((periods, columns), dtype=np.float64)
+
+
+def _datagen(observables: np.ndarray | None = None):
+    obs = _sample() if observables is None else observables
+    return raw_model_data_step("dat", observables=obs, observable_names=("y", "x"))
+
+
+def test_unknown_source_field_is_rejected_by_the_factory() -> None:
+    # The factory can settle this alone: the field name is checked against the
+    # known source fields without reference to any producer.
+    with pytest.raises(ValueError, match="Unknown MC source field"):
+        standardize_step("s", source="dat", field="not_a_field")
+
+
+@pytest.mark.parametrize(
+    "steps, match",
+    [
+        (
+            lambda: [
+                _datagen(),
+                standardize_step("s", source="absent", field="observables"),
+            ],
+            "unknown producer",
+        ),
+        (
+            lambda: [
+                _datagen(),
+                standardize_step("dat", source="dat", field="observables"),
+            ],
+            "step names must be unique",
+        ),
+        (
+            lambda: [standardize_step("s", source="dat", field="observables")],
+            "requires exactly one DATAGEN step",
+        ),
+    ],
+    ids=["unknown-producer", "duplicate-name", "no-datagen"],
+)
+def test_graph_faults_are_rejected_at_construction(steps, match) -> None:
+    # No model and no run: these never reach the kernel.
+    with pytest.raises(ValueError, match=match):
+        MCPipeline(steps())
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        lambda: rolling_mean_step(
+            "bad", source="dat", field="observables", window=PERIODS + 5
+        ),
+        lambda: rolling_mean_step("bad", source="dat", field="observables", window=0),
+        lambda: diff_step("bad", source="dat", field="observables", order=0),
+        lambda: diff_step("bad", source="dat", field="observables", order=-1),
+    ],
+    ids=["window-over-length", "window-zero", "order-zero", "order-negative"],
+)
+def test_invalid_step_parameters_fail_in_the_run(
+    mc_run, solved_test_model, step
 ) -> None:
-    step = factory("step_a", **kwargs)  # type: ignore[operator]
+    # These build and lower without complaint; the kernel rejects them per
+    # replication. The status code is carried in the message and deliberately not
+    # asserted, since it is an internal numbering.
+    pipeline = MCPipeline([_datagen(), step()])
+
+    with pytest.raises(RuntimeError, match="'bad'"):
+        mc_run(pipeline, solved_test_model, n_rep=1)
+
+
+def test_run_failures_are_collected_per_replication_when_not_failing_fast(
+    mc_run,
+    solved_test_model,
+) -> None:
+    pipeline = MCPipeline(
+        [
+            _datagen(),
+            rolling_mean_step(
+                "bad", source="dat", field="observables", window=PERIODS + 5
+            ),
+        ]
+    )
+
+    result = mc_run(pipeline, solved_test_model, n_rep=3, fail_fast=False)
+
+    assert result.n_successful == 0
+    assert len(result.failures) == 3
+    assert {f.step_name for f in result.failures} == {"bad"}
+    assert {f.error_type for f in result.failures} == {"NativeStepError"}
+    assert [f.rep_idx for f in result.failures] == [0, 1, 2]
+
+
+def test_log_of_a_non_positive_sample_is_not_rejected(
+    mc_run, solved_test_model
+) -> None:
+    # Documented as observed, not endorsed: the step propagates the non-finite
+    # result rather than failing, so a caller feeding it a centred sample gets
+    # NaN columns and no error.
+    pipeline = MCPipeline(
+        [
+            _datagen(),
+            add_payload_step("nonpositive", -np.ones((PERIODS, COLUMNS))),
+            log_step("log_bad", source="nonpositive", field="payload"),
+        ]
+    )
+
+    result = mc_run(pipeline, solved_test_model, n_rep=1)
+
+    assert result.failures == ()
+    assert not np.isfinite(np.asarray(result.transform_outputs["log_bad"])).all()
+
+
+def test_diff_order_at_the_sample_length_yields_an_empty_payload(
+    mc_run, solved_test_model
+) -> None:
+    # Also observed rather than endorsed: differencing away every row is not an
+    # error, it is a zero-row payload that downstream steps would read as empty.
+    pipeline = MCPipeline(
+        [
+            _datagen(),
+            diff_step("drained", source="dat", field="observables", order=PERIODS),
+        ]
+    )
+
+    result = mc_run(pipeline, solved_test_model, n_rep=1)
+
+    assert result.failures == ()
+    assert np.asarray(result.transform_outputs["drained"]).shape == (1, 0, COLUMNS)
+
+
+# ---- factories -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "factory, kwargs, runner_kwargs",
+    [
+        (standardize_step, {}, {"ddof": 0}),
+        (log_step, {"offset": 1.0}, {"offset": 1.0}),
+        (log_diff_step, {}, {"offset": 0.0}),
+        (diff_step, {"order": 1}, {"order": 1}),
+        (rolling_mean_step, {"window": 5}, {"window": 5}),
+        (rolling_std_step, {"window": 5}, {"window": 5, "ddof": 0}),
+        (rolling_var_step, {"window": 5}, {"window": 5, "ddof": 0}),
+    ],
+    ids=["standardize", "log", "log_diff", "diff", "rmean", "rstd", "rvar"],
+)
+def test_transform_factories_produce_a_bound_transform_step(
+    factory, kwargs, runner_kwargs
+) -> None:
+    """Each factory yields a TRANSFORM step carrying only its runner kwargs.
+
+    The source binding is separate from the runner configuration, so the kwargs
+    the kernel reads must not pick up ``source`` or ``field``.
+    """
+    step = factory("step_a", source="datagen", field="observables", **kwargs)
+
     assert step.op_type is OpType.TRANSFORM
     assert step.name == "step_a"
-    assert dict(step.kwargs) == expected_runner_kwargs
+    assert dict(step.kwargs) == runner_kwargs
     assert len(step.source_args) == 1
 
 
-def test_transform_step_types_set_matches_catalog() -> None:
-    assert TRANSFORM_STEP_TYPES == frozenset(
-        {
-            "standardize",
-            "log",
-            "log_diff",
-            "diff",
-            "rolling_mean",
-            "rolling_std",
-            "rolling_var",
-        }
-    )
-
-
-# ---- graph validation / compilation -------------------------------------
-
-
-def _sim_node() -> NodeSpec:
-    return NodeSpec(
-        id="sim",
-        step_type="simulation",
-        name="datagen",
-        params={"T": 50},
-    )
-
-
-def test_validate_orders_transform_between_filter_and_terminal() -> None:
-    spec = PipelineSpec(
-        nodes=[
-            _sim_node(),
-            NodeSpec(
-                id="lg",
-                step_type="log",
-                name="log_obs",
-                params={"source": "datagen", "field": "observables"},
-            ),
-            NodeSpec(
-                id="jb",
-                step_type="jarque_bera",
-                name="normality",
-                params={"source": "log_obs", "field": "payload"},
-            ),
-        ],
-        edges=[
-            EdgeSpec(source="sim", target="lg"),
-            EdgeSpec(source="lg", target="jb"),
-        ],
-    )
-    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    assert [node.name for node in ordered] == ["datagen", "log_obs", "normality"]
-    terminal = ordered[-1]
-    assert terminal.params["source"] == "log_obs"
-    assert terminal.params["field"] == "payload"
-
-
-def test_chained_transforms_are_topologically_ordered() -> None:
-    spec = PipelineSpec(
-        nodes=[
-            _sim_node(),
-            # Note: spec order intentionally reversed so it's NOT trivially sorted.
-            NodeSpec(
-                id="b",
-                step_type="standardize",
-                name="standardize_log",
-                params={"source": "log_obs", "field": "payload"},
-            ),
-            NodeSpec(
-                id="a",
-                step_type="log",
-                name="log_obs",
-                params={"source": "datagen", "field": "observables"},
-            ),
-            NodeSpec(
-                id="t",
-                step_type="jarque_bera",
-                name="normality",
-                params={"source": "standardize_log", "field": "payload"},
-            ),
-        ],
-        edges=[
-            EdgeSpec(source="sim", target="a"),
-            EdgeSpec(source="a", target="b"),
-            EdgeSpec(source="b", target="t"),
-        ],
-    )
-    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    names = [node.name for node in ordered]
-    assert names == ["datagen", "log_obs", "standardize_log", "normality"]
-    standardize = next(n for n in ordered if n.name == "standardize_log")
-    terminal = ordered[-1]
-    assert standardize.params["source"] == "log_obs"
-    assert standardize.params["field"] == "payload"
-    assert terminal.params["source"] == "standardize_log"
-    assert terminal.params["field"] == "payload"
-
-
-def test_terminal_with_transform_parent_keeps_explicit_source() -> None:
-    spec = PipelineSpec(
-        nodes=[
-            _sim_node(),
-            NodeSpec(
-                id="lg",
-                step_type="log",
-                name="log_obs",
-                params={"source": "datagen", "field": "observables"},
-            ),
-            NodeSpec(
-                id="jb",
-                step_type="jarque_bera",
-                name="normality",
-                params={"source": "datagen", "field": "observables"},
-            ),
-        ],
-        edges=[
-            EdgeSpec(source="sim", target="lg"),
-            EdgeSpec(source="lg", target="jb"),
-        ],
-    )
-    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    terminal = ordered[-1]
-    assert terminal.params["source"] == "datagen"
-    assert terminal.params["field"] == "observables"
-
-
-def test_multi_input_consumer_without_payload_leg_reads_declared_sources() -> None:
-    # A multi-input node may sit downstream of a transform without consuming its
-    # payload. It reads the sources its legs declare.
-    spec = PipelineSpec(
-        nodes=[
-            _sim_node(),
-            NodeSpec(
-                id="d",
-                step_type="diff",
-                name="diff_obs",
-                params={"source": "datagen", "field": "observables"},
-            ),
-            NodeSpec(
-                id="bp",
-                step_type="breusch_pagan",
-                name="bp",
-                params={
-                    "residuals_source": "datagen",
-                    "residuals_field": "observables",
-                    "X_source": "datagen",
-                    "X_field": "observables",
-                },
-            ),
-        ],
-        edges=[
-            EdgeSpec(source="sim", target="d"),
-            EdgeSpec(source="d", target="bp"),
-        ],
-    )
-    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    bp = ordered[-1]
-    assert bp.params["residuals_source"] == "datagen"
-    assert bp.params["residuals_field"] == "observables"
-    assert bp.params["X_source"] == "datagen"
-    assert bp.params["X_field"] == "observables"
-
-
-def test_multi_input_consumer_with_explicit_payload_source() -> None:
-    spec = PipelineSpec(
-        nodes=[
-            _sim_node(),
-            NodeSpec(
-                id="d",
-                step_type="diff",
-                name="diff_obs",
-                params={"source": "datagen", "field": "observables"},
-            ),
-            NodeSpec(
-                id="bp",
-                step_type="breusch_pagan",
-                name="bp",
-                params={
-                    "residuals_source": "diff_obs",
-                    "residuals_field": "payload",
-                    "X_source": "datagen",
-                    "X_field": "observables",
-                },
-            ),
-        ],
-        edges=[
-            EdgeSpec(source="sim", target="d"),
-            EdgeSpec(source="d", target="bp"),
-        ],
-    )
-    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    bp = ordered[-1]
-    assert bp.params["residuals_source"] == "diff_obs"
-    assert bp.params["residuals_field"] == "payload"
-    assert bp.params["X_source"] == "datagen"
-    assert bp.params["X_field"] == "observables"
-
-
-def test_payload_source_with_dangling_producer_is_rejected() -> None:
-    spec = PipelineSpec(
-        nodes=[
-            _sim_node(),
-            NodeSpec(
-                id="jb",
-                step_type="jarque_bera",
-                name="normality",
-                params={"source": "nonexistent", "field": "payload"},
-            ),
-        ],
-        edges=[EdgeSpec(source="sim", target="jb")],
-    )
-    with pytest.raises(ValueError, match="requires prior source"):
-        validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-
-
-def test_transform_cannot_link_from_terminal() -> None:
-    spec = PipelineSpec(
-        nodes=[
-            _sim_node(),
-            NodeSpec(
-                id="jb",
-                step_type="jarque_bera",
-                name="normality",
-                params={"source": "datagen", "field": "observables"},
-            ),
-            NodeSpec(
-                id="lg",
-                step_type="log",
-                name="log_after",
-                params={"source": "datagen", "field": "observables"},
-            ),
-        ],
-        edges=[
-            EdgeSpec(source="sim", target="jb"),
-            EdgeSpec(source="jb", target="lg"),
-        ],
-    )
-    with pytest.raises(ValueError, match="Terminal step .* cannot link"):
-        validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-
-
-def test_transform_fans_out_to_multiple_downstream_chains() -> None:
-    """One transform feeds two independent downstream chains.
-
-    Shape: Sim to Standardize to {RollingMean to Wald(avg),
-                                  RollingVar to Wald(var)}
-
-    Each consumer takes Standardize as its single parent; Standardize has two
-    outgoing edges. Each downstream step names the producer it reads from.
-    """
-    spec = PipelineSpec(
-        nodes=[
-            _sim_node(),
-            NodeSpec(
-                id="std",
-                step_type="standardize",
-                name="standardize",
-                params={"source": "datagen", "field": "observables"},
-            ),
-            NodeSpec(
-                id="rmean",
-                step_type="rolling_mean",
-                name="rmean",
-                params={"source": "standardize", "field": "payload", "window": 3},
-            ),
-            NodeSpec(
-                id="rvar",
-                step_type="rolling_var",
-                name="rvar",
-                params={"source": "standardize", "field": "payload", "window": 3},
-            ),
-            NodeSpec(
-                id="wmean",
-                step_type="wald",
-                name="wald_mean",
-                params={
-                    "kind": "mean",
-                    "source": "rmean",
-                    "field": "payload",
-                    "target_vector": [0.0],
-                    "burn_in": 0,
-                },
-            ),
-            NodeSpec(
-                id="wvar",
-                step_type="wald",
-                name="wald_var",
-                params={
-                    "kind": "mean",
-                    "source": "rvar",
-                    "field": "payload",
-                    "target_vector": [1.0],
-                    "burn_in": 0,
-                },
-            ),
-        ],
-        edges=[
-            EdgeSpec(source="sim", target="std"),
-            EdgeSpec(source="std", target="rmean"),
-            EdgeSpec(source="std", target="rvar"),
-            EdgeSpec(source="rmean", target="wmean"),
-            EdgeSpec(source="rvar", target="wvar"),
-        ],
-    )
-    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    names = [node.name for node in ordered]
-    # standardize before the two rolling steps; both rolling steps before the
-    # two terminals. The relative order within a layer follows spec order.
-    assert names[0] == "datagen"
-    assert names[1] == "standardize"
-    assert set(names[2:4]) == {"rmean", "rvar"}
-    assert set(names[4:6]) == {"wald_mean", "wald_var"}
-
-    # Each rolling step's source is standardize's payload.
-    rmean = next(n for n in ordered if n.name == "rmean")
-    rvar = next(n for n in ordered if n.name == "rvar")
-    assert rmean.params["source"] == "standardize"
-    assert rmean.params["field"] == "payload"
-    assert rvar.params["source"] == "standardize"
-    assert rvar.params["field"] == "payload"
-
-    # Each Wald reads its immediate rolling parent, not standardize.
-    wmean = next(n for n in ordered if n.name == "wald_mean")
-    wvar = next(n for n in ordered if n.name == "wald_var")
-    assert wmean.params["source"] == "rmean"
-    assert wmean.params["field"] == "payload"
-    assert wvar.params["source"] == "rvar"
-    assert wvar.params["field"] == "payload"
-
-    # Catalog-driven compile succeeds with the bound params.
-    pipeline = build_pipeline(ordered)
-    assert [step.name for step in pipeline.per_rep_steps] == names
-
-
-def test_terminal_can_read_an_earlier_transform_via_explicit_source() -> None:
-    """A consumer can reference any earlier transform's payload by name."""
-    spec = PipelineSpec(
-        nodes=[
-            _sim_node(),
-            NodeSpec(
-                id="std",
-                step_type="standardize",
-                name="standardize",
-                params={"source": "datagen", "field": "observables"},
-            ),
-            NodeSpec(
-                id="rm",
-                step_type="rolling_mean",
-                name="rmean",
-                params={"source": "standardize", "field": "payload", "window": 3},
-            ),
-            NodeSpec(
-                id="jb",
-                step_type="jarque_bera",
-                name="normality_on_std",
-                # Override: read standardize directly, not rmean.
-                params={"source": "standardize", "field": "payload"},
-            ),
-        ],
-        edges=[
-            EdgeSpec(source="sim", target="std"),
-            EdgeSpec(source="std", target="rm"),
-            EdgeSpec(source="rm", target="jb"),
-        ],
-    )
-    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    jb = next(n for n in ordered if n.name == "normality_on_std")
-    assert jb.params["source"] == "standardize"
-    assert jb.params["field"] == "payload"
+# ---- persistence -----------------------------------------------------------
 
 
 def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
@@ -628,9 +310,6 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     from tests._spec_helpers import as_posted
 
     yaml_text = pathlib.Path("MODELS/test.yaml").read_text(encoding="utf-8")
-    # The library spec, not the oracle's: this pipeline crosses into the real
-    # BundleBuilder rather than the reference implementation the rest of the
-    # module drives.
     # Authored the way the GUI posts it, then lowered through the UI boundary,
     # which is what resolves op kinds, source legs and the wald target field.
     pipeline = as_posted(
@@ -700,36 +379,3 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
         "rmean",
         "wald_mean",
     ]
-
-
-def test_build_pipeline_emits_transform_mcstep_with_bound_params() -> None:
-    spec = PipelineSpec(
-        nodes=[
-            _sim_node(),
-            NodeSpec(
-                id="rm",
-                step_type="rolling_mean",
-                name="rmean",
-                params={"source": "datagen", "field": "observables", "window": 3},
-            ),
-            NodeSpec(
-                id="jb",
-                step_type="jarque_bera",
-                name="normality",
-                params={"source": "rmean", "field": "payload"},
-            ),
-        ],
-        edges=[
-            EdgeSpec(source="sim", target="rm"),
-            EdgeSpec(source="rm", target="jb"),
-        ],
-    )
-    ordered, _ = validate_pipeline_spec(spec, has_reference=True, has_dgp=True)
-    pipeline = build_pipeline(ordered)
-    names = [step.name for step in pipeline.per_rep_steps]
-    assert names == ["datagen", "rmean", "normality"]
-    rm_step = pipeline.per_rep_steps[1]
-    assert rm_step.op_type is OpType.TRANSFORM
-    assert rm_step.kwargs["window"] == 3
-    jb_step = pipeline.per_rep_steps[2]
-    assert jb_step.source_args[0].source_step == "rmean"

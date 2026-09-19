@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE import DSGESolver, ModelParser, Shock
+from SymbolicDSGE import Shock
 from SymbolicDSGE._ckernels.monte_carlo._runner import run as run_native
 from SymbolicDSGE._ckernels.rng import (
     philox_standard_normal,
@@ -39,21 +39,14 @@ from SymbolicDSGE.core.shock.spec import _normalized_spec, resolve_shock_plan
 T = 16
 
 
-@pytest.fixture(scope="module")
-def solved():
-    model, kalman = ModelParser("MODELS/test.yaml").get_all()
-    solver = DSGESolver(model, kalman)
-    return solver.solve(solver.compile())
-
-
-def _plan(solved, shocks, shock_scale=1.0):
+def _plan(solved_test_model, shocks, shock_scale=1.0):
     step = simulation_step(T=T, shocks=shocks, shock_scale=shock_scale)
-    return build_native_plan(solved, step, T)
+    return build_native_plan(solved_test_model, step, T)
 
 
-def _entries(solved, shocks):
+def _entries(solved_test_model, shocks):
     families = native_shock_families(_normalized_spec(shocks))
-    resolved = resolve_shock_plan(solved.compiled, shocks, T)
+    resolved = resolve_shock_plan(solved_test_model.compiled, shocks, T)
     return native_shock_entries(resolved, families)
 
 
@@ -101,26 +94,28 @@ def test_native_scratch_sizes_on_the_widest_entry() -> None:
 # --- the draw itself --------------------------------------------------------
 
 
-def test_univariate_normal_draw_is_the_scaled_engine_stream(solved) -> None:
+def test_univariate_normal_draw_is_the_scaled_engine_stream(solved_test_model) -> None:
     shocks = {("e_u",): Shock("norm", seed=7)}
-    (entry,) = _entries(solved, shocks)
-    block = _plan(solved, shocks).draw(3)
+    (entry,) = _entries(solved_test_model, shocks)
+    block = _plan(solved_test_model, shocks).draw(3)
 
     z = philox_standard_normal(entry.key, 0, 3, 0, T)
-    expected = np.zeros((T, solved.compiled.n_exog))
+    expected = np.zeros((T, solved_test_model.compiled.n_exog))
     expected[:, entry.columns[0]] = z * entry.factor[0, 0]
 
     np.testing.assert_array_equal(block, expected)
 
 
-def test_multivariate_normal_draw_applies_the_covariance_factor(solved) -> None:
+def test_multivariate_normal_draw_applies_the_covariance_factor(
+    solved_test_model,
+) -> None:
     shocks = {("e_u", "e_v"): Shock("norm", seed=11)}
-    (entry,) = _entries(solved, shocks)
-    block = _plan(solved, shocks).draw(2)
+    (entry,) = _entries(solved_test_model, shocks)
+    block = _plan(solved_test_model, shocks).draw(2)
 
     width = len(entry.columns)
     z = philox_standard_normal(entry.key, 0, 2, 0, T * width).reshape(T, width)
-    expected = np.zeros((T, solved.compiled.n_exog))
+    expected = np.zeros((T, solved_test_model.compiled.n_exog))
     expected[:, entry.columns] = z @ entry.factor.T
 
     np.testing.assert_array_equal(block, expected)
@@ -128,10 +123,10 @@ def test_multivariate_normal_draw_applies_the_covariance_factor(solved) -> None:
     assert not np.allclose(entry.factor, np.eye(width))
 
 
-def test_normal_draw_applies_the_location_shift(solved) -> None:
+def test_normal_draw_applies_the_location_shift(solved_test_model) -> None:
     shocks = {("e_u",): Shock("norm", seed=7, dist_kwargs={"loc": 2.5})}
-    (entry,) = _entries(solved, shocks)
-    block = _plan(solved, shocks).draw(0)
+    (entry,) = _entries(solved_test_model, shocks)
+    block = _plan(solved_test_model, shocks).draw(0)
 
     z = philox_standard_normal(entry.key, 0, 0, 0, T)
     np.testing.assert_array_equal(
@@ -139,21 +134,23 @@ def test_normal_draw_applies_the_location_shift(solved) -> None:
     )
 
 
-def test_shock_scale_multiplies_the_whole_block(solved) -> None:
+def test_shock_scale_multiplies_the_whole_block(solved_test_model) -> None:
     shocks = {("e_u",): Shock("norm", seed=7)}
-    plain = _plan(solved, shocks, shock_scale=1.0).draw(1)
-    scaled = _plan(solved, shocks, shock_scale=2.5).draw(1)
+    plain = _plan(solved_test_model, shocks, shock_scale=1.0).draw(1)
+    scaled = _plan(solved_test_model, shocks, shock_scale=2.5).draw(1)
 
     np.testing.assert_array_equal(scaled, 2.5 * plain)
 
 
-def test_untargeted_columns_stay_zero(solved) -> None:
+def test_untargeted_columns_stay_zero(solved_test_model) -> None:
     shocks = {("e_u",): Shock("norm", seed=7)}
-    (entry,) = _entries(solved, shocks)
-    block = _plan(solved, shocks).draw(0)
+    (entry,) = _entries(solved_test_model, shocks)
+    block = _plan(solved_test_model, shocks).draw(0)
 
     untargeted = [
-        i for i in range(solved.compiled.n_exog) if i not in set(entry.columns)
+        i
+        for i in range(solved_test_model.compiled.n_exog)
+        if i not in set(entry.columns)
     ]
     assert untargeted
     np.testing.assert_array_equal(block[:, untargeted], 0.0)
@@ -162,17 +159,17 @@ def test_untargeted_columns_stay_zero(solved) -> None:
 # --- addressing -------------------------------------------------------------
 
 
-def test_a_seeded_spec_replays_across_plans(solved) -> None:
+def test_a_seeded_spec_replays_across_plans(solved_test_model) -> None:
     shocks = {("e_u",): Shock("norm", seed=1), ("e_v",): Shock("uni", seed=2)}
-    first = _plan(solved, shocks)
-    second = _plan(solved, shocks)
+    first = _plan(solved_test_model, shocks)
+    second = _plan(solved_test_model, shocks)
 
     for rep_idx in (0, 1, 97):
         np.testing.assert_array_equal(first.draw(rep_idx), second.draw(rep_idx))
 
 
-def test_replications_do_not_share_a_stream(solved) -> None:
-    plan = _plan(solved, {("e_u", "e_v"): Shock("norm", seed=1)})
+def test_replications_do_not_share_a_stream(solved_test_model) -> None:
+    plan = _plan(solved_test_model, {("e_u", "e_v"): Shock("norm", seed=1)})
     blocks = [plan.draw(rep_idx) for rep_idx in range(4)]
 
     for i in range(len(blocks)):
@@ -180,10 +177,10 @@ def test_replications_do_not_share_a_stream(solved) -> None:
             assert not np.array_equal(blocks[i], blocks[j])
 
 
-def test_entries_sharing_a_seed_stay_independent(solved) -> None:
+def test_entries_sharing_a_seed_stay_independent(solved_test_model) -> None:
     shocks = {("e_u",): Shock("norm", seed=5), ("e_v",): Shock("norm", seed=5)}
-    entries = _entries(solved, shocks)
-    block = _plan(solved, shocks).draw(0)
+    entries = _entries(solved_test_model, shocks)
+    block = _plan(solved_test_model, shocks).draw(0)
 
     assert entries[0].key == entries[1].key
     left = block[:, entries[0].columns[0]]
@@ -191,22 +188,23 @@ def test_entries_sharing_a_seed_stay_independent(solved) -> None:
     assert not np.array_equal(left, right)
 
 
-def test_an_unseeded_spec_redraws_each_run(solved) -> None:
+def test_an_unseeded_spec_redraws_each_run(solved_test_model) -> None:
     shocks = {("e_u",): Shock("norm", seed=None)}
     assert not np.array_equal(
-        _plan(solved, shocks).draw(0), _plan(solved, shocks).draw(0)
+        _plan(solved_test_model, shocks).draw(0),
+        _plan(solved_test_model, shocks).draw(0),
     )
 
 
-def test_negative_replication_index_is_rejected(solved) -> None:
+def test_negative_replication_index_is_rejected(solved_test_model) -> None:
     with pytest.raises(ValueError, match="non-negative"):
-        _plan(solved, {("e_u",): Shock("norm", seed=0)}).draw(-1)
+        _plan(solved_test_model, {("e_u",): Shock("norm", seed=0)}).draw(-1)
 
 
 # --- the run reads the same blocks -----------------------------------------
 
 
-def _run_states(solved, shocks, n_rep, n_jobs):
+def _run_states(solved_test_model, shocks, n_rep, n_jobs):
     """Simulate ``n_rep`` replications and return their retained state paths."""
     pipeline = MCPipeline(
         [
@@ -215,7 +213,9 @@ def _run_states(solved, shocks, n_rep, n_jobs):
             )
         ]
     )
-    lowered = lower_native_run(pipeline, reference=solved, n_rep=n_rep, n_jobs=n_jobs)
+    lowered = lower_native_run(
+        pipeline, reference=solved_test_model, n_rep=n_rep, n_jobs=n_jobs
+    )
     assert (
         run_native(lowered.allocation, lowered.steps, lowered.input_bindings).status
         == 0
@@ -230,15 +230,17 @@ def _run_states(solved, shocks, n_rep, n_jobs):
 
 @pytest.mark.parametrize("n_jobs", [1, 2])
 @pytest.mark.parametrize("n_rep", [3, 8])
-def test_run_states_match_the_addressed_blocks(solved, n_rep, n_jobs) -> None:
+def test_run_states_match_the_addressed_blocks(
+    solved_test_model, n_rep, n_jobs
+) -> None:
     shocks = {("e_u", "e_v"): Shock("norm", seed=1)}
-    states = _run_states(solved, shocks, n_rep, n_jobs)
+    states = _run_states(solved_test_model, shocks, n_rep, n_jobs)
 
-    plan = _plan(solved, shocks)
-    (entry,) = _entries(solved, shocks)
+    plan = _plan(solved_test_model, shocks)
+    (entry,) = _entries(solved_test_model, shocks)
     for rep_idx in range(n_rep):
         block = plan.draw(rep_idx)[:, entry.columns]
-        expected = solved.sim(T, shocks={("e_u", "e_v"): block}).X
+        expected = solved_test_model.sim(T, shocks={("e_u", "e_v"): block}).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)
 
 
@@ -254,35 +256,37 @@ def test_run_states_match_the_addressed_blocks(solved, n_rep, n_jobs) -> None:
         {("e_u",): Shock("t", seed=3, dist_kwargs={"df": 5})},
     ],
 )
-def test_replication_shocks_reproduce_a_single_replication(solved, shocks) -> None:
+def test_replication_shocks_reproduce_a_single_replication(
+    solved_test_model, shocks
+) -> None:
     step = simulation_step("sim", target="reference", T=T, shocks=shocks)
-    states = _run_states(solved, shocks, 5, 1)
+    states = _run_states(solved_test_model, shocks, 5, 1)
 
     for rep_idx in (0, 2, 4):
-        drawn = replication_shocks(solved, step, rep_idx)
-        expected = solved.sim(T, shocks=drawn, shock_scale=1.0).X
+        drawn = replication_shocks(solved_test_model, step, rep_idx)
+        expected = solved_test_model.sim(T, shocks=drawn, shock_scale=1.0).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)
 
 
-def test_replication_shocks_rejects_a_deterministic_step(solved) -> None:
+def test_replication_shocks_rejects_a_deterministic_step(solved_test_model) -> None:
     step = simulation_step("sim", target="reference", T=T, shocks=None)
     with pytest.raises(ValueError, match="draws no shocks"):
-        replication_shocks(solved, step, 0)
+        replication_shocks(solved_test_model, step, 0)
 
 
 # --- the fallback route ------------------------------------------------------
 
 
-def test_unported_spec_still_runs_off_the_python_slab(solved) -> None:
+def test_unported_spec_still_runs_off_the_python_slab(solved_test_model) -> None:
     shocks = {("e_u",): Shock("t", seed=3, dist_kwargs={"df": 5})}
     step = simulation_step(T=T, target="reference", shocks=shocks, observables=False)
-    assert build_native_plan(solved, step, T) is None
+    assert build_native_plan(solved_test_model, step, T) is None
 
-    states = _run_states(solved, shocks, 3, 1)
-    resolved = resolve_shock_plan(solved.compiled, shocks, T)
+    states = _run_states(solved_test_model, shocks, 3, 1)
+    resolved = resolve_shock_plan(solved_test_model.compiled, shocks, T)
     for rep_idx in range(3):
         drawn = resolved.matrix(T, 1.0, rep_idx)
-        expected = solved.sim(T, shocks={("e_u",): drawn[:, 0]}).X
+        expected = solved_test_model.sim(T, shocks={("e_u",): drawn[:, 0]}).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)
 
 
@@ -296,12 +300,14 @@ def test_unported_spec_still_runs_off_the_python_slab(solved) -> None:
 # ``_native_draw`` asserts the lowering actually happened rather than trusting it.
 
 
-def _python_draw(solved, spec, rep_idx):
-    return resolve_shock_plan(solved.compiled, spec, T).matrix(T, 1.0, rep_idx)
+def _python_draw(solved_test_model, spec, rep_idx):
+    return resolve_shock_plan(solved_test_model.compiled, spec, T).matrix(
+        T, 1.0, rep_idx
+    )
 
 
-def _native_draw(solved, spec, rep_idx):
-    plan = _plan(solved, spec)
+def _native_draw(solved_test_model, spec, rep_idx):
+    plan = _plan(solved_test_model, spec)
     assert plan is not None, "spec was expected to lower to the native draw"
     return plan.draw(rep_idx)
 
@@ -319,7 +325,7 @@ def _entry(family, seed, target):
 
 @pytest.mark.parametrize("family, draw", ROUTES)
 def test_entry_draw_does_not_depend_on_its_position_in_the_spec(
-    solved, family, draw
+    solved_test_model, family, draw
 ) -> None:
     """Reordering a spec must move nothing.
 
@@ -330,14 +336,14 @@ def test_entry_draw_does_not_depend_on_its_position_in_the_spec(
     spec = [_entry(family, 11, "e_u"), _entry(family, 12, "e_v")]
 
     np.testing.assert_array_equal(
-        draw(solved, spec, 3),
-        draw(solved, list(reversed(spec)), 3),
+        draw(solved_test_model, spec, 3),
+        draw(solved_test_model, list(reversed(spec)), 3),
     )
 
 
 @pytest.mark.parametrize("family, draw", ROUTES)
 def test_entry_draw_does_not_depend_on_the_rest_of_the_spec(
-    solved, family, draw
+    solved_test_model, family, draw
 ) -> None:
     """Adding a second seeded entry leaves the first untouched.
 
@@ -347,16 +353,18 @@ def test_entry_draw_does_not_depend_on_the_rest_of_the_spec(
     """
     alone = [_entry(family, 11, "e_u")]
     joined = alone + [_entry(family, 12, "e_v")]
-    col = solved.compiled.shock_idx["e_u"]
+    col = solved_test_model.compiled.shock_idx["e_u"]
 
     np.testing.assert_array_equal(
-        draw(solved, alone, 3)[:, col],
-        draw(solved, joined, 3)[:, col],
+        draw(solved_test_model, alone, 3)[:, col],
+        draw(solved_test_model, joined, 3)[:, col],
     )
 
 
 @pytest.mark.parametrize("family, draw", ROUTES)
-def test_identically_seeded_copies_are_not_degenerate(solved, family, draw) -> None:
+def test_identically_seeded_copies_are_not_degenerate(
+    solved_test_model, family, draw
+) -> None:
     """Copies sharing one seed still draw independently.
 
     ``offset_seeds=False`` hands every copy the template's seed. On the Python
@@ -370,4 +378,4 @@ def test_identically_seeded_copies_are_not_degenerate(solved, family, draw) -> N
     )
     assert [shock.seed for shock in spec] == [5, 5]
 
-    assert np.linalg.matrix_rank(draw(solved, spec, 0)) == len(spec)
+    assert np.linalg.matrix_rank(draw(solved_test_model, spec, 0)) == len(spec)
