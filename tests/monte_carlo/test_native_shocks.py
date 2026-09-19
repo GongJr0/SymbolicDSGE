@@ -281,6 +281,93 @@ def test_unported_spec_still_runs_off_the_python_slab(solved) -> None:
     states = _run_states(solved, shocks, 3, 1)
     resolved = resolve_shock_plan(solved.compiled, shocks, T)
     for rep_idx in range(3):
-        drawn = resolved.matrix(T, 1.0, rep_idx * resolved.seeded_count)
+        drawn = resolved.matrix(T, 1.0, rep_idx)
         expected = solved.sim(T, shocks={("e_u",): drawn[:, 0]}).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)
+
+
+# --- entry invariance, on both routes (#507) --------------------------------
+#
+# An entry's stream must be a function of the entry alone. The two routes key
+# differently -- Philox on ``(seed, columns[0], rep_idx)`` in C, a mixed
+# ``SeedSequence`` on the same triple in Python -- so they never produce equal
+# numbers, but they owe the same invariances. Parameterizing on the family is
+# what selects the route: ``norm`` lowers to the kernel, ``t`` does not, and
+# ``_native_draw`` asserts the lowering actually happened rather than trusting it.
+
+
+def _python_draw(solved, spec, rep_idx):
+    return resolve_shock_plan(solved.compiled, spec, T).matrix(T, 1.0, rep_idx)
+
+
+def _native_draw(solved, spec, rep_idx):
+    plan = _plan(solved, spec)
+    assert plan is not None, "spec was expected to lower to the native draw"
+    return plan.draw(rep_idx)
+
+
+ROUTES = [
+    pytest.param("t", _python_draw, id="python"),
+    pytest.param("norm", _native_draw, id="native"),
+]
+
+
+def _entry(family, seed, target):
+    kwargs = {"df": 5} if family == "t" else {}
+    return Shock(family, seed=seed, dist_kwargs=kwargs).independent(target)[0]
+
+
+@pytest.mark.parametrize("family, draw", ROUTES)
+def test_entry_draw_does_not_depend_on_its_position_in_the_spec(
+    solved, family, draw
+) -> None:
+    """Reordering a spec must move nothing.
+
+    This is the native half of #507: the Philox key carried the entry's position
+    in the spec list, so every entry that moved drew differently even though the
+    columns it writes are canonical. The Python route always held this.
+    """
+    spec = [_entry(family, 11, "e_u"), _entry(family, 12, "e_v")]
+
+    np.testing.assert_array_equal(
+        draw(solved, spec, 3),
+        draw(solved, list(reversed(spec)), 3),
+    )
+
+
+@pytest.mark.parametrize("family, draw", ROUTES)
+def test_entry_draw_does_not_depend_on_the_rest_of_the_spec(
+    solved, family, draw
+) -> None:
+    """Adding a second seeded entry leaves the first untouched.
+
+    The Python half of #507: the per-replication shift was the count of seeded
+    entries, so adding one moved every other entry at every replication past
+    zero. Native keyed per entry and already held this.
+    """
+    alone = [_entry(family, 11, "e_u")]
+    joined = alone + [_entry(family, 12, "e_v")]
+    col = solved.compiled.shock_idx["e_u"]
+
+    np.testing.assert_array_equal(
+        draw(solved, alone, 3)[:, col],
+        draw(solved, joined, 3)[:, col],
+    )
+
+
+@pytest.mark.parametrize("family, draw", ROUTES)
+def test_identically_seeded_copies_are_not_degenerate(solved, family, draw) -> None:
+    """Copies sharing one seed still draw independently.
+
+    ``offset_seeds=False`` hands every copy the template's seed. On the Python
+    route that used to give one standardized variate scaled per column, a
+    rank-deficient block whatever ``shock_corr`` declared. Rank is scale-free,
+    so this reads the same on either route.
+    """
+    kwargs = {"df": 5} if family == "t" else {}
+    spec = Shock(family, seed=5, dist_kwargs=kwargs).independent(
+        "e_u", "e_v", offset_seeds=False
+    )
+    assert [shock.seed for shock in spec] == [5, 5]
+
+    assert np.linalg.matrix_rank(draw(solved, spec, 0)) == len(spec)

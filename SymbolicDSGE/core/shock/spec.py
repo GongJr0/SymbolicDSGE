@@ -169,7 +169,6 @@ def resolve_shock_plan(
     validate_shock_targets(spec, list(compiled.shock_names))
 
     entries: list[ShockEntry | ArrayEntry] = []
-    seeded_count = 0
     cov: NDF | None = None
 
     for shock in spec:
@@ -186,10 +185,6 @@ def resolve_shock_plan(
             )
 
         indices = _columns(key, shock_col)
-
-        if shock.seed is not None:
-            seeded_count += 1
-
         # A width-1 entry draws against its own standard deviation; a grouped
         # one against its covariance block, which is why only the grouped case
         # assembles one. The assembly reads a calibration no entry can vary:
@@ -227,7 +222,6 @@ def resolve_shock_plan(
     return ShockPlan(
         entries=tuple(entries),
         n_exog=compiled.n_exog,
-        seeded_count=seeded_count,
     )
 
 

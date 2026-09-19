@@ -203,9 +203,9 @@ def replication_shocks(
     """The shock paths one Monte Carlo replication saw, keyed by entry target.
 
     Reproduces a specific replication regardless of whether the replication was
-    retained in the output. Index based seed incrementation allows resolving the
-    exact ``Shock`` specification a simulation ``MCStep`` produced in-run for a
-    given replication index. Only seeded entries are reproducible.
+    retained in the output: an entry is seeded off its own spec member and the
+    replication index, so a given index resolves to the draw the run made. Only
+    seeded entries are reproducible.
 
     For retained replications, MCDataGenResult.replication(retained_idx) returns
     a live ``SimResult`` including the shocks.
@@ -221,7 +221,7 @@ def replication_shocks(
         resolved.matrix(
             T,
             float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE)),
-            rep_idx * resolved.seeded_count,
+            rep_idx,
         )
         if plan is None
         else plan.draw(rep_idx)

@@ -26,7 +26,8 @@ class ShockEntry:
     ``loc + factor @ v`` over that family's standardized variate. ``factor`` is
     the scale at any width: the 1x1 holding a standard deviation, or the
     covariance block's factor. ``loc`` is the ``width``-long location.
-    ``base_seed`` is the spec's own seed, which :meth:`unpack` shifts per draw.
+    ``base_seed`` is the spec's own seed as declared, which :meth:`_seed` keys a
+    per-replication draw from rather than using directly.
 
     ``kwargs`` carries what is neither location nor scale forward for the native
     lowering.
@@ -45,15 +46,19 @@ class ShockEntry:
         """Number of columns this entry targets."""
         return len(self.indices)
 
-    def unpack(self, seed_offset: int = 0) -> list[tuple[int, NDF]]:
+    def unpack(self, rep_idx: int = 0) -> list[tuple[int, NDF]]:
         """Draw this entry and pair each column with its exogenous index.
 
-        ``seed_offset`` shifts the base seed, which is what keeps the
-        replications of one Monte Carlo run on different paths. An unseeded
-        entry has nothing to shift and redraws freshly.
+        ``rep_idx`` selects which replication of the spec to draw, which is what
+        keeps the replications of one Monte Carlo run on different paths. An
+        unseeded entry has no seed to key and redraws freshly whatever it is
+        given.
         """
-        seed = None if self.base_seed is None else self.base_seed + seed_offset
-        drawn = self.draw(self.loc, self.factor, seed)
+        drawn = self.draw(
+            self.loc,
+            self.factor,
+            self._seed(rep_idx),
+        )
 
         if drawn.ndim != 2 or drawn.shape[1] != self.width:
             raise ValueError(
@@ -61,6 +66,29 @@ class ShockEntry:
                 f"got {tuple(drawn.shape)}."
             )
         return list(zip(self.indices, (drawn[:, i] for i in range(self.width))))
+
+    def _seed(self, rep_idx: int = 0) -> int | None:
+        """The seed for one replication of this entry, or None when unseeded.
+
+        ``rep_idx`` takes 0 for any non-MC draw, where replications do not apply.
+        ``indices[0]`` is the minimum canonical shock index in the entry, which
+        separates entries uniquely because no two can share a shock index (#507).
+
+        Mixing the three inputs is what makes a draw a function of the entry and
+        the replication alone. Adding them cannot: a declared seed is unbounded
+        and user-chosen, so any additive qualifier is congruent to some other
+        entry's seed, which is how two entries used to land on one stream.
+
+        ``SeedSequence`` serves as the mixing function rather than as an RNG
+        state, so the result is a plain 64-bit integer.
+        """
+        if self.base_seed is None:
+            return None
+        return int(
+            np.random.SeedSequence(
+                entropy=self.base_seed, spawn_key=(self.indices[0], rep_idx)
+            ).generate_state(1, dtype=np.uint64)[0]
+        )
 
 
 @dataclass(frozen=True)
@@ -82,14 +110,14 @@ class ArrayEntry:
         """Number of columns this entry targets."""
         return len(self.indices)
 
-    def unpack(self, seed_offset: int = 0) -> list[tuple[int, NDF]]:
+    def unpack(self, rep_idx: int = 0) -> list[tuple[int, NDF]]:
         """Pair each column of the supplied path with its exogenous index.
 
-        Takes ``seed_offset`` to match :meth:`ShockEntry.unpack`; a plan then
+        Takes ``rep_idx`` to match :meth:`ShockEntry.unpack`; a plan then
         unpacks its entries without asking which kind each one is. A supplied
         path has no seed to shift.
         """
-        del seed_offset
+        del rep_idx
         if self.value.ndim != 2 or self.value.shape[1] != self.width:
             raise ValueError(
                 f"Array entry for {self.key!r} must have shape (T, {self.width}); "
@@ -104,13 +132,12 @@ class ShockPlan:
 
     entries: tuple[ShockEntry | ArrayEntry, ...]
     n_exog: int
-    seeded_count: int
 
-    def unpack(self, seed_offset: int = 0) -> list[tuple[int, NDF]]:
+    def unpack(self, rep_idx: int = 0) -> list[tuple[int, NDF]]:
         """Draw every entry as ``(exogenous index, column)`` pairs."""
         out: list[tuple[int, NDF]] = []
         for entry in self.entries:
-            out.extend(entry.unpack(seed_offset))
+            out.extend(entry.unpack(rep_idx))
         return out
 
     def fill(
@@ -118,7 +145,7 @@ class ShockPlan:
         out: NDF,
         T: int,
         shock_scale: float = 1.0,
-        seed_offset: int = 0,
+        rep_idx: int = 0,
     ) -> None:
         """Draw into a preallocated ``(T, n_exog)`` view.
 
@@ -127,17 +154,17 @@ class ShockPlan:
         temporary. Columns no entry targets are left untouched, so the caller
         owns zeroing.
         """
-        for idx, values in self.unpack(seed_offset):
+        for idx, values in self.unpack(rep_idx):
             if values.shape[0] != T:
                 raise ValueError(
                     f"Shock array for variable index {idx} must have length {T}."
                 )
             out[:, idx] = shock_scale * values
 
-    def matrix(self, T: int, shock_scale: float = 1.0, seed_offset: int = 0) -> NDF:
+    def matrix(self, T: int, shock_scale: float = 1.0, rep_idx: int = 0) -> NDF:
         """Draw a fresh ``(T, n_exog)`` shock matrix."""
         out = np.zeros((T, self.n_exog), dtype=float64)
-        self.fill(out, T, shock_scale, seed_offset)
+        self.fill(out, T, shock_scale, rep_idx)
         return out
 
 

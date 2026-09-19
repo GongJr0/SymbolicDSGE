@@ -83,7 +83,14 @@ def abstract_shock_array(
     -------
     np.ndarray: An array of shocks of length T.
     """
-    state = random.RandomState(seed)
+    # `RandomState` seeds from 32-bit words.
+    # Both deterministic bitops fix the low and high 32 bits
+    # of a 64-bit seed, producung 2 words for the 32-bit engine.
+    state = random.RandomState(
+        None
+        if seed is None
+        else np.array([seed & 0xFFFFFFFF, seed >> 32], dtype=np.uint32)
+    )
     shocks = dist.rvs(size=T, random_state=state, **dist_kwargs)  # type: ignore
     return asarray(shocks, dtype=float64)
 
@@ -303,9 +310,10 @@ class Shock:
         *keys : str
             The shock variables this spec drives, one copy each.
         offset_seeds : bool
-            Whether to advance the seed by one per copy. Copies sharing a seed
-            draw the same path on the Python route, so the default keeps them
-            apart. An unseeded template has nothing to offset.
+            Whether to advance the seed by one per copy, so the copies carry
+            distinct seeds rather than the template's. ``False`` does not make
+            them draw alike: copies target different shocks, which separates
+            their draws on its own. An unseeded template has nothing to offset.
 
         Returns
         -------
