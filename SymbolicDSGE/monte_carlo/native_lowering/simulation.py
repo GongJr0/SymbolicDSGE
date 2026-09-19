@@ -209,8 +209,8 @@ def _simulation_shocks(
     The spec resolves against the model once. Only the seed varies per
     replication, so the loop below reseeds and draws straight into its own row
     of the slab; the calibration lookups, the covariance assembly, and its
-    Cholesky are not repeated. Each replication shifts every base seed by the
-    number of seeded entries, which keeps entries that share a run apart.
+    Cholesky are not repeated. An entry is seeded off its own spec member and
+    the replication index.
     """
     shocks = _normalized_spec(step.kwargs.get("shocks"))
     shock_scale = float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE))
@@ -221,7 +221,7 @@ def _simulation_shocks(
 
     values = np.zeros((n_rep, T, model.compiled.n_exog), dtype=np.float64)
     for rep_idx in range(n_rep):
-        plan.fill(values[rep_idx], T, shock_scale, rep_idx * plan.seeded_count)
+        plan.fill(values[rep_idx], T, shock_scale, rep_idx)
     return values, True
 
 

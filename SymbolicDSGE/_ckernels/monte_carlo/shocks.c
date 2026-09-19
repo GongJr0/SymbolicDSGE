@@ -15,7 +15,11 @@ i64 sdsge_mc_shock_scratch_size(const sdsge_mc_shock_plan *plan) {
 static inline void sdsge_mc_shock_seed(sdsge_philox_state *st,
                                        const sdsge_mc_shock_entry *entry,
                                        i64 rep_idx) {
-  sdsge_philox_seed(st, entry->key, entry->entry_idx, (u64)rep_idx, 0);
+  /*
+   * entry->columns is the sorted canonical indices of each shock variable
+   * in the group. A variable cannot appear in more than one group, therefore
+entry->columns[0] is a unique identifier for the group. */
+  sdsge_philox_seed(st, entry->key, entry->columns[0], (u64)rep_idx, 0);
 }
 
 /* z @ factor.T, scattered into the entry's columns. Width is the number of

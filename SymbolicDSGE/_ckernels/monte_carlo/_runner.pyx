@@ -33,7 +33,6 @@ cdef extern from "shocks.h":
         const double *factor
         const double *loc
         uint64_t key
-        uint64_t entry_idx
 
     ctypedef struct sdsge_mc_shock_plan:
         const sdsge_mc_shock_entry *entries
@@ -761,7 +760,6 @@ def shock_plan(
         plan._entries[i].width = width
         plan._entries[i].key = <uint64_t>key
         # Position in the spec, so entries sharing a seed stay independent.
-        plan._entries[i].entry_idx = <uint64_t>i
         if width > max_width:
             max_width = width
 

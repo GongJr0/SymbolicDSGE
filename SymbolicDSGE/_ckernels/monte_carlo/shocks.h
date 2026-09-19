@@ -25,8 +25,7 @@ typedef struct {
   const f64 *factor;
   /* width-long mean vector */
   const f64 *loc;
-  u64 key; /* the spec's seed; entry_idx separates entries sharing one. */
-  u64 entry_idx;
+  u64 key; /* the spec's seed; columns[0] separates entries sharing one. */
 } sdsge_mc_shock_entry;
 
 /* A whole spec, resolved once at lowering and shared read-only by every
