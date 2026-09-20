@@ -72,6 +72,10 @@ i64 sdsge_log(const f64 *SDSGE_RESTRICT x, const f64 offset, const i64 n,
   const i64 total = n * p;
 
   for (i64 i = 0; i < total; ++i) {
+    f64 inner = x[i] + offset;
+    if (inner <= 0.0) {
+      return SDSGE_TRANSFORM_OUT_OF_DOMAIN;
+    }
     out[i] = log(x[i] + offset);
   }
 
@@ -98,6 +102,10 @@ i64 sdsge_log_diff(const f64 *SDSGE_RESTRICT x, const f64 offset, const i64 n,
     f64 *dst = out + (i - 1) * p;
 
     for (i64 j = 0; j < p; ++j) {
+      f64 inner = row[j] + offset;
+      if (inner <= 0.0) {
+        return SDSGE_TRANSFORM_OUT_OF_DOMAIN;
+      }
       const f64 current = log(row[j] + offset);
 
       dst[j] = current - previous[j];
@@ -111,7 +119,7 @@ i64 sdsge_log_diff(const f64 *SDSGE_RESTRICT x, const f64 offset, const i64 n,
 i64 sdsge_diff(const f64 *SDSGE_RESTRICT x, const i64 order, const i64 n,
                const i64 p, f64 *SDSGE_RESTRICT scratch,
                f64 *SDSGE_RESTRICT out) {
-  if (n <= 0 || p <= 0 || order < 1) {
+  if (n <= 0 || p <= 0 || order < 1 || order >= n) {
     return SDSGE_TRANSFORM_BAD_ARG;
   }
 
@@ -297,10 +305,13 @@ i64 sdsge_rolling_std(const f64 *SDSGE_RESTRICT x, const i64 n, const i64 p,
   return rolling_moment_ax0(x, n, p, window, ddof, 1, scratch, out);
 }
 
+/* ``int_out`` is the whole lane: slot 0 belongs to the runner, slot 1 to this
+ * step. Taking the lane rather than the slot keeps the NULL test meaningful for
+ * a step whose output declares no int lane at all. */
 static int sdsge_mc_transform_status(const i64 status,
                                      i64 *SDSGE_RESTRICT int_out) {
   if (int_out != NULL) {
-    int_out[0] = status;
+    int_out[1] = status;
   }
   return (int)status;
 }

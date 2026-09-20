@@ -12,6 +12,14 @@ import numpy as np
 
 from libc.stdint cimport int64_t
 
+cdef extern from "runner.h":
+    int SDSGE_MC_NOT_RUN
+
+# The status every slot of the record is seeded with. The native runner reseeds
+# the whole record on entry; this keeps an allocation that has not been run
+# through readable rather than leaving it whatever ``empty`` handed back.
+MC_NOT_RUN = SDSGE_MC_NOT_RUN
+
 
 cdef class StepArenas:
     """Dynamic arenas and retention metadata for one compiled step."""
@@ -33,8 +41,7 @@ cdef class ArenaAllocation:
     cdef public int64_t n_workers
     cdef public dict plan
     cdef public dict steps
-    cdef public object failure_step_by_rep
-    cdef public object failure_status_by_rep
+    cdef public object step_status_by_rep
 
 
 def resolve_retention(int64_t n_retain, int64_t n_rep):
@@ -112,6 +119,7 @@ def allocate_arenas(dict plan, int64_t n_rep, object n_jobs=None):
     cdef int64_t n_int_out
     cdef int64_t n_retain
     cdef int64_t n_workers
+    cdef int64_t n_steps
 
     if n_rep <= 0:
         raise ValueError("n_rep must be positive.")
@@ -121,11 +129,12 @@ def allocate_arenas(dict plan, int64_t n_rep, object n_jobs=None):
     allocation.n_workers = n_workers
     allocation.plan = dict(plan)
     allocation.steps = {}
-    allocation.failure_step_by_rep = np.full(
-        n_rep, np.iinfo(np.int64).min, dtype=np.int64
-    )
-    allocation.failure_status_by_rep = np.full(
-        n_rep, np.iinfo(np.int64).min, dtype=np.int64
+    # One status per step per replication, replication-major. The retained lanes
+    # only cover the replications the plan kept, so this is the sole record of
+    # what became of a step in one it did not.
+    n_steps = len(allocation.plan)
+    allocation.step_status_by_rep = np.full(
+        (n_rep, n_steps), MC_NOT_RUN, dtype=np.int64
     )
     for step_name, step_plan in allocation.plan.items():
         n_float_in = step_plan.input_size.n_float

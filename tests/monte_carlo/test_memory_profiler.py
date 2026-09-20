@@ -71,8 +71,7 @@ def abundant_memory(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _allocated_bytes(allocation: Any) -> int:
     """Every dynamic array one allocation owns, measured after the fact."""
-    total = int(allocation.failure_step_by_rep.nbytes)
-    total += int(allocation.failure_status_by_rep.nbytes)
+    total = int(allocation.step_status_by_rep.nbytes)
     for arenas in allocation.steps.values():
         total += sum(int(getattr(arenas, name).nbytes) for name in ARENA_NAMES)
     return total

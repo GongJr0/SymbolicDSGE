@@ -220,9 +220,7 @@ class MCRegressionResultSpec:
 
 class MCFailureSpec(TypedDict):
     rep_idx: int
-    step_name: str
-    error_type: str
-    message: str
+    failures: Mapping[str, int]
 
 
 class MCRunMeta(TypedDict):

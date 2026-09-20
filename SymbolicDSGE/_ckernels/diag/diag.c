@@ -71,7 +71,9 @@ arena_size sdsge_bp_arena_size(i64 n, i64 p) {
 int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
                  i64 n, i64 p, f64 *SDSGE_RESTRICT arena,
                  f64 *SDSGE_RESTRICT rss_out, f64 *SDSGE_RESTRICT tss_out) {
-  if (n == 0)
+
+  /* p=2 -> intercept + 1 regressor */
+  if (p < 2 || n <= p)
     return DIAG_INSUFFICIENT_SAMPLES;
 
   /* sigma2 = mean(eps^2); g = eps^2 / sigma2. */
@@ -127,9 +129,9 @@ int sdsge_bp_aux(const f64 *SDSGE_RESTRICT eps, const f64 *SDSGE_RESTRICT X_aug,
 }
 
 int sdsge_bp_stat(const f64 *SDSGE_RESTRICT eps,
-                  const f64 *SDSGE_RESTRICT X_aug, const i64 n,
-                  const i64 p, const i64 robust,
-                  f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT stat_out) {
+                  const f64 *SDSGE_RESTRICT X_aug, const i64 n, const i64 p,
+                  const i64 robust, f64 *SDSGE_RESTRICT arena,
+                  f64 *SDSGE_RESTRICT stat_out) {
   f64 rss = NAN;
   f64 tss = NAN;
   *stat_out = NAN;
@@ -286,8 +288,7 @@ int sdsge_cusum_series(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,
 }
 
 arena_size sdsge_cusum_arena_size(i64 T, i64 p) {
-  return make_sizer((T - p) + 2 * p * p + 2 * p + 3 * p * p + 3 * p +
-                        (T - p),
+  return make_sizer((T - p) + 2 * p * p + 2 * p + 3 * p * p + 3 * p + (T - p),
                     0);
 }
 int sdsge_cusum_stat(const f64 *SDSGE_RESTRICT y, const f64 *SDSGE_RESTRICT X,

@@ -113,7 +113,7 @@ def test_native_lowering_runs_raw_transform_ols_and_diagnostic_pipeline() -> Non
     )
 
     assert native_result.status == 0
-    assert lowered.allocation.failure_step_by_rep.tolist() == [-1] * n_rep
+    assert (lowered.allocation.step_status_by_rep == 0).all()
     assert native_result.step_counts_by_worker.sum(axis=0).tolist() == [
         n_rep,
         n_rep,
@@ -383,7 +383,7 @@ def test_native_diagnostic_status_is_retained_not_a_runner_failure() -> None:
     )
 
     assert result.status == 0
-    assert lowered.allocation.failure_step_by_rep.tolist() == [-1] * n_rep
+    assert (lowered.allocation.step_status_by_rep == 0).all()
     status_layout = lowered.plan["jb"].out_fields["status"]
     actual_status = lowered.allocation.steps["jb"].int_retained[:, status_layout.offset]
     np.testing.assert_array_equal(actual_status, int(TestStatus.INSUFFICIENT_SAMPLES))

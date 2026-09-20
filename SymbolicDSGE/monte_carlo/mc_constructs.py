@@ -387,18 +387,35 @@ class MCFailure:
     ----------
     rep_idx : int
         Replication index that failed, or -1 for a post-loop step.
-    step_name : str
-        Step executing when the failure occurred.
-    error_type : str
-        Exception type name.
-    message : str
-        Exception message.
+    failures : dict[str, int]
+        Mapping of step name to status code for each step that
+        failed in the replication.
     """
 
     rep_idx: int
-    step_name: str
-    error_type: str
-    message: str
+    failures: Mapping[str, int]
+
+    @property
+    def failed_steps(self) -> Sequence[str]:
+        """Names of the steps that failed in this replication."""
+        return list(self.failures.keys())
+
+    def message_for(self, step_name: str) -> str:
+        """Return a human-readable message for the failure of a specific step."""
+        if step_name not in self.failures:
+            raise ValueError(
+                f"No step of name {step_name!r} failed in replication {self.rep_idx}."
+            )
+        ...
+        return ""
+
+    def status_for(self, step_name: str) -> int:
+        """Return the status code for the failure of a specific step."""
+        if step_name not in self.failures:
+            raise ValueError(
+                f"No step of name {step_name!r} failed in replication {self.rep_idx}."
+            )
+        return self.failures[step_name]
 
 
 @dataclass(frozen=True)
@@ -991,7 +1008,7 @@ def report_mc_step_performance(
 
 def failed_postproc_names(fails: list[MCFailure]) -> set[str]:
     """Names of post-loop steps that failed (recorded with the ``-1`` sentinel)."""
-    return {f.step_name for f in fails if f.rep_idx == -1}
+    return {step for f in fails if f.rep_idx == -1 for step in f.failures}
 
 
 def failed_step_counts(fails: list[MCFailure]) -> dict[str, int]:
@@ -999,5 +1016,6 @@ def failed_step_counts(fails: list[MCFailure]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for f in fails:
         if f.rep_idx != -1:
-            counts[f.step_name] = counts.get(f.step_name, 0) + 1
+            for step_name in f.failures:
+                counts[step_name] = counts.get(step_name, 0) + 1
     return counts

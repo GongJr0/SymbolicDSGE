@@ -57,9 +57,7 @@ def serialize_pipeline_result(result: MCPipelineResult) -> dict[str, Any]:
         "failures": [
             {
                 "rep_idx": failure.rep_idx,
-                "step_name": failure.step_name,
-                "error_type": failure.error_type,
-                "message": failure.message,
+                "failures": dict(failure.failures),
             }
             for failure in result.failures
         ],
@@ -155,9 +153,7 @@ def serialize_run_meta(result: MCPipelineResult) -> MCRunMeta:
         failures=[
             MCFailureSpec(
                 rep_idx=failure.rep_idx,
-                step_name=failure.step_name,
-                error_type=failure.error_type,
-                message=failure.message,
+                failures=dict(failure.failures),
             )
             for failure in result.failures
         ],

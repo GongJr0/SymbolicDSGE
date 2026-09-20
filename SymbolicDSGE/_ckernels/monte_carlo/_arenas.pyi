@@ -13,13 +13,14 @@ class StepArenas:
     retained_reps: NDArray[np.int64]
     retained_row_by_rep: NDArray[np.int64]
 
+MC_NOT_RUN: int
+
 class ArenaAllocation:
     n_rep: int
     n_workers: int
     plan: dict[str, Any]
     steps: dict[str, StepArenas]
-    failure_step_by_rep: NDArray[np.int64]
-    failure_status_by_rep: NDArray[np.int64]
+    step_status_by_rep: NDArray[np.int64]
 
 def resolve_retention(
     n_retain: int, n_rep: int
