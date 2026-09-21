@@ -53,8 +53,11 @@ def solved() -> SolvedModel:
 def _plan(steps: list[MCStep], reference: object = None) -> Any:
     """Resolve output layouts without lowering or allocating."""
     pipeline = MCPipeline(steps)
-    return pipeline._resolve_output_specs(
-        cast(SolvedModel, reference if reference is not None else object()), None
+    return resolve_output_specs(
+        pipeline.replication_steps,
+        pipeline._source_indices,
+        cast(SolvedModel, reference if reference is not None else object()),
+        None,
     )
 
 

@@ -49,7 +49,7 @@ from ..monte_carlo.mc_constructs import MCPipelineResult, OpType
 from ..monte_carlo.serialize import (
     json_safe,
     serialize_run_meta,
-    serialize_datagen_result,
+    serialize_datagen_results,
     serialize_filter_results,
     serialize_test_results,
     serialize_regression_results,
@@ -533,9 +533,7 @@ class BundleBuilder:
             Member(path=_MC_RESULT_META, kind="mc_result_meta"),
             json.dumps(json_safe(serialize_run_meta(result)), indent=2).encode("utf-8"),
         )
-        datagen = serialize_datagen_result(
-            result.datagen_outputs, pipeline.replication_steps[0].name
-        )
+        datagen = serialize_datagen_results(result.datagen_outputs)
         filters = serialize_filter_results(result.filter_outputs)
         tests = serialize_test_results(result.test_summaries)
         regressions = serialize_regression_results(result.regression_summaries)

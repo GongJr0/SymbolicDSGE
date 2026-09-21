@@ -13,7 +13,7 @@ from ..._ckernels.monte_carlo._runner import (
     raw_model_data_step,
     transform_step,
 )
-from ..allocation import BufferPlan, _selected_source_shape
+from ..allocation import BufferPlan, _selected_source_shape, resolve_output_specs
 from ..custom_op import NumbaCustomFunc
 from ..mc_constructs import MCStep, OpType
 from ..memory import MCMemoryProfiler
@@ -61,7 +61,9 @@ def lower_native_run(
     if n_rep <= 0:
         raise ValueError("n_rep must be positive.")
 
-    plan = pipeline._resolve_output_specs(reference, dgp)
+    plan = resolve_output_specs(
+        pipeline.replication_steps, pipeline._source_indices, reference, dgp
+    )
     if check_memory_availability:
         MCMemoryProfiler(
             plan,
