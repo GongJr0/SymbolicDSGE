@@ -354,7 +354,7 @@ class MCPipeline:
             raise RuntimeError(
                 f"Monte Carlo run failed at replication "
                 f"{native_res.halt_rep_idx}, step {step_name!r}, with status "
-                f"{status.name} ({status.message}).\n"
+                f"{status.name} ({status.value}): {status.message}."
             )
         failures = _resolve_failures(prep)
 
