@@ -92,7 +92,11 @@ i64 sdsge_log_diff(const f64 *SDSGE_RESTRICT x, const f64 offset, const i64 n,
   f64 *previous = scratch;
 
   for (i64 j = 0; j < p; ++j) {
-    previous[j] = log(x[j] + offset);
+    f64 inner = x[j] + offset;
+    if (inner <= 0.0) {
+      return SDSGE_TRANSFORM_OUT_OF_DOMAIN;
+    }
+    previous[j] = log(inner);
   }
 
   /* Row i of the input produces row i - 1 of the output, so a single-row input
@@ -106,7 +110,7 @@ i64 sdsge_log_diff(const f64 *SDSGE_RESTRICT x, const f64 offset, const i64 n,
       if (inner <= 0.0) {
         return SDSGE_TRANSFORM_OUT_OF_DOMAIN;
       }
-      const f64 current = log(row[j] + offset);
+      const f64 current = log(inner);
 
       dst[j] = current - previous[j];
       previous[j] = current;
