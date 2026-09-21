@@ -197,11 +197,11 @@ def test_invalid_step_parameters_fail_in_the_run(
 ) -> None:
     # These build and lower without complaint; the kernel rejects them per
     # replication. The status code is carried in the message and deliberately not
-    # asserted, since it is an internal numbering.
+    # asserted via catching the `fail_fast` raise.
     pipeline = MCPipeline([_datagen(), step()])
 
     with pytest.raises(RuntimeError, match="'bad'"):
-        mc_run(pipeline, solved_test_model, n_rep=1)
+        mc_run(pipeline, solved_test_model, n_rep=1, fail_fast=True)
 
 
 def test_run_failures_are_collected_per_replication_when_not_failing_fast(
