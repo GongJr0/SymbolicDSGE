@@ -536,9 +536,8 @@ class MCDataGenResult:
     """Stacked datagen output across the replications a run retained.
 
     Stacks the simulation result a datagen step produces on each replication into
-    one container, adding a leading replication axis to every path. A pipeline has
-    exactly one datagen step, so the pipeline result holds this container directly
-    rather than a mapping.
+    one container, adding a leading replication axis to every path. The pipeline
+    result maps each datagen step's name to its container.
 
     A datagen step declares what it writes, and a field it never produced still
     reports a block filled with NaN at the width its names imply, rather than being
@@ -841,8 +840,8 @@ class MCPipelineResult:
         Total number of replications attempted.
     n_successful : int
         Successful replications (retained after filtering).
-    datagen_outputs : MCDataGenResult
-        MCDataGenResult containing the retained replications' simulated states,
+    datagen_outputs : Mapping[str, MCDataGenResult]
+        MCDataGenResult per datagen step, containing retained states,
         shocks, and observables.
     filter_outputs : Mapping[str, MCFilterResult]
         MCFilterResult per filter step, containing the retained replications' filter
@@ -875,7 +874,7 @@ class MCPipelineResult:
     meta: MCMeta
     n_rep: int
     n_successful: int
-    datagen_outputs: MCDataGenResult
+    datagen_outputs: Mapping[str, MCDataGenResult]
     filter_outputs: Mapping[str, MCFilterResult] = dcf(default_factory=dict)
     transform_outputs: Mapping[str, NDF] = dcf(default_factory=dict)
     test_summaries: Mapping[str, MCTestResult] = dcf(default_factory=dict)

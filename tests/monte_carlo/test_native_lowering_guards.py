@@ -12,9 +12,7 @@ from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
-from SymbolicDSGE.monte_carlo.allocation import FieldLayout
 from SymbolicDSGE.monte_carlo.mc_constructs import MCStep
-from SymbolicDSGE.monte_carlo.native_lowering.filters import _filter_y_binding
 from SymbolicDSGE.monte_carlo.step_factories import (
     breusch_pagan_test_step,
     jarque_bera_test_step,
@@ -22,7 +20,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     log_diff_step,
     passthrough_step,
     raw_model_data_step,
-    reference_filter_step,
+    filter_step,
     simulation_step,
     wald_test_step,
 )
@@ -218,17 +216,25 @@ def test_filter_rejects_a_datagen_whose_width_it_cannot_match(
         raw_model_data_step(
             "data", observables=np.zeros((N_REP, T, n_obs + 1), dtype=np.float64)
         ),
-        reference_filter_step("filter"),
+        filter_step("filter", obs_source="data", obs_field="observables"),
     ]
 
-    with pytest.raises(ValueError, match="do not match the DATAGEN output"):
+    with pytest.raises(
+        ValueError, match="selects 4 observation columns but requires 3"
+    ):
         _lower(steps, reference=solved)
 
 
 def test_unscented_filtering_cannot_return_shocks(solved: SolvedModel) -> None:
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
-        reference_filter_step("filter", filter_mode="unscented", return_shocks=True),
+        filter_step(
+            "filter",
+            obs_source="sim",
+            obs_field="observables",
+            filter_mode="unscented",
+            return_shocks=True,
+        ),
     ]
 
     with pytest.raises(ValueError, match="does not support return_shocks"):
@@ -237,7 +243,7 @@ def test_unscented_filtering_cannot_return_shocks(solved: SolvedModel) -> None:
 
 def test_an_unknown_filter_mode_is_rejected(solved: SolvedModel) -> None:
     """The interface resolves the mode before lowering picks a kernel for it."""
-    step = reference_filter_step("filter")
+    step = filter_step("filter", obs_source="sim", obs_field="observables")
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
         dataclasses.replace(step, kwargs={**step.kwargs, "filter_mode": "particle"}),
@@ -252,11 +258,11 @@ def test_a_filter_on_dgp_simulated_data_needs_the_dgp(solved: SolvedModel) -> No
     pipeline = MCPipeline(
         [
             simulation_step("sim", target="dgp", T=T, observables=True),
-            reference_filter_step("filter"),
+            filter_step("filter", obs_source="sim", obs_field="observables"),
         ]
     )
 
-    with pytest.raises(ValueError, match="Simulation output planning requires"):
+    with pytest.raises(ValueError, match="requires its target model 'dgp'"):
         lower_native_run(pipeline, reference=solved, dgp=None, n_rep=N_REP, n_jobs=1)
 
 
@@ -264,7 +270,13 @@ def test_filter_observables_must_be_unique(solved: SolvedModel) -> None:
     name = solved.compiled.observable_names[0]
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
-        reference_filter_step("filter", observables=[name, name]),
+        filter_step(
+            "filter",
+            obs_source="sim",
+            obs_field="observables",
+            obs_columns=[0, 1],
+            observables=[name, name],
+        ),
     ]
 
     with pytest.raises(ValueError, match="must be unique"):
@@ -274,17 +286,23 @@ def test_filter_observables_must_be_unique(solved: SolvedModel) -> None:
 def test_filter_observables_must_exist_on_the_reference(solved: SolvedModel) -> None:
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
-        reference_filter_step("filter", observables=["not_an_observable"]),
+        filter_step(
+            "filter",
+            obs_source="sim",
+            obs_field="observables",
+            obs_columns=[0],
+            observables=["not_an_observable"],
+        ),
     ]
 
     with pytest.raises(ValueError, match="Unknown reference observables"):
         _lower(steps, reference=solved)
 
 
-def test_filter_observables_must_be_present_in_the_datagen_output(
+def test_filter_observable_names_must_match_selected_width(
     solved: SolvedModel,
 ) -> None:
-    """Named raw data can carry a subset the filter does not fully cover."""
+    """Each selected data column needs exactly one supplied observable name."""
     all_names = tuple(solved.compiled.observable_names)
     steps = [
         raw_model_data_step(
@@ -292,10 +310,17 @@ def test_filter_observables_must_be_present_in_the_datagen_output(
             observables=np.zeros((N_REP, T, 1), dtype=np.float64),
             observable_names=all_names[:1],
         ),
-        reference_filter_step("filter", observables=list(all_names[:2])),
+        filter_step(
+            "filter",
+            obs_source="data",
+            obs_field="observables",
+            observables=list(all_names[:2]),
+        ),
     ]
 
-    with pytest.raises(ValueError, match="missing filter observables"):
+    with pytest.raises(
+        ValueError, match="selects 1 observation columns but requires 2"
+    ):
         _lower(steps, reference=solved)
 
 
@@ -303,7 +328,12 @@ def test_filter_x0_must_cover_every_state(solved: SolvedModel) -> None:
     n_var = len(solved.compiled.var_names)
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
-        reference_filter_step("filter", x0=np.zeros(n_var - 1, dtype=np.float64)),
+        filter_step(
+            "filter",
+            obs_source="sim",
+            obs_field="observables",
+            x0=np.zeros(n_var - 1, dtype=np.float64),
+        ),
     ]
 
     # The state resolver owns the length check now, so the message is its own.
@@ -336,21 +366,8 @@ def test_a_readable_filter_field_still_authors_and_lowers(
     """The curated list has to still admit what the binding can actually stage."""
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
-        reference_filter_step("filter"),
+        filter_step("filter", obs_source="sim", obs_field="observables"),
         passthrough_step("keep", source="filter", field="innov", columns=None),
     ]
 
     _lower(steps, reference=solved)
-
-
-def test_the_observation_binding_must_match_the_source_layout() -> None:
-    """An internal consistency check between the staged rows and the plan."""
-    layout = FieldLayout(
-        shape=(T, 2), flat_count=T * 2, dtype=np.dtype(np.float64), offset=0
-    )
-
-    with pytest.raises(ValueError, match="do not match their input layout"):
-        _filter_y_binding(layout, T + 1, np.asarray([0, 1], dtype=np.int64), 0, 2)
-
-    with pytest.raises(ValueError, match="do not match their input layout"):
-        _filter_y_binding(layout, T, np.asarray([0], dtype=np.int64), 0, 2)

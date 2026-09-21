@@ -169,7 +169,7 @@ def test_unknown_source_field_is_rejected_by_the_factory() -> None:
         ),
         (
             lambda: [standardize_step("s", source="dat", field="observables")],
-            "requires exactly one DATAGEN step",
+            "unknown producer",
         ),
     ],
     ids=["unknown-producer", "duplicate-name", "no-datagen"],

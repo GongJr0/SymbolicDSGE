@@ -24,6 +24,7 @@ from SymbolicDSGE.monte_carlo.allocation import (
     ArenaSize,
     FieldLayout,
     StepBufferPlan,
+    resolve_output_specs,
 )
 from SymbolicDSGE.monte_carlo.mc_constructs import (
     report_mc_performance,
@@ -40,7 +41,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     ljung_box_test_step,
     log_diff_step,
     raw_model_data_step,
-    reference_filter_step,
+    filter_step,
     regression_step,
     wald_test_step,
 )
@@ -856,7 +857,9 @@ def test_output_shape_resolution_tracks_selected_transform_payloads(
         ]
     )
 
-    specs = pipeline._resolve_output_specs(solved_test_model, None)
+    specs = resolve_output_specs(
+        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+    )
 
     # A datagen step allocates all three of its fields; the ones its author did
     # not supply are zero-width rather than absent.
@@ -902,7 +905,9 @@ def test_output_specs_for_non_ols_regressions(solved_test_model, kind: str) -> N
         ]
     )
 
-    specs = pipeline._resolve_output_specs(solved_test_model, None)
+    specs = resolve_output_specs(
+        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+    )
 
     _assert_output_plan(
         specs[kind],
@@ -934,7 +939,9 @@ def test_output_shape_resolution_includes_linear_filter_fields(
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables, observable_names=names),
-            reference_filter_step(
+            filter_step(
+                obs_source="datagen",
+                obs_field="observables",
                 filter_mode=filter_mode,
                 observables=list(names),
                 return_shocks=True,
@@ -942,7 +949,9 @@ def test_output_shape_resolution_includes_linear_filter_fields(
         ]
     )
 
-    specs = pipeline._resolve_output_specs(solved_test_model, None)
+    specs = resolve_output_specs(
+        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+    )
 
     # The filter carries the full variable vector, not just the predetermined
     # states, so its state width is ``n_var``.
@@ -978,7 +987,9 @@ def test_output_shape_resolution_includes_scalar_test_channels(
         ]
     )
 
-    specs = pipeline._resolve_output_specs(solved_test_model, None)
+    specs = resolve_output_specs(
+        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+    )
 
     _assert_output_plan(
         specs["jb"],
@@ -998,7 +1009,9 @@ def test_output_shape_resolution_normalizes_payload_values_to_source_shapes(
         ]
     )
 
-    specs = pipeline._resolve_output_specs(solved_test_model, None)
+    specs = resolve_output_specs(
+        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+    )
 
     _assert_output_plan(specs["vector"], "vector", ("payload", (4, 1), np.float64))
     _assert_output_plan(specs["matrix"], "matrix", ("payload", (4, 2), np.float64))
@@ -1011,7 +1024,9 @@ def test_output_plan_carries_step_retention_count(solved_test_model) -> None:
     )
     pipeline = MCPipeline([datagen])
 
-    specs = pipeline._resolve_output_specs(solved_test_model, None)
+    specs = resolve_output_specs(
+        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+    )
 
     assert specs["datagen"].n_retain == 2
 
@@ -1037,11 +1052,15 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
                 observables=np.zeros((T, n_obs), dtype=np.float64),
                 observable_names=reference.compiled.observable_names,
             ),
-            reference_filter_step(filter_mode="unscented"),
+            filter_step(
+                obs_source="datagen", obs_field="observables", filter_mode="unscented"
+            ),
         ]
     )
 
-    specs = pipeline._resolve_output_specs(reference, None)
+    specs = resolve_output_specs(
+        pipeline.replication_steps, pipeline._source_indices, reference, None
+    )
     n_state = reference.compiled.n_state
     n_z = 2 * n_state
 
@@ -1320,7 +1339,7 @@ def test_regression_step_requires_matching_row_counts(
 
 
 def test_pipeline_validates_step_order_and_unique_names() -> None:
-    with pytest.raises(ValueError, match="exactly one DATAGEN step"):
+    with pytest.raises(ValueError, match="unknown producer"):
         MCPipeline(
             [
                 wald_test_step(

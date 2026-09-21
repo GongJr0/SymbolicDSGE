@@ -194,32 +194,32 @@ def serialize_regression_results(
     return out
 
 
-def serialize_datagen_result(
-    datagen: MCDataGenResult,
-    step_name: str,
+def serialize_datagen_results(
+    datagens: Mapping[str, MCDataGenResult],
 ) -> dict[str, tuple[MCDataGenResultMeta, dict[str, NDArray[Any]]]]:
-    """The datagen's ``(meta, traces)`` halves, keyed by its step name.
+    """Each datagen's ``(meta, traces)`` halves, keyed by step name.
 
-    One datagen per pipeline, so the mapping holds one entry; it is keyed
-    because that is the shape the member writers take. Arrays are handed over as
-    the run's own, and the meta records the shape each one unflattens to.
+    Arrays are handed over as the run's own, and the metadata records their shapes.
     """
-    fields: dict[str, NDArray[Any]] = {
-        "retained_reps": datagen.retained_reps,
-        "states": datagen.X,
-        "shocks": datagen.eps,
-    }
-    if datagen.y.shape[-1]:
-        fields["observables"] = datagen.y
-    meta = MCDataGenResultMeta(
-        n_rep=int(datagen.n_rep),
-        n_retained=int(datagen.n_retained),
-        var_names=list(datagen.var_names),
-        shock_names=list(datagen.shock_names),
-        observable_names=list(datagen.observable_names),
-        shapes={name: list(arr.shape) for name, arr in fields.items()},
-    )
-    return {step_name: (meta, fields)}
+    out = {}
+    for name, datagen in datagens.items():
+        fields: dict[str, NDArray[Any]] = {
+            "retained_reps": datagen.retained_reps,
+            "states": datagen.X,
+            "shocks": datagen.eps,
+        }
+        if datagen.y.shape[-1]:
+            fields["observables"] = datagen.y
+        meta = MCDataGenResultMeta(
+            n_rep=int(datagen.n_rep),
+            n_retained=int(datagen.n_retained),
+            var_names=list(datagen.var_names),
+            shock_names=list(datagen.shock_names),
+            observable_names=list(datagen.observable_names),
+            shapes={name: list(arr.shape) for name, arr in fields.items()},
+        )
+        out[name] = (meta, fields)
+    return out
 
 
 def serialize_filter_results(

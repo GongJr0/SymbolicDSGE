@@ -570,55 +570,49 @@ def _mc_summary(value: Any) -> Any:
     return value
 
 
-def _load_mc_datagen(archive: BundleArchive, manifest: Manifest) -> MCDataGenResult:
-    """The datagen step's retained output, empty when the bundle carries none.
+def _load_mc_datagen(
+    archive: BundleArchive, manifest: Manifest
+) -> dict[str, MCDataGenResult]:
+    """Restore datagen outputs by step name, or an empty mapping when absent.
 
-    ``shapes`` names the fields the step produced, so an absent ``observables``
-    entry restores the ``None`` the run reported rather than an empty array. The
-    widths come from those shapes rather than from the name sequences beside
-    them, since raw data may declare an array it never named.
+    Field widths come from stored shapes because raw arrays may be unnamed.
+    Missing observables are restored as an array with zero columns.
     """
     metas = _mc_json(archive, manifest, "mc_datagen_steps")
     if not metas:
-        empty = np.empty((0, 0, 0), dtype=np.float64)
-        return MCDataGenResult(
-            n_rep=0,
-            n_retained=0,
-            retained_reps=np.empty((0,), dtype=np.int64),
-            var_names=(),
-            X=empty,
-            shock_names=(),
-            eps=empty,
+        return {}
+
+    columns = _mc_array_columns(archive, manifest, "mc_datagen_trace")
+    results: dict[str, MCDataGenResult] = {}
+    for name, meta in metas.items():
+        shapes = meta["shapes"]
+
+        def field(key: str) -> NDF:
+            shape = tuple(int(size) for size in shapes[key])
+            return _mc_array(columns.get((name, key), {}), f"{name}.{key}", shape)
+
+        states = field("states")
+        results[name] = MCDataGenResult(
+            n_rep=int(meta["n_rep"]),
+            n_retained=int(meta["n_retained"]),
+            retained_reps=_int_trace(
+                columns.get((name, "retained_reps"), {}),
+                f"{name}.retained_reps",
+                int(meta["n_retained"]),
+            ),
+            var_names=tuple(meta["var_names"]),
+            X=states,
+            shock_names=tuple(meta["shock_names"]),
+            eps=field("shocks"),
+            observable_names=tuple(meta["observable_names"]),
+            y=(
+                field("observables")
+                if "observables" in shapes
+                else np.empty((*states.shape[:2], 0), dtype=np.float64)
+            ),
         )
 
-    name, meta = next(iter(metas.items()))
-    columns = _mc_array_columns(archive, manifest, "mc_datagen_trace")
-    shapes = meta["shapes"]
-
-    def field(key: str) -> NDF:
-        shape = tuple(int(size) for size in shapes[key])
-        return _mc_array(columns.get((name, key), {}), f"{name}.{key}", shape)
-
-    states = field("states")
-    return MCDataGenResult(
-        n_rep=int(meta["n_rep"]),
-        n_retained=int(meta["n_retained"]),
-        retained_reps=_int_trace(
-            columns.get((name, "retained_reps"), {}),
-            f"{name}.retained_reps",
-            int(meta["n_retained"]),
-        ),
-        var_names=tuple(meta["var_names"]),
-        X=states,
-        shock_names=tuple(meta["shock_names"]),
-        eps=field("shocks"),
-        observable_names=tuple(meta["observable_names"]),
-        y=(
-            field("observables")
-            if "observables" in shapes
-            else np.empty((*states.shape[:2], 0), dtype=np.float64)
-        ),
-    )
+    return results
 
 
 def _load_mc_result(

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Sequence, cast
+from dataclasses import replace
+from typing import Sequence
 
 import numpy as np
 
@@ -22,8 +23,8 @@ from ..._ckernels.monte_carlo._runner import (
 )
 from ...core.solved_model import SolvedModel
 from ...core.compiled_model import _shock_covariance
-from ..allocation import BufferPlan, FieldLayout
-from ..defaults import DEFAULT_FILTER_MODE, DEFAULT_SIMULATION_TARGET
+from ..allocation import BufferPlan, get_target_model
+from ..defaults import DEFAULT_FILTER_MODE
 from ..mc_constructs import MCStep
 from .utils import (
     NDF,
@@ -33,69 +34,84 @@ from .utils import (
     _flat_f64,
     _model_params,
     _static_binding,
+    _source_binding,
 )
 
 
 def lower_filter_step(
     step: MCStep,
-    datagen_step: MCStep,
+    source_indices: tuple[int, ...],
+    steps: tuple[MCStep, ...],
     plan: BufferPlan,
-    reference: SolvedModel,
+    reference: SolvedModel | None,
     dgp: SolvedModel | None,
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
     """Compile a resolved filter configuration and its staged observations."""
-    source_names, requested_names = _filter_observable_names(
-        datagen_step, step, reference, dgp
+    source_names, requested_names = _filter_observable_names(step, reference, dgp)
+    if len(source_indices) != 1 or len(step.source_args) != 1:
+        raise ValueError(f"Filter step {step.name!r} must have one source argument.")
+    source_binding = _source_binding(
+        source_indices[0],
+        steps,
+        plan,
+        step.source_args[0],
+        target_offset=0,
+        target_row_stride=len(source_names),
     )
-    source_layout = plan[datagen_step.name].out_fields["observables"]
-    T, source_n_obs = source_layout.shape
+    T = source_binding.n_rows
+    source_n_obs = source_binding.columns.size
+    model = get_target_model(step, reference, dgp, "reference")
     mode = step.kwargs.get("filter_mode", DEFAULT_FILTER_MODE)
 
-    canonical_names = _canonical_observables(reference, requested_names)
+    canonical_names = _canonical_observables(model, requested_names)
     measurement_addr = 0
     jacobian_addr = 0
     if mode in {"extended", "unscented"}:
         measurement_addr = int(
-            reference.compiled.construct_measurement_cfunc(canonical_names).address
+            model.compiled.construct_measurement_cfunc(canonical_names).address
         )
         if mode == "extended":
             jacobian_addr = int(
-                reference.compiled.construct_measurement_jacobian_cfunc(
+                model.compiled.construct_measurement_jacobian_cfunc(
                     canonical_names
                 ).address
             )
 
-    if len(canonical_names) != source_n_obs and requested_names is None:
-        raise ValueError("Filter observations do not match the DATAGEN output.")
-    source_columns = _filter_source_columns(source_names, canonical_names)
-    n_state = reference.compiled.n_state
-    n_ctrl = reference.compiled.n_ctrl
-    n_var = reference.compiled.n_var
-    n_exog = reference.compiled.n_exog
-    n_par = reference.compiled.n_par
+    if len(canonical_names) != source_n_obs:
+        raise ValueError(
+            "Selected source columns do not match the filter observable names."
+        )
+    source_columns = source_binding.columns[
+        _filter_source_columns(source_names, canonical_names)
+    ]
+    n_state = model.compiled.n_state
+    n_ctrl = model.compiled.n_ctrl
+    n_var = model.compiled.n_var
+    n_exog = model.compiled.n_exog
+    n_par = model.compiled.n_par
     n_obs = len(canonical_names)
     before_y: tuple[NDF, ...]
     input_offsets = _offsets.filter_offsets(
         mode, n_state, n_ctrl, n_exog, n_obs, T, n_par
     ).foffset
 
-    R = _build_R(reference, step.kwargs.get("R"), canonical_names)
-    Q = _shock_covariance(reference.compiled)
-    P0 = _build_P0(reference, mode, step.kwargs.get("P0"))
+    R = _build_R(model, step.kwargs.get("R"), canonical_names)
+    Q = _shock_covariance(model.compiled)
+    P0 = _build_P0(model, mode, step.kwargs.get("P0"))
 
     if mode == "linear":
-        C, d = reference._build_C_d_from_obs(canonical_names)
+        C, d = model._build_C_d_from_obs(canonical_names)
         before_y = (
-            _flat_f64(reference.policy.A),
-            _flat_f64(reference.policy.B),
+            _flat_f64(model.policy.A),
+            _flat_f64(model.policy.B),
             _flat_f64(C),
             _flat_f64(d),
             _flat_f64(Q),
             _flat_f64(R),
-            _flat_f64(reference.policy.steady_state),
+            _flat_f64(model.policy.steady_state),
         )
         binding = _filter_y_binding(
-            source_layout, T, source_columns, input_offsets[len(before_y)], n_obs
+            source_binding, source_columns, input_offsets[len(before_y)], n_obs
         )
         return (
             filter_linear_step(
@@ -111,22 +127,22 @@ def lower_filter_step(
             _filter_bindings(
                 before_y,
                 binding,
-                (reference._initial_state(step.kwargs.get("x0")), P0),
+                (model._initial_state(step.kwargs.get("x0")), P0),
                 input_offsets,
             ),
         )
     if mode == "extended":
-        params = _model_params(reference)
+        params = _model_params(model)
         before_y = (
-            _flat_f64(reference.policy.A),
-            _flat_f64(reference.policy.B),
+            _flat_f64(model.policy.A),
+            _flat_f64(model.policy.B),
             params,
             _flat_f64(Q),
             _flat_f64(R),
-            _flat_f64(reference.policy.steady_state),
+            _flat_f64(model.policy.steady_state),
         )
         binding = _filter_y_binding(
-            source_layout, T, source_columns, input_offsets[len(before_y)], n_obs
+            source_binding, source_columns, input_offsets[len(before_y)], n_obs
         )
         return (
             filter_extended_step(
@@ -145,7 +161,7 @@ def lower_filter_step(
             _filter_bindings(
                 before_y,
                 binding,
-                (reference._initial_state(step.kwargs.get("x0")), P0),
+                (model._initial_state(step.kwargs.get("x0")), P0),
                 input_offsets,
             ),
         )
@@ -153,15 +169,15 @@ def lower_filter_step(
     else:  # mode == "unscented"
         if step.kwargs.get("return_shocks"):
             raise ValueError("Unscented filtering does not support return_shocks.")
-        policy = reference.policy
+        policy = model.policy
         if not isinstance(policy, SecondOrderSolution):
             raise ValueError(
                 "Native unscented filtering requires a second order solution."
             )
-        n_state = reference.compiled.n_state
-        n_ctrl = reference.compiled.n_ctrl
-        params = _model_params(reference)
-        z0 = _build_unscented_z0(reference, step.kwargs.get("x0"))
+        n_state = model.compiled.n_state
+        n_ctrl = model.compiled.n_ctrl
+        params = _model_params(model)
+        z0 = _build_unscented_z0(model, step.kwargs.get("x0"))
         before_y = (
             _flat_f64(policy.hx),
             _flat_f64(policy.gx),
@@ -180,7 +196,7 @@ def lower_filter_step(
             _flat_f64(R),
         )
         binding = _filter_y_binding(
-            source_layout, T, source_columns, input_offsets[len(before_y)], n_obs
+            source_binding, source_columns, input_offsets[len(before_y)], n_obs
         )
         return (
             filter_unscented_step(
@@ -206,24 +222,17 @@ def lower_filter_step(
 
 
 def _filter_observable_names(
-    datagen_step: MCStep,
     filter_step: MCStep,
-    reference: SolvedModel,
+    reference: SolvedModel | None,
     dgp: SolvedModel | None,
 ) -> tuple[tuple[str, ...], tuple[str, ...] | None]:
+    """Name selected data columns explicitly or in the target model's order."""
+    model = get_target_model(filter_step, reference, dgp, "reference")
     requested = filter_step.kwargs.get("observables")
-    if datagen_step.step_type == "raw_model_data":
-        raw_names = tuple(datagen_step.kwargs.get("observable_names") or ())
-        return (
-            raw_names or tuple(reference.compiled.observable_names),
-            tuple(requested) if requested is not None else (raw_names or None),
-        )
-
-    # simulation
-    target = datagen_step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
-    model = reference if target == "reference" else cast(SolvedModel, dgp)
-    names = tuple(model.compiled.observable_names)
-    return names, tuple(requested) if requested is not None else names
+    if requested is not None:
+        names = tuple(requested)
+        return names, names
+    return tuple(model.compiled.observable_names), None
 
 
 def _canonical_observables(
@@ -253,21 +262,13 @@ def _filter_source_columns(
 
 
 def _filter_y_binding(
-    source_layout: FieldLayout,
-    T: int,
+    source_binding: FloatInputBinding,
     columns: NDI,
     target_offset: int,
     n_obs: int,
 ) -> FloatInputBinding:
-    source_T, source_n_obs = source_layout.shape
-    if source_T != T or columns.size != n_obs:
-        raise ValueError("Filter observations do not match their input layout.")
-    return FloatInputBinding(
-        source_step_idx=0,
-        source_offset=source_layout.offset,
-        source_row_stride=source_n_obs,
-        row_start=0,
-        n_rows=T,
+    return replace(
+        source_binding,
         columns=columns,
         target_offset=target_offset,
         target_row_stride=n_obs,

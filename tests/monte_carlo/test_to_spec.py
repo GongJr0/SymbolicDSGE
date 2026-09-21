@@ -13,7 +13,7 @@ from SymbolicDSGE.monte_carlo.spec import pipeline_meta
 from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,
     raw_model_data_step,
-    reference_filter_step,
+    filter_step,
     simulation_step,
     standardize_step,
     transform_step,
@@ -35,7 +35,7 @@ def _simulation_pipeline() -> MCPipeline:
                 observables=True,
                 shocks={"u": Shock(dist="norm", seed=0, dist_kwargs={"loc": 0.0})},
             ),
-            reference_filter_step("filter"),
+            filter_step("filter", obs_source="dgp", obs_field="observables"),
             standardize_step("s", source="dgp", field="observables"),
             jarque_bera_test_step("jb", source="s", field="payload"),
             wald_test_step(

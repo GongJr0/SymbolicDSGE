@@ -227,7 +227,7 @@ class MCMemoryProfiler:
         plan: BufferPlan,
         steps: Sequence[MCStep],
         *,
-        reference: SolvedModel,
+        reference: SolvedModel | None = None,
         dgp: SolvedModel | None = None,
         n_rep: int,
         n_jobs: int | None = None,
@@ -320,20 +320,22 @@ class MCMemoryProfiler:
         ``(n_rep, T, n_exog)`` slab. Eligibility is read off the raw spec, the same
         way the arena planner and lowering read it.
         """
-        step = self._steps[0]
-        if step.op_type is not OpType.DATAGEN or step.step_type != "simulation":
-            return 0
-        shocks = _normalized_spec(step.kwargs.get("shocks"))
-        if not shocks:
-            return 0  # A single (T, n_exog) matrix, shared by every replication.
-        if native_shock_families(shocks):
-            return 0
-        target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
-        model = self._reference if target == "reference" else self._dgp
-        if model is None:
-            return 0
-        T = int(step.kwargs["T"])
-        return self._n_rep * T * model.compiled.n_exog * BYTES_PER_ELEMENT
+        total_bytes = 0
+        for step in self._steps:
+            if step.op_type is not OpType.DATAGEN or step.step_type != "simulation":
+                continue
+            shocks = _normalized_spec(step.kwargs.get("shocks"))
+            if not shocks:
+                continue  # A single (T, n_exog) matrix, shared by every replication.
+            if native_shock_families(shocks):
+                continue
+            target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
+            model = self._reference if target == "reference" else self._dgp
+            if model is None:
+                continue
+            T = int(step.kwargs["T"])
+            total_bytes += self._n_rep * T * model.compiled.n_exog * BYTES_PER_ELEMENT
+        return total_bytes
 
 
 def _format_bytes(n_bytes: int) -> str:

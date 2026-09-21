@@ -85,7 +85,7 @@ def _postproc_result(postproc: dict[str, Artifact]) -> MCPipelineResult:
         meta=MCMeta(n_rep=3, n_retained_by_step={}),
         n_rep=3,
         n_successful=3,
-        datagen_outputs=_empty_datagen(),
+        datagen_outputs={"datagen": _empty_datagen()},
         postproc=postproc,
     )
 

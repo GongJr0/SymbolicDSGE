@@ -8,7 +8,7 @@ named logical arrays.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, NamedTuple, Sequence, TypeAlias, cast
+from typing import Any, Mapping, NamedTuple, Sequence, TypeAlias
 
 import numpy as np
 from numpy import float64, int64
@@ -84,7 +84,7 @@ BufferPlan: TypeAlias = dict[str, StepBufferPlan]
 def resolve_output_specs(
     steps: Sequence[MCStep],
     source_indices: Sequence[Sequence[int]],
-    reference: SolvedModel,
+    reference: SolvedModel | None,
     dgp: SolvedModel | None,
 ) -> BufferPlan:
     """Compile native output layouts for the pipeline's built-in steps.
@@ -112,9 +112,11 @@ def resolve_output_specs(
             case OpType.FILTER:
                 fields, offsets = _resolve_filter_fields(
                     step,
-                    steps[0],
-                    plans[steps[0].name],
+                    indices,
+                    plans,
+                    steps,
                     reference,
+                    dgp,
                 )
             case OpType.REGRESSION:
                 fields, offsets = _resolve_regression_fields(
@@ -245,7 +247,7 @@ def _resolve_input_asize(
     source_indices: Sequence[int],
     plans: BufferPlan,
     steps: Sequence[MCStep],
-    reference: SolvedModel,
+    reference: SolvedModel | None,
     dgp: SolvedModel | None,
 ) -> ArenaSize:
     """Resolve one native step's packed input and workspace requirement."""
@@ -271,7 +273,7 @@ def _resolve_input_asize(
             )
         case OpType.FILTER:
             return _resolve_filter_input_asize(
-                step, steps[0], plans[steps[0].name], reference
+                step, source_indices, plans, steps, reference, dgp
             )
         case OpType.REGRESSION:
             return _resolve_regression_input_asize(step, source_indices, plans, steps)
@@ -286,19 +288,12 @@ def _resolve_input_asize(
 
 def _resolve_datagen_input_asize(
     step: MCStep,
-    reference: SolvedModel,
+    reference: SolvedModel | None,
     dgp: SolvedModel | None,
 ) -> ArenaSize:
     if step.step_type == "raw_model_data":
         return ArenaSize()
-    model = cast(
-        SolvedModel,
-        (
-            reference
-            if step.kwargs.get("target", DEFAULT_SIMULATION_TARGET) == "reference"
-            else dgp
-        ),
-    )
+    model = get_target_model(step, reference, dgp, DEFAULT_SIMULATION_TARGET)
     T = int(step.kwargs["T"])
     size = _asize(
         a.simulation_arena_size(
@@ -319,34 +314,49 @@ def _resolve_datagen_input_asize(
     return size
 
 
+def _resolve_filter_shape(
+    step: MCStep,
+    source_indices: Sequence[int],
+    plans: BufferPlan,
+    steps: Sequence[MCStep],
+    model: SolvedModel,
+) -> tuple[int, int]:
+    """Resolve selected observations and check their width against model names."""
+    if len(step.source_args) != 1 or len(source_indices) != 1:
+        raise ValueError(f"Filter step {step.name!r} must have one source argument.")
+    T, n_obs = _selected_source_shape(
+        plans, steps, source_indices[0], step.source_args[0]
+    )
+    names = step.kwargs.get("observables")
+    expected = len(names) if names is not None else model.compiled.n_obs
+    if n_obs != expected:
+        raise ValueError(
+            f"Filter step {step.name!r} selects {n_obs} observation columns "
+            f"but requires {expected} for its observable names."
+        )
+    return T, n_obs
+
+
 def _resolve_filter_input_asize(
     step: MCStep,
-    datagen_step: MCStep,
-    datagen_plan: StepBufferPlan,
-    reference: SolvedModel,
+    source_indices: Sequence[int],
+    plans: BufferPlan,
+    steps: Sequence[MCStep],
+    reference: SolvedModel | None,
+    dgp: SolvedModel | None,
 ) -> ArenaSize:
-    observables = datagen_plan.out_fields.get("observables")
-    if observables is None or is_empty(observables):
-        raise ValueError("Filter input planning requires datagen observables.")
-    T, datagen_n_obs = observables.shape
-    selected_observables = step.kwargs.get("observables")
-    if selected_observables is not None:
-        n_obs = len(selected_observables)
-    elif datagen_step.step_type == "raw_model_data" and not datagen_step.kwargs.get(
-        "observable_names"
-    ):
-        n_obs = reference.compiled.n_obs
-    else:
-        n_obs = datagen_n_obs
+    model = get_target_model(step, reference, dgp, "reference")
+    T, n_obs = _resolve_filter_shape(step, source_indices, plans, steps, model)
+    comp = model.compiled
     return _asize(
         a.filter_arena_size(
             _filter_mode(step),
-            reference.compiled.n_state,
-            reference.compiled.n_ctrl,
-            reference.compiled.n_exog,
+            comp.n_state,
+            comp.n_ctrl,
+            comp.n_exog,
             n_obs,
             T,
-            reference.compiled.n_par,
+            comp.n_par,
         )
     )
 
@@ -539,19 +549,36 @@ def _transform_output_shape(
     return rows, n_columns
 
 
+def get_target_model(
+    step: MCStep,
+    reference: SolvedModel | None,
+    dgp: SolvedModel | None,
+    default: str = DEFAULT_SIMULATION_TARGET,
+) -> SolvedModel:
+    target = step.kwargs.get("target", default)
+    if target not in ("reference", "dgp"):
+        raise ValueError(
+            f"Step {step.name!r} has unrecognized target model {target!r}. "
+            "Valid targets are 'reference' and 'dgp'."
+        )
+    model = reference if target == "reference" else dgp
+    if model is None:
+        raise ValueError(
+            f"Step {step.name!r} requires its target model {target!r}. "
+            "If no target was specified, the default for this step is "
+            f"{default!r}."
+        )
+    return model
+
+
 def _resolve_datagen_fields(
     step: MCStep,
-    reference: SolvedModel,
+    reference: SolvedModel | None,
     dgp: SolvedModel | None,
 ) -> tuple[dict[str, _FieldSpec], o.ArenaOffset]:
     match step.step_type:
         case "simulation":
-            target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
-            model = reference if target == "reference" else dgp
-            if model is None:
-                raise ValueError(
-                    "Simulation output planning requires its target model."
-                )
+            model = get_target_model(step, reference, dgp)
             T = int(step.kwargs["T"])
             n_obs = (
                 model.compiled.n_obs
@@ -594,25 +621,15 @@ def _resolve_datagen_fields(
 
 def _resolve_filter_fields(
     step: MCStep,
-    datagen_step: MCStep,
-    datagen_plan: StepBufferPlan,
-    reference: SolvedModel,
+    source_indices: Sequence[int],
+    plans: BufferPlan,
+    steps: Sequence[MCStep],
+    reference: SolvedModel | None,
+    dgp: SolvedModel | None,
 ) -> tuple[dict[str, _FieldSpec], o.ArenaOffset]:
-    comp = reference.compiled
-    observables = datagen_plan.out_fields.get("observables")
-    if observables is None or is_empty(observables):
-        raise ValueError("Filter output planning requires datagen observables.")
-    T, datagen_n_obs = observables.shape
-
-    selected_observables = step.kwargs.get("observables")
-    if selected_observables is not None:
-        n_obs = len(selected_observables)
-    elif datagen_step.step_type == "raw_model_data" and not datagen_step.kwargs.get(
-        "observable_names"
-    ):
-        n_obs = comp.n_obs
-    else:
-        n_obs = datagen_n_obs
+    model = get_target_model(step, reference, dgp, "reference")
+    T, n_obs = _resolve_filter_shape(step, source_indices, plans, steps, model)
+    comp = model.compiled
     n_var = comp.n_var
     mode = _filter_mode(step)
     match mode:

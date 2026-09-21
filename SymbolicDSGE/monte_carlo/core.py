@@ -17,7 +17,6 @@ from ..core.solved_model import SolvedModel
 from ..regression.result import MCRegressionResult
 
 from .allocation import (
-    BufferPlan,
     FieldLayout,
     _filter_mode,
     is_empty,
@@ -93,177 +92,19 @@ class MCPipeline:
     ) -> None:
         rep_tuple = tuple(replication_steps)
         postproc_tuple = tuple(postproc_steps)
-        self._validate_steps(rep_tuple, postproc_tuple)
-        ordered = self._order_steps(rep_tuple)
-        source_indices = self._resolve_source_indices(ordered)
-        self._validate_postproc_traces(ordered, postproc_tuple)
+        _validate_steps(rep_tuple, postproc_tuple)
+
+        ordered = _order_steps(rep_tuple)
+        source_indices = _resolve_source_indices(ordered)
+        _validate_postproc_traces(ordered, postproc_tuple)
+
         self.replication_steps = ordered
         self.postproc_steps = postproc_tuple
         self._source_indices = source_indices
 
-    @staticmethod
-    def _validate_steps(
-        replication_steps: tuple[MCStep, ...],
-        postproc_steps: tuple[MCStep, ...],
-    ) -> None:
-        if not replication_steps:
-            raise ValueError("MCPipeline requires at least one per-replication step.")
-        names = [step.name for step in (*replication_steps, *postproc_steps)]
-        if len(set(names)) != len(names):
-            raise ValueError("MCPipeline step names must be unique.")
-        for name in names:
-            bad = sorted(set(name) & _RESERVED_NAME_CHARS)
-            if bad:
-                raise ValueError(
-                    f"MCPipeline step name {name!r} uses reserved characters "
-                    f"{''.join(bad)!r}. A step name becomes a bundle member path "
-                    f"and a trace column qualifier, which reserve them."
-                )
-        datagens = [
-            step for step in replication_steps if step.op_type is OpType.DATAGEN
-        ]
-        if len(datagens) != 1:
-            raise ValueError("MCPipeline requires exactly one DATAGEN step.")
-        for step in replication_steps:
-            if step.op_type is OpType.POSTPROC:
-                raise ValueError(
-                    "POSTPROC steps can't be specified under replication_steps, use "
-                    "postproc_steps."
-                )
-        for step in postproc_steps:
-            if step.op_type is not OpType.POSTPROC:
-                raise ValueError(
-                    f"postproc_steps may only contain POSTPROC steps; {step.name!r} "
-                    f"is {step.op_type}."
-                )
-
-    @staticmethod
-    def _order_steps(replication_steps: tuple[MCStep, ...]) -> tuple[MCStep, ...]:
-        """Sort the steps into execution order: datagen, filters, transforms, terminals.
-
-        A caller authors a step list, not a schedule. Filters read only the
-        datagen and terminals are read by no one, so those phases keep their
-        authored order; transforms chain, so they are walked against theirs.
-        """
-        datagen: list[MCStep] = []
-        filters: list[MCStep] = []
-        transforms: list[MCStep] = []
-        terminals: list[MCStep] = []
-        for step in replication_steps:
-            if step.op_type is OpType.DATAGEN:
-                datagen.append(step)
-            elif step.op_type is OpType.FILTER:
-                filters.append(step)
-            elif step.op_type is OpType.TRANSFORM:
-                transforms.append(step)
-            else:
-                terminals.append(step)
-        placed = {step.name for step in (*datagen, *filters)}
-        return (*datagen, *filters, *_order_transforms(transforms, placed), *terminals)
-
-    @staticmethod
-    def _resolve_source_indices(
-        replication_steps: tuple[MCStep, ...],
-    ) -> tuple[tuple[int, ...], ...]:
-        index_by_name = {
-            step.name: index for index, step in enumerate(replication_steps)
-        }
-
-        resolved: list[tuple[int, ...]] = []
-        for step_index, step in enumerate(replication_steps):
-            step_indices: list[int] = []
-            for selector in step.source_args:
-                source_name = selector.source_step
-                source_idx = index_by_name.get(source_name)
-                if source_idx is None:
-                    raise ValueError(
-                        f"Step {step.name!r} depends on unknown producer {source_name!r}."
-                    )
-                producer_step = replication_steps[source_idx]
-                if source_idx >= step_index:
-                    raise ValueError(
-                        f"Step {step.name!r} depends on {producer_step.name!r}, which does not "
-                        "appear earlier in the pipeline."
-                    )
-                _validate_source_producer(step, selector, producer_step)
-                step_indices.append(source_idx)
-            resolved.append(tuple(step_indices))
-        return tuple(resolved)
-
-    @staticmethod
-    def _validate_postproc_traces(
-        replication_steps: tuple[MCStep, ...],
-        postproc_steps: tuple[MCStep, ...],
-    ) -> None:
-        """Check each postproc's trace selectors against what the producers emit.
-
-        A reference is recognized by its own spelling, so a custom op's trace
-        selections are checked alongside a built-in's. Every trace a run can
-        emit is known from the producers, so a bad key is caught here rather
-        than after the replication loop that a post-loop op runs behind.
-
-        Presence is not checked here: a built-in's factory requires its trace,
-        and a custom op may read keys as literals in its own body, unseen from
-        anywhere outside it.
-        """
-        if not postproc_steps:
-            return
-
-        available = {
-            key for step in replication_steps for key in trace_keys_for_step(step)
-        }
-        for step in postproc_steps:
-            for key, value in step.kwargs.items():
-                if not is_trace_ref(value):
-                    continue
-                problem = trace_ref_error(value, available)
-                if problem is not None:
-                    raise ValueError(
-                        f"POSTPROC step {step.name!r} field {key!r}: {problem} "
-                        f"(available: {sorted(available)})."
-                    )
-
-    def _resolve_output_specs(
-        self,
-        reference: SolvedModel,
-        dgp: SolvedModel | None,
-    ) -> BufferPlan:
-        return resolve_output_specs(
-            self.replication_steps, self._source_indices, reference, dgp
-        )
-
-    def validate_memory_requirements(
-        self,
-        *,
-        reference: SolvedModel,
-        dgp: SolvedModel | None = None,
-        n_rep: int,
-        n_jobs: int | None = None,
-    ) -> "MCMemoryReport":
-        """Report what these run arguments would allocate, before running them.
-
-        Takes the arguments :meth:`run` takes, since the buffer plan they size
-        does not exist without them. Warns when the run spills past physical
-        memory, which costs throughput and nothing else, and raises
-        :class:`MemoryError` only when it does not fit with swap counted too.
-        The breakdown is printed before the raise so the numbers land above the
-        traceback rather than after it. The returned report carries that same
-        breakdown, naming no step as the one to shrink: which traces are worth
-        their memory is not a question the step graph can answer.
-        """
-        plan = self._resolve_output_specs(reference, dgp)
-        return MCMemoryProfiler(
-            plan,
-            self.replication_steps,
-            reference=reference,
-            dgp=dgp,
-            n_rep=n_rep,
-            n_jobs=n_jobs,
-        ).validate()
-
     def run(
         self,
-        reference: SolvedModel,
+        reference: SolvedModel | None = None,
         dgp: SolvedModel | None = None,
         *,
         n_rep: int,
@@ -276,15 +117,13 @@ class MCPipeline:
 
         Parameters
         ----------
-        reference : SolvedModel
-            The primary model being tested against raw data or a DGP model.
-            The reference slot is mandatory and pipelines name/size/shape resolution
-            largely go through it.
         n_rep : int
             Total number of replications to run. Must be positive.
             Steps do not necessarily keep the data from all replications.
             Refer to documentation on the monte_carlo module to learn about specifying
             high-rep runs with controlled memory usage.
+        reference : SolvedModel | None
+            The primary model being tested against raw data or a DGP model.
         dgp : SolvedModel | None
             Model to use as the Data Generating Process (DGP) for simulation DATAGEN steps.
             A simulation step defaults to DGP as the target but it is possible to override it to
@@ -362,11 +201,11 @@ class MCPipeline:
         regressions = []
         transforms = []
         filters = []
-        # Ordered first by `_order_steps`, which the filter lowering reads it
-        # from too, and there is exactly one.
-        datagen = self.replication_steps[0]
+        datagens = []
         for s in self.replication_steps:
-            if s.op_type is OpType.TEST:
+            if s.op_type is OpType.DATAGEN:
+                datagens.append(s)
+            elif s.op_type is OpType.TEST:
                 tests.append(s.name)
             elif s.op_type is OpType.REGRESSION:
                 regressions.append(s.name)
@@ -375,7 +214,7 @@ class MCPipeline:
             elif s.op_type is OpType.FILTER:
                 filters.append(s)
 
-        datagen_result = _compile_datagen(datagen, prep, n_rep)
+        datagen_result = _compile_datagen(datagens, prep, n_rep)
         test_summaries = _compile_tests(tests, prep, n_rep)
         regression_summaries = _compile_regressions(regressions, prep, n_rep)
         payload_columns = _resolve_payloads(transforms, prep)
@@ -528,6 +367,37 @@ class MCPipeline:
                 postproc_elapsed_s[step.name] += perf_counter() - step_start
         return postproc, postproc_elapsed_s
 
+    def validate_memory_requirements(
+        self,
+        *,
+        reference: SolvedModel,
+        dgp: SolvedModel | None = None,
+        n_rep: int,
+        n_jobs: int | None = None,
+    ) -> "MCMemoryReport":
+        """Report what these run arguments would allocate, before running them.
+
+        Takes the arguments :meth:`run` takes, since the buffer plan they size
+        does not exist without them. Warns when the run spills past physical
+        memory, which costs throughput and nothing else, and raises
+        :class:`MemoryError` only when it does not fit with swap counted too.
+        The breakdown is printed before the raise so the numbers land above the
+        traceback rather than after it. The returned report carries that same
+        breakdown, naming no step as the one to shrink: which traces are worth
+        their memory is not a question the step graph can answer.
+        """
+        plan = resolve_output_specs(
+            self.replication_steps, self._source_indices, reference, dgp
+        )
+        return MCMemoryProfiler(
+            plan,
+            self.replication_steps,
+            reference=reference,
+            dgp=dgp,
+            n_rep=n_rep,
+            n_jobs=n_jobs,
+        ).validate()
+
     def to_spec(self) -> PipelineSpec:
         return PipelineSpec(
             replication_steps=[s.to_spec() for s in self.replication_steps],
@@ -542,20 +412,14 @@ class MCPipeline:
         )
 
 
-def _order_transforms(
-    transforms: Sequence[MCStep],
-    placed: set[str],
-) -> list[MCStep]:
-    """Kahn-walk the transform phase so each step follows the transforms it reads.
-
-    ``placed`` seeds the walk with the earlier phases. A producer outside the
-    transform phase is left to :meth:`MCPipeline._resolve_source_indices`, which
-    owns the unknown-producer and wrong-producer-type errors.
-    """
-    names = {step.name for step in transforms}
-    remaining = list(transforms)
+def _order_steps(
+    steps: Sequence[MCStep],
+) -> tuple[MCStep, ...]:
+    """Kahn-walk the steps to sort them in source dependecy order."""
+    names = {step.name for step in steps}
+    remaining = list(steps)
     ordered: list[MCStep] = []
-    placed = set(placed)
+    placed: set[str] = set()
     while remaining:
         progress = False
         next_remaining: list[MCStep] = []
@@ -573,9 +437,9 @@ def _order_transforms(
                 next_remaining.append(step)
         if not progress:
             stuck = [step.name for step in next_remaining]
-            raise ValueError(f"Transform dependency cycle among {stuck}.")
+            raise ValueError(f"Step source dependency cycle among {stuck}.")
         remaining = next_remaining
-    return ordered
+    return tuple(ordered)
 
 
 def _validate_source_producer(
@@ -606,6 +470,95 @@ def _validate_source_producer(
             f"Step {consumer.name!r} reads field {selector.field!r} from "
             f"{producer.name!r}, but that producer is {producer.op_type.value!r}."
         )
+
+
+def _validate_steps(
+    replication_steps: tuple[MCStep, ...],
+    postproc_steps: tuple[MCStep, ...],
+) -> None:
+    if not replication_steps:
+        raise ValueError("MCPipeline requires at least one per-replication step.")
+    names = [step.name for step in (*replication_steps, *postproc_steps)]
+    if len(set(names)) != len(names):
+        raise ValueError("MCPipeline step names must be unique.")
+    for name in names:
+        bad = sorted(set(name) & _RESERVED_NAME_CHARS)
+        if bad:
+            raise ValueError(
+                f"MCPipeline step name {name!r} uses reserved characters "
+                f"{''.join(bad)!r}. A step name becomes a bundle member path "
+                f"and a trace column qualifier, which reserve them."
+            )
+    for step in replication_steps:
+        if step.op_type is OpType.POSTPROC:
+            raise ValueError(
+                "POSTPROC steps can't be specified under replication_steps, use "
+                "postproc_steps."
+            )
+    for step in postproc_steps:
+        if step.op_type is not OpType.POSTPROC:
+            raise ValueError(
+                f"postproc_steps may only contain POSTPROC steps; {step.name!r} "
+                f"is {step.op_type}."
+            )
+
+
+def _validate_postproc_traces(
+    replication_steps: tuple[MCStep, ...],
+    postproc_steps: tuple[MCStep, ...],
+) -> None:
+    """Check each postproc's trace selectors against what the producers emit.
+
+    A reference is recognized by its own spelling, so a custom op's trace
+    selections are checked alongside a built-in's. Every trace a run can
+    emit is known from the producers, so a bad key is caught here rather
+    than after the replication loop that a post-loop op runs behind.
+
+    Presence is not checked here: a built-in's factory requires its trace,
+    and a custom op may read keys as literals in its own body, unseen from
+    anywhere outside it.
+    """
+    if not postproc_steps:
+        return
+
+    available = {key for step in replication_steps for key in trace_keys_for_step(step)}
+    for step in postproc_steps:
+        for key, value in step.kwargs.items():
+            if not is_trace_ref(value):
+                continue
+            problem = trace_ref_error(value, available)
+            if problem is not None:
+                raise ValueError(
+                    f"POSTPROC step {step.name!r} field {key!r}: {problem} "
+                    f"(available: {sorted(available)})."
+                )
+
+
+def _resolve_source_indices(
+    replication_steps: tuple[MCStep, ...],
+) -> tuple[tuple[int, ...], ...]:
+    index_by_name = {step.name: index for index, step in enumerate(replication_steps)}
+
+    resolved: list[tuple[int, ...]] = []
+    for step_index, step in enumerate(replication_steps):
+        step_indices: list[int] = []
+        for selector in step.source_args:
+            source_name = selector.source_step
+            source_idx = index_by_name.get(source_name)
+            if source_idx is None:
+                raise ValueError(
+                    f"Step {step.name!r} depends on unknown producer {source_name!r}."
+                )
+            producer_step = replication_steps[source_idx]
+            if source_idx >= step_index:
+                raise ValueError(
+                    f"Step {step.name!r} depends on {producer_step.name!r}, which does not "
+                    "appear earlier in the pipeline."
+                )
+            _validate_source_producer(step, selector, producer_step)
+            step_indices.append(source_idx)
+        resolved.append(tuple(step_indices))
+    return tuple(resolved)
 
 
 def _compile_tests(
@@ -649,7 +602,7 @@ def _compile_tests(
 
 
 def _datagen_names(
-    step: MCStep, reference: SolvedModel, dgp: SolvedModel | None
+    step: MCStep, reference: SolvedModel | None, dgp: SolvedModel | None
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """The variable, shock and observable names of one datagen's columns.
 
@@ -685,51 +638,50 @@ def _datagen_names(
 
 
 def _compile_datagen(
-    step: MCStep, lowered: LoweredMCRun, n_rep: int
-) -> MCDataGenResult:
-    """Read the one datagen step's retained fields out of its arena.
+    datagen_steps: Sequence[MCStep], lowered: LoweredMCRun, n_rep: int
+) -> dict[str, MCDataGenResult]:
+    """Read each datagen step's retained fields out of its arena.
 
-    A pipeline has exactly one datagen, so this returns the container rather
-    than a mapping. Only what the step declared is in the arena: raw data may
-    carry any of states, shocks and observables, and a simulation omits
-    observables when it was built without them. A field the step never produced
-    still reports a block, filled with NaN at the width its names imply, so that
-    "not recorded" reads as itself rather than as the zeros a deterministic run
-    legitimately produces.
+    Only declared fields are stored. Missing fields return NaN blocks at the
+    width implied by their names.
     """
-    layout = lowered.plan[step.name].out_fields
-    arena = lowered.allocation.steps[step.name]
-    n_retained = int(arena.retained_reps.size)
+    results: dict[str, MCDataGenResult] = {}
+    for step in datagen_steps:
+        layout = lowered.plan[step.name].out_fields
+        arena = lowered.allocation.steps[step.name]
+        n_retained = int(arena.retained_reps.size)
 
-    def read(field: str, width: int) -> NDF:
-        if not _has_field(layout, field):
-            return np.full((n_retained, T, width), np.nan)
-        return _read_float_field(arena, layout, field)
+        def read(field: str, width: int) -> NDF:
+            if not _has_field(layout, field):
+                return np.full((n_retained, T, width), np.nan)
+            return _read_float_field(arena, layout, field)
 
-    # Every field shares its leading axis, so any one of them dates the run.
-    T = next(
-        (
-            entry.shape[0]
-            for name, entry in layout.items()
-            if entry.dtype == np.float64 and _has_field(layout, name)
-        ),
-        0,
-    )
-    var_names, shock_names, observable_names = _datagen_names(
-        step, lowered.reference, lowered.dgp
-    )
+        # Every field shares its leading axis, so any one of them dates the run.
+        T = next(
+            (
+                entry.shape[0]
+                for name, entry in layout.items()
+                if entry.dtype == np.float64 and _has_field(layout, name)
+            ),
+            0,
+        )
+        var_names, shock_names, observable_names = _datagen_names(
+            step, lowered.reference, lowered.dgp
+        )
 
-    return MCDataGenResult(
-        n_rep=n_rep,
-        n_retained=n_retained,
-        retained_reps=arena.retained_reps,
-        var_names=var_names,
-        X=read("states", len(var_names)),
-        shock_names=shock_names,
-        eps=read("shocks", len(shock_names)),
-        observable_names=observable_names,
-        y=read("observables", len(observable_names)),
-    )
+        results[step.name] = MCDataGenResult(
+            n_rep=n_rep,
+            n_retained=n_retained,
+            retained_reps=arena.retained_reps,
+            var_names=var_names,
+            X=read("states", len(var_names)),
+            shock_names=shock_names,
+            eps=read("shocks", len(shock_names)),
+            observable_names=observable_names,
+            y=read("observables", len(observable_names)),
+        )
+
+    return results
 
 
 def _compile_filters(

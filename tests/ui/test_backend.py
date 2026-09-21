@@ -1222,7 +1222,7 @@ def test_ui_backend_serializes_detailed_mc_summaries() -> None:
             n_retained_by_step={"diagnostic": 2, "ols": 2},
         ),
         n_successful=2,
-        datagen_outputs=_empty_datagen(),
+        datagen_outputs={"datagen": _empty_datagen()},
         test_summaries={"diagnostic": tests},
         transform_outputs=None,
         regression_summaries={"ols": regressions},

@@ -30,7 +30,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     log_diff_step,
     postproc_step,
     raw_model_data_step,
-    reference_filter_step,
+    filter_step,
     regression_step,
     rolling_mean_step,
     rolling_std_step,
@@ -53,8 +53,11 @@ def solved() -> SolvedModel:
 def _plan(steps: list[MCStep], reference: object = None) -> Any:
     """Resolve output layouts without lowering or allocating."""
     pipeline = MCPipeline(steps)
-    return pipeline._resolve_output_specs(
-        cast(SolvedModel, reference if reference is not None else object()), None
+    return resolve_output_specs(
+        pipeline.replication_steps,
+        pipeline._source_indices,
+        cast(SolvedModel, reference if reference is not None else object()),
+        None,
     )
 
 
@@ -274,7 +277,7 @@ def test_a_non_two_dimensional_source_field_cannot_be_selected(
     step = standardize_step("out", source="filter", field="innov")
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
-        reference_filter_step("filter"),
+        filter_step("filter", obs_source="sim", obs_field="observables"),
         dataclasses.replace(
             step,
             source_args=(dataclasses.replace(step.source_args[0], field="P_pred"),),
@@ -288,10 +291,10 @@ def test_a_non_two_dimensional_source_field_cannot_be_selected(
 def test_a_filter_needs_datagen_observables(solved: SolvedModel) -> None:
     steps = [
         simulation_step("sim", target="reference", T=T, observables=False),
-        reference_filter_step("filter"),
+        filter_step("filter", obs_source="sim", obs_field="observables"),
     ]
 
-    with pytest.raises(ValueError, match="Filter output planning requires"):
+    with pytest.raises(ValueError, match="does not produce source field 'observables'"):
         _plan(steps, reference=solved)
 
 
@@ -320,7 +323,7 @@ def test_the_planner_still_sizes_only_two_dimensional_sources(
     step = standardize_step("out", source="filter", field="innov")
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
-        reference_filter_step("filter"),
+        filter_step("filter", obs_source="sim", obs_field="observables"),
         dataclasses.replace(
             step,
             source_args=(dataclasses.replace(step.source_args[0], field="P_pred"),),
