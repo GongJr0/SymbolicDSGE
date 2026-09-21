@@ -136,8 +136,8 @@ def test_retention_sentinel_resolves_against_n_rep(
     assert step.per_rep_bytes == (3 + 2) * 8
     assert step.retained_bytes == expected_reps * (3 + 2) * 8
     assert step.worker_bytes == 2 * (5 + 1 + 3 + 2) * 8
-    # Two run-level failure lanes, plus this step's retention indices.
-    assert report.bookkeeping_bytes == (2 * 10 + expected_reps + 10) * 8
+    # One status per step per replication, plus this step's retention indices.
+    assert report.bookkeeping_bytes == (10 * len(plan) + expected_reps + 10) * 8
 
 
 def test_native_eligible_shocks_prematerialize_nothing(solved: SolvedModel) -> None:

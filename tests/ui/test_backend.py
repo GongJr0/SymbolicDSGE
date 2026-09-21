@@ -586,14 +586,12 @@ _POSTPROC_PIPELINE = {
             "step_type": "simulation",
             "name": "datagen",
             "params": {
-                "T": 8,
+                "T": 25,
                 "shocks": [
                     {
                         "target": ["e_u", "e_v"],
                         "dist": "norm",
-                        "multivar": True,
-                        "seed": 10,
-                        "dist_args": [],
+                        "seed": 0,
                         "dist_kwargs": {"mean": [0.0, 0.0]},
                     }
                 ],
@@ -693,6 +691,13 @@ def test_ui_backend_accepts_fanout() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 8,
+                    "shocks": [
+                        {
+                            "target": ["e_u", "e_v"],
+                            "dist": "norm",
+                            "seed": 0,
+                        }
+                    ],
                 },
             },
             {
@@ -759,6 +764,13 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
                 "name": "datagen",
                 "params": {
                     "T": 12,
+                    "shocks": [
+                        {
+                            "target": ["e_u", "e_v"],
+                            "dist": "norm",
+                            "random_state": 0,
+                        }
+                    ],
                 },
             },
             {
@@ -1342,7 +1354,7 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
-                    "T": 8,
+                    "T": 25,
                     "shocks": [
                         {
                             "target": ["e_u", "e_v"],
@@ -1363,7 +1375,7 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                     "code": _UI_CUSTOM_OP,
                     "source": "datagen",
                     "field": "observables",
-                    "output_shape": [8, 2],
+                    "output_shape": [25, 2],
                 },
             },
             {

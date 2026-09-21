@@ -330,7 +330,7 @@ static int sdsge_mc_regression_status(const i64 kind,
   float_out[out_off.foffset[0]] = rec->ssr;
   float_out[out_off.foffset[1]] = rec->sst;
   if (int_out != NULL) {
-    int_out[out_off.ioffset[0]] = rec->status;
+    int_out[1] = rec->status;
   }
   return (int)rec->status;
 }

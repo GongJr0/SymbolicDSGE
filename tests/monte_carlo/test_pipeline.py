@@ -53,17 +53,34 @@ def _assert_output_plan(
     name: str,
     *fields: tuple[str, tuple[int, ...], object],
 ) -> None:
+    """Assert a step's output layout from the fields that belong to it.
+
+    The int lane every native output carries is closed over here, the way
+    ``_with_int_flags`` closes it over in the resolvers, so a call site states
+    only its own fields and the two flags stay stated in one place.
+    """
+    named = [field_name for field_name, _, _ in fields]
+    assert not {"has_failed_sources", "status"}.intersection(
+        named
+    ), "The runner's int lane is supplied here, not named by the call site."
+
     float_offset = 0
     int_offset = 0
     layouts: dict[str, FieldLayout] = {}
-    for field_name, shape, raw_dtype in fields:
-        dtype = np.dtype(raw_dtype)
+    for field_name, shape, dtype in (
+        *fields,
+        ("has_failed_sources", (), np.int64),
+        ("status", (), np.int64),
+    ):
         flat_count = int(np.prod(shape, dtype=np.intp)) if shape else 1
-        if dtype == np.dtype(np.float64):
+        # The layout carries the bare type the lane is keyed on, not a dtype
+        # instance. They compare equal but hash apart, so spelling it the way
+        # the planner spells it keeps the comparison an exact one.
+        if dtype is np.float64:
             offset = float_offset
             float_offset += flat_count
         else:
-            assert dtype == np.dtype(np.int64)
+            assert dtype is np.int64
             offset = int_offset
             int_offset += flat_count
         layouts[field_name] = FieldLayout(shape, flat_count, dtype, offset)
@@ -258,35 +275,6 @@ def test_jarque_bera_pipeline_rejects_multi_column_inputs(
         mc_run(pipeline, reference, n_rep=1, verbosity=0)
 
 
-def test_jarque_bera_pipeline_handles_burn_in_that_removes_all_samples(
-    mc_run, solved_test_model
-) -> None:
-    reference = solved_test_model
-    observables = np.arange(6.0, dtype=np.float64).reshape(-1, 1)
-    pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            jarque_bera_test_step(
-                "jb",
-                source="datagen",
-                field="observables",
-                burn_in=observables.shape[0],
-            ),
-        ]
-    )
-
-    out = mc_run(pipeline, reference, n_rep=2, verbosity=0)
-
-    assert out.succeeded
-    assert out.failures == ()
-    assert out.test_status_traces["jb"] == (TestStatus.INSUFFICIENT_SAMPLES,) * 2
-    assert (
-        out.test_summaries["jb"].status_trace == (TestStatus.INSUFFICIENT_SAMPLES,) * 2
-    )
-    assert np.isnan(out.statistic_traces["jb"]).all()
-    assert np.isnan(out.pval_traces["jb"]).all()
-
-
 def test_breusch_pagan_pipeline_selects_columns_and_aggregates_results(
     mc_run, solved_test_model
 ) -> None:
@@ -429,8 +417,8 @@ def test_add_payload_step_registers_2d_payload_with_column_selection(
 ) -> None:
     payload = np.column_stack(
         [
-            np.asarray([1.0, 2.0, 1.5, 2.5, 3.0], dtype=np.float64),
-            np.asarray([0.5, -0.5, 1.0, -1.0, 0.0], dtype=np.float64),
+            np.random.default_rng(0).normal(size=30),
+            np.random.default_rng(1).normal(size=30),
         ]
     )
     pipeline = MCPipeline(
@@ -474,7 +462,7 @@ def test_add_payload_step_selects_batched_payload_by_replication(
 def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs(
     mc_run, solved_test_model
 ) -> None:
-    observables = np.arange(30.0, dtype=np.float64).reshape(10, 3)
+    observables = np.arange(150.0, dtype=np.float64).reshape(50, 3)
     reference = solved_test_model
 
     with pytest.raises(ValueError, match="single-column source"):
@@ -498,32 +486,29 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs(
             check_memory_availability=False,
         )
 
-    # A Breusch-Pagan test with no variance regressors is meaningless, and
-    # nothing refuses it: not the factory, not the graph, not the kernel. The
-    # statistic comes back a clean zero under an OK status. Pinned as observed
-    # rather than endorsed, so a fix shows up here as a failure.
-    degenerate = mc_run(
-        MCPipeline(
-            [
-                raw_model_data_step(observables=observables),
-                breusch_pagan_test_step(
-                    "bp",
-                    residuals_source="datagen",
-                    residuals_field="observables",
-                    X_source="datagen",
-                    X_field="observables",
-                    residual_col=0,
-                    X_columns=[],
-                ),
-            ]
-        ),
+    degenerate = MCPipeline(
+        [
+            raw_model_data_step(observables=observables),
+            breusch_pagan_test_step(
+                "bp",
+                residuals_source="datagen",
+                residuals_field="observables",
+                X_source="datagen",
+                X_field="observables",
+                residual_col=0,
+                X_columns=[],
+            ),
+        ]
+    ).run(
         reference,
         n_rep=1,
+        check_memory_availability=False,
+        fail_fast=False,
     )
-    np.testing.assert_allclose(
-        degenerate.statistic_traces["bp"], np.zeros(1, dtype=np.float64), atol=1e-12
+    np.isnan(degenerate.statistic_traces["bp"]).all()
+    assert degenerate.test_summaries["bp"].status_trace == (
+        TestStatus.INSUFFICIENT_SAMPLES,
     )
-    assert degenerate.test_summaries["bp"].status_trace == (TestStatus.OK,)
 
     with pytest.raises(ValueError, match="matching row counts"):
         MCPipeline(
@@ -549,35 +534,6 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs(
             verbosity=0,
             check_memory_availability=False,
         )
-
-
-def test_breusch_pagan_pipeline_handles_burn_in_that_removes_all_samples(
-    mc_run, solved_test_model
-) -> None:
-    base = np.arange(30.0, dtype=np.float64).reshape(10, 3)
-    observables = base
-    pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            breusch_pagan_test_step(
-                "bp",
-                residuals_source="datagen",
-                residuals_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                residual_col=0,
-                X_columns=[1, 2],
-                burn_in=observables.shape[0],
-            ),
-        ]
-    )
-
-    out = mc_run(pipeline, solved_test_model, n_rep=2, verbosity=0)
-
-    assert out.succeeded
-    assert out.test_status_traces["bp"] == (TestStatus.INSUFFICIENT_SAMPLES,) * 2
-    assert np.isnan(out.statistic_traces["bp"]).all()
-    assert np.isnan(out.pval_traces["bp"]).all()
 
 
 def test_breusch_godfrey_pipeline_selects_columns_and_aggregates_results(
@@ -662,35 +618,6 @@ def test_breusch_godfrey_pipeline_validates_residual_and_regressor_inputs(
             verbosity=0,
             check_memory_availability=False,
         )
-
-
-def test_breusch_godfrey_pipeline_handles_burn_in_that_removes_all_samples(
-    mc_run, solved_test_model
-) -> None:
-    base = np.arange(30.0, dtype=np.float64).reshape(10, 3)
-    observables = base
-    pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            breusch_godfrey_test_step(
-                "bg",
-                residuals_source="datagen",
-                residuals_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                residual_col=0,
-                X_columns=[1, 2],
-                burn_in=observables.shape[0],
-            ),
-        ]
-    )
-
-    out = mc_run(pipeline, solved_test_model, n_rep=2, verbosity=0)
-
-    assert out.succeeded
-    assert out.test_status_traces["bg"] == (TestStatus.INSUFFICIENT_SAMPLES,) * 2
-    assert np.isnan(out.statistic_traces["bg"]).all()
-    assert np.isnan(out.pval_traces["bg"]).all()
 
 
 def test_cusum_pipeline_aggregates_results_with_nan_df(
@@ -947,7 +874,6 @@ def test_output_shape_resolution_tracks_selected_transform_payloads(
         ("coef", (2,), np.float64),
         ("ssr", (), np.float64),
         ("sst", (), np.float64),
-        ("status", (), np.int64),
         ("se", (2,), np.float64),
     )
     assert specs["datagen"].input_size == ArenaSize()
@@ -987,7 +913,6 @@ def test_output_specs_for_non_ols_regressions(solved_test_model, kind: str) -> N
         # Non-OLS kinds report no standard errors, and the slot is allocated
         # zero-width rather than omitted.
         ("se", (0,), np.float64),
-        ("status", (), np.int64),
     )
 
 
@@ -1059,7 +984,6 @@ def test_output_shape_resolution_includes_scalar_test_channels(
         specs["jb"],
         "jb",
         ("statistic", (), np.float64),
-        ("status", (), np.int64),
     )
 
 

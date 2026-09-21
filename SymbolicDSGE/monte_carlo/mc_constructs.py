@@ -219,11 +219,16 @@ class MCStep:
         if self.n_retain < -1:
             raise ValueError("MCStep n_retain must be -1 (retain all) or non-negative.")
 
-        if self.op_type is OpType.POSTPROC and self.n_retain != -1:
-            raise ValueError(
-                "POSTPROC steps run in the post-loop retained traces. "
-                "`n_retain` is not applicable and must be left at its default value of -1."
-            )
+        if self.op_type is OpType.POSTPROC:
+            if not callable(self.func):
+                raise ValueError(
+                    "POSTPROC steps must carry a callable in the `func` attribute."
+                )
+            if self.n_retain != -1:
+                raise ValueError(
+                    "POSTPROC steps run in the post-loop retained traces. "
+                    "`n_retain` is not applicable and must be left at its default value of -1."
+                )
 
         if (
             isinstance(self.func, PandasCustomFunc)

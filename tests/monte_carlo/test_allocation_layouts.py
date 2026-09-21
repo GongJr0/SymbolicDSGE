@@ -96,7 +96,7 @@ def test_a_payload_needs_no_input_arena() -> None:
     plans = _plan(_with_datagen(add_payload_step("const", payload=[1.0, 2.0])))
 
     assert plans["const"].input_size == ArenaSize(0, 0)
-    assert plans["const"].output_size == ArenaSize(n_float=2, n_int=0)
+    assert plans["const"].output_size == ArenaSize(n_float=2, n_int=2)
 
 
 def test_a_payload_offsets_land_in_the_float_lane() -> None:

@@ -506,14 +506,13 @@ class MCPipeline:
                 )
             step_start = perf_counter()
             out: Any = None
-            failed = False
             try:
                 out = step.func(
                     traces=traces,
                     **dict(step.kwargs),
                 )
+                postproc[step.name] = normalize_artifacts(out)
             except Exception:
-                failed = True
                 if fail_fast:
                     raise
                 failures.append(
@@ -524,8 +523,6 @@ class MCPipeline:
                 )
             finally:
                 postproc_elapsed_s[step.name] += perf_counter() - step_start
-            if not failed:
-                postproc[step.name] = normalize_artifacts(out)
         return postproc, postproc_elapsed_s
 
     def to_spec(self) -> PipelineSpec:
