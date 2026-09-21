@@ -267,7 +267,7 @@ class MCPipeline:
         dgp: SolvedModel | None = None,
         *,
         n_rep: int,
-        fail_fast: bool = True,
+        fail_fast: bool = False,
         verbosity: int = 1,
         n_jobs: int | None = None,
         check_memory_availability: bool = True,
