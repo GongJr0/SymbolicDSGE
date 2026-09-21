@@ -104,7 +104,7 @@ class MCPipeline:
 
     def run(
         self,
-        reference: SolvedModel,
+        reference: SolvedModel | None = None,
         dgp: SolvedModel | None = None,
         *,
         n_rep: int,
@@ -117,15 +117,13 @@ class MCPipeline:
 
         Parameters
         ----------
-        reference : SolvedModel
-            The primary model being tested against raw data or a DGP model.
-            The reference slot is mandatory and pipelines name/size/shape resolution
-            largely go through it.
         n_rep : int
             Total number of replications to run. Must be positive.
             Steps do not necessarily keep the data from all replications.
             Refer to documentation on the monte_carlo module to learn about specifying
             high-rep runs with controlled memory usage.
+        reference : SolvedModel | None
+            The primary model being tested against raw data or a DGP model.
         dgp : SolvedModel | None
             Model to use as the Data Generating Process (DGP) for simulation DATAGEN steps.
             A simulation step defaults to DGP as the target but it is possible to override it to
@@ -604,7 +602,7 @@ def _compile_tests(
 
 
 def _datagen_names(
-    step: MCStep, reference: SolvedModel, dgp: SolvedModel | None
+    step: MCStep, reference: SolvedModel | None, dgp: SolvedModel | None
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """The variable, shock and observable names of one datagen's columns.
 

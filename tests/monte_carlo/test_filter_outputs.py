@@ -21,8 +21,9 @@ from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult
 from SymbolicDSGE.monte_carlo.step_factories import (
+    add_payload_step,
     raw_model_data_step,
-    reference_filter_step,
+    filter_step,
 )
 
 T = 8
@@ -85,7 +86,7 @@ def _run(
                 observables=y,
                 observable_names=tuple(solved.compiled.observable_names),
             ),
-            reference_filter_step(name, **filter_kwargs),  # type: ignore[arg-type]
+            filter_step(name, obs_source="data", obs_field="observables", **filter_kwargs),  # type: ignore[arg-type]
         ]
     )
     return pipeline.run(solved, n_rep=n_rep, verbosity=0)
@@ -406,8 +407,15 @@ def test_filters_are_keyed_by_step_name(linear: SolvedModel) -> None:
                 observables=y,
                 observable_names=tuple(linear.compiled.observable_names),
             ),
-            reference_filter_step("kf", filter_mode="linear"),
-            reference_filter_step("ekf", filter_mode="extended"),
+            filter_step(
+                "kf", obs_source="data", obs_field="observables", filter_mode="linear"
+            ),
+            filter_step(
+                "ekf",
+                obs_source="data",
+                obs_field="observables",
+                filter_mode="extended",
+            ),
         ]
     )
 
@@ -436,3 +444,48 @@ def test_a_pipeline_without_filters_reports_no_filter_outputs(
     result = pipeline.run(linear, n_rep=N_REP, verbosity=0)
 
     assert result.filter_outputs == {}
+
+
+def test_filter_reads_observations_from_payload(linear: SolvedModel) -> None:
+    names = tuple(linear.compiled.observable_names)
+    y = np.random.default_rng(517).normal(scale=0.01, size=(2, T, len(names)))
+    # Present columns in a different order, with an unrelated column between them.
+    order = np.roll(np.arange(len(names)), 1)
+    columns = np.arange(len(names)) * 2
+    payload = np.full((2, T, 2 * len(names)), 123.0)
+    payload[:, :, columns] = y[:, :, order]
+    pipeline = MCPipeline(
+        [
+            filter_step(
+                "filt",
+                target="reference",
+                obs_source="observations",
+                obs_field="payload",
+                obs_columns=columns.tolist(),
+                observables=[names[i] for i in order],
+            ),
+            add_payload_step("unrelated", np.zeros((T, 1))),
+            add_payload_step("observations", payload),
+        ]
+    )
+    assert [s.name for s in pipeline.replication_steps] == [
+        "unrelated",
+        "observations",
+        "filt",
+    ]
+    result = pipeline.run(
+        reference=linear, n_rep=2, n_jobs=1, verbosity=0, fail_fast=True
+    )
+    assert not result.failures
+    assert result.datagen_outputs == {}
+    actual = result.filter_outputs["filt"]
+    for rep in range(2):
+        expected = linear.kalman(y=y[rep], filter_mode="linear")
+        for field in ("x_pred", "x_filt", "P_pred", "P_filt", "innov", "loglik"):
+            np.testing.assert_allclose(
+                getattr(actual, field)[rep],
+                getattr(expected, field),
+                rtol=1e-10,
+                atol=1e-12,
+                err_msg=f"replication {rep}, field {field}",
+            )

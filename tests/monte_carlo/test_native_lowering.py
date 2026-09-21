@@ -23,7 +23,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,
     ljung_box_test_step,
     raw_model_data_step,
-    reference_filter_step,
+    filter_step,
     regression_step,
     simulation_step,
     log_diff_step,
@@ -504,7 +504,12 @@ def test_native_lowering_runs_linear_and_extended_filters() -> None:
         pipeline = MCPipeline(
             [
                 simulation_step("sim", target="reference", T=T, observables=True),
-                reference_filter_step("filter", filter_mode=mode),
+                filter_step(
+                    "filter",
+                    obs_source="sim",
+                    obs_field="observables",
+                    filter_mode=mode,
+                ),
             ]
         )
         lowered = lower_native_run(pipeline, reference=solved, n_rep=1, n_jobs=1)
@@ -554,9 +559,15 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides() -> None:
                 shocks=shocks,
                 observables=True,
             ),
-            reference_filter_step(
+            filter_step(
                 "filter",
+                obs_source="sim",
+                obs_field="observables",
                 filter_mode="linear",
+                obs_columns=[
+                    list(solved.compiled.observable_names).index(name)
+                    for name in requested
+                ],
                 observables=requested,
                 x0=x0,
                 P0=P0,
@@ -616,7 +627,12 @@ def test_native_lowering_runs_unscented_filter_with_rbc_fixture() -> None:
                 observables=y,
                 observable_names=solved.compiled.observable_names,
             ),
-            reference_filter_step("filter", filter_mode="unscented"),
+            filter_step(
+                "filter",
+                obs_source="data",
+                obs_field="observables",
+                filter_mode="unscented",
+            ),
         ]
     )
 

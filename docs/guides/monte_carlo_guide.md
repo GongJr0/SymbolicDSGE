@@ -35,7 +35,7 @@ from SymbolicDSGE.monte_carlo import (
 from SymbolicDSGE.monte_carlo.step_factories import (
     kde_step,
     postproc_step,
-    reference_filter_step,
+    filter_step,
     simulation_step,
     standardize_step,
     transform_step,
@@ -137,15 +137,15 @@ Scaling is already applied to what comes back, which is why `shock_scale` is `1.
 ### Filtering
 
 The first step after datagen is filtering the reference model using a Kalman filter against the DGP simulated observables.
-`reference_filter_step` is a pre-built function configuring the reference model's Kalman filter to be run per iteration for this purpose.
+`filter_step` selects its model with `target`, which defaults to `"reference"`, and reads observations from the named producer and field.
 
 ```python
-from SymbolicDSGE.monte_carlo.step_factories import reference_filter_step
+from SymbolicDSGE.monte_carlo.step_factories import filter_step
 
-kf_step = reference_filter_step()
+kf_step = filter_step(obs_source="datagen", obs_field="observables")
 ```
 
-`reference_filter_step` accepts `filter_mode`, `observables`, `x0`, `P0`, `R`, `jitter`, `symmetrize`, `joseph_cov`, and `return_shocks`, mirroring the `SolvedModel.kalman` configuration.
+`filter_step` accepts `filter_mode`, `observables`, `x0`, `P0`, `R`, `jitter`, `symmetrize`, `joseph_cov`, and `return_shocks`, mirroring the `SolvedModel.kalman` configuration.
 
 ### Testing
 
@@ -325,19 +325,19 @@ mc = pipeline.run(
     The native loop only collects per-step profiling when it is asked to. At any lower verbosity `meta.step_elapsed_s`, `meta.step_counts`, and `meta.step_failures` are empty dictionaries.
 
 ```bash
->>> MC run concluded successfully in 0.05s with 20350.26 it/s.
+>>> MC run concluded successfully in 0.03s with 35908.90 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 46869.49 worker it/s (0.02 worker-s), 20350.26 wall it/s.
-    filter: 0 failures, 3101.53 worker it/s (0.32 worker-s), 20350.26 wall it/s.
-    custom_std: 0 failures, 223065.68 worker it/s (0.00 worker-s), 20350.26 wall it/s.
-    builtin_std: 0 failures, 119482.22 worker it/s (0.01 worker-s), 20350.26 wall it/s.
-    std_innov_mean: 0 failures, 81373.27 worker it/s (0.01 worker-s), 20350.26 wall it/s.
+    datagen: 0 failures, 68953.51 worker it/s (0.01 worker-s), 35908.90 wall it/s.
+    filter: 0 failures, 6023.76 worker it/s (0.17 worker-s), 35908.90 wall it/s.
+    custom_std: 0 failures, 374324.32 worker it/s (0.00 worker-s), 35908.90 wall it/s.
+    builtin_std: 0 failures, 261767.71 worker it/s (0.00 worker-s), 35908.90 wall it/s.
+    std_innov_mean: 0 failures, 95516.12 worker it/s (0.01 worker-s), 35908.90 wall it/s.
 
 Post-processing Report:
 
-    custom_postproc: Succeeded in 0.0017s.
-    builtin_kde: Succeeded in 0.2205s.
+    custom_postproc: Succeeded in 0.0018s.
+    builtin_kde: Succeeded in 0.2148s.
 ```
 
 ???+ note "Worker Time vs Wall Time"

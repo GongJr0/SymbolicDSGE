@@ -6,7 +6,6 @@ from typing import Sequence
 
 import numpy as np
 
-from SymbolicDSGE.core.solver_backend import SecondOrderSolution
 
 from ..._ckernels.monte_carlo import _offsets
 from ..._ckernels.monte_carlo._runner import (
@@ -15,6 +14,7 @@ from ..._ckernels.monte_carlo._runner import (
     simulate2_step,
 )
 from ...core.solved_model import SolvedModel
+from ...core.solver_backend import SecondOrderSolution
 from ...core.shock.spec import (
     _normalized_spec,
     resolve_shock_plan,
@@ -25,6 +25,7 @@ from ..defaults import (
     DEFAULT_SIMULATION_OBSERVABLES,
     DEFAULT_SIMULATION_TARGET,
 )
+from ..allocation import get_target_model
 from ..mc_constructs import MCStep
 from ..shock_native import build_native_plan
 from .utils import (
@@ -38,18 +39,13 @@ from .utils import (
 
 def lower_simulation_step(
     step: MCStep,
-    reference: SolvedModel,
+    reference: SolvedModel | None,
     dgp: SolvedModel | None,
     n_rep: int,
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
     """Compile one model simulation into the native simulation ABI."""
     T = int(step.kwargs["T"])
-    target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
-    if target not in {"reference", "dgp"}:
-        raise ValueError(f"Unsupported simulation target: {target!r}.")
-    model = reference if target == "reference" else dgp
-    if model is None:
-        raise ValueError("Simulation step requires its target model.")
+    model = get_target_model(step, reference, dgp, DEFAULT_SIMULATION_TARGET)
 
     comp = model.compiled
     n_var = comp.n_var

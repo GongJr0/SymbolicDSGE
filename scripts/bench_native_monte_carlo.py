@@ -52,7 +52,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (  # noqa: E402
     breusch_godfrey_test_step,
     ljung_box_test_step,
     raw_model_data_step,
-    reference_filter_step,
+    filter_step,
     regression_step,
     standardize_step,
     simulation_step,
@@ -65,7 +65,7 @@ from tests._oracles.monte_carlo.operations.core import (  # noqa: E402
     raw_model_data_step as legacy_raw_model_data_step,
 )
 from tests._oracles.monte_carlo.operations.core import (  # noqa: E402
-    reference_filter_step as legacy_reference_filter_step,
+    filter_step as legacy_filter_step,
 )
 from tests._oracles.monte_carlo.operations.core import (  # noqa: E402
     simulation_step as legacy_simulation_step,
@@ -148,7 +148,7 @@ def _cases(
                         observables=raw_observables,
                         observable_names=reference.compiled.observable_names,
                     ),
-                    reference_filter_step("filter"),
+                    filter_step("filter"),
                     ljung_box_test_step(
                         "lb",
                         source="filter",
@@ -165,7 +165,7 @@ def _cases(
                         observables=raw_observables,
                         observable_names=reference.compiled.observable_names,
                     ),
-                    legacy_reference_filter_step("filter"),
+                    legacy_filter_step("filter"),
                     legacy_ljung_box_test_step(
                         "lb",
                         source="filter",
@@ -188,7 +188,7 @@ def _cases(
                         shocks=_shocks(reference),
                         observables=True,
                     ),
-                    reference_filter_step("filter"),
+                    filter_step("filter"),
                     regression_step(
                         "ols",
                         y_source="filter",
@@ -210,7 +210,7 @@ def _cases(
                         shocks=_shocks(reference),
                         observables=True,
                     ),
-                    legacy_reference_filter_step("filter"),
+                    legacy_filter_step("filter"),
                     legacy_regression_step(
                         "ols",
                         y_source="filter",

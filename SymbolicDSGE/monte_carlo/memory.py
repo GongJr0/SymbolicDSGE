@@ -227,7 +227,7 @@ class MCMemoryProfiler:
         plan: BufferPlan,
         steps: Sequence[MCStep],
         *,
-        reference: SolvedModel,
+        reference: SolvedModel | None = None,
         dgp: SolvedModel | None = None,
         n_rep: int,
         n_jobs: int | None = None,

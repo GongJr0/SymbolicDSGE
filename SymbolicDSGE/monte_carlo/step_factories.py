@@ -17,7 +17,7 @@ NDF = NDArray[np.float64]
 
 def simulation_step(
     name: str = "datagen",
-    target: str = "dgp",
+    target: Literal["reference", "dgp"] = "dgp",
     n_retain: int = -1,
     *,
     T: int,
@@ -36,8 +36,8 @@ def simulation_step(
         Periods to simulate.
     name : str
         Step name, used to reference the step in later steps and results.
-    target : str
-        Target model by role. "reference" or "dgp".
+    target : Literal["reference", "dgp"]
+        Model role to simulate, defaulting to "dgp"; the selected model must be supplied to the run.
     n_retain : int
         Number of samples to retain. -1 means all, 0 means none.
     shocks : Mapping[str | Sequence[str], Shock | NDF] | Sequence[Shock | ShockPath] | None
@@ -125,10 +125,14 @@ def raw_model_data_step(
     )
 
 
-def reference_filter_step(
+def filter_step(
     name: str = "filter",
+    target: Literal["reference", "dgp"] = "reference",
     n_retain: int = -1,
     *,
+    obs_source: str,
+    obs_field: str,
+    obs_columns: ColumnSelector = None,
     filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     observables: list[str] | None = None,
     x0: dict[str, float | np.float64] | list[float | np.float64] | NDF | None = None,
@@ -139,14 +143,22 @@ def reference_filter_step(
     joseph_cov: bool = False,
     return_shocks: bool = False,
 ) -> MCStep:
-    """FILTER step to run a Kalman filter on the reference model.
+    """FILTER step to run a Kalman filter on the target model.
 
     Parameters
     ----------
     name : str
         Step name, used to reference the step in later steps and results.
+    target : Literal["reference", "dgp"]
+        Model role supplying filter components, defaulting to "reference"; the selected model must be supplied to the run.
     n_retain : int
         Number of samples to retain. -1 means all, 0 means none.
+    obs_source : str
+        Producer step supplying the observed data.
+    obs_field : str
+        Two-dimensional output field to read from the producer.
+    obs_columns : ColumnSelector
+        Columns to select from that field; ``None`` selects all columns.
     filter_mode : Literal["linear", "extended", "unscented"]
         Mode of the kalman filter. "linear", "extended", or "unscented".
         - "linear" -> Linear Gaussian KF
@@ -154,7 +166,7 @@ def reference_filter_step(
         - "unscented" -> Unscented Kalman Filter (UKF) for second-order non-linearities
         in states and non-linear measurement equations.
     observables : list[str] | None
-        Observable names to include in the filter. If ``None``, all observables are used.
+        Target-model observable names corresponding to the selected data columns, in order; ``None`` uses the model's full observation order.
     x0 : dict[str, float | np.float64] | list[float | np.float64] | NDF | None
         Initial state for the filter.
     P0 : NDF | None
@@ -181,6 +193,7 @@ def reference_filter_step(
         name=name,
         op_type=OpType.FILTER,
         kwargs={
+            "target": target,
             "filter_mode": filter_mode,
             "observables": observables,
             "x0": x0,
@@ -193,6 +206,14 @@ def reference_filter_step(
         },
         step_type="filter",
         n_retain=n_retain,
+        source_args=(
+            _compile_source_args(
+                arg="observables",
+                source=obs_source,
+                field=obs_field,
+                columns=obs_columns,
+            ),
+        ),
     )
 
 

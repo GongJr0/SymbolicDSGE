@@ -41,7 +41,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     ljung_box_test_step,
     log_diff_step,
     raw_model_data_step,
-    reference_filter_step,
+    filter_step,
     regression_step,
     wald_test_step,
 )
@@ -939,7 +939,9 @@ def test_output_shape_resolution_includes_linear_filter_fields(
     pipeline = MCPipeline(
         [
             raw_model_data_step(observables=observables, observable_names=names),
-            reference_filter_step(
+            filter_step(
+                obs_source="datagen",
+                obs_field="observables",
                 filter_mode=filter_mode,
                 observables=list(names),
                 return_shocks=True,
@@ -1050,7 +1052,9 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
                 observables=np.zeros((T, n_obs), dtype=np.float64),
                 observable_names=reference.compiled.observable_names,
             ),
-            reference_filter_step(filter_mode="unscented"),
+            filter_step(
+                obs_source="datagen", obs_field="observables", filter_mode="unscented"
+            ),
         ]
     )
 

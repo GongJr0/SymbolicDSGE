@@ -44,14 +44,14 @@ class LoweredMCRun:
     input_bindings: tuple[tuple[FloatInputBinding, ...], ...]
     test_result_specs: Mapping[str, TestResultSpec]
     regression_result_specs: Mapping[str, RegressionResultSpec]
-    reference: SolvedModel
+    reference: SolvedModel | None
     dgp: SolvedModel | None
 
 
 def lower_native_run(
     pipeline: MCPipeline,
     *,
-    reference: SolvedModel,
+    reference: SolvedModel | None = None,
     dgp: SolvedModel | None = None,
     n_rep: int,
     n_jobs: int | None = None,
@@ -130,7 +130,7 @@ def _lower_step(
     steps: tuple[MCStep, ...],
     source_indices: tuple[int, ...],
     plan: BufferPlan,
-    reference: SolvedModel,
+    reference: SolvedModel | None,
     dgp: SolvedModel | None,
     n_rep: int,
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
@@ -140,7 +140,7 @@ def _lower_step(
         case OpType.TRANSFORM:
             return _lower_transform_step(step, source_indices, steps, plan)
         case OpType.FILTER:
-            return lower_filter_step(step, steps[0], plan, reference, dgp)
+            return lower_filter_step(step, source_indices, steps, plan, reference, dgp)
         case OpType.REGRESSION:
             return lower_regression_step(step, source_indices, steps, plan)
         case OpType.TEST:
@@ -153,7 +153,7 @@ def _lower_step(
 
 def _lower_datagen_step(
     step: MCStep,
-    reference: SolvedModel,
+    reference: SolvedModel | None,
     dgp: SolvedModel | None,
     n_rep: int,
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
