@@ -350,10 +350,11 @@ class MCPipeline:
                 if 0 <= native_res.halt_step_idx < len(self.replication_steps)
                 else "<runner>"
             )
+            status = MCStatus(native_res.halt_status)
             raise RuntimeError(
                 f"Monte Carlo run failed at replication "
                 f"{native_res.halt_rep_idx}, step {step_name!r}, with status "
-                f"{MCStatus(native_res.halt_status)}."
+                f"{status.name} ({status.message}).\n"
             )
         failures = _resolve_failures(prep)
 

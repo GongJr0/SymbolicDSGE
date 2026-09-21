@@ -102,6 +102,10 @@ _MESSAGES = {
     MCStatus.TRANSFORM_OUT_OF_DOMAIN: (
         "A transform input is outside the operation's domain."
     ),
+    MCStatus.TRANSFORM_CUSTOM_FAILED: (
+        "A custom transform callable returned a non-zero status code. "
+
+    ),
     MCStatus.REGRESSION_RANK_DEFICIENT: "The regression system is rank-deficient.",
     MCStatus.REGRESSION_NON_CONVERGENT: "The regression solver did not converge.",
 }
