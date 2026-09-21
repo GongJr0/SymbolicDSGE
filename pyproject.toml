@@ -94,7 +94,7 @@ include = ["SymbolicDSGE*"]
 "SymbolicDSGE._ckernels" = ["**/*.pyx", "**/*.pxd", "**/*.pyi", "**/*.c", "**/*.h"]
 
 [tool.ruff]
-include = ["SymbolicDSGE/**/*.py"]
+include = ["SymbolicDSGE/**/*.py", "SymbolicDSGE/**/*.pyi"]
 
 [tool.ruff.lint]
 select = ["D", "F"]

@@ -17,6 +17,8 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
+from .._ckernels.monte_carlo._status import MCStatus
+
 from ..core.sim_result import SimResult, OccBinDiagnostics
 from ..kalman.filter import FilterResult, UnscentedFilterResult
 from .._diag_tests.result import MCTestResult
@@ -26,7 +28,7 @@ from ..regression.enums import RegressionStatus
 from .postproc import Artifact
 from ..regression.result import MCRegressionResult
 from .custom_op import PandasCustomFunc
-from .spec import SourceSpec, StepMeta, StepSpec
+from .spec import MCFailureMeta, SourceSpec, StepMeta, StepSpec
 
 NDF = NDArray[float64]
 NDI = NDArray[np.int_]
@@ -398,29 +400,41 @@ class MCFailure:
     """
 
     rep_idx: int
-    failures: Mapping[str, int]
+    failures: Mapping[str, MCStatus]
 
     @property
     def failed_steps(self) -> Sequence[str]:
         """Names of the steps that failed in this replication."""
         return list(self.failures.keys())
 
-    def message_for(self, step_name: str) -> str:
-        """Return a human-readable message for the failure of a specific step."""
-        if step_name not in self.failures:
-            raise ValueError(
-                f"No step of name {step_name!r} failed in replication {self.rep_idx}."
-            )
-        ...
-        return ""
-
-    def status_for(self, step_name: str) -> int:
+    def status_for(self, step_name: str) -> MCStatus:
         """Return the status code for the failure of a specific step."""
         if step_name not in self.failures:
             raise ValueError(
                 f"No step of name {step_name!r} failed in replication {self.rep_idx}."
             )
         return self.failures[step_name]
+
+    def message_for(self, step_name: str) -> str:
+        """Return a human-readable message for the failure of a specific step."""
+        return self.status_for(step_name).message
+
+    def to_meta(self) -> MCFailureMeta:
+        """Return a serializable representation of this failure."""
+        return {
+            "rep_idx": self.rep_idx,
+            "failures": {step: status.value for step, status in self.failures.items()},
+        }
+
+    @classmethod
+    def from_meta(cls, spec: MCFailureMeta) -> MCFailure:
+        """Rebuild a failure from its serializable representation."""
+        return cls(
+            rep_idx=spec["rep_idx"],
+            failures={
+                step: MCStatus(status) for step, status in spec["failures"].items()
+            },
+        )
 
 
 @dataclass(frozen=True)

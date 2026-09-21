@@ -434,5 +434,9 @@ int sdsge_mc_user_transform_runner(const i64 rep_idx,
   const sdsge_mc_user_transform_step_ctx *config = ctx;
   const i64 status = config->fn(float_in_work, float_out, config->n_in,
                                 config->p_in, config->n_out, config->p_out);
-  return sdsge_mc_transform_status(status, int_out);
+
+  return sdsge_mc_transform_status((status == SDSGE_TRANSFORM_SUCCESS)
+                                       ? SDSGE_TRANSFORM_SUCCESS
+                                       : SDSGE_TRANSFORM_CUSTOM_FAILED,
+                                   int_out);
 }

@@ -8,6 +8,8 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+from SymbolicDSGE._ckernels.monte_carlo._status import MCStatus
+
 from .._ckernels.monte_carlo._arenas import StepArenas
 from .._ckernels.monte_carlo._runner import NativeRunResult, run
 from .._diag_tests.result import MCTestResult
@@ -351,7 +353,7 @@ class MCPipeline:
             raise RuntimeError(
                 f"Monte Carlo run failed at replication "
                 f"{native_res.halt_rep_idx}, step {step_name!r}, with status "
-                f"{native_res.halt_status}."
+                f"{MCStatus(native_res.halt_status)}."
             )
         failures = _resolve_failures(prep)
 
@@ -518,7 +520,7 @@ class MCPipeline:
                 failures.append(
                     MCFailure(
                         rep_idx=-1,
-                        failures={step.name: -1},
+                        failures={step.name: MCStatus.POSTPROC_FAILED},
                     )
                 )
             finally:
@@ -885,7 +887,7 @@ def _resolve_failures(lowered: LoweredMCRun) -> list[MCFailure]:
 
     for rep_idx, row in enumerate(statuses):
         failed = {
-            name: int(status)
+            name: MCStatus(status)
             for name, status in zip(step_names, row, strict=True)
             if status != 0
         }

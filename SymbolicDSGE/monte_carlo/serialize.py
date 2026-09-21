@@ -25,7 +25,6 @@ from .postproc import Artifact
 from .._diag_tests.result import MCTestResult
 from ..regression.result import MCRegressionResult
 from .spec import (
-    MCFailureSpec,
     MCDataGenResultMeta,
     MCFilterResultMeta,
     MCPostprocResultMeta,
@@ -150,13 +149,7 @@ def serialize_run_meta(result: MCPipelineResult) -> MCRunMeta:
         step_counts=dict(meta.step_counts),
         step_failures=dict(meta.step_failures),
         postproc_elapsed_s=dict(meta.postproc_elapsed_s),
-        failures=[
-            MCFailureSpec(
-                rep_idx=failure.rep_idx,
-                failures=dict(failure.failures),
-            )
-            for failure in result.failures
-        ],
+        failures=[f.to_meta() for f in result.failures],
         run_config=dict(result.run_config),
     )
 

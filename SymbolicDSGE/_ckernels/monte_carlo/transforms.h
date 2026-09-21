@@ -20,6 +20,7 @@
  */
 #define SDSGE_TRANSFORM_BAD_ARG -1301
 #define SDSGE_TRANSFORM_OUT_OF_DOMAIN -1302
+#define SDSGE_TRANSFORM_CUSTOM_FAILED -1303
 /* Static configuration for generic native MC transform dispatch.
  * Dynamic sample data, scratch, and output remain in caller-owned arenas. */
 typedef struct {
