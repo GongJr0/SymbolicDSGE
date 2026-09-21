@@ -218,11 +218,9 @@ class MCRegressionResultSpec:
     _se_trace: NDF | None = None
 
 
-class MCFailureSpec(TypedDict):
+class MCFailureMeta(TypedDict):
     rep_idx: int
-    step_name: str
-    error_type: str
-    message: str
+    failures: Mapping[str, int]
 
 
 class MCRunMeta(TypedDict):
@@ -241,7 +239,7 @@ class MCRunMeta(TypedDict):
     step_counts: Mapping[str, int]
     step_failures: Mapping[str, int]
     postproc_elapsed_s: Mapping[str, float]
-    failures: list[MCFailureSpec]
+    failures: list[MCFailureMeta]
     run_config: Mapping[str, Any]
 
 

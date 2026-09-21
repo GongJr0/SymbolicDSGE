@@ -111,8 +111,7 @@ cdef extern from "runner.h":
         int fail_fast
         int64_t halt
         sdsge_mc_failure halt_failure
-        int64_t *failure_step_by_rep
-        int64_t *failure_status_by_rep
+        int64_t *step_status_by_rep
         int profile_steps
         double *step_elapsed_s_by_worker
         int64_t *step_counts_by_worker
@@ -1698,8 +1697,7 @@ def run(
     cdef int64_t[:, ::1] int_live_out
     cdef double[:, ::1] float_retained
     cdef int64_t[:, ::1] int_retained
-    cdef int64_t[::1] failure_step_by_rep
-    cdef int64_t[::1] failure_status_by_rep
+    cdef int64_t[:, ::1] step_status_by_rep
     cdef double[:, ::1] step_elapsed_s_by_worker
     cdef int64_t[:, ::1] step_counts_by_worker
     cdef int64_t[:, ::1] step_failures_by_worker
@@ -1727,8 +1725,7 @@ def run(
     for step_binding_specs in input_bindings:
         n_bindings += len(step_binding_specs)
 
-    failure_step_by_rep = allocation.failure_step_by_rep
-    failure_status_by_rep = allocation.failure_status_by_rep
+    step_status_by_rep = allocation.step_status_by_rep
 
     descs = <sdsge_mc_step_desc *>PyMem_Malloc(
         n_steps * sizeof(sdsge_mc_step_desc)
@@ -1846,8 +1843,7 @@ def run(
         runner.halt_failure.rep_idx = -1
         runner.halt_failure.step_idx = -1
         runner.halt_failure.status = 0
-        runner.failure_step_by_rep = &failure_step_by_rep[0]
-        runner.failure_status_by_rep = &failure_status_by_rep[0]
+        runner.step_status_by_rep = &step_status_by_rep[0, 0]
         runner.profile_steps = profile_steps
         if profile_steps:
             step_elapsed_s_by_worker = np.empty(

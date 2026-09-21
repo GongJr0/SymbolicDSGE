@@ -36,7 +36,7 @@ def test_shock_class_draw_fn_and_rejections():
         Shock(dist="norm", dist_kwargs={"scale": 1.0}).draw_fn(6, False)
 
     with pytest.raises(ValueError, match="Distribution must be specified"):
-        Shock().draw_fn(6, False)
+        Shock(dist=None).draw_fn(6, False)
 
     # A linear map of independent uniforms is not uniform in its margins, so a
     # grouped uniform is refused where the arity is known.

@@ -217,13 +217,19 @@ class Shock:
 
     def __init__(
         self,
-        dist: ShockDistribution | rv_generic | multi_rv_generic | None = None,
+        dist: ShockDistribution | rv_generic | multi_rv_generic,
         seed: int | None = 0,
         dist_kwargs: dict | None = None,
     ) -> None:
         # A Shock is a horizon-independent distribution spec: the number of
         # periods ``T`` is supplied by the caller at generation time, not baked
         # in here. The simulation is the single authority on its own horizon.
+        if dist is None:
+            raise ValueError(
+                "Distribution must be specified to draw shocks. "
+                "Use `ShockPath` if you intend to supply a pre-generated "
+                "shock array instead of drawing from a distribution."
+            )
         self.dist = dist
         self.seed = seed
         self.dist_kwargs = dict(dist_kwargs) if dist_kwargs is not None else {}

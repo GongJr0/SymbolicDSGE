@@ -89,7 +89,7 @@ class MCMemoryReport:
     #: The shock slab the Python fallback route materializes at lowering time.
     shock_bytes: int
 
-    #: Retention indices and per-replication failure records.
+    #: Retention indices and the per-step, per-replication status record.
     bookkeeping_bytes: int
 
     #: Physical memory available at the moment the profile ran.
@@ -244,7 +244,9 @@ class MCMemoryProfiler:
     def report(self) -> MCMemoryReport:
         """Profile the plan without acting on the result."""
         steps: list[StepMemory] = []
-        bookkeeping = 2 * self._n_rep * BYTES_PER_ELEMENT
+        # One status per step per replication, held for every replication
+        # whether or not the plan retains it.
+        bookkeeping = self._n_rep * len(self._plan) * BYTES_PER_ELEMENT
         for name, step_plan in self._plan.items():
             output_elements = (
                 step_plan.output_size.n_float + step_plan.output_size.n_int

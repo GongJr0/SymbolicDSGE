@@ -17,6 +17,8 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
+from .._ckernels.monte_carlo._status import MCStatus
+
 from ..core.sim_result import SimResult, OccBinDiagnostics
 from ..kalman.filter import FilterResult, UnscentedFilterResult
 from .._diag_tests.result import MCTestResult
@@ -26,7 +28,7 @@ from ..regression.enums import RegressionStatus
 from .postproc import Artifact
 from ..regression.result import MCRegressionResult
 from .custom_op import PandasCustomFunc
-from .spec import SourceSpec, StepMeta, StepSpec
+from .spec import MCFailureMeta, SourceSpec, StepMeta, StepSpec
 
 NDF = NDArray[float64]
 NDI = NDArray[np.int_]
@@ -219,11 +221,16 @@ class MCStep:
         if self.n_retain < -1:
             raise ValueError("MCStep n_retain must be -1 (retain all) or non-negative.")
 
-        if self.op_type is OpType.POSTPROC and self.n_retain != -1:
-            raise ValueError(
-                "POSTPROC steps run in the post-loop retained traces. "
-                "`n_retain` is not applicable and must be left at its default value of -1."
-            )
+        if self.op_type is OpType.POSTPROC:
+            if not callable(self.func):
+                raise ValueError(
+                    "POSTPROC steps must carry a callable in the `func` attribute."
+                )
+            if self.n_retain != -1:
+                raise ValueError(
+                    "POSTPROC steps run in the post-loop retained traces. "
+                    "`n_retain` is not applicable and must be left at its default value of -1."
+                )
 
         if (
             isinstance(self.func, PandasCustomFunc)
@@ -387,18 +394,47 @@ class MCFailure:
     ----------
     rep_idx : int
         Replication index that failed, or -1 for a post-loop step.
-    step_name : str
-        Step executing when the failure occurred.
-    error_type : str
-        Exception type name.
-    message : str
-        Exception message.
+    failures : dict[str, int]
+        Mapping of step name to status code for each step that
+        failed in the replication.
     """
 
     rep_idx: int
-    step_name: str
-    error_type: str
-    message: str
+    failures: Mapping[str, MCStatus]
+
+    @property
+    def failed_steps(self) -> Sequence[str]:
+        """Names of the steps that failed in this replication."""
+        return list(self.failures.keys())
+
+    def status_for(self, step_name: str) -> MCStatus:
+        """Return the status code for the failure of a specific step."""
+        if step_name not in self.failures:
+            raise ValueError(
+                f"No step of name {step_name!r} failed in replication {self.rep_idx}."
+            )
+        return self.failures[step_name]
+
+    def message_for(self, step_name: str) -> str:
+        """Return a human-readable message for the failure of a specific step."""
+        return self.status_for(step_name).message
+
+    def to_meta(self) -> MCFailureMeta:
+        """Return a serializable representation of this failure."""
+        return {
+            "rep_idx": self.rep_idx,
+            "failures": {step: status.value for step, status in self.failures.items()},
+        }
+
+    @classmethod
+    def from_meta(cls, spec: MCFailureMeta) -> MCFailure:
+        """Rebuild a failure from its serializable representation."""
+        return cls(
+            rep_idx=spec["rep_idx"],
+            failures={
+                step: MCStatus(status) for step, status in spec["failures"].items()
+            },
+        )
 
 
 @dataclass(frozen=True)
@@ -991,7 +1027,7 @@ def report_mc_step_performance(
 
 def failed_postproc_names(fails: list[MCFailure]) -> set[str]:
     """Names of post-loop steps that failed (recorded with the ``-1`` sentinel)."""
-    return {f.step_name for f in fails if f.rep_idx == -1}
+    return {step for f in fails if f.rep_idx == -1 for step in f.failures}
 
 
 def failed_step_counts(fails: list[MCFailure]) -> dict[str, int]:
@@ -999,5 +1035,6 @@ def failed_step_counts(fails: list[MCFailure]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for f in fails:
         if f.rep_idx != -1:
-            counts[f.step_name] = counts.get(f.step_name, 0) + 1
+            for step_name in f.failures:
+                counts[step_name] = counts.get(step_name, 0) + 1
     return counts

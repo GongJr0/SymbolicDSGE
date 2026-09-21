@@ -3,10 +3,13 @@
 #include "layout.h"
 #include <string.h>
 
+/* Slot 0 of the int lane is the runner's; a step answers only for its own
+ * status. The guard is on the lane itself, since a step with no int lane is
+ * handed NULL and offsetting that would defeat the test. */
 static int sdsge_mc_finish_status(const int status,
                                   i64 *SDSGE_RESTRICT int_out) {
   if (int_out != NULL)
-    int_out[0] = (i64)status;
+    int_out[1] = (i64)status;
   return status;
 }
 

@@ -65,13 +65,17 @@ typedef struct {
   int status;
 } sdsge_mc_failure;
 
-/* ``SDSGE_MC_NOT_RUN`` marks failure-lane entries and integer retained
- * outputs for replications that failed or were skipped by a fail-fast halt.
- * Float retained outputs for the same rows are set to NAN. */
-#define SDSGE_MC_NOT_RUN INT64_MIN
+/* Run statuses. A step states one in slot 1 of its int output lane, and the
+ * runner records the same value in ``step_status_by_rep``.
+ *
+ * ``SDSGE_MC_NOT_RUN`` is the status of a step the runner declined to dispatch,
+ * which a dependent reads to inherit the refusal. It is also what the status
+ * record is seeded with, so a step still carrying it never ran: either it was
+ * declined, or the replication it belongs to was dropped before it started. */
 #define SDSGE_MC_RUN_OK 0
 #define SDSGE_MC_RUN_HALTED 1
 #define SDSGE_MC_RUN_BAD_ARG -1201
+#define SDSGE_MC_NOT_RUN -1202
 
 /* Native execution plan. The compiler owns the descriptor array, all step
  * contexts, and every Cython backing array referenced by them for as long as
@@ -79,10 +83,25 @@ typedef struct {
  * that wins the transition from zero to one records ``halt_failure`` and stops
  * new replications when ``fail_fast`` is nonzero.
  *
- * Before returning, the runner sets every retained row belonging to a failed
- * or unfinished replication to defined sentinels. When ``profile_steps`` is
- * nonzero, each profiling array has ``n_workers * n_steps`` entries in
- * worker-major order, and only the executing worker's row is written. */
+ * ``step_status_by_rep`` has ``n_rep * n_steps`` entries in replication-major
+ * order, and holds the status of every step of every replication. It is the
+ * only record that survives a replication the run did not retain, since the
+ * live output lane belongs to the worker and the next replication overwrites
+ * it. Replication-major is deliberate: a worker walks one row as it walks its
+ * steps, and the static schedule gives it a contiguous block of rows, so two
+ * workers share a cache line only at a block boundary.
+ *
+ * A replication failed if any entry in its row is not ``SDSGE_MC_RUN_OK``. The
+ * first entry that is neither that nor ``SDSGE_MC_NOT_RUN`` is the failure that
+ * originated; every ``SDSGE_MC_NOT_RUN`` after it is a step declined for
+ * reading from one that failed.
+ *
+ * Before returning, the runner sets the retained float row of every step that
+ * did not produce output to NAN, leaving the int row as the step and the runner
+ * wrote it. A replication that never started wrote no int row either, and that
+ * one is filled outright. When ``profile_steps`` is nonzero, each profiling
+ * array has ``n_workers * n_steps`` entries in worker-major order, and only the
+ * executing worker's row is written. */
 
 typedef struct {
   const sdsge_mc_step_desc *steps;
@@ -92,8 +111,7 @@ typedef struct {
   int fail_fast;
   volatile i64 halt;
   sdsge_mc_failure halt_failure;
-  i64 *failure_step_by_rep;
-  i64 *failure_status_by_rep;
+  i64 *step_status_by_rep;
   int profile_steps;
   f64 *step_elapsed_s_by_worker;
   i64 *step_counts_by_worker;

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from SymbolicDSGE._ckernels.monte_carlo._arenas import allocate_arenas
+from SymbolicDSGE._ckernels.monte_carlo._arenas import (
+    MC_NOT_RUN,
+    allocate_arenas,
+)
 from SymbolicDSGE._ckernels.monte_carlo._runner import (
     payload_step,
     run,
@@ -64,8 +67,7 @@ def test_runner_lowers_arenas_and_retains_batched_payload_rows() -> None:
         allocation.steps["payload"].float_retained,
         payload.reshape(5, 2),
     )
-    assert allocation.failure_step_by_rep.tolist() == [-1] * 5
-    assert allocation.failure_status_by_rep.tolist() == [0] * 5
+    assert allocation.step_status_by_rep.tolist() == [[0]] * 5
 
 
 def test_runner_profiles_step_work_per_worker_and_wall_time() -> None:
@@ -140,15 +142,16 @@ def test_runner_fail_fast_sanitizes_failed_and_skipped_retained_rows() -> None:
         fail_fast=True,
     )
 
-    not_run = np.iinfo(np.int64).min
     assert result.status == 1
     assert 0 <= result.halt_rep_idx < 5
     assert result.halt_step_idx == 0
     # SDSGE_TRANSFORM_BAD_ARG, _ckernels/monte_carlo/transforms.h.
     bad_arg = -1301
     assert result.halt_status == bad_arg
-    assert set(allocation.failure_step_by_rep.tolist()) <= {0, not_run}
-    assert set(allocation.failure_status_by_rep.tolist()) <= {bad_arg, not_run}
+    assert set(allocation.step_status_by_rep.ravel().tolist()) <= {
+        bad_arg,
+        MC_NOT_RUN,
+    }
     assert np.isnan(allocation.steps["diff"].float_retained).all()
 
 

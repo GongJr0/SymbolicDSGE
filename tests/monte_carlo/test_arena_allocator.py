@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE._ckernels.monte_carlo._arenas import (
+    MC_NOT_RUN,
     allocate_arenas,
     resolve_n_workers,
     resolve_retention,
@@ -86,9 +87,8 @@ def test_allocate_arenas_uses_plan_sizes_and_compact_retained_rows() -> None:
     assert allocation.n_rep == 8
     assert allocation.n_workers == 2
     assert allocation.plan == plan
-    not_run = np.iinfo(np.int64).min
-    assert allocation.failure_step_by_rep.tolist() == [not_run] * 8
-    assert allocation.failure_status_by_rep.tolist() == [not_run] * 8
+    assert allocation.step_status_by_rep.shape == (8, len(plan))
+    assert (allocation.step_status_by_rep == MC_NOT_RUN).all()
     assert transform.float_in_work.shape == (2, 11)
     assert transform.int_in_work.shape == (2, 2)
     assert transform.float_live_out.shape == (2, 6)

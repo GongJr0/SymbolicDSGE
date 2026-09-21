@@ -8,6 +8,8 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+from SymbolicDSGE._ckernels.monte_carlo._status import MCStatus
+
 from .._ckernels.monte_carlo._arenas import StepArenas
 from .._ckernels.monte_carlo._runner import NativeRunResult, run
 from .._diag_tests.result import MCTestResult
@@ -265,7 +267,7 @@ class MCPipeline:
         dgp: SolvedModel | None = None,
         *,
         n_rep: int,
-        fail_fast: bool = True,
+        fail_fast: bool = False,
         verbosity: int = 1,
         n_jobs: int | None = None,
         check_memory_availability: bool = True,
@@ -348,10 +350,11 @@ class MCPipeline:
                 if 0 <= native_res.halt_step_idx < len(self.replication_steps)
                 else "<runner>"
             )
+            status = MCStatus(native_res.halt_status)
             raise RuntimeError(
                 f"Monte Carlo run failed at replication "
                 f"{native_res.halt_rep_idx}, step {step_name!r}, with status "
-                f"{native_res.halt_status}."
+                f"{status.name} ({status.value}): {status.message}"
             )
         failures = _resolve_failures(prep)
 
@@ -444,7 +447,7 @@ class MCPipeline:
             datagen_outputs=datagen_result,
             filter_outputs=filter_outputs,
             n_successful=int(
-                np.count_nonzero(prep.allocation.failure_status_by_rep == 0)
+                np.count_nonzero((prep.allocation.step_status_by_rep == 0).all(axis=1))
             ),
             test_summaries=test_summaries,
             transform_outputs=payload_columns,
@@ -506,28 +509,23 @@ class MCPipeline:
                 )
             step_start = perf_counter()
             out: Any = None
-            failed = False
             try:
                 out = step.func(
                     traces=traces,
                     **dict(step.kwargs),
                 )
-            except Exception as exc:
-                failed = True
+                postproc[step.name] = normalize_artifacts(out)
+            except Exception:
                 if fail_fast:
                     raise
                 failures.append(
                     MCFailure(
                         rep_idx=-1,
-                        step_name=step.name,
-                        error_type=type(exc).__name__,
-                        message=str(exc),
+                        failures={step.name: MCStatus.POSTPROC_FAILED},
                     )
                 )
             finally:
                 postproc_elapsed_s[step.name] += perf_counter() - step_start
-            if not failed:
-                postproc[step.name] = normalize_artifacts(out)
         return postproc, postproc_elapsed_s
 
     def to_spec(self) -> PipelineSpec:
@@ -710,7 +708,11 @@ def _compile_datagen(
 
     # Every field shares its leading axis, so any one of them dates the run.
     T = next(
-        (entry.shape[0] for name, entry in layout.items() if _has_field(layout, name)),
+        (
+            entry.shape[0]
+            for name, entry in layout.items()
+            if entry.dtype == np.float64 and _has_field(layout, name)
+        ),
         0,
     )
     var_names, shock_names, observable_names = _datagen_names(
@@ -869,32 +871,30 @@ def _compile_regressions(
 
 
 def _resolve_failures(lowered: LoweredMCRun) -> list[MCFailure]:
-    """Project native per-replication runner failures onto public failures."""
-    step_names = tuple(step.name for step in lowered.steps)
-    failure_steps = lowered.allocation.failure_step_by_rep
-    failure_statuses = lowered.allocation.failure_status_by_rep
+    """Project native per-replication runner failures onto public failures.
+
+    The runner records one status per step per replication, so a replication
+    reports every step that did not produce output rather than only the first.
+    A step the runner declined for reading from a failed source records
+    ``MC_NOT_RUN``, which distinguishes a casualty from the failure that
+    originated it.
+
+    The record covers every replication, including those the plan did not
+    retain, whose statuses reach nowhere else.
+    """
+    statuses = lowered.allocation.step_status_by_rep
+    step_names = [step.name for step in lowered.steps]
     failures: list[MCFailure] = []
 
-    for rep_idx, (step_idx, status) in enumerate(
-        zip(failure_steps, failure_statuses, strict=True)
-    ):
-        if status == 0:
+    for rep_idx, row in enumerate(statuses):
+        failed = {
+            name: MCStatus(status)
+            for name, status in zip(step_names, row, strict=True)
+            if status != 0
+        }
+        if not failed:
             continue
-        if step_idx < 0:
-            continue
-        if step_idx >= len(step_names):
-            raise RuntimeError(
-                f"Native runner reported an invalid step index {step_idx} "
-                f"for replication {rep_idx}."
-            )
-        failures.append(
-            MCFailure(
-                rep_idx=rep_idx,
-                step_name=step_names[step_idx],
-                error_type="NativeStepError",
-                message=f"Native step returned status {status}.",
-            )
-        )
+        failures.append(MCFailure(rep_idx=rep_idx, failures=failed))
     return failures
 
 

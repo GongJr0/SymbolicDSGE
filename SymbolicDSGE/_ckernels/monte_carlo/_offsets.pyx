@@ -114,6 +114,8 @@ cdef extern from "layout.h":
     int64_t sdsge_mc_transform_output_rows(
             int64_t kind, int64_t n, int64_t order, int64_t window
             )
+    arena_offset sdsge_mc_transform_output_arena_offset(int64_t rows,
+                                                        int64_t p)
 
 
 cdef extern from "diag.h":
@@ -220,6 +222,15 @@ def transform_output_rows(str kind, int64_t n, int64_t order=0,
     if code is None:
         raise ValueError(f"Unsupported native transform kind: {kind!r}.")
     return sdsge_mc_transform_output_rows(<int64_t>code, n, order, window)
+
+
+def transform_output_offsets(int64_t rows, int64_t p):
+    """Return the output boundaries for a transform.
+
+    One float output buffer and two int flags for
+    failed sources and status.
+    """
+    return _offset(sdsge_mc_transform_output_arena_offset(rows, p))
 
 
 def regression_offsets(

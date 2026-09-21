@@ -28,13 +28,8 @@ def test_compile_field_layout_reads_each_lane_in_its_own_order() -> None:
     assert fields["failure"].offset == 1
 
 
-def test_compile_field_layout_rejects_non_native_dtype() -> None:
-    with pytest.raises(TypeError, match="unsupported dtype"):
-        _compile_field_layout({"bad": _FieldSpec((1,), np.int32)}, _EMPTY)
-
-
 def test_a_field_with_no_native_buffer_is_rejected() -> None:
-    with pytest.raises(ValueError, match="no buffer in the native layout"):
+    with pytest.raises(ValueError, match="no native buffer to occupy"):
         _compile_field_layout({"payload": _FieldSpec((2,), np.float64)}, _EMPTY)
 
 

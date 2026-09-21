@@ -197,11 +197,11 @@ def test_invalid_step_parameters_fail_in_the_run(
 ) -> None:
     # These build and lower without complaint; the kernel rejects them per
     # replication. The status code is carried in the message and deliberately not
-    # asserted, since it is an internal numbering.
+    # asserted via catching the `fail_fast` raise.
     pipeline = MCPipeline([_datagen(), step()])
 
     with pytest.raises(RuntimeError, match="'bad'"):
-        mc_run(pipeline, solved_test_model, n_rep=1)
+        mc_run(pipeline, solved_test_model, n_rep=1, fail_fast=True)
 
 
 def test_run_failures_are_collected_per_replication_when_not_failing_fast(
@@ -221,47 +221,46 @@ def test_run_failures_are_collected_per_replication_when_not_failing_fast(
 
     assert result.n_successful == 0
     assert len(result.failures) == 3
-    assert {f.step_name for f in result.failures} == {"bad"}
-    assert {f.error_type for f in result.failures} == {"NativeStepError"}
+    assert all("bad" in f.failures for f in result.failures)
     assert [f.rep_idx for f in result.failures] == [0, 1, 2]
 
 
-def test_log_of_a_non_positive_sample_is_not_rejected(
-    mc_run, solved_test_model
+def test_log_of_a_non_positive_sample_is_rejected(
+    mc_run,
+    solved_test_model,
 ) -> None:
-    # Documented as observed, not endorsed: the step propagates the non-finite
-    # result rather than failing, so a caller feeding it a centred sample gets
-    # NaN columns and no error.
-    pipeline = MCPipeline(
+    result = MCPipeline(
         [
             _datagen(),
             add_payload_step("nonpositive", -np.ones((PERIODS, COLUMNS))),
             log_step("log_bad", source="nonpositive", field="payload"),
         ]
+    ).run(
+        solved_test_model,
+        n_rep=1,
+        fail_fast=False,
+        check_memory_availability=False,
     )
 
-    result = mc_run(pipeline, solved_test_model, n_rep=1)
-
-    assert result.failures == ()
-    assert not np.isfinite(np.asarray(result.transform_outputs["log_bad"])).all()
+    assert not result.succeeded
+    assert all("log_bad" in f.failures for f in result.failures)
 
 
-def test_diff_order_at_the_sample_length_yields_an_empty_payload(
-    mc_run, solved_test_model
-) -> None:
-    # Also observed rather than endorsed: differencing away every row is not an
-    # error, it is a zero-row payload that downstream steps would read as empty.
-    pipeline = MCPipeline(
+def test_diff_order_at_the_sample_length_fails(mc_run, solved_test_model) -> None:
+    result = MCPipeline(
         [
             _datagen(),
             diff_step("drained", source="dat", field="observables", order=PERIODS),
         ]
+    ).run(
+        solved_test_model,
+        n_rep=1,
+        fail_fast=False,
+        check_memory_availability=False,
     )
 
-    result = mc_run(pipeline, solved_test_model, n_rep=1)
-
-    assert result.failures == ()
-    assert np.asarray(result.transform_outputs["drained"]).shape == (1, 0, COLUMNS)
+    assert not result.succeeded
+    assert all("drained" in f.failures for f in result.failures)
 
 
 # ---- factories -------------------------------------------------------------

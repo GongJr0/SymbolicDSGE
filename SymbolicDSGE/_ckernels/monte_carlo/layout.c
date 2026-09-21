@@ -27,10 +27,12 @@ arena_size sdsge_passthrough_arena_size(const i64 n, const i64 p) {
 arena_offset sdsge_raw_model_data_output_arena_offset(const i64 n_states,
                                                       const i64 n_shocks,
                                                       const i64 n_observables) {
-  arena_offset off = make_offset(3, 0);
+  arena_offset off = make_offset(3, 2);
   off.foffset[0] = n_states;                       // states
   off.foffset[1] = off.foffset[0] + n_shocks;      // shocks
   off.foffset[2] = off.foffset[1] + n_observables; // observables
+  off.ioffset[0] = 1;                              // bool(any_failed_sources)
+  off.ioffset[1] = 2;                              // status
   return off;
 }
 
@@ -39,7 +41,7 @@ arena_size sdsge_raw_model_data_output_arena_size(const i64 n_states,
                                                   const i64 n_observables) {
   const arena_offset off = sdsge_raw_model_data_output_arena_offset(
       n_states, n_shocks, n_observables);
-  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
 }
 
 arena_offset sdsge_simulate_order1_arena_offset(const i64 n, const i64 k,
@@ -66,11 +68,13 @@ arena_size sdsge_simulate_order1_arena_size(const i64 n, const i64 k,
 arena_offset sdsge_simulate_order1_output_arena_offset(const i64 n, const i64 k,
                                                        const i64 T,
                                                        const i64 m) {
-  arena_offset off = make_offset(3, 0);
+  arena_offset off = make_offset(3, 2);
   off.foffset[0] = T * n;                  // states(T, n)
   off.foffset[1] = off.foffset[0] + T * k; // shocks(T, k)
   off.foffset[2] =
       off.foffset[1] + T * m; // observables(T, m), zero when unbuilt
+  off.ioffset[0] = 1;         // bool(any_failed_sources)
+  off.ioffset[1] = 2;         // status
   return off;
 }
 
@@ -78,7 +82,7 @@ arena_size sdsge_simulate_order1_output_arena_size(const i64 n, const i64 k,
                                                    const i64 T, const i64 m) {
   const arena_offset off =
       sdsge_simulate_order1_output_arena_offset(n, k, T, m);
-  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
 }
 
 arena_offset sdsge_simulate_order2_arena_offset(const i64 n_state,
@@ -157,7 +161,7 @@ arena_size sdsge_filter_linear_input_arena_size(const i64 n, const i64 m,
 arena_offset sdsge_filter_linear_output_arena_offset(const i64 n, const i64 m,
                                                      const i64 k, const i64 T,
                                                      const int return_shocks) {
-  arena_offset off = make_offset(11, 0);
+  arena_offset off = make_offset(11, 2);
   off.foffset[0] = T * n;                      // x_pred(T, n)
   off.foffset[1] = off.foffset[0] + T * n;     // x_filt(T, n)
   off.foffset[2] = off.foffset[1] + T * n * n; // P_pred(T, n, n)
@@ -170,6 +174,8 @@ arena_offset sdsge_filter_linear_output_arena_offset(const i64 n, const i64 m,
   off.foffset[9] =
       off.foffset[8] + (return_shocks ? T * k : 0); // eps_hat(T, k) or nothing
   off.foffset[10] = off.foffset[9] + 1;             // loglik
+  off.ioffset[0] = 1;                               // bool(any_failed_sources)
+  off.ioffset[1] = 2;                               // status
   return off;
 }
 
@@ -178,7 +184,7 @@ arena_size sdsge_filter_linear_output_arena_size(const i64 n, const i64 m,
                                                  const int return_shocks) {
   const arena_offset off =
       sdsge_filter_linear_output_arena_offset(n, m, k, T, return_shocks);
-  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
 }
 
 arena_offset sdsge_filter_extended_input_arena_offset(const i64 n, const i64 m,
@@ -267,7 +273,7 @@ arena_offset sdsge_filter_unscented_output_arena_offset(const i64 n_state,
                                                         const i64 n_ctrl,
                                                         const i64 n_obs,
                                                         const i64 T) {
-  arena_offset off = make_offset(14, 0);
+  arena_offset off = make_offset(14, 2);
   const i64 n_var = n_state + n_ctrl;
   const i64 nz = 2 * n_state;
   off.foffset[0] = T * n_var;                          // x_pred(T, n_var)
@@ -284,6 +290,8 @@ arena_offset sdsge_filter_unscented_output_arena_offset(const i64 n_state,
   off.foffset[11] = off.foffset[10] + T * n_state;     // x2_pred(T, n_state)
   off.foffset[12] = off.foffset[11] + T * n_state;     // x1_filt(T, n_state)
   off.foffset[13] = off.foffset[12] + T * n_state;     // x2_filt(T, n_state)
+  off.ioffset[0] = 1; // bool(any_failed_sources)
+  off.ioffset[1] = 2; // status
   return off;
 }
 
@@ -293,7 +301,7 @@ arena_size sdsge_filter_unscented_output_arena_size(const i64 n_state,
                                                     const i64 T) {
   const arena_offset off =
       sdsge_filter_unscented_output_arena_offset(n_state, n_ctrl, n_obs, T);
-  return make_sizer(off.foffset[off.n_fbuf - 1], 0);
+  return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
 }
 
 /* from tests.c */
@@ -313,9 +321,10 @@ arena_size sdsge_mc_diag_sample_arena_size(const i64 n, const i64 q,
 }
 
 arena_offset sdsge_mc_diag_output_arena_offset(void) {
-  arena_offset off = make_offset(1, 1);
+  arena_offset off = make_offset(1, 2);
   off.foffset[0] = 1; // statistic
-  off.ioffset[0] = 1; // status
+  off.ioffset[0] = 1; // bool(any_failed_sources)
+  off.ioffset[1] = 2; // status
   return off;
 }
 
@@ -422,14 +431,15 @@ arena_size sdsge_mc_regression_arena_size(const i64 kind, const i64 n,
 
 arena_offset sdsge_mc_regression_output_arena_offset(const i64 kind,
                                                      const i64 p) {
-  arena_offset off = make_offset(4, 1);
+  arena_offset off = make_offset(4, 2);
   const int with_se =
       sdsge_mc_regression_reports_se((sdsge_mc_regression_kind)kind);
   off.foffset[0] = p;                                  // coef(p)
   off.foffset[1] = off.foffset[0] + 1;                 // ssr
   off.foffset[2] = off.foffset[1] + 1;                 // sst
   off.foffset[3] = off.foffset[2] + (with_se ? p : 0); // se(p), or nothing
-  off.ioffset[0] = 1;                                  // status
+  off.ioffset[0] = 1; // bool(any_failed_sources)
+  off.ioffset[1] = 2; // status
   return off;
 }
 
@@ -506,4 +516,13 @@ i64 sdsge_mc_transform_output_rows(const i64 kind, const i64 n, const i64 order,
   }
 
   return (rows > 0) ? rows : 0;
+}
+
+arena_offset sdsge_mc_transform_output_arena_offset(const i64 rows,
+                                                    const i64 p) {
+  arena_offset off = make_offset(1, 2);
+  off.foffset[0] = rows * p; // payload(rows, p)
+  off.ioffset[0] = 1;        // bool(any_failed_sources)
+  off.ioffset[1] = 2;        // status
+  return off;
 }

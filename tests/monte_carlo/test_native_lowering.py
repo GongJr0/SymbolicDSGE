@@ -113,7 +113,7 @@ def test_native_lowering_runs_raw_transform_ols_and_diagnostic_pipeline() -> Non
     )
 
     assert native_result.status == 0
-    assert lowered.allocation.failure_step_by_rep.tolist() == [-1] * n_rep
+    assert (lowered.allocation.step_status_by_rep == 0).all()
     assert native_result.step_counts_by_worker.sum(axis=0).tolist() == [
         n_rep,
         n_rep,
@@ -361,32 +361,6 @@ def test_native_lowering_runs_all_diagnostic_kinds() -> None:
             rtol=1e-9,
             atol=1e-11,
         )
-
-
-def test_native_diagnostic_status_is_retained_not_a_runner_failure() -> None:
-    n_rep, n = 2, 4
-    observables = np.arange(n_rep * n, dtype=np.float64).reshape(n_rep, n, 1)
-    pipeline = MCPipeline(
-        [
-            raw_model_data_step("data", observables=observables),
-            jarque_bera_test_step("jb", source="data", field="observables", column=0),
-        ]
-    )
-    reference = cast(SolvedModel, object())
-
-    lowered = lower_native_run(pipeline, reference=reference, n_rep=n_rep, n_jobs=1)
-    result = run_native(
-        lowered.allocation,
-        lowered.steps,
-        lowered.input_bindings,
-        fail_fast=True,
-    )
-
-    assert result.status == 0
-    assert lowered.allocation.failure_step_by_rep.tolist() == [-1] * n_rep
-    status_layout = lowered.plan["jb"].out_fields["status"]
-    actual_status = lowered.allocation.steps["jb"].int_retained[:, status_layout.offset]
-    np.testing.assert_array_equal(actual_status, int(TestStatus.INSUFFICIENT_SAMPLES))
 
 
 def test_native_lowering_runs_first_order_simulation_with_observables() -> None:

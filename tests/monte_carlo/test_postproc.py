@@ -181,7 +181,7 @@ def test_postproc_failure_respects_fail_fast() -> None:
 
     result = _run([_postproc("b", boom)], fail_fast=False)
     assert result.succeeded is False
-    assert any(f.step_name == "b" and f.rep_idx == -1 for f in result.failures)
+    assert any("b" in f.failures and f.rep_idx == -1 for f in result.failures)
     assert "b" not in result.postproc
 
 

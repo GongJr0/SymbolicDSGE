@@ -71,8 +71,7 @@ def abundant_memory(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _allocated_bytes(allocation: Any) -> int:
     """Every dynamic array one allocation owns, measured after the fact."""
-    total = int(allocation.failure_step_by_rep.nbytes)
-    total += int(allocation.failure_status_by_rep.nbytes)
+    total = int(allocation.step_status_by_rep.nbytes)
     for arenas in allocation.steps.values():
         total += sum(int(getattr(arenas, name).nbytes) for name in ARENA_NAMES)
     return total
@@ -137,8 +136,8 @@ def test_retention_sentinel_resolves_against_n_rep(
     assert step.per_rep_bytes == (3 + 2) * 8
     assert step.retained_bytes == expected_reps * (3 + 2) * 8
     assert step.worker_bytes == 2 * (5 + 1 + 3 + 2) * 8
-    # Two run-level failure lanes, plus this step's retention indices.
-    assert report.bookkeeping_bytes == (2 * 10 + expected_reps + 10) * 8
+    # One status per step per replication, plus this step's retention indices.
+    assert report.bookkeeping_bytes == (10 * len(plan) + expected_reps + 10) * 8
 
 
 def test_native_eligible_shocks_prematerialize_nothing(solved: SolvedModel) -> None:

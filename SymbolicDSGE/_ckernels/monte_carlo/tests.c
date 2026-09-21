@@ -17,11 +17,14 @@ static arena_size sdsge_mc_wald_work(const sdsge_mc_wald_kind kind, const i64 n,
   return make_sizer(0, 0);
 }
 
+/* ``int_out`` is the whole lane: slot 0 belongs to the runner, slot 1 to this
+ * step. Taking the lane rather than the slot keeps the NULL test meaningful for
+ * a step whose output declares no int lane at all. */
 static int sdsge_mc_test_status(const int status, i64 *SDSGE_RESTRICT int_out) {
   if (int_out != NULL) {
-    int_out[0] = status;
+    int_out[1] = status;
   }
-  return SDSGE_MC_RUN_OK;
+  return status;
 }
 
 int sdsge_mc_wald_test_runner(const i64 rep_idx,

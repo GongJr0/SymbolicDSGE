@@ -180,10 +180,10 @@ arena_offset sdsge_mc_transform_arena_offset(i64 kind, i64 n, i64 p, i64 order,
 arena_size sdsge_mc_transform_arena_size(i64 kind, i64 n, i64 p, i64 order,
                                          i64 window);
 
-/* The rows a transform writes from an n-row input, over the p columns it was
- * given. A scalar rather than a layout: the output is one buffer with no
- * interior boundary, so the row count is all there is to agree on, and the
- * kernels bound their own writes by it.
+/* The rows a transform writes from an n-row input. A scalar because the kind
+ * changes nothing but the row count: the columns come from the input, and
+ * `sdsge_mc_transform_output_arena_offset` below places the same layout
+ * whatever the kind resolved to.
  *
  * ``order`` is read by ``diff`` alone and ``window`` by the rolling kinds; the
  * rest ignore both. An order or a window wider than the input yields no rows.
@@ -191,5 +191,15 @@ arena_size sdsge_mc_transform_arena_size(i64 kind, i64 n, i64 p, i64 order,
  * Rows by kind: standardize n, log n, log_diff n-1, diff n-order, rolling_mean,
  * rolling_var and rolling_std n-window+1. */
 i64 sdsge_mc_transform_output_rows(i64 kind, i64 n, i64 order, i64 window);
+
+/* Every transform output is [payload(rows, p)] on the float lane and
+ * [any_failed_sources, status] on the int lane. Rows are taken rather than a
+ * kind because the three families that write a payload share one layout: a kind
+ * resolves its rows through `sdsge_mc_transform_output_rows` above,
+ * `passthrough` carries its source's, and a custom transform declares its own.
+ *
+ * The int lane is unconditional. A step that cannot fail still answers both
+ * questions at a constant; a reader never has to know which kind it holds. */
+arena_offset sdsge_mc_transform_output_arena_offset(i64 rows, i64 p);
 
 #endif // !SDSGE_MC_LAYOUT_H

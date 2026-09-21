@@ -628,7 +628,7 @@ def _load_mc_result(
     run = _mc_json(archive, manifest, "mc_result_meta")
     if not run:
         return None
-    failures = [MCFailure(**failure) for failure in run["failures"]]
+    failures = [MCFailure.from_meta(f) for f in run["failures"]]
     meta = MCMeta(
         n_rep=int(run["n_rep"]),
         n_retained_by_step={
