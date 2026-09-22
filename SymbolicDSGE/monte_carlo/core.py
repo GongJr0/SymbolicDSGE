@@ -34,10 +34,6 @@ from .traces import (
 )
 from .postproc import Artifact, normalize_artifacts
 from .mc_constructs import (
-    DYNAMIC_SOURCE_FIELDS,
-    FILTER_RAW_SOURCE_FIELDS,
-    FILTER_SOURCE_FIELDS,
-    MC_DATA_SOURCE_FIELDS,
     MCDataGenResult,
     MCFilterResult,
     MCFailure,
@@ -442,36 +438,6 @@ def _order_steps(
     return tuple(ordered)
 
 
-def _validate_source_producer(
-    consumer: MCStep,
-    selector: Any,
-    producer: MCStep,
-) -> None:
-    if selector.field in MC_DATA_SOURCE_FIELDS:
-        expected = OpType.DATAGEN
-    elif selector.field in DYNAMIC_SOURCE_FIELDS:
-        expected = OpType.TRANSFORM
-    elif selector.field in FILTER_SOURCE_FIELDS:
-        expected = OpType.FILTER
-    elif selector.field in FILTER_RAW_SOURCE_FIELDS:
-        # Produced and retained, but not shaped like anything a consumer can be
-        # fed. The step factories say so too; this catches a hand-built step.
-        raise ValueError(
-            f"Step {consumer.name!r} reads filter output {selector.field!r}, "
-            f"which cannot be read as a source: it is not two dimensional per "
-            f"replication."
-        )
-    else:
-        raise ValueError(
-            f"Step {consumer.name!r} has unknown source field {selector.field!r}."
-        )
-    if producer.op_type is not expected:
-        raise ValueError(
-            f"Step {consumer.name!r} reads field {selector.field!r} from "
-            f"{producer.name!r}, but that producer is {producer.op_type.value!r}."
-        )
-
-
 def _validate_steps(
     replication_steps: tuple[MCStep, ...],
     postproc_steps: tuple[MCStep, ...],
@@ -555,7 +521,6 @@ def _resolve_source_indices(
                     f"Step {step.name!r} depends on {producer_step.name!r}, which does not "
                     "appear earlier in the pipeline."
                 )
-            _validate_source_producer(step, selector, producer_step)
             step_indices.append(source_idx)
         resolved.append(tuple(step_indices))
     return tuple(resolved)

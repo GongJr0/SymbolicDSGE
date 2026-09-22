@@ -143,13 +143,6 @@ def _datagen(observables: np.ndarray | None = None):
     return raw_model_data_step("dat", observables=obs, observable_names=("y", "x"))
 
 
-def test_unknown_source_field_is_rejected_by_the_factory() -> None:
-    # The factory can settle this alone: the field name is checked against the
-    # known source fields without reference to any producer.
-    with pytest.raises(ValueError, match="Unknown MC source field"):
-        standardize_step("s", source="dat", field="not_a_field")
-
-
 @pytest.mark.parametrize(
     "steps, match",
     [

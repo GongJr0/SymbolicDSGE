@@ -14,7 +14,7 @@ from ..._diag_tests.distributions import (
     ReferenceDistribution,
 )
 from ...core.solved_model import SolvedModel
-from ..allocation import BufferPlan, FieldLayout, is_empty
+from ..allocation import BufferPlan, FieldLayout, is_empty, source_matrix_shape
 from ..mc_constructs import MCStep, SourceArgs
 
 _FILL_COLUMNS = np.zeros(1, dtype=np.int64)
@@ -90,11 +90,11 @@ def _source_binding(
 ) -> FloatInputBinding:
     producer = steps[source_step_idx]
     layout = _source_layout(plan, producer, source.field)
-    if layout.dtype != np.dtype(np.float64) or len(layout.shape) != 2:
+    if layout.dtype != np.dtype(np.float64):
         raise ValueError(
-            f"Native source {producer.name!r}.{source.field!r} must be a 2D float field."
+            f"Native source {producer.name!r}.{source.field!r} must be a float64 field."
         )
-    n_rows, n_columns = layout.shape
+    n_rows, n_columns = source_matrix_shape(layout.shape, producer.name, source.field)
     columns = _selected_columns(source, n_columns)
     n_selected_rows = n_rows - source.burn_in
     if n_selected_rows < 0:
