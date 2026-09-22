@@ -10,11 +10,6 @@ from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
 from SymbolicDSGE.monte_carlo import MCPipeline, OpType
 from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc
 from SymbolicDSGE.monte_carlo.postproc import run_kde as _run_kde
-from SymbolicDSGE.monte_carlo.mc_constructs import (
-    DYNAMIC_SOURCE_FIELDS,
-    FILTER_RAW_SOURCE_FIELDS,
-    MC_DATA_SOURCE_FIELDS,
-)
 from SymbolicDSGE.monte_carlo.step_factories import (
     standardize_step,
     transform_step,
@@ -78,7 +73,7 @@ def test_source_kwargs_compile_to_runner_args_once() -> None:
 def test_source_arg_compile_validates_static_selection() -> None:
     with pytest.raises(TypeError, match="field"):
         standardize_step("bad_string", source="observables")
-    with pytest.raises(ValueError, match="source must be non-empty"):
+    with pytest.raises(ValueError, match="`source` must be non-empty"):
         standardize_step("bad_payload", source="", field="payload")
     with pytest.raises(ValueError, match="burn_in"):
         standardize_step("bad_burn", source="datagen", field="states", burn_in=-1)
@@ -107,22 +102,6 @@ def test_transform_step_wraps_custom_function_and_compiles_source() -> None:
     assert step.source_args[0].field == "observables"
     assert step.source_args[0].columns == (0, 1)
     assert step.source_args[0].burn_in == 1
-
-
-def test_source_fields_match_the_native_output_channels() -> None:
-    assert MC_DATA_SOURCE_FIELDS == ("states", "shocks", "observables")
-    # ``status`` is a scalar error code, not a selectable array source, so it is
-    # excluded from the source-field set. Native lowering resolves the layouts,
-    # so source fields no longer carry Python-side positional indices.
-    linear_array_fields = tuple(
-        f.name for f in fields(FilterResult) if f.name != "status"
-    )
-    unscented_array_fields = tuple(
-        f.name for f in fields(UnscentedFilterResult) if f.name != "status"
-    )
-    assert FILTER_RAW_SOURCE_FIELDS[: len(linear_array_fields)] == linear_array_fields
-    assert FILTER_RAW_SOURCE_FIELDS == unscented_array_fields
-    assert DYNAMIC_SOURCE_FIELDS == ("payload",)
 
 
 def test_validate_orders_steps_with_explicit_filter_source() -> None:

@@ -24,6 +24,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     add_payload_step,
     raw_model_data_step,
     filter_step,
+    transform_step,
 )
 
 T = 8
@@ -69,6 +70,53 @@ def _observations(solved: SolvedModel, n_rep: int = N_REP) -> np.ndarray:
     rng = np.random.default_rng(20260908)
     n_obs = len(solved.compiled.observable_names)
     return rng.normal(scale=0.01, size=(n_rep, T, n_obs))
+
+
+def _add_one(sample: np.ndarray, output: np.ndarray) -> int:
+    output[:] = sample + 1
+    return 0
+
+
+def test_transforms_consume_scalar_loglik_and_vector_payload(
+    linear: SolvedModel,
+) -> None:
+    vector = np.array([-2.0, 0.0, 3.0, 7.0])
+    pipeline = MCPipeline(
+        [
+            raw_model_data_step("data", observables=_observations(linear)),
+            filter_step("filt", obs_source="data", obs_field="observables"),
+            add_payload_step("vector", vector),
+            transform_step(
+                "scalar_plus_one",
+                _add_one,
+                source="filt",
+                field="loglik",
+                output_shape=(1, 1),
+            ),
+            transform_step(
+                "vector_plus_one",
+                _add_one,
+                source="vector",
+                field="payload",
+                output_shape=(vector.size, 1),
+            ),
+        ]
+    )
+
+    result = pipeline.run(linear, n_rep=N_REP, n_jobs=1, verbosity=0, fail_fast=True)
+
+    assert not result.failures
+    assert result.n_successful == N_REP
+    loglik = result.filter_outputs["filt"].loglik
+    assert loglik.shape == (N_REP,)
+    assert np.isfinite(loglik).all()
+    np.testing.assert_allclose(
+        result.transform_outputs["scalar_plus_one"], loglik[:, None, None] + 1
+    )
+    np.testing.assert_array_equal(
+        result.transform_outputs["vector_plus_one"],
+        np.broadcast_to((vector + 1)[None, :, None], (N_REP, vector.size, 1)),
+    )
 
 
 def _run(

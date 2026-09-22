@@ -11,6 +11,7 @@ import pytest
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
+from SymbolicDSGE.monte_carlo.allocation import resolve_output_specs
 from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
 from SymbolicDSGE.monte_carlo.mc_constructs import MCStep
 from SymbolicDSGE.monte_carlo.step_factories import (
@@ -341,29 +342,28 @@ def test_filter_x0_must_cover_every_state(solved: SolvedModel) -> None:
         _lower(steps, reference=solved)
 
 
-@pytest.mark.parametrize("field", ["P_pred", "P_filt", "S", "loglik"])
-def test_a_filter_field_that_cannot_be_staged_is_refused_at_authoring(
-    field: str,
+def test_missing_producer_field_is_rejected_during_planning(
+    solved: SolvedModel,
 ) -> None:
-    """The run produces and retains these, but no consumer can read them.
+    steps = [
+        simulation_step("sim", target="reference", T=T, observables=True),
+        filter_step("filter", obs_source="sim", obs_field="observables"),
+        passthrough_step("keep", source="filter", field="x_smooth", columns=None),
+    ]
+    pipeline = MCPipeline(steps)
 
-    Rejecting at the factory puts the error where the selector was written,
-    rather than at lowering where the planner sizes the input arena.
-    """
-    with pytest.raises(ValueError, match="cannot be read as a source"):
-        passthrough_step("keep", source="filter", field=field, columns=None)
-
-
-def test_an_unrecognized_source_field_is_still_refused_as_unknown() -> None:
-    """A field the result never had reads as a typo, not as a shape problem."""
-    with pytest.raises(ValueError, match="Unknown MC source field"):
-        passthrough_step("keep", source="filter", field="x_smooth", columns=None)
+    with pytest.raises(
+        ValueError, match="Step 'filter' does not produce source field 'x_smooth'"
+    ):
+        resolve_output_specs(
+            pipeline.replication_steps, pipeline._source_indices, solved, None
+        )
 
 
 def test_a_readable_filter_field_still_authors_and_lowers(
     solved: SolvedModel,
 ) -> None:
-    """The curated list has to still admit what the binding can actually stage."""
+    """A field present in the producer layout can be staged for its consumer."""
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
         filter_step("filter", obs_source="sim", obs_field="observables"),

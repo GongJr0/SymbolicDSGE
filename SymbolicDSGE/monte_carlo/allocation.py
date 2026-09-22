@@ -8,6 +8,7 @@ named logical arrays.
 
 from __future__ import annotations
 
+from math import prod
 from typing import Any, Mapping, NamedTuple, Sequence, TypeAlias
 
 import numpy as np
@@ -476,13 +477,25 @@ def _raw_data_shape(field: str, value: object) -> Shape:
 
 def _payload_shape(value: object) -> Shape:
     array = np.asarray(value, dtype=float64)
-    if array.ndim == 1:
-        return array.shape[0], 1
+    if array.ndim < 2:
+        return (prod(array.shape), 1)
     if array.ndim == 2:
         return tuple(int(size) for size in array.shape)
     if array.ndim == 3:
         return tuple(int(size) for size in array.shape[1:])
-    raise ValueError(f"Payload must be 1D, 2D, or 3D, got {array.ndim}D.")
+    raise ValueError(f"Payload must be 0D (scalar) to 3D, got {array.ndim}D.")
+
+
+def source_matrix_shape(
+    shape: Shape, producer_name: str, field: str
+) -> tuple[int, int]:
+    """Interpret a scalar, vector, or matrix source as rows and columns."""
+    if len(shape) > 2:
+        raise ValueError(
+            f"Source field {producer_name!r}.{field} must be 2D or lower, "
+            f"got shape {shape} with {len(shape)} dimensions."
+        )
+    return (shape[0], shape[1]) if len(shape) == 2 else (prod(shape), 1)
 
 
 def _selected_source_shape(
@@ -497,14 +510,7 @@ def _selected_source_shape(
         raise ValueError(
             f"Step {producer.name!r} does not produce source field {selector.field!r}."
         )
-    shape = layout.shape
-    if len(shape) != 2:
-        raise ValueError(
-            f"Source field {producer.name!r}.{selector.field} must be 2D, "
-            f"got shape {shape}."
-        )
-
-    n_rows, n_columns = shape
+    n_rows, n_columns = source_matrix_shape(layout.shape, producer.name, selector.field)
     n_rows = n_rows - selector.burn_in
     columns = selector.column_selector
     if isinstance(columns, slice):

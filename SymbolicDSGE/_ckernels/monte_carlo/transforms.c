@@ -2,6 +2,7 @@
 #include "layout.h"
 #include <math.h>
 #include <stddef.h>
+#include <string.h>
 
 /* Column means and sums of squared deviations of a row-major (n, p) buffer, in
  * one Welford pass. Writes mean(p) and m2(p); both are zeroed here. The
@@ -436,6 +437,8 @@ int sdsge_mc_user_transform_runner(const i64 rep_idx,
   (void)rep_idx;
   (void)int_work;
   const sdsge_mc_user_transform_step_ctx *config = ctx;
+
+  memset(float_out, 0xFF, config->n_out * config->p_out * sizeof(f64));
   const i64 status = config->fn(float_in_work, float_out, config->n_in,
                                 config->p_in, config->n_out, config->p_out);
 

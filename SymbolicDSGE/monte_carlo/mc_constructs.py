@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field as dcf, fields
+from dataclasses import dataclass, field as dcf
 from functools import cached_property
 from enum import StrEnum
 from typing import (
@@ -35,27 +35,6 @@ NDI = NDArray[np.int_]
 NDB = NDArray[np.bool_]
 ColumnSelector = int | Sequence[int] | slice | NDArray[Any] | None
 CompiledColumnSelector = Sequence[int] | slice | None
-
-MC_DATA_SOURCE_FIELDS: tuple[str, ...] = ("states", "shocks", "observables")
-DYNAMIC_SOURCE_FIELDS: tuple[str, ...] = ("payload",)
-# The array-valued filter outputs, in tuple order. ``status`` is a scalar error
-# code carried on the raw result, not a selectable source, so it is excluded.
-FILTER_RAW_SOURCE_FIELDS: tuple[str, ...] = tuple(
-    f.name for f in fields(UnscentedFilterResult) if f.name != "status"
-)
-FILTER_SOURCE_FIELDS: tuple[str, ...] = (
-    "x_pred",
-    "x_filt",
-    "x1_pred",
-    "x2_pred",
-    "x1_filt",
-    "x2_filt",
-    "y_pred",
-    "y_filt",
-    "innov",
-    "std_innov",
-    "eps_hat",
-)
 
 
 class OpType(StrEnum):
@@ -345,31 +324,15 @@ def _compile_source_args(
 ) -> SourceArgs:
     source_step = str(source)
     if not source_step:
-        raise ValueError("source must be non-empty.")
+        raise ValueError("`source` must be non-empty.")
     source_field = str(field)
-    known_fields = (
-        *MC_DATA_SOURCE_FIELDS,
-        *FILTER_SOURCE_FIELDS,
-        *DYNAMIC_SOURCE_FIELDS,
+    return SourceArgs(
+        arg=arg,
+        source_step=source_step,
+        field=source_field,
+        columns=columns,
+        burn_in=burn_in,
     )
-    if source_field in known_fields:
-        return SourceArgs(
-            arg=arg,
-            source_step=source_step,
-            field=source_field,
-            columns=columns,
-            burn_in=burn_in,
-        )
-
-    if source_field in FILTER_RAW_SOURCE_FIELDS:
-        raise ValueError(
-            f"Filter output {source_field!r} cannot be read as a source. A "
-            f"source is staged row by column, and {source_field!r} is not two "
-            f"dimensional per replication. Readable filter fields: "
-            f"{list(FILTER_SOURCE_FIELDS)}."
-        )
-
-    raise ValueError(f"Unknown MC source field: {source_field!r}.")
 
 
 def _normalize_columns(value: ColumnSelector) -> CompiledColumnSelector:
