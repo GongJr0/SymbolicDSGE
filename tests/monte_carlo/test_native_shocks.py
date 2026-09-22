@@ -214,7 +214,7 @@ def _run_states(solved_test_model, shocks, n_rep, n_jobs):
         ]
     )
     lowered = lower_native_run(
-        pipeline, reference=solved_test_model, n_rep=n_rep, n_jobs=n_jobs
+        pipeline, models={"reference": solved_test_model}, n_rep=n_rep, n_jobs=n_jobs
     )
     assert (
         run_native(lowered.allocation, lowered.steps, lowered.input_bindings).status

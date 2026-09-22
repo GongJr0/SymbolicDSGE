@@ -46,7 +46,11 @@ def _lower(steps: list[MCStep], reference: object = None) -> None:
     """Lower a pipeline far enough to reach the step compilers."""
     lower_native_run(
         MCPipeline(steps),
-        reference=cast(SolvedModel, reference if reference is not None else object()),
+        models={
+            "reference": cast(
+                SolvedModel, reference if reference is not None else object()
+            )
+        },
         n_rep=N_REP,
         n_jobs=1,
     )
@@ -263,8 +267,10 @@ def test_a_filter_on_dgp_simulated_data_needs_the_dgp(solved: SolvedModel) -> No
         ]
     )
 
-    with pytest.raises(ValueError, match="requires its target model 'dgp'"):
-        lower_native_run(pipeline, reference=solved, dgp=None, n_rep=N_REP, n_jobs=1)
+    with pytest.raises(
+        ValueError, match="Step 'sim' has unrecognized target model 'dgp'"
+    ):
+        lower_native_run(pipeline, models={"reference": solved}, n_rep=N_REP, n_jobs=1)
 
 
 def test_filter_observables_must_be_unique(solved: SolvedModel) -> None:
@@ -356,7 +362,7 @@ def test_missing_producer_field_is_rejected_during_planning(
         ValueError, match="Step 'filter' does not produce source field 'x_smooth'"
     ):
         resolve_output_specs(
-            pipeline.replication_steps, pipeline._source_indices, solved, None
+            pipeline.replication_steps, pipeline._source_indices, {"reference": solved}
         )
 
 

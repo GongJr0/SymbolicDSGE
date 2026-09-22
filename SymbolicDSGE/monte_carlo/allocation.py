@@ -30,7 +30,6 @@ from .defaults import (
     DEFAULT_FILTER_MODE,
     DEFAULT_REGRESSION_KIND,
     DEFAULT_SIMULATION_OBSERVABLES,
-    DEFAULT_SIMULATION_TARGET,
     DEFAULT_WALD_KIND_NAME,
 )
 from .mc_constructs import MCStep, OpType, SourceArgs
@@ -85,8 +84,7 @@ BufferPlan: TypeAlias = dict[str, StepBufferPlan]
 def resolve_output_specs(
     steps: Sequence[MCStep],
     source_indices: Sequence[Sequence[int]],
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel] | None,
 ) -> BufferPlan:
     """Compile native output layouts for the pipeline's built-in steps.
 
@@ -99,7 +97,7 @@ def resolve_output_specs(
         indices = source_indices[step_index]
         match step.op_type:
             case OpType.DATAGEN:
-                fields, offsets = _resolve_datagen_fields(step, reference, dgp)
+                fields, offsets = _resolve_datagen_fields(step, models)
             case OpType.TRANSFORM:
                 if step.step_type == "payload":
                     fields, offsets = _resolve_payload_fields(step)
@@ -112,12 +110,7 @@ def resolve_output_specs(
                     )
             case OpType.FILTER:
                 fields, offsets = _resolve_filter_fields(
-                    step,
-                    indices,
-                    plans,
-                    steps,
-                    reference,
-                    dgp,
+                    step, indices, plans, steps, models
                 )
             case OpType.REGRESSION:
                 fields, offsets = _resolve_regression_fields(
@@ -137,8 +130,7 @@ def resolve_output_specs(
             indices,
             plans,
             steps,
-            reference,
-            dgp,
+            models,
         )
         plans[step.name] = StepBufferPlan(
             name=step.name,
@@ -248,13 +240,12 @@ def _resolve_input_asize(
     source_indices: Sequence[int],
     plans: BufferPlan,
     steps: Sequence[MCStep],
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel] | None,
 ) -> ArenaSize:
     """Resolve one native step's packed input and workspace requirement."""
     match step.op_type:
         case OpType.DATAGEN:
-            return _resolve_datagen_input_asize(step, reference, dgp)
+            return _resolve_datagen_input_asize(step, models)
         case OpType.TRANSFORM:
             if step.step_type == "payload":
                 return ArenaSize()
@@ -274,7 +265,7 @@ def _resolve_input_asize(
             )
         case OpType.FILTER:
             return _resolve_filter_input_asize(
-                step, source_indices, plans, steps, reference, dgp
+                step, source_indices, plans, steps, models
             )
         case OpType.REGRESSION:
             return _resolve_regression_input_asize(step, source_indices, plans, steps)
@@ -289,12 +280,11 @@ def _resolve_input_asize(
 
 def _resolve_datagen_input_asize(
     step: MCStep,
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel] | None,
 ) -> ArenaSize:
     if step.step_type == "raw_model_data":
         return ArenaSize()
-    model = get_target_model(step, reference, dgp, DEFAULT_SIMULATION_TARGET)
+    model = get_target_model(step, models)
     T = int(step.kwargs["T"])
     size = _asize(
         a.simulation_arena_size(
@@ -343,10 +333,9 @@ def _resolve_filter_input_asize(
     source_indices: Sequence[int],
     plans: BufferPlan,
     steps: Sequence[MCStep],
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel] | None,
 ) -> ArenaSize:
-    model = get_target_model(step, reference, dgp, "reference")
+    model = get_target_model(step, models)
     T, n_obs = _resolve_filter_shape(step, source_indices, plans, steps, model)
     comp = model.compiled
     return _asize(
@@ -557,34 +546,38 @@ def _transform_output_shape(
 
 def get_target_model(
     step: MCStep,
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
-    default: str = DEFAULT_SIMULATION_TARGET,
+    models: Mapping[str, SolvedModel] | None,
 ) -> SolvedModel:
-    target = step.kwargs.get("target", default)
-    if target not in ("reference", "dgp"):
+    target: str | None = step.kwargs.get("target")
+
+    if target is None:
+        raise ValueError(
+            f"Step {step.name!r} requires a target model, but no target was specified. "
+            "Use the 'target' keyword to specify a model name to use in this step."
+        )
+
+    if models is None:
+        raise ValueError(
+            f"Step {step.name!r} requires its target model {target!r}, but no "
+            "models were provided."
+        )
+
+    if target not in models:
         raise ValueError(
             f"Step {step.name!r} has unrecognized target model {target!r}. "
-            "Valid targets are 'reference' and 'dgp'."
+            f"Valid targets are {list(models.keys())}."
         )
-    model = reference if target == "reference" else dgp
-    if model is None:
-        raise ValueError(
-            f"Step {step.name!r} requires its target model {target!r}. "
-            "If no target was specified, the default for this step is "
-            f"{default!r}."
-        )
-    return model
+
+    return models[target]
 
 
 def _resolve_datagen_fields(
     step: MCStep,
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel] | None,
 ) -> tuple[dict[str, _FieldSpec], o.ArenaOffset]:
     match step.step_type:
         case "simulation":
-            model = get_target_model(step, reference, dgp)
+            model = get_target_model(step, models)
             T = int(step.kwargs["T"])
             n_obs = (
                 model.compiled.n_obs
@@ -630,10 +623,9 @@ def _resolve_filter_fields(
     source_indices: Sequence[int],
     plans: BufferPlan,
     steps: Sequence[MCStep],
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel] | None,
 ) -> tuple[dict[str, _FieldSpec], o.ArenaOffset]:
-    model = get_target_model(step, reference, dgp, "reference")
+    model = get_target_model(step, models)
     T, n_obs = _resolve_filter_shape(step, source_indices, plans, steps, model)
     comp = model.compiled
     n_var = comp.n_var

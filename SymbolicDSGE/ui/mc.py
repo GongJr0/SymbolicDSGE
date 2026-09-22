@@ -163,8 +163,9 @@ def run_pipeline(
     if reference is None:
         raise ValueError("A solved reference model is required.")
     return pipeline.run(
-        reference=reference,
-        dgp=dgp,
+        models=(
+            {"reference": reference, "dgp": dgp} if dgp else {"reference": reference}
+        ),
         n_rep=n_rep,
         fail_fast=fail_fast,
         n_jobs=n_jobs,

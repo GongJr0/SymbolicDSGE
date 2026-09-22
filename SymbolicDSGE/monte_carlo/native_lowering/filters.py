@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
 
@@ -43,11 +43,10 @@ def lower_filter_step(
     source_indices: tuple[int, ...],
     steps: tuple[MCStep, ...],
     plan: BufferPlan,
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel] | None,
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
     """Compile a resolved filter configuration and its staged observations."""
-    source_names, requested_names = _filter_observable_names(step, reference, dgp)
+    source_names, requested_names = _filter_observable_names(step, models)
     if len(source_indices) != 1 or len(step.source_args) != 1:
         raise ValueError(f"Filter step {step.name!r} must have one source argument.")
     source_binding = _source_binding(
@@ -60,7 +59,7 @@ def lower_filter_step(
     )
     T = source_binding.n_rows
     source_n_obs = source_binding.columns.size
-    model = get_target_model(step, reference, dgp, "reference")
+    model = get_target_model(step, models)
     mode = step.kwargs.get("filter_mode", DEFAULT_FILTER_MODE)
 
     canonical_names = _canonical_observables(model, requested_names)
@@ -223,11 +222,10 @@ def lower_filter_step(
 
 def _filter_observable_names(
     filter_step: MCStep,
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel] | None,
 ) -> tuple[tuple[str, ...], tuple[str, ...] | None]:
     """Name selected data columns explicitly or in the target model's order."""
-    model = get_target_model(filter_step, reference, dgp, "reference")
+    model = get_target_model(filter_step, models)
     requested = filter_step.kwargs.get("observables")
     if requested is not None:
         names = tuple(requested)

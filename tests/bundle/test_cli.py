@@ -59,7 +59,9 @@ def _bundle(tmp_path: Path, *, with_result: bool = True) -> Path:
     """A bundle carrying every member kind the CLI has to move."""
     pipe = _pipeline()
     result = (
-        pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
+        pipe.run(
+            models={"reference": cast(SolvedModel, object())}, n_rep=4, verbosity=0
+        )
         if with_result
         else None
     )

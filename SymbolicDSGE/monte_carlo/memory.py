@@ -11,13 +11,12 @@ import sys
 import warnings
 from dataclasses import dataclass
 from types import FrameType
-from typing import TYPE_CHECKING, Callable, NamedTuple, Sequence
+from typing import TYPE_CHECKING, Callable, NamedTuple, Sequence, Mapping
 
 import psutil
 
 from .._ckernels.monte_carlo._arenas import resolve_n_workers
-from .allocation import BufferPlan
-from .defaults import DEFAULT_SIMULATION_TARGET
+from .allocation import BufferPlan, get_target_model
 from .mc_constructs import MCStep, OpType
 from ..core.shock.spec import _normalized_spec
 from .shock_native import native_shock_families
@@ -227,8 +226,7 @@ class MCMemoryProfiler:
         plan: BufferPlan,
         steps: Sequence[MCStep],
         *,
-        reference: SolvedModel | None = None,
-        dgp: SolvedModel | None = None,
+        models: Mapping[str, SolvedModel] | None,
         n_rep: int,
         n_jobs: int | None = None,
     ) -> None:
@@ -236,8 +234,7 @@ class MCMemoryProfiler:
             raise ValueError("n_rep must be positive.")
         self._plan = plan
         self._steps = tuple(steps)
-        self._reference = reference
-        self._dgp = dgp
+        self._models = models or {}
         self._n_rep = int(n_rep)
         self._n_workers = int(resolve_n_workers(n_jobs))
 
@@ -329,10 +326,7 @@ class MCMemoryProfiler:
                 continue  # A single (T, n_exog) matrix, shared by every replication.
             if native_shock_families(shocks):
                 continue
-            target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
-            model = self._reference if target == "reference" else self._dgp
-            if model is None:
-                continue
+            model = get_target_model(step, self._models)
             T = int(step.kwargs["T"])
             total_bytes += self._n_rep * T * model.compiled.n_exog * BYTES_PER_ELEMENT
         return total_bytes

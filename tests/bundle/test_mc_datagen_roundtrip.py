@@ -77,7 +77,11 @@ def test_datagen_counts_roundtrip(
         )
     pipeline = MCPipeline(steps)
     result = pipeline.run(
-        reference=reference, n_rep=3, n_jobs=1, verbosity=0, fail_fast=True
+        models={"reference": reference} if reference is not None else None,
+        n_rep=3,
+        n_jobs=1,
+        verbosity=0,
+        fail_fast=True,
     )
     assert not result.failures
     expected_names = {f"sim_{i}" for i in range(n_simulations)} | {

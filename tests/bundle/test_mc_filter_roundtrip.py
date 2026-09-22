@@ -80,7 +80,7 @@ def _roundtrip(
     as_parquet: bool = True,
 ) -> tuple[dict[str, MCFilterResult], dict[str, MCFilterResult]]:
     """Run, bundle, reload; return the run's filters beside the reloaded ones."""
-    result = pipeline.run(solved, n_rep=N_REP, verbosity=0)
+    result = pipeline.run({"reference": solved}, n_rep=N_REP, verbosity=0)
     target = (
         BundleBuilder(created_by="filter-roundtrip")
         .add_mc(pipeline, result=result, as_parquet=as_parquet)

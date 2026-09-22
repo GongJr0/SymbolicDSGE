@@ -44,15 +44,13 @@ class LoweredMCRun:
     input_bindings: tuple[tuple[FloatInputBinding, ...], ...]
     test_result_specs: Mapping[str, TestResultSpec]
     regression_result_specs: Mapping[str, RegressionResultSpec]
-    reference: SolvedModel | None
-    dgp: SolvedModel | None
+    models: Mapping[str, SolvedModel] | None
 
 
 def lower_native_run(
     pipeline: MCPipeline,
     *,
-    reference: SolvedModel | None = None,
-    dgp: SolvedModel | None = None,
+    models: Mapping[str, SolvedModel] | None,
     n_rep: int,
     n_jobs: int | None = None,
     check_memory_availability: bool = True,
@@ -62,14 +60,13 @@ def lower_native_run(
         raise ValueError("n_rep must be positive.")
 
     plan = resolve_output_specs(
-        pipeline.replication_steps, pipeline._source_indices, reference, dgp
+        pipeline.replication_steps, pipeline._source_indices, models
     )
     if check_memory_availability:
         MCMemoryProfiler(
             plan,
             pipeline.replication_steps,
-            reference=reference,
-            dgp=dgp,
+            models=models,
             n_rep=n_rep,
             n_jobs=n_jobs,
         ).validate()
@@ -85,8 +82,7 @@ def lower_native_run(
             pipeline.replication_steps,
             pipeline._source_indices[step_idx],
             plan,
-            reference,
-            dgp,
+            models,
             n_rep,
         )
         steps.append(native_step)
@@ -119,8 +115,7 @@ def lower_native_run(
         tuple(bindings),
         test_result_specs,
         regression_result_specs,
-        reference,
-        dgp,
+        models,
     )
 
 
@@ -130,17 +125,16 @@ def _lower_step(
     steps: tuple[MCStep, ...],
     source_indices: tuple[int, ...],
     plan: BufferPlan,
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel] | None,
     n_rep: int,
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
     match step.op_type:
         case OpType.DATAGEN:
-            return _lower_datagen_step(step, reference, dgp, n_rep)
+            return _lower_datagen_step(step, models, n_rep)
         case OpType.TRANSFORM:
             return _lower_transform_step(step, source_indices, steps, plan)
         case OpType.FILTER:
-            return lower_filter_step(step, source_indices, steps, plan, reference, dgp)
+            return lower_filter_step(step, source_indices, steps, plan, models)
         case OpType.REGRESSION:
             return lower_regression_step(step, source_indices, steps, plan)
         case OpType.TEST:
@@ -153,8 +147,7 @@ def _lower_step(
 
 def _lower_datagen_step(
     step: MCStep,
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel] | None,
     n_rep: int,
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
     if step.step_type == "raw_model_data":
@@ -168,7 +161,7 @@ def _lower_datagen_step(
             (),
         )
     if step.step_type == "simulation":
-        return lower_simulation_step(step, reference, dgp, n_rep)
+        return lower_simulation_step(step, models, n_rep)
     raise NotImplementedError(
         f"Native lowering is not implemented for {step.name!r} ({step.step_type!r})."
     )

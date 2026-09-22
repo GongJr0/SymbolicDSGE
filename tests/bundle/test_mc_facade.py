@@ -143,7 +143,9 @@ def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
         ],
         [postproc_step("post", selection_rate)],
     )
-    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
+    result = pipe.run(
+        models={"reference": cast(SolvedModel, object())}, n_rep=4, verbosity=0
+    )
 
     target = (
         BundleBuilder(created_by="mc-test")
@@ -176,7 +178,9 @@ def test_add_mc_bundles_native_result_without_legacy_retention_flags(
             jarque_bera_test_step("jb", source="dat", field="observables", column=0),
         ],
     )
-    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
+    result = pipe.run(
+        models={"reference": cast(SolvedModel, object())}, n_rep=4, verbosity=0
+    )
     target = (
         BundleBuilder(created_by="mc-test")
         .add_mc(pipe, result=result)
@@ -198,7 +202,9 @@ def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
         ],
         [kde_step("kde", trace="test.jb.statistic", grid_points=32)],
     )
-    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
+    result = pipe.run(
+        models={"reference": cast(SolvedModel, object())}, n_rep=4, verbosity=0
+    )
 
     target = (
         BundleBuilder(created_by="mc-test")
@@ -234,7 +240,9 @@ def test_add_mc_ships_pandas_postproc_op_under_pandas_namespace(tmp_path) -> Non
         ],
         [postproc_step("ptab", pval_table)],  # plain func -> auto-wrapped at ship
     )
-    result = pipe.run(reference=cast(SolvedModel, object()), n_rep=6, verbosity=0)
+    result = pipe.run(
+        models={"reference": cast(SolvedModel, object())}, n_rep=6, verbosity=0
+    )
 
     target = (
         BundleBuilder(created_by="mc-test")
@@ -268,7 +276,7 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
         [postproc_step("sum", summary_bundle, threshold=0.5)],
     )
     ref = cast(SolvedModel, object())
-    result = pipe.run(reference=ref, n_rep=8, verbosity=0)
+    result = pipe.run(models={"reference": ref}, n_rep=8, verbosity=0)
 
     target = (
         BundleBuilder(created_by="mc-test")
@@ -304,7 +312,7 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
     ]
 
     # Re-running reproduces every artifact (deterministic replayed data).
-    rerun = rebuilt.run(reference=ref, n_rep=8, verbosity=0)
+    rerun = rebuilt.run(models={"reference": ref}, n_rep=8, verbosity=0)
     np.testing.assert_array_equal(
         rerun.postproc["sum"]["raw"].value, result.postproc["sum"]["raw"].value
     )

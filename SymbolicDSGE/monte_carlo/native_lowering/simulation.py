@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Sequence, Mapping
 
 import numpy as np
 
@@ -23,7 +23,6 @@ from ...core.shock.spec import (
 from ..defaults import (
     DEFAULT_SHOCK_SCALE,
     DEFAULT_SIMULATION_OBSERVABLES,
-    DEFAULT_SIMULATION_TARGET,
 )
 from ..allocation import get_target_model
 from ..mc_constructs import MCStep
@@ -39,13 +38,12 @@ from .utils import (
 
 def lower_simulation_step(
     step: MCStep,
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel] | None,
     n_rep: int,
 ) -> tuple[NativeStep, tuple[FloatInputBinding, ...]]:
     """Compile one model simulation into the native simulation ABI."""
     T = int(step.kwargs["T"])
-    model = get_target_model(step, reference, dgp, DEFAULT_SIMULATION_TARGET)
+    model = get_target_model(step, models)
 
     comp = model.compiled
     n_var = comp.n_var

@@ -49,7 +49,7 @@ def mc_run():
         kwargs.setdefault("n_jobs", 1)
         kwargs.setdefault("verbosity", 0)
         kwargs.setdefault("check_memory_availability", False)
-        return pipeline.run(reference, n_rep=n_rep, **kwargs)
+        return pipeline.run({"reference": reference}, n_rep=n_rep, **kwargs)
 
     return run
 
