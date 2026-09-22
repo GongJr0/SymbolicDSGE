@@ -12,7 +12,7 @@ import socket
 import threading
 import webbrowser
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Sequence, Mapping
 
 if TYPE_CHECKING:
     from SymbolicDSGE.core.solved_model import SolvedModel
@@ -41,8 +41,7 @@ def _free_port(host: str = "127.0.0.1") -> int:
 
 def run_server(
     *,
-    reference: "SolvedModel | None" = None,
-    dgp: "SolvedModel | None" = None,
+    models: Mapping[str, SolvedModel] | None = None,
     workspace: "Workspace | None" = None,
     source: str | None = None,
     host: str = "127.0.0.1",
@@ -53,7 +52,7 @@ def run_server(
 
     Parameters
     ----------
-    reference, dgp:
+    models:
         Optional pre-solved models to preload into the session.
     source:
         Where the preloaded models came from, shown in the GUI as their
@@ -110,7 +109,7 @@ def run_server(
                     raise
                 return await super().get_response("index.html", scope)
 
-    app = create_app(reference=reference, dgp=dgp, workspace=workspace, source=source)
+    app = create_app(models=models, workspace=workspace, source=source)
     # Mounted last so it does not shadow the /api routes registered above.
     app.mount("/", _HttpOnlyStaticFiles(directory=_STATIC_DIR, html=True), name="ui")
 
@@ -130,7 +129,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     """Console-script entry point (``sdsge-ui``).
 
     With no positional argument the GUI launches empty. Passing a ``.sdsge``
-    bundle path preloads the reference/dgp models and the estimation/MC/sim
+    bundle path preloads the named models and the estimation/MC/sim
     tabs from the bundle.
     """
     parser = argparse.ArgumentParser(

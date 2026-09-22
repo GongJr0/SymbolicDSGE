@@ -4,7 +4,6 @@ from typing import Any, Literal, TypedDict
 
 from ..estimation.spec import PriorSpec
 
-Role = Literal["reference", "dgp"]
 FunctionKind = Literal["array", "figure"]
 EstimationMethod = Literal["mle", "map", "mcmc"]
 WorkspaceTab = Literal["estimation", "mc"]
@@ -29,19 +28,19 @@ class ArrayEnvelope(TypedDict):
 
 
 class LoadYamlRequest(TypedDict):
-    role: Role
+    model_name: str
     path: str | None
     content: str | None
 
 
 class SolveModelRequest(TypedDict):
-    role: Role
+    model_name: str
     compile_kwargs: dict[str, Any]
     solve_kwargs: dict[str, Any]
 
 
 class SubmitFunctionRequest(TypedDict):
-    role: Role
+    model_name: str
     code: str
     kind: FunctionKind
 
@@ -56,7 +55,7 @@ class EstimationParameterSpec(TypedDict):
 
 
 class EstimationRunRequest(TypedDict):
-    role: Role
+    model_name: str
     routine: EstimationMethod
     y: list[list[float]]
     observables: list[str] | None

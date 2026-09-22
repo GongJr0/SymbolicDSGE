@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, Mapping, cast
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +22,6 @@ from .schemas import (
     EstimationRunRequest,
     WorkspaceViewUpdate,
     LoadYamlRequest,
-    Role,
     SolveModelRequest,
     SubmitFunctionRequest,
 )
@@ -32,15 +31,14 @@ from .session import UISession, Workspace
 def create_app(
     *,
     session: UISession | None = None,
-    reference: SolvedModel | None = None,
-    dgp: SolvedModel | None = None,
+    models: Mapping[str, SolvedModel] | None = None,
     workspace: Workspace | None = None,
     source: str | None = None,
 ) -> FastAPI:
     ui_session = (
         session
         if session is not None
-        else UISession(reference=reference, dgp=dgp, workspace=workspace, source=source)
+        else UISession(models=models, workspace=workspace, source=source)
     )
     app = FastAPI(title="SymbolicDSGE UI", version="0.1.0")
     app.state.ui_session = ui_session
@@ -122,8 +120,11 @@ def create_app(
             pipeline = build_pipeline(request["pipeline"])
             result = run_pipeline(
                 pipeline,
-                reference=ui_session.solved_model("reference"),
-                dgp=ui_session.solved_model("dgp"),
+                models={
+                    name: slot.solved
+                    for name, slot in ui_session.slots.items()
+                    if slot.solved is not None
+                },
                 n_rep=int(request.get("n_rep", 100)),
                 fail_fast=bool(request.get("fail_fast", True)),
                 n_jobs=request.get("n_jobs"),
@@ -158,10 +159,10 @@ def create_app(
                 detail=_error_detail(exc),
             ) from exc
 
-    @app.get("/api/model/{role}/summary")
-    def model_summary(role: Role) -> dict[str, Any]:
+    @app.get("/api/model/{model_name}/summary")
+    def model_summary(model_name: str) -> dict[str, Any]:
         try:
-            return ui_session.model_summary(role)
+            return ui_session.model_summary(model_name)
         except KeyError as exc:
             raise HTTPException(
                 status_code=404,
@@ -171,9 +172,9 @@ def create_app(
     @app.post("/api/run/sim")
     def run_simulation(request: dict[str, Any]) -> dict[str, Any]:
         try:
-            role = request["role"]
+            model_name = request["model_name"]
             spec = SimSpec.from_dict(request["spec"])
-            return ui_session.run_simulation_spec(role, spec)
+            return ui_session.run_simulation_spec(model_name, spec)
         except (KeyError, ValueError) as exc:
             raise HTTPException(
                 status_code=400,
@@ -190,10 +191,10 @@ def create_app(
                 detail=_error_detail(exc),
             ) from exc
 
-    @app.delete("/api/code/{role}/{name}")
-    def remove_function(role: Role, name: str) -> dict[str, Any]:
+    @app.delete("/api/code/{model_name}/{name}")
+    def remove_function(model_name: str, name: str) -> dict[str, Any]:
         try:
-            ui_session.remove_function(role=role, name=name)
+            ui_session.remove_function(model_name=model_name, name=name)
             return {"removed": name}
         except KeyError as exc:
             raise HTTPException(
@@ -201,10 +202,10 @@ def create_app(
                 detail=_error_detail(exc),
             ) from exc
 
-    @app.get("/api/code/{role}/functions")
-    def list_functions(role: Role) -> list[dict[str, Any]]:
+    @app.get("/api/code/{model_name}/functions")
+    def list_functions(model_name: str) -> list[dict[str, Any]]:
         try:
-            return ui_session.list_functions(role=role)
+            return ui_session.list_functions(model_name=model_name)
         except KeyError as exc:
             raise HTTPException(
                 status_code=404,
