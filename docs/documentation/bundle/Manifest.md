@@ -49,7 +49,7 @@ __Fields:__
 | path | `#!python str` | POSIX path inside the archive (e.g. `model/reference.yaml`). |
 | kind | `#!python str` | Semantic kind, e.g. `model_config`, `estimation_data`, `mc_pipeline`. Drawn from `MEMBER_KINDS`; the builder sets it. |
 | format | `#!python str` | `"yaml"` / `"json"` / `"csv"` / `"parquet"` / `"pickle"`. Inferred from the `path` extension. |
-| role | `#!python str | None` | `"reference"` / `"dgp"` for model members. |
+| model_name | `#!python str | None` | Name of the model associated with this member. |
 | columns | `#!python list[str] | None` | Column names for tabular members (e.g. observable names on `estimation_data`). |
 | options | `#!python dict[str, Any]` | Kind-specific metadata. `model_config` carries `compile_kwargs` / `solve_kwargs`; an unpacked MC array carries the `name` and `field` it came from. |
 

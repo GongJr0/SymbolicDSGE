@@ -5,6 +5,7 @@ import pytest
 from SymbolicDSGE.bundle.manifest import (
     SDSGE_FORMAT_VERSION,
     SDSGE_LAST_BREAKING_VERSION,
+    SDSGE_MIN_READABLE_VERSION,
     Manifest,
     Member,
     SimSpec,
@@ -36,7 +37,9 @@ def test_member_unknown_kind_rejected() -> None:
 
 
 def test_member_format_filled_from_path() -> None:
-    member = Member(path="model/reference.yaml", kind="model_config", role="reference")
+    member = Member(
+        path="model/reference.yaml", kind="model_config", model_name="reference"
+    )
     assert member.format == "yaml"
 
 
@@ -48,7 +51,7 @@ def test_manifest_round_trip() -> None:
             Member(
                 path="model/reference.yaml",
                 kind="model_config",
-                role="reference",
+                model_name="reference",
                 options={"compile_kwargs": {"n_state": 3, "n_exog": 2}},
             ),
             Member(
@@ -89,11 +92,11 @@ def test_manifest_rejects_a_bundle_written_after_a_later_break() -> None:
         Manifest.from_dict(payload)
 
 
-def test_manifest_rejects_a_bundle_predating_the_last_break() -> None:
+def test_manifest_rejects_a_bundle_predating_the_read_floor() -> None:
     # A version 1 bundle keys its shock specs by the driven variable, so it
     # rebuilds into specs naming shocks the model does not have.
     payload = Manifest(created_by="x").to_dict()
-    payload["sdsge_version"] = SDSGE_LAST_BREAKING_VERSION - 1
+    payload["sdsge_version"] = SDSGE_MIN_READABLE_VERSION - 1
 
     with pytest.raises(ValueError, match="predates"):
         Manifest.from_dict(payload)
@@ -105,5 +108,25 @@ def test_manifest_without_the_field_assumes_its_own_version_broke() -> None:
     payload["sdsge_version"] = SDSGE_FORMAT_VERSION + 1
     del payload["last_breaking_version"]
 
+    with pytest.raises(ValueError, match="upgrade SymbolicDSGE"):
+        Manifest.from_dict(payload)
+
+
+def test_manifest_reads_version_8_after_the_writer_break():
+    payload = Manifest().to_dict()
+    payload.update(sdsge_version=8, last_breaking_version=8)
+    restored = Manifest.from_dict(payload)
+    assert restored.sdsge_version == 8
+    assert restored.last_breaking_version == 8
+
+
+def test_version_8_reader_rejects_current_manifest(monkeypatch):
+    import SymbolicDSGE.bundle.manifest as module
+
+    payload = Manifest().to_dict()
+    assert payload["sdsge_version"] == 9
+    assert payload["last_breaking_version"] == 9
+    # The existing forward-compatibility check also runs in version 8 readers.
+    monkeypatch.setattr(module, "SDSGE_FORMAT_VERSION", 8)
     with pytest.raises(ValueError, match="upgrade SymbolicDSGE"):
         Manifest.from_dict(payload)

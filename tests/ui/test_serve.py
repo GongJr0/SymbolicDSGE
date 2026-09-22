@@ -474,8 +474,8 @@ def test_bundled_simulation_replays_into_an_output(tmp_path: Path) -> None:
     """
     loaded = load_bundle(_hydrated_bundle(tmp_path))
     app = create_app(
-        reference=loaded.reference,
-        dgp=loaded.dgp,
+        reference=loaded.models["reference"],
+        dgp=loaded.models.get("dgp"),
         workspace=build_workspace(loaded),
     )
     client = TestClient(app)
@@ -497,8 +497,12 @@ def test_bundled_simulation_replay_reproduces_rather_than_redraws(
     """The spec pins the seed, so two replays of it agree."""
     loaded = load_bundle(_hydrated_bundle(tmp_path))
 
-    first = create_app(reference=loaded.reference, workspace=build_workspace(loaded))
-    second = create_app(reference=loaded.reference, workspace=build_workspace(loaded))
+    first = create_app(
+        reference=loaded.models["reference"], workspace=build_workspace(loaded)
+    )
+    second = create_app(
+        reference=loaded.models["reference"], workspace=build_workspace(loaded)
+    )
 
     def series(app: Any) -> Any:
         payload = TestClient(app).get("/api/session").json()
@@ -525,7 +529,7 @@ def test_a_simulation_that_cannot_replay_leaves_the_session_usable(
         }
     ]
 
-    app = create_app(reference=loaded.reference, workspace=workspace)
+    app = create_app(reference=loaded.models["reference"], workspace=workspace)
 
     assert "could not replay" in capsys.readouterr().out
     payload = TestClient(app).get("/api/session").json()
@@ -649,8 +653,8 @@ def test_preloaded_model_reports_its_source_and_yaml(tmp_path: Path) -> None:
     bundle = _hydrated_bundle(tmp_path)
     loaded = load_bundle(bundle)
     app = create_app(
-        reference=loaded.reference,
-        dgp=loaded.dgp,
+        reference=loaded.models["reference"],
+        dgp=loaded.models.get("dgp"),
         workspace=build_workspace(loaded),
         source=str(bundle),
     )

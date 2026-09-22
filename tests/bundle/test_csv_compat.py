@@ -197,7 +197,7 @@ def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
             Member(
                 path="model/reference.yaml",
                 kind="model_config",
-                role="reference",
+                model_name="reference",
                 options={"compile_kwargs": {}},
             ),
         ],

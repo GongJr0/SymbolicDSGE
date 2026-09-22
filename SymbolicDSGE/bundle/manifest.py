@@ -22,13 +22,14 @@ from ..core.shock.generators import ShockParameters, ShockPathParameters
 from ..core.shock.spec import shock_from_json
 
 #: Bundle format version. Bump on every manifest change.
-SDSGE_FORMAT_VERSION = 8
+SDSGE_FORMAT_VERSION = 9
 
-#: The version at which the format last broke. A reader rejects bundles older
-#: than this, and each bundle records its own so a reader can tell a version it
-#: predates from a version that postdates it: a bump that breaks nothing
-#: leaves this alone and stays readable by older versions.
-SDSGE_LAST_BREAKING_VERSION = 8
+#: Oldest bundle format this reader can reconstruct.
+SDSGE_MIN_READABLE_VERSION = 8
+
+#: Most recent format change requiring a newer reader. Written into the
+#: manifest so older readers reject bundles they cannot interpret.
+SDSGE_LAST_BREAKING_VERSION = 9
 
 MemberKind = Literal[
     "model_config",
@@ -173,7 +174,7 @@ class Member:
     path: str
     kind: str
     format: str = ""
-    role: str | None = None
+    model_name: str | None = None
     columns: list[str] | None = None
     options: dict[str, Any] = field(default_factory=dict)
 
@@ -193,7 +194,7 @@ class Member:
         -------
         dict[str, Any]
             Dictionary with keys ``path``, ``kind``, ``format``, and optionally
-            ``role``, ``columns``, and ``options``.
+            ``model_name``, ``columns``, and ``options``.
 
         """
         out: dict[str, Any] = {
@@ -201,8 +202,8 @@ class Member:
             "kind": self.kind,
             "format": self.format,
         }
-        if self.role is not None:
-            out["role"] = self.role
+        if self.model_name is not None:
+            out["model_name"] = self.model_name
         if self.columns is not None:
             out["columns"] = list(self.columns)
         if self.options:
@@ -229,7 +230,11 @@ class Member:
             path=str(data["path"]),
             kind=str(data["kind"]),
             format=str(data.get("format", "")),
-            role=None if data.get("role") is None else str(data["role"]),
+            model_name=(
+                None
+                if (model_name := data.get("model_name", data.get("role"))) is None
+                else str(model_name)
+            ),
             columns=(
                 list(data["columns"]) if data.get("columns") is not None else None
             ),
@@ -265,23 +270,23 @@ class Manifest:
         """
         return [m for m in self.members if m.kind == kind]
 
-    def model_member(self, role: str) -> Member | None:
-        """Get the model config member with a given role if it exists.
+    def model_member(self, name: str) -> Member | None:
+        """Get the model config member with a given name if it exists.
 
         Parameters
         ----------
-        role : str
-            The role of the model. ("reference" or "dgp")
+        name : str
+            The name of the model.
 
         Returns
         -------
         Member | None
-            The :class:`Member` instance representing the model configuration with the specified role,
+            The :class:`Member` instance representing the model configuration with the specified name,
             or None if no such member exists in the manifest.
 
         """
         for member in self.members:
-            if member.kind == "model_config" and member.role == role:
+            if member.kind == "model_config" and member.model_name == name:
                 return member
         return None
 
@@ -325,14 +330,14 @@ class Manifest:
 
         """
         version = int(data.get("sdsge_version", SDSGE_FORMAT_VERSION))
-        if version < SDSGE_LAST_BREAKING_VERSION:
+        if version < SDSGE_MIN_READABLE_VERSION:
             raise ValueError(
-                f"Bundle sdsge_version {version} predates the format's last "
-                f"breaking change ({SDSGE_LAST_BREAKING_VERSION}); rebuild the "
+                f"Bundle sdsge_version {version} predates the oldest readable "
+                f"format ({SDSGE_MIN_READABLE_VERSION}); rebuild the "
                 f"bundle from its sources."
             )
-        # Absent on bundles written before the field existed, and those are
-        # already rejected above, so assuming the worst costs nothing.
+        # Without an explicit compatibility boundary, require a reader at
+        # least as recent as the bundle format.
         last_break = int(data.get("last_breaking_version", version))
         if last_break > SDSGE_FORMAT_VERSION:
             raise ValueError(

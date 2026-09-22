@@ -68,7 +68,7 @@ from .parquet import (
 NDF = NDArray[np.float64]
 
 # Ref/DGP top level models
-_MODEL_PATH = "model/{role}.yaml"
+_MODEL_PATH = "model/{name}.yaml"
 
 # MLE, MAP, MCMC estimation tab members
 _ESTIMATION_SPEC = "estimation/spec.json"
@@ -189,25 +189,25 @@ class BundleBuilder:
 
     def add_model(
         self,
-        role: str,
+        name: str,
         yaml_text: str,
         *,
         compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,
     ) -> BundleBuilder:
-        """Add a model config (its source YAML) under ``role`` (reference/dgp).
+        """Add a model config (its source YAML) under ``name``.
 
         ``compile_kwargs``/``solve_kwargs`` are recorded so the loader rebuilds an
         identical :class:`SolvedModel`.
         """
-        path = _MODEL_PATH.format(role=role)
+        path = _MODEL_PATH.format(name=name)
         options: dict[str, Any] = {}
         if compile_kwargs:
             options["compile_kwargs"] = dict(compile_kwargs)
         if solve_kwargs:
             options["solve_kwargs"] = dict(solve_kwargs)
         self._add(
-            Member(path=path, kind="model_config", role=role, options=options),
+            Member(path=path, kind="model_config", model_name=name, options=options),
             yaml_text.encode("utf-8"),
         )
         return self
@@ -242,6 +242,7 @@ class BundleBuilder:
     def add_estimation(
         self,
         source: Estimator,
+        model_name: str | None = None,
         *,
         result: MLEResult | MAPResult | MCMCResult | None = None,
         as_parquet: bool = True,
@@ -273,7 +274,9 @@ class BundleBuilder:
             return _observed_to_csv(y, observable_names)
 
         self._add(
-            Member(path=_ESTIMATION_SPEC, kind="estimation_spec"),
+            Member(
+                path=_ESTIMATION_SPEC, kind="estimation_spec", model_name=model_name
+            ),
             json.dumps(spec.params, indent=2).encode("utf-8"),
         )
         self._add(
@@ -639,6 +642,7 @@ class BundleBuilder:
             Mapping of member paths to their bytes, along with the manifest containing metadata and checksums.
 
         """
+        self._validate_model_targets()
         return self.manifest(), dict(self._files)
 
     def write(self, path: str | Path) -> Path:
@@ -655,8 +659,26 @@ class BundleBuilder:
             The path where the bundle was written.
 
         """
+        self._validate_model_targets()
         write_bundle(path, self.manifest(), self._files)
         return Path(path)
+
+    def _validate_model_targets(self) -> None:
+        """Require estimation targets to name models before emitting the bundle."""
+        model_names = {
+            member.model_name
+            for member in self._members
+            if member.kind == "model_config" and member.model_name
+        }
+        for member in self._members:
+            if member.kind != "estimation_spec":
+                continue
+            model_name = "reference" if member.model_name is None else member.model_name
+            if model_name not in model_names:
+                raise ValueError(
+                    f"Estimation member {member.path!r} targets model "
+                    f"{model_name!r}, which is not present in the bundle's models."
+                )
 
     def _add(self, member: Member, data: bytes) -> None:
         if member.path in self._files:

@@ -15,7 +15,9 @@ def _manifest(members: list[Member]) -> Manifest:
 
 def test_write_and_open_round_trip(tmp_path: Path) -> None:
     members = [
-        Member(path="model/reference.yaml", kind="model_config", role="reference"),
+        Member(
+            path="model/reference.yaml", kind="model_config", model_name="reference"
+        ),
         Member(path="data/x.parquet", kind="raw_data"),
     ]
     files = {
