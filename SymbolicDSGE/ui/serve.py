@@ -88,7 +88,9 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
     its form posts back. The simulation prefill rides as the SimSpec dict so
     the Outputs tab pre-fills the seed/T/shock controls.
     """
+    eout: dict[str, TabState] = {}
     estimation = TabState()
+
     if loaded.estimation is not None:
         spec = loaded.estimation.estimator.to_spec()
         estimation.spec = estimator_spec_wire(spec)
@@ -98,13 +100,12 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
         model_name = "reference" if member.model_name is None else member.model_name
         model = loaded.models[model_name] if loaded.models is not None else None
         if model is not None:
-            estimation.view = {
-                model_name: build_estimation_prefill(
-                    spec,
-                    loaded.estimation.result,
-                    model.compiled,
-                )
-            }
+            estimation.view = build_estimation_prefill(
+                spec,
+                loaded.estimation.result,
+                model.compiled,
+            )
+        eout = {model_name: estimation}
 
     mc = TabState()
     if loaded.mc is not None:
@@ -120,7 +121,7 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
     }
 
     return Workspace(
-        estimation=estimation,
+        estimation=eout,
         mc=mc,
         simulation=simulation,
     )

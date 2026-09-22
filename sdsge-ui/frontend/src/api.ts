@@ -5,7 +5,7 @@ import type {
   EstimationCatalog,
   EstimationRunRequest,
   EstimationRunResult,
-  EstimationViewsByRole,
+  EstimationViewState,
   MCViewState,
   ModelSummary,
   MCPipelineResult,
@@ -53,48 +53,49 @@ export function getSession(): Promise<SessionSummary> {
  */
 export function putWorkspaceView(
   tab: WorkspaceTab,
-  view: EstimationViewsByRole | MCViewState | null,
+  view: Partial<EstimationViewState> | MCViewState | null,
+  model_name?: string,
 ): Promise<{ tab: WorkspaceTab }> {
   return requestJson<{ tab: WorkspaceTab }>("/api/session/workspace", {
     method: "PUT",
-    body: JSON.stringify({ tab, view }),
+    body: JSON.stringify({ tab, view, model_name }),
   });
 }
 
-export function loadYamlPath(role: string, path: string): Promise<ModelSummary> {
+export function loadYamlPath(model_name: string, path: string): Promise<ModelSummary> {
   return requestJson<ModelSummary>("/api/model/load-yaml", {
     method: "POST",
-    body: JSON.stringify({ model_name: role, path }),
+    body: JSON.stringify({ model_name, path }),
   });
 }
 
 export function loadYamlContent(
-  role: string,
+  model_name: string,
   content: string,
 ): Promise<ModelSummary> {
   return requestJson<ModelSummary>("/api/model/load-yaml", {
     method: "POST",
-    body: JSON.stringify({ model_name: role, content }),
+    body: JSON.stringify({ model_name, content }),
   });
 }
 
 export function solveModel(
-  role: string,
+  model_name: string,
   compileKwargs: Record<string, unknown> = {},
 ): Promise<ModelSummary> {
   return requestJson<ModelSummary>("/api/model/solve", {
     method: "POST",
-    body: JSON.stringify({ model_name: role, compile_kwargs: compileKwargs }),
+    body: JSON.stringify({ model_name, compile_kwargs: compileKwargs }),
   });
 }
 
 export function runSimulation(
-  role: string,
+  model_name: string,
   spec: SimSpecWire,
 ): Promise<SimResult> {
   return requestJson<SimResult>("/api/run/sim", {
     method: "POST",
-    body: JSON.stringify({ role, spec }),
+    body: JSON.stringify({ model_name, spec }),
   });
 }
 
@@ -112,28 +113,28 @@ export function runEstimation(
 }
 
 export function submitFunction(
-  role: string,
+  model_name: string,
   code: string,
   kind: FunctionKind = "array",
 ): Promise<FunctionRecord> {
   return requestJson<FunctionRecord>("/api/code/submit", {
     method: "POST",
-    body: JSON.stringify({ role, code, kind }),
+    body: JSON.stringify({ model_name, code, kind }),
   });
 }
 
 export function removeFunction(
-  role: string,
+  model_name: string,
   name: string,
 ): Promise<{ removed: string }> {
   return requestJson<{ removed: string }>(
-    `/api/code/${role}/${encodeURIComponent(name)}`,
+    `/api/code/${encodeURIComponent(model_name)}/${encodeURIComponent(name)}`,
     { method: "DELETE" },
   );
 }
 
-export function listFunctions(role: string): Promise<FunctionRecord[]> {
-  return requestJson<FunctionRecord[]>(`/api/code/${role}/functions`);
+export function listFunctions(model_name: string): Promise<FunctionRecord[]> {
+  return requestJson<FunctionRecord[]>(`/api/code/${encodeURIComponent(model_name)}/functions`);
 }
 
 export function getMCCustomTemplate(): Promise<{ template: string }> {

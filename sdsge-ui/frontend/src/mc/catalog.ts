@@ -169,7 +169,9 @@ const DEFINITIONS: MCStepDefinition[] = [
     defaultName: "filter",
     description: "Filter observations through a solved model.",
     opType: "filter",
-    legs: [],
+    legs: [
+      leg("observables", "Observations", true, { field: "observables" }),
+    ],
     fields: [
       field("target", "Model", "select", null, { required: true }),
       field("filter_mode", "Mode", "select", "linear", { options: ["linear", "extended", "unscented"] }),

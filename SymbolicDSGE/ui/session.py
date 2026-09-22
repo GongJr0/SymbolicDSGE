@@ -104,7 +104,7 @@ class Workspace:
     that never went away rather than from anything stored on the client.
     """
 
-    estimation: TabState = field(default_factory=TabState)
+    estimation: dict[str, TabState] = field(default_factory=dict)
     mc: TabState = field(default_factory=TabState)
     #: Per-model simulation tabs. The Outputs tab renders only ``T`` and the
     #: observables toggle, both of them ``SimSpec`` fields, so there is no
@@ -141,22 +141,23 @@ class UISession:
     def _workspace_payload(self) -> dict[str, Any]:
         """Wire shape for the workspace (omits tabs and slots nothing filled)."""
         out: dict[str, Any] = {}
+
+        if mc := self.workspace.mc.payload():
+            out["mc"] = mc
+
         for name, tab in (
             ("estimation", self.workspace.estimation),
-            ("mc", self.workspace.mc),
+            ("simulation", self.workspace.simulation),
         ):
-            if payload := tab.payload():
+            if payload := {n: t.payload() for n, t in tab.items() if t.payload()}:
                 out[name] = payload
-        if simulation := {
-            model_name: payload
-            for model_name, tab in self.workspace.simulation.items()
-            if (payload := tab.payload())
-        }:
-            out["simulation"] = simulation
         return out
 
     def set_workspace_view(
-        self, tab: WorkspaceTab, view: dict[str, Any] | None
+        self,
+        tab: WorkspaceTab,
+        view: dict[str, Any] | None,
+        model_name: str | None = None,
     ) -> None:
         """Replace a tab's view with what the client last had on screen.
 
@@ -164,7 +165,16 @@ class UISession:
         appears here without the server learning what it means. Writing it
         cannot disturb ``spec``/``result``, which only a run fills.
         """
-        getattr(self.workspace, tab).view = view
+        if tab == "estimation":
+            if model_name is None:
+                raise ValueError("Estimation view updates require a model_name.")
+            self._slot(model_name)
+            state = self.workspace.estimation.setdefault(model_name, TabState())
+        elif tab == "mc":
+            state = self.workspace.mc
+        else:
+            raise ValueError(f"Unknown workspace tab {tab!r}.")
+        state.view = view
 
     def set_solved_model(
         self, name: str, model: SolvedModel, *, source: str | None = None
@@ -322,12 +332,16 @@ class UISession:
         if slot.solved is None:
             raise ValueError(f"{model_name!r} is not a solved model.")
         kwargs = spec.to_sim_kwargs()
-        return self._record_sim_run(
+        result = self._record_sim_run(
             model_name=model_name,
             sim=slot.solved.sim(**kwargs),
             T=int(kwargs["T"]),
             observables=bool(kwargs["observables"]),
         )
+        state = self.workspace.simulation.setdefault(model_name, TabState())
+        state.spec = spec.to_dict()
+        state.result = result
+        return result
 
     def run_estimation(self, request: EstimationRunRequest) -> dict[str, Any]:
         slot = self._slot(request["model_name"])
@@ -439,8 +453,9 @@ class UISession:
         }
         # The bundle-bound slots, filled from the run that just produced them.
         # The client's view is untouched: it already shows this.
-        self.workspace.estimation.spec = spec_wire
-        self.workspace.estimation.result = result_wire
+        state = self.workspace.estimation.setdefault(request["model_name"], TabState())
+        state.spec = spec_wire
+        state.result = result_wire
         return payload
 
     def submit_function(

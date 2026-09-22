@@ -10,7 +10,6 @@ import type {
     EstimationParameterSpec,
     EstimationResultWire,
     EstimationViewState,
-    EstimationViewsByRole,
     MapOptions,
     ModelSummary,
     SessionWorkspace,
@@ -120,13 +119,13 @@ function pick<K extends keyof Knobs>(
 
 export function EstimationView({
     hidden,
-    role,
+    model_name,
     model,
     workspace,
     onSessionRefresh,
 }: {
     hidden?: boolean;
-    role: string;
+    model_name: string;
     model: ModelSummary;
     workspace: SessionWorkspace | null;
     onSessionRefresh: () => Promise<void>;
@@ -149,7 +148,19 @@ export function EstimationView({
     const [error, setError] = useState(false);
     const [result, setResult] = useState<EstimationResultWire | null>(null);
     const [modeFolded, setModeFolded] = useState(false);
-    const [hydrated, setHydrated] = useState(false);
+    const [hydrated, setHydrated] = useState<{
+        model_name: string;
+        workspace: SessionWorkspace;
+    } | null>(null);
+    const selectedModel = useRef(model_name);
+    selectedModel.current = model_name;
+    const savedView = useRef("");
+    const localViews = useRef<Record<string, Partial<EstimationViewState> | null>>({});
+    const restoredWorkspace = useRef<SessionWorkspace | null>(null);
+
+    function viewFingerprint(view: EstimationViewState): string {
+        return JSON.stringify(Object.entries(view).sort(([a], [b]) => a.localeCompare(b)));
+    }
     const [workspaceRevision, setWorkspaceRevision] = useState(0);
     const [chartRevision, setChartRevision] = useState(0);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -171,20 +182,18 @@ export function EstimationView({
         return () => window.cancelAnimationFrame(frame);
     }, [hidden]);
 
-    // Seeded once from the session, then owned by this component. Later session
-    // reads carry back only what was PUT from here, so re-reading them would
-    // fight the user's typing.
-    const viewsRef = useRef<EstimationViewsByRole>({});
-
     useEffect(() => {
-        if (catalog === null || workspace === null || hydrated) return;
+        if (catalog === null || workspace === null || !model.loaded) return;
         const values = model.parameter_values ?? {};
         const names = model.observables ?? [];
-        viewsRef.current = workspace.estimation?.view ?? {};
-        // Merge over the defaults rather than requiring every field: a bundle
-        // fills only what it can speak to, and a control added later still opens
-        // at its default instead of undefined.
-        const stored = viewsRef.current[role];
+        if (restoredWorkspace.current !== workspace) {
+            localViews.current = {};
+            restoredWorkspace.current = workspace;
+        }
+        const state = workspace.estimation?.[model_name];
+        const stored = Object.hasOwn(localViews.current, model_name)
+            ? localViews.current[model_name]
+            : state?.view;
         const base: EstimationViewState = {
             ...DEFAULTS,
             routine: "mle",
@@ -196,18 +205,14 @@ export function EstimationView({
             dataVectors: Object.fromEntries(names.map((name) => [name, ""])),
             modeFolded: false,
         };
-        applyView({ ...base, ...stored });
-        setResult(workspace.estimation?.result ?? null);
-        setHydrated(true);
-    }, [catalog, hydrated, model, role, workspace]);
-
-    // Switching role swaps in that role's form without touching the other's.
-    useEffect(() => {
-        if (!hydrated) return;
-        applyView({ ...currentView(), ...viewsRef.current[role] });
-        // Only on a role change: the deps are deliberately not the form fields.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [role]);
+        const view = { ...base, ...stored };
+        savedView.current = viewFingerprint(view);
+        applyView(view);
+        setResult(state?.result ?? null);
+        setNotice("");
+        setError(false);
+        setHydrated({ model_name, workspace });
+    }, [catalog, model, model_name, workspace]);
 
     function currentView(): EstimationViewState {
         return {
@@ -232,25 +237,39 @@ export function EstimationView({
     }
 
     useEffect(() => {
-        if (!hydrated) return;
-        const timeout = window.setTimeout(() => {
-            viewsRef.current = { ...viewsRef.current, [role]: currentView() };
-            void putWorkspaceView("estimation", viewsRef.current).catch(
+        if (hydrated?.model_name !== model_name || hydrated.workspace !== workspace) return;
+        const view = currentView();
+        const serialized = viewFingerprint(view);
+        localViews.current[model_name] = view;
+        if (serialized === savedView.current) return;
+        let sent = false;
+        const save = () => {
+            sent = true;
+            void putWorkspaceView("estimation", view, model_name).then(() => {
+                if (restoredWorkspace.current === workspace && selectedModel.current === model_name) {
+                    savedView.current = serialized;
+                }
+            }).catch(
                 (reason: unknown) => {
                     setNotice(reason instanceof Error ? reason.message : String(reason));
                     setError(true);
                 },
             );
-        }, 250);
-        return () => window.clearTimeout(timeout);
+        };
+        const timeout = window.setTimeout(save, 250);
+        return () => {
+            window.clearTimeout(timeout);
+            if (!sent && selectedModel.current !== model_name) save();
+        };
     }, [
         dataVectors,
+        workspace,
         hydrated,
         knobs,
         modeFolded,
         observables,
         parameters,
-        role,
+        model_name,
         routine,
         selected,
     ]);
@@ -288,8 +307,9 @@ export function EstimationView({
         setNotice("");
         setError(false);
         try {
+            await putWorkspaceView("estimation", currentView(), model_name);
             const output = await runEstimation({
-                model_name: role,
+                model_name,
                 routine,
                 y: matrixFromVectors(observableNames, dataVectors),
                 observables: observableNames,
@@ -326,7 +346,7 @@ export function EstimationView({
                 estimate_and_solve: estimateAndSolve,
             });
             setResult(output.result);
-            if (estimateAndSolve) await onSessionRefresh();
+            await onSessionRefresh();
             setNotice(
                 estimateAndSolve
                     ? "Estimation completed and the model was solved."
@@ -366,21 +386,22 @@ export function EstimationView({
     async function clearWorkspace() {
         const values = model.parameter_values ?? {};
         const names = model.observables ?? [];
-        setRoutine("mle");
-        setParameters(
-            Object.entries(values).map(([name, value]) => makeParameter(name, value, catalog)),
-        );
-        setSelected(Object.keys(values)[0] ?? null);
-        setObservables(names.join(", "));
-        setDataVectors(Object.fromEntries(names.map((name) => [name, ""])));
-        setKnobs(DEFAULTS);
+        const view: EstimationViewState = {
+            ...DEFAULTS,
+            routine: "mle",
+            parameters: Object.entries(values).map(([name, value]) => makeParameter(name, value, catalog)),
+            selected: Object.keys(values)[0] ?? null,
+            observables: names.join(", "),
+            dataVectors: Object.fromEntries(names.map((name) => [name, ""])),
+            modeFolded: false,
+        };
+        localViews.current[model_name] = null;
+        savedView.current = viewFingerprint(view);
+        applyView(view);
         setResult(null);
-        setModeFolded(false);
         setWorkspaceRevision((current) => current + 1);
         try {
-            const { [role]: _cleared, ...rest } = viewsRef.current;
-            viewsRef.current = rest;
-            await putWorkspaceView("estimation", viewsRef.current);
+            await putWorkspaceView("estimation", null, model_name);
             setNotice("Estimation workspace cleared.");
             setError(false);
         } catch (reason) {

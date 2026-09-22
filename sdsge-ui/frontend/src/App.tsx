@@ -79,7 +79,7 @@ type View = "builder" | "spec" | "outputs" | "estimation" | "mc";
 
 export default function App() {
     const [session, setSession] = useState<SessionSummary | null>(null);
-    const [role, setRole] = useState<string>("");
+    const [model_name, setSelectedModelName] = useState<string>("");
     const [modelName, setModelName] = useState("");
     const [path, setPath] = useState("MODELS/POST82.yaml");
     const [content, setContent] = useState("");
@@ -103,7 +103,7 @@ export default function App() {
     const [sidebarWidth, setSidebarWidth] = useState(320);
     const [mcMounted, setMcMounted] = useState(() => initialView() === "mc");
 
-    const activeModel = session?.models[role] ?? { model_name: role, loaded: false, solved: false };
+    const activeModel = session?.models[model_name] ?? { model_name, loaded: false, solved: false };
     const shockNames = useMemo(
         () => activeModel.shocks ?? [],
         [activeModel.shocks],
@@ -112,17 +112,7 @@ export default function App() {
         () => activeModel.variables ?? [],
         [activeModel.variables],
     );
-    // The simulation's shocks, edited through the same panel the Monte Carlo
-    // simulation step uses. The list is component state rather than anything the
-    // session holds, which is what the tab's shock form was too.
     const registry = useShockRegistry(simShocks, setSimShocks);
-    // An entry names one model's declared innovations, and the other model need
-    // not declare them, so switching role drops the list rather than carrying a
-    // spec the new model cannot run.
-    useEffect(() => {
-        setSimShocks(null);
-        setX0Text({});
-    }, [role]);
     const graphSeries = useMemo(
         () =>
             result?.series.filter(
@@ -134,7 +124,7 @@ export default function App() {
     async function refreshSession() {
         const next = await getSession();
         setSession(next);
-        setRole((current) =>
+        setSelectedModelName((current) =>
             Object.hasOwn(next.models, current)
                 ? current
                 : Object.keys(next.models)[0] ?? "",
@@ -171,30 +161,32 @@ export default function App() {
         });
     }, []);
 
-    // Populate the builder with yaml from the backend when the page is refreshed
-    // (content state starts empty; session carries the last-loaded yaml)
+    // Switching models replaces the editor; refreshing the same model preserves edits.
+    const editorModelName = useRef<string | null>(null);
+    useEffect(() => {
+        if (session === null || editorModelName.current === model_name) return;
+        if (!Object.hasOwn(session.models, model_name)) return;
+        setContent(session.models[model_name].raw_yaml ?? "");
+        editorModelName.current = model_name;
+    }, [session, model_name]);
+
+    // Restore the selected model's last successful run on selection or refresh.
     useEffect(() => {
         if (session === null) return;
-        const yaml = session.models[role]?.raw_yaml;
-        if (yaml) setContent((c) => (c === "" ? yaml : c));
-    }, [session, role]);
-
-    // Seed the Outputs tab from the session: this role's last simulation, which
-    // is either a run made here or a bundle's stored spec replayed at load.
-    // Once per role, so the refresh after each run does not reset the controls
-    // under the user.
-    const outputsSeeded = useRef<string | null>(null);
-    useEffect(() => {
-        if (session === null || outputsSeeded.current === role) return;
-        outputsSeeded.current = role;
-        const simulation = session.workspace.simulation?.[role];
-        if (simulation === undefined) return;
-        if (simulation.spec !== undefined) {
-            setSimT(simulation.spec.T);
-            setIncludeObs(simulation.spec.observables);
-        }
-        setResult(simulation.result ?? null);
-    }, [session, role]);
+        const simulation = session.workspace.simulation?.[model_name];
+        const spec = simulation?.spec;
+        setSimT(spec?.T ?? 100);
+        setIncludeObs(spec?.observables ?? true);
+        setShockScale(spec?.shock_scale ?? 1);
+        setSimShocks(spec?.shocks ?? null);
+        const x0 = spec?.x0;
+        const names = session.models[model_name]?.variables ?? [];
+        const entries = Array.isArray(x0)
+            ? names.slice(0, x0.length).map((name, index) => [name, String(x0[index])])
+            : Object.entries(x0 ?? {}).map(([name, value]) => [name, String(value)]);
+        setX0Text(Object.fromEntries(entries));
+        setResult(simulation?.result ?? null);
+    }, [session, model_name]);
 
     useEffect(() => {
         if (message === "" || messageIsError) return;
@@ -314,9 +306,9 @@ export default function App() {
                 <label>
                     Model
                     <select
-                        value={role}
+                        value={model_name}
                         disabled={busy || Object.keys(session?.models ?? {}).length === 0}
-                        onChange={(event) => setRole(event.target.value)}
+                        onChange={(event) => setSelectedModelName(event.target.value)}
                     >
                         {Object.keys(session?.models ?? {}).length === 0 && (
                             <option value="">No models loaded</option>
@@ -355,7 +347,7 @@ export default function App() {
                                 async () => {
                                     const yaml = await file.text();
                                     const loaded = await loadYamlContent(modelName.trim(), yaml);
-                                    setRole(loaded.model_name);
+                                    setSelectedModelName(loaded.model_name);
                                     setContent(loaded.raw_yaml ?? yaml);
                                 },
                                 `YAML loaded from ${file.name}.`,
@@ -371,7 +363,7 @@ export default function App() {
                             runAction(
                                 async () => {
                                     const loaded = await loadYamlPath(modelName.trim(), path.trim());
-                                    setRole(loaded.model_name);
+                                    setSelectedModelName(loaded.model_name);
                                     if (loaded.raw_yaml !== undefined) {
                                         setContent(loaded.raw_yaml);
                                     }
@@ -405,7 +397,7 @@ export default function App() {
                     disabled={busy || !activeModel.loaded}
                     onClick={() =>
                         runAction(
-                            () => solveModel(role, { linearize }),
+                            () => solveModel(model_name, { linearize }),
                             linearize ? "Model linearized and solved." : "Model solved.",
                         )
                     }
@@ -463,7 +455,7 @@ export default function App() {
 
                 <BuilderView
                     hidden={view !== "builder"}
-                    role={role}
+                    model_name={model_name}
                     busy={busy}
                     theme={theme}
                     content={content}
@@ -473,7 +465,7 @@ export default function App() {
                         runAction(
                             async () => {
                                 const loaded = await loadYamlContent(modelName.trim(), content);
-                                setRole(loaded.model_name);
+                                setSelectedModelName(loaded.model_name);
                             },
                             "YAML loaded from content.",
                         )
@@ -484,7 +476,7 @@ export default function App() {
                 />
                 <SpecView
                     hidden={view !== "spec"}
-                    role={role}
+                    model_name={model_name}
                     theme={theme}
                     activeModel={activeModel}
                     shockNames={shockNames}
@@ -504,7 +496,7 @@ export default function App() {
                     setIncludeObs={setIncludeObs}
                     runSimulationAction={() =>
                         runAction(async () => {
-                            const sim = await runSimulation(role, {
+                            const sim = await runSimulation(model_name, {
                                 T: simT,
                                 x0: buildX0(),
                                 shock_scale: shockScale,
@@ -523,7 +515,7 @@ export default function App() {
                 />
                 <EstimationView
                     hidden={view !== "estimation"}
-                    role={role}
+                    model_name={model_name}
                     model={activeModel}
                     workspace={session?.workspace ?? null}
                     onSessionRefresh={refreshSession}
@@ -546,7 +538,7 @@ export default function App() {
 
 function BuilderView({
     hidden,
-    role,
+    model_name,
     busy,
     theme,
     content,
@@ -556,7 +548,7 @@ function BuilderView({
     syncAction,
 }: {
     hidden?: boolean;
-    role: string;
+    model_name: string;
     busy: boolean;
     theme: "light" | "dark";
     content: string;
@@ -569,7 +561,7 @@ function BuilderView({
         {
             id: "editor",
             title: "Config Builder",
-            badge: role,
+            badge: model_name,
             noPadding: true,
             headerActions: (
                 <>
@@ -619,14 +611,14 @@ function BuilderView({
 
 function SpecView({
     hidden,
-    role,
+    model_name,
     theme,
     activeModel,
     shockNames,
     registry,
 }: {
     hidden?: boolean;
-    role: string;
+    model_name: string;
     theme: "light" | "dark";
     activeModel: ModelSummary;
     shockNames: string[];
@@ -660,7 +652,7 @@ function SpecView({
             content: (
                 <>
                     <ShockRegistryEditor
-                        role={role}
+                        role={model_name}
                         shockNames={shockNames}
                         entries={registry.entries}
                         onChange={registry.setRegistry}
@@ -694,7 +686,7 @@ function SpecView({
                 </button>
             ),
             content: (
-                <CodePanel ref={arrayPanelRef} kind="array" role={role} activeModel={activeModel} theme={theme} />
+                <CodePanel ref={arrayPanelRef} kind="array" role={model_name} activeModel={activeModel} theme={theme} />
             ),
         },
         {
@@ -712,7 +704,7 @@ function SpecView({
                 </button>
             ),
             content: (
-                <CodePanel ref={figurePanelRef} kind="figure" role={role} activeModel={activeModel} theme={theme} />
+                <CodePanel ref={figurePanelRef} kind="figure" role={model_name} activeModel={activeModel} theme={theme} />
             ),
         },
     ];

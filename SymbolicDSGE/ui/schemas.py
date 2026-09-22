@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from ..estimation.spec import PriorSpec
 
@@ -20,6 +20,7 @@ class WorkspaceViewUpdate(TypedDict):
 
     tab: WorkspaceTab
     view: dict[str, Any] | None
+    model_name: NotRequired[str]
 
 
 class ArrayEnvelope(TypedDict):

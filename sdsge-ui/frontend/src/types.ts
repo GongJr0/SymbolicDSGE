@@ -137,20 +137,12 @@ export interface EstimatorSpecWire {
  * Lives in the server process, which the refresh does not restart, so this is
  * the whole restore mechanism: nothing is kept on the client.
  */
-/* Estimation views keyed by role: the form is per-role, the tab's other two
- * slots are not (a bundle holds one estimation, against the reference model).
- * Partial per role so a bundle can fill only what it knows and the form merges
- * the rest from its own defaults. */
-export type EstimationViewsByRole = Partial<
-    Record<string, Partial<EstimationViewState>>
->;
-
 export interface SessionWorkspace {
-    estimation?: WorkspaceTabState<
+    estimation?: Partial<Record<string, WorkspaceTabState<
         EstimatorSpecWire,
         EstimationRunResult["result"],
-        EstimationViewsByRole
-    >;
+        Partial<EstimationViewState>
+    >>>;
     mc?: WorkspaceTabState<MCPipelineSpec, MCPipelineResult, MCViewState>;
     // Per role, and with no view: the Outputs tab renders only `T` and the
     // observables toggle, both of them fields of the spec itself.
