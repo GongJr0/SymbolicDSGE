@@ -123,11 +123,10 @@ def test_a_payload_feeds_a_downstream_transform() -> None:
     assert plans["growth"].out_fields["payload"].shape == (5, 2)
 
 
-@pytest.mark.parametrize("ndim", [0, 4])
-def test_a_payload_must_be_1d_2d_or_3d(ndim: int) -> None:
-    payload = np.zeros((2,) * ndim)
+def test_a_payload_must_be_0d_to_3d() -> None:
+    payload = np.zeros((2, 2, 2, 2))
 
-    with pytest.raises(ValueError, match="Payload must be 1D, 2D, or 3D"):
+    with pytest.raises(ValueError, match=r"Payload must be 0D \(scalar\) to 3D"):
         _plan(_with_datagen(add_payload_step("const", payload=cast(Any, payload))))
 
 
