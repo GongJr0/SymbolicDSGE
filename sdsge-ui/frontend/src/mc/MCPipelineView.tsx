@@ -51,7 +51,6 @@ import type {
   MCViewState,
   MCStepCatalogItem,
   MCStepCategory,
-  Role,
   SessionSummary,
 } from "../types";
 import { StepInspector } from "./StepInspector";
@@ -60,7 +59,7 @@ import { MCResultPanel } from "./MCResultPanel";
 import type { MCFlowNode, MCProducer } from "./types";
 
 import type { MCStepDefinition } from "./catalog";
-import { MC_CATALOG, stepDefinition } from "./catalog";
+import { MC_CATALOG, stepDefinition, usesModelTarget } from "./catalog";
 import { defaultStep, getField, setField } from "./fields";
 
 const nodeTypes = { mcStep: StepNode };
@@ -228,16 +227,17 @@ function MCPipelineBuilder({
       }),
     [edges, nodes],
   );
-  const modelsReady =
-    session?.models.reference?.solved === true && session.models.dgp?.solved === true;
-
-  // Declared innovation names per model role, sourced from the loaded model
-  // configs (independent of the pipeline), for the simulation shock checklist.
-  const shockNamesByRole: Record<Role, string[]> = useMemo(
-    () => ({
-      reference: session?.models.reference?.shocks ?? [],
-      dgp: session?.models.dgp?.shocks ?? [],
-    }),
+  const modelSteps = nodes
+    .map((node) => node.data.step)
+    .filter((step) => usesModelTarget(step.step_type));
+  const requiredModels = [...new Set(
+    modelSteps.map((step) => String(step.kwargs.target ?? "")).filter(Boolean),
+  )];
+  const modelNames = Object.keys(session?.models ?? {});
+  const shockNamesByRole: Record<string, string[]> = useMemo(
+    () => Object.fromEntries(
+      Object.entries(session?.models ?? {}).map(([name, model]) => [name, model.shocks ?? []]),
+    ),
     [session],
   );
 
@@ -519,6 +519,7 @@ function MCPipelineBuilder({
           theme={theme}
           producers={producers}
           availableTraces={availableTraces}
+          modelNames={modelNames}
           shockNamesByRole={shockNamesByRole}
         />
       ),
@@ -557,8 +558,9 @@ function MCPipelineBuilder({
     <>
       <section className="mc-runbar">
         <div className="mc-model-readiness">
-          <ModelPill label="Reference" ready={session?.models.reference?.solved === true} />
-          <ModelPill label="DGP" ready={session?.models.dgp?.solved === true} />
+          {requiredModels.map((name) => (
+            <ModelPill key={name} label={name} ready={session?.models[name]?.solved === true} />
+          ))}
         </div>
         <label>
           Replications
@@ -605,7 +607,7 @@ function MCPipelineBuilder({
           <Check size={15} />
           Validate
         </button>
-        <button disabled={busy || !modelsReady} onClick={() => void run()}>
+        <button disabled={busy} onClick={() => void run()}>
           <Play size={15} />
           Run pipeline
         </button>
@@ -796,7 +798,7 @@ function ModelPill({ label, ready }: { label: string; ready: boolean }) {
   return (
     <span className={`mc-model-pill ${ready ? "ready" : ""}`}>
       {ready ? <Check size={12} /> : <TriangleAlert size={12} />}
-      {label}
+      {label}{ready ? "" : ": needs solve"}
     </span>
   );
 }

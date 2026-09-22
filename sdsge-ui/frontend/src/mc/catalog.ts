@@ -15,6 +15,10 @@ import type {
   MCStepType,
 } from "../types";
 
+export function usesModelTarget(stepType: MCStepType): boolean {
+  return stepType === "simulation" || stepType === "filter";
+}
+
 export type MCOpType =
   | "datagen"
   | "filter"
@@ -148,11 +152,11 @@ const DEFINITIONS: MCStepDefinition[] = [
   step("simulation", {
     title: "Simulation",
     defaultName: "datagen",
-    description: "Generate one sample by simulating a solved model (DGP or reference).",
+    description: "Generate one sample by simulating a solved model.",
     opType: "datagen",
     legs: [],
     fields: [
-      field("target", "Simulate", "select", "dgp", { options: ["dgp", "reference"] }),
+      field("target", "Model", "select", null, { required: true }),
       field("T", "Periods", "number", 100, { required: true, minimum: 1 }),
       field("observables", "Observables", "boolean", true),
       field("shock_scale", "Shock scale", "number", 1.0),
@@ -161,12 +165,13 @@ const DEFINITIONS: MCStepDefinition[] = [
     ],
   }),
   step("filter", {
-    title: "Reference Filter",
+    title: "Filter",
     defaultName: "filter",
-    description: "Filter generated observables through the reference model.",
+    description: "Filter observations through a solved model.",
     opType: "filter",
     legs: [],
     fields: [
+      field("target", "Model", "select", null, { required: true }),
       field("filter_mode", "Mode", "select", "linear", { options: ["linear", "extended", "unscented"] }),
       field("return_shocks", "Return shocks", "boolean", false),
     ],

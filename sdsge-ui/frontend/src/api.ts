@@ -11,7 +11,6 @@ import type {
   MCPipelineResult,
   MCPipelineSpec,
   MCStepType,
-  Role,
   SessionSummary,
   SimResult,
   SimSpecWire,
@@ -62,35 +61,35 @@ export function putWorkspaceView(
   });
 }
 
-export function loadYamlPath(role: Role, path: string): Promise<ModelSummary> {
+export function loadYamlPath(role: string, path: string): Promise<ModelSummary> {
   return requestJson<ModelSummary>("/api/model/load-yaml", {
     method: "POST",
-    body: JSON.stringify({ role, path }),
+    body: JSON.stringify({ model_name: role, path }),
   });
 }
 
 export function loadYamlContent(
-  role: Role,
+  role: string,
   content: string,
 ): Promise<ModelSummary> {
   return requestJson<ModelSummary>("/api/model/load-yaml", {
     method: "POST",
-    body: JSON.stringify({ role, content }),
+    body: JSON.stringify({ model_name: role, content }),
   });
 }
 
 export function solveModel(
-  role: Role,
+  role: string,
   compileKwargs: Record<string, unknown> = {},
 ): Promise<ModelSummary> {
   return requestJson<ModelSummary>("/api/model/solve", {
     method: "POST",
-    body: JSON.stringify({ role, compile_kwargs: compileKwargs }),
+    body: JSON.stringify({ model_name: role, compile_kwargs: compileKwargs }),
   });
 }
 
 export function runSimulation(
-  role: Role,
+  role: string,
   spec: SimSpecWire,
 ): Promise<SimResult> {
   return requestJson<SimResult>("/api/run/sim", {
@@ -113,7 +112,7 @@ export function runEstimation(
 }
 
 export function submitFunction(
-  role: Role,
+  role: string,
   code: string,
   kind: FunctionKind = "array",
 ): Promise<FunctionRecord> {
@@ -124,7 +123,7 @@ export function submitFunction(
 }
 
 export function removeFunction(
-  role: Role,
+  role: string,
   name: string,
 ): Promise<{ removed: string }> {
   return requestJson<{ removed: string }>(
@@ -133,7 +132,7 @@ export function removeFunction(
   );
 }
 
-export function listFunctions(role: Role): Promise<FunctionRecord[]> {
+export function listFunctions(role: string): Promise<FunctionRecord[]> {
   return requestJson<FunctionRecord[]>(`/api/code/${role}/functions`);
 }
 
