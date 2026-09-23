@@ -221,7 +221,9 @@ def test_filter_rejects_a_datagen_whose_width_it_cannot_match(
         raw_model_data_step(
             "data", observables=np.zeros((N_REP, T, n_obs + 1), dtype=np.float64)
         ),
-        filter_step("filter", obs_source="data", obs_field="observables"),
+        filter_step(
+            "filter", target="reference", obs_source="data", obs_field="observables"
+        ),
     ]
 
     with pytest.raises(
@@ -235,6 +237,7 @@ def test_unscented_filtering_cannot_return_shocks(solved: SolvedModel) -> None:
         simulation_step("sim", target="reference", T=T, observables=True),
         filter_step(
             "filter",
+            target="reference",
             obs_source="sim",
             obs_field="observables",
             filter_mode="unscented",
@@ -248,7 +251,9 @@ def test_unscented_filtering_cannot_return_shocks(solved: SolvedModel) -> None:
 
 def test_an_unknown_filter_mode_is_rejected(solved: SolvedModel) -> None:
     """The interface resolves the mode before lowering picks a kernel for it."""
-    step = filter_step("filter", obs_source="sim", obs_field="observables")
+    step = filter_step(
+        "filter", target="reference", obs_source="sim", obs_field="observables"
+    )
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
         dataclasses.replace(step, kwargs={**step.kwargs, "filter_mode": "particle"}),
@@ -263,7 +268,9 @@ def test_a_filter_on_dgp_simulated_data_needs_the_dgp(solved: SolvedModel) -> No
     pipeline = MCPipeline(
         [
             simulation_step("sim", target="dgp", T=T, observables=True),
-            filter_step("filter", obs_source="sim", obs_field="observables"),
+            filter_step(
+                "filter", target="reference", obs_source="sim", obs_field="observables"
+            ),
         ]
     )
 
@@ -279,6 +286,7 @@ def test_filter_observables_must_be_unique(solved: SolvedModel) -> None:
         simulation_step("sim", target="reference", T=T, observables=True),
         filter_step(
             "filter",
+            target="reference",
             obs_source="sim",
             obs_field="observables",
             obs_columns=[0, 1],
@@ -295,6 +303,7 @@ def test_filter_observables_must_exist_on_the_reference(solved: SolvedModel) -> 
         simulation_step("sim", target="reference", T=T, observables=True),
         filter_step(
             "filter",
+            target="reference",
             obs_source="sim",
             obs_field="observables",
             obs_columns=[0],
@@ -319,6 +328,7 @@ def test_filter_observable_names_must_match_selected_width(
         ),
         filter_step(
             "filter",
+            target="reference",
             obs_source="data",
             obs_field="observables",
             observables=list(all_names[:2]),
@@ -337,6 +347,7 @@ def test_filter_x0_must_cover_every_state(solved: SolvedModel) -> None:
         simulation_step("sim", target="reference", T=T, observables=True),
         filter_step(
             "filter",
+            target="reference",
             obs_source="sim",
             obs_field="observables",
             x0=np.zeros(n_var - 1, dtype=np.float64),
@@ -353,7 +364,9 @@ def test_missing_producer_field_is_rejected_during_planning(
 ) -> None:
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
-        filter_step("filter", obs_source="sim", obs_field="observables"),
+        filter_step(
+            "filter", target="reference", obs_source="sim", obs_field="observables"
+        ),
         passthrough_step("keep", source="filter", field="x_smooth", columns=None),
     ]
     pipeline = MCPipeline(steps)
@@ -372,7 +385,9 @@ def test_a_readable_filter_field_still_authors_and_lowers(
     """A field present in the producer layout can be staged for its consumer."""
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
-        filter_step("filter", obs_source="sim", obs_field="observables"),
+        filter_step(
+            "filter", target="reference", obs_source="sim", obs_field="observables"
+        ),
         passthrough_step("keep", source="filter", field="innov", columns=None),
     ]
 

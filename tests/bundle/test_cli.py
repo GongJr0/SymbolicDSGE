@@ -111,7 +111,7 @@ def test_round_tripped_bundle_still_loads(tmp_path: Path) -> None:
     )
     loaded = load_bundle(packed)
 
-    assert loaded.reference is not None
+    assert loaded.models["reference"] is not None
     assert loaded.simulation is not None and loaded.simulation["reference"]["T"] == 8
     assert loaded.mc is not None and loaded.mc.result is not None
     np.testing.assert_array_equal(

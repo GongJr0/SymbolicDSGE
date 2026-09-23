@@ -944,6 +944,7 @@ def test_output_shape_resolution_includes_linear_filter_fields(
         [
             raw_model_data_step(observables=observables, observable_names=names),
             filter_step(
+                target="reference",
                 obs_source="datagen",
                 obs_field="observables",
                 filter_mode=filter_mode,
@@ -1065,7 +1066,10 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
                 observable_names=reference.compiled.observable_names,
             ),
             filter_step(
-                obs_source="datagen", obs_field="observables", filter_mode="unscented"
+                target="reference",
+                obs_source="datagen",
+                obs_field="observables",
+                filter_mode="unscented",
             ),
         ]
     )

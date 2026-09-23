@@ -84,7 +84,9 @@ def test_transforms_consume_scalar_loglik_and_vector_payload(
     pipeline = MCPipeline(
         [
             raw_model_data_step("data", observables=_observations(linear)),
-            filter_step("filt", obs_source="data", obs_field="observables"),
+            filter_step(
+                "filt", target="reference", obs_source="data", obs_field="observables"
+            ),
             add_payload_step("vector", vector),
             transform_step(
                 "scalar_plus_one",
@@ -136,7 +138,7 @@ def _run(
                 observables=y,
                 observable_names=tuple(solved.compiled.observable_names),
             ),
-            filter_step(name, obs_source="data", obs_field="observables", **filter_kwargs),  # type: ignore[arg-type]
+            filter_step(name, target="reference", obs_source="data", obs_field="observables", **filter_kwargs),  # type: ignore[arg-type]
         ]
     )
     return pipeline.run({"reference": solved}, n_rep=n_rep, verbosity=0)
@@ -458,10 +460,15 @@ def test_filters_are_keyed_by_step_name(linear: SolvedModel) -> None:
                 observable_names=tuple(linear.compiled.observable_names),
             ),
             filter_step(
-                "kf", obs_source="data", obs_field="observables", filter_mode="linear"
+                "kf",
+                target="reference",
+                obs_source="data",
+                obs_field="observables",
+                filter_mode="linear",
             ),
             filter_step(
                 "ekf",
+                target="reference",
                 obs_source="data",
                 obs_field="observables",
                 filter_mode="extended",

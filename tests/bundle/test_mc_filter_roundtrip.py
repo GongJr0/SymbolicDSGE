@@ -116,7 +116,11 @@ def test_a_filter_round_trips_every_field_it_produced(
     pipeline = _pipeline(
         linear,
         filter_step(
-            "filt", obs_source="data", obs_field="observables", filter_mode=mode
+            "filt",
+            target="reference",
+            obs_source="data",
+            obs_field="observables",
+            filter_mode=mode,
         ),
     )
 
@@ -133,7 +137,11 @@ def test_the_unscented_pruned_state_survives_the_bundle(
     pipeline = _pipeline(
         second_order,
         filter_step(
-            "filt", obs_source="data", obs_field="observables", filter_mode="unscented"
+            "filt",
+            target="reference",
+            obs_source="data",
+            obs_field="observables",
+            filter_mode="unscented",
         ),
     )
 
@@ -153,7 +161,11 @@ def test_the_mode_is_read_back_rather_than_inferred(
     pipeline = _pipeline(
         linear,
         filter_step(
-            "filt", obs_source="data", obs_field="observables", filter_mode="extended"
+            "filt",
+            target="reference",
+            obs_source="data",
+            obs_field="observables",
+            filter_mode="extended",
         ),
     )
 
@@ -177,12 +189,14 @@ def test_requested_shocks_come_back_and_absent_ones_stay_absent(
         linear,
         filter_step(
             "with_shocks",
+            target="reference",
             obs_source="data",
             obs_field="observables",
             return_shocks=True,
         ),
         filter_step(
             "without_shocks",
+            target="reference",
             obs_source="data",
             obs_field="observables",
             return_shocks=False,
@@ -204,7 +218,10 @@ def test_a_reloaded_linear_filter_still_refuses_the_pruned_state(
 ) -> None:
     """A field with no member must come back absent, not as an empty array."""
     pipeline = _pipeline(
-        linear, filter_step("filt", obs_source="data", obs_field="observables")
+        linear,
+        filter_step(
+            "filt", target="reference", obs_source="data", obs_field="observables"
+        ),
     )
 
     _, after = _roundtrip(linear, pipeline, tmp_path)
@@ -223,7 +240,10 @@ def test_the_covariance_blocks_keep_their_rank(linear: SolvedModel, tmp_path) ->
     n_var = linear.compiled.n_var
     n_obs = len(linear.compiled.observable_names)
     pipeline = _pipeline(
-        linear, filter_step("filt", obs_source="data", obs_field="observables")
+        linear,
+        filter_step(
+            "filt", target="reference", obs_source="data", obs_field="observables"
+        ),
     )
 
     _, after = _roundtrip(linear, pipeline, tmp_path)
@@ -238,7 +258,10 @@ def test_a_per_replication_scalar_keeps_its_single_axis(
 ) -> None:
     """``loglik`` must not pick up a trailing axis on the way through storage."""
     pipeline = _pipeline(
-        linear, filter_step("filt", obs_source="data", obs_field="observables")
+        linear,
+        filter_step(
+            "filt", target="reference", obs_source="data", obs_field="observables"
+        ),
     )
 
     _, after = _roundtrip(linear, pipeline, tmp_path)
@@ -256,7 +279,13 @@ def test_retaining_nothing_still_restores_the_shapes(
     n_var = linear.compiled.n_var
     pipeline = _pipeline(
         linear,
-        filter_step("filt", n_retain=0, obs_source="data", obs_field="observables"),
+        filter_step(
+            "filt",
+            target="reference",
+            n_retain=0,
+            obs_source="data",
+            obs_field="observables",
+        ),
     )
 
     _, after = _roundtrip(linear, pipeline, tmp_path)
@@ -275,10 +304,18 @@ def test_filters_round_trip_keyed_by_step_name(linear: SolvedModel, tmp_path) ->
     pipeline = _pipeline(
         linear,
         filter_step(
-            "kf", obs_source="data", obs_field="observables", filter_mode="linear"
+            "kf",
+            target="reference",
+            obs_source="data",
+            obs_field="observables",
+            filter_mode="linear",
         ),
         filter_step(
-            "ekf", obs_source="data", obs_field="observables", filter_mode="extended"
+            "ekf",
+            target="reference",
+            obs_source="data",
+            obs_field="observables",
+            filter_mode="extended",
         ),
     )
 
@@ -295,7 +332,11 @@ def test_filters_round_trip_through_csv_members(linear: SolvedModel, tmp_path) -
     pipeline = _pipeline(
         linear,
         filter_step(
-            "filt", obs_source="data", obs_field="observables", return_shocks=True
+            "filt",
+            target="reference",
+            obs_source="data",
+            obs_field="observables",
+            return_shocks=True,
         ),
     )
 
@@ -313,7 +354,13 @@ def test_a_step_that_retained_nothing_reloads_its_index_map_empty(
     """Retaining nothing means no member for the index map, and that is not corruption."""
     pipeline = _pipeline(
         linear,
-        filter_step("filt", n_retain=0, obs_source="data", obs_field="observables"),
+        filter_step(
+            "filt",
+            target="reference",
+            n_retain=0,
+            obs_source="data",
+            obs_field="observables",
+        ),
     )
 
     before, after = _roundtrip(linear, pipeline, tmp_path)
@@ -329,7 +376,13 @@ def test_the_index_map_says_which_replication_each_entry_holds(
     """Rows are compact under partial retention, so the mapping is the only link."""
     pipeline = _pipeline(
         linear,
-        filter_step("filt", n_retain=2, obs_source="data", obs_field="observables"),
+        filter_step(
+            "filt",
+            target="reference",
+            n_retain=2,
+            obs_source="data",
+            obs_field="observables",
+        ),
     )
 
     before, after = _roundtrip(linear, pipeline, tmp_path)

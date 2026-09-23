@@ -521,6 +521,7 @@ def test_native_lowering_runs_linear_and_extended_filters() -> None:
                 simulation_step("sim", target="reference", T=T, observables=True),
                 filter_step(
                     "filter",
+                    target="reference",
                     obs_source="sim",
                     obs_field="observables",
                     filter_mode=mode,
@@ -578,6 +579,7 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides() -> None:
             ),
             filter_step(
                 "filter",
+                target="reference",
                 obs_source="sim",
                 obs_field="observables",
                 filter_mode="linear",
@@ -648,6 +650,7 @@ def test_native_lowering_runs_unscented_filter_with_rbc_fixture() -> None:
             ),
             filter_step(
                 "filter",
+                target="reference",
                 obs_source="data",
                 obs_field="observables",
                 filter_mode="unscented",

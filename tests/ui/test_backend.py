@@ -55,9 +55,11 @@ def _solved_client() -> TestClient:
     client = TestClient(create_app())
     client.post(
         "/api/model/load-yaml",
-        json={"role": "reference", "path": "MODELS/test.yaml"},
+        json={"model_name": "reference", "path": "MODELS/test.yaml"},
     )
-    client.post("/api/model/solve", json={"role": "reference", "compile_kwargs": {}})
+    client.post(
+        "/api/model/solve", json={"model_name": "reference", "compile_kwargs": {}}
+    )
     return client
 
 
@@ -65,7 +67,7 @@ def _simulate(client: TestClient, *, observables: bool) -> dict:
     return client.post(
         "/api/run/sim",
         json={
-            "role": "reference",
+            "model_name": "reference",
             "spec": {
                 "T": 20,
                 "x0": None,
@@ -81,7 +83,7 @@ def test_submitted_transform_becomes_a_series() -> None:
     client = _solved_client()
     client.post(
         "/api/code/submit",
-        json={"role": "reference", "code": _TRANSFORM, "kind": "array"},
+        json={"model_name": "reference", "code": _TRANSFORM, "kind": "array"},
     )
 
     sim = _simulate(client, observables=True)
@@ -99,7 +101,7 @@ def test_transform_missing_a_series_says_which_one() -> None:
     client = _solved_client()
     client.post(
         "/api/code/submit",
-        json={"role": "reference", "code": _TRANSFORM, "kind": "array"},
+        json={"model_name": "reference", "code": _TRANSFORM, "kind": "array"},
     )
 
     sim = _simulate(client, observables=False)
@@ -115,7 +117,7 @@ def test_transform_that_raises_reports_its_own_message() -> None:
     client.post(
         "/api/code/submit",
         json={
-            "role": "reference",
+            "model_name": "reference",
             "code": "def boom(u):\n    raise ValueError('kaboom')\n",
             "kind": "array",
         },
@@ -132,7 +134,7 @@ def test_transform_with_a_default_does_not_count_as_missing() -> None:
     client.post(
         "/api/code/submit",
         json={
-            "role": "reference",
+            "model_name": "reference",
             "code": "def scaled(u, factor=2.0):\n    return u * factor\n",
             "kind": "array",
         },
@@ -153,7 +155,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
 
     loaded = client.post(
         "/api/model/load-yaml",
-        json={"role": "reference", "path": "MODELS/test.yaml"},
+        json={"model_name": "reference", "path": "MODELS/test.yaml"},
     )
     assert loaded.status_code == 200
     loaded_body = loaded.json()
@@ -166,7 +168,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     solved = client.post(
         "/api/model/solve",
         json={
-            "role": "reference",
+            "model_name": "reference",
             "compile_kwargs": {},
         },
     )
@@ -180,7 +182,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     simulated = client.post(
         "/api/run/sim",
         json={
-            "role": "reference",
+            "model_name": "reference",
             "spec": {
                 "T": 5,
                 "x0": None,
@@ -193,7 +195,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     assert simulated.status_code == 200
     sim_body = simulated.json()
     assert sim_body["kind"] == "sim"
-    assert sim_body["role"] == "reference"
+    assert sim_body["model_name"] == "reference"
     names = {series["name"] for series in sim_body["series"]}
     assert "_X" in names
 
@@ -204,7 +206,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     shocked = client.post(
         "/api/run/sim",
         json={
-            "role": "reference",
+            "model_name": "reference",
             "spec": {
                 "T": 5,
                 "x0": None,
@@ -227,7 +229,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     generated = client.post(
         "/api/run/sim",
         json={
-            "role": "reference",
+            "model_name": "reference",
             "spec": {
                 "T": 5,
                 "x0": None,
@@ -257,7 +259,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     generated_t = client.post(
         "/api/run/sim",
         json={
-            "role": "reference",
+            "model_name": "reference",
             "spec": {
                 "T": 5,
                 "x0": None,
@@ -283,7 +285,7 @@ def test_ui_backend_loads_yaml_content_and_reports_user_errors() -> None:
 
     loaded = client.post(
         "/api/model/load-yaml",
-        json={"role": "dgp", "content": content},
+        json={"model_name": "dgp", "content": content},
     )
     assert loaded.status_code == 200
     assert loaded.json()["source"] == "<content>"
@@ -291,7 +293,7 @@ def test_ui_backend_loads_yaml_content_and_reports_user_errors() -> None:
     unsolved_sim = client.post(
         "/api/run/sim",
         json={
-            "role": "dgp",
+            "model_name": "dgp",
             "spec": {
                 "T": 3,
                 "x0": None,
@@ -304,11 +306,15 @@ def test_ui_backend_loads_yaml_content_and_reports_user_errors() -> None:
     assert unsolved_sim.status_code == 400
     detail = unsolved_sim.json()["detail"]
     assert detail["error_type"] == "ValueError"
-    assert "does not have a solved model" in detail["message"]
+    assert "is not a solved model" in detail["message"]
 
     bad_load = client.post(
         "/api/model/load-yaml",
-        json={"role": "reference", "path": "MODELS/test.yaml", "content": content},
+        json={
+            "model_name": "reference",
+            "path": "MODELS/test.yaml",
+            "content": content,
+        },
     )
     assert bad_load.status_code == 400
     assert bad_load.json()["detail"]["error_type"] == "ValueError"
@@ -382,7 +388,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     client = TestClient(app)
     loaded = client.post(
         "/api/model/load-yaml",
-        json={"role": "reference", "path": "MODELS/test.yaml"},
+        json={"model_name": "reference", "path": "MODELS/test.yaml"},
     )
     assert loaded.status_code == 200
     assert loaded.json()["parameter_values"]["beta"] == 0.99
@@ -399,7 +405,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     solved = client.post(
         "/api/model/solve",
         json={
-            "role": "reference",
+            "model_name": "reference",
             "compile_kwargs": {},
         },
     )
@@ -428,7 +434,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
 
     monkeypatch.setattr(slot.solver, "estimate", fake_estimate)
     request = {
-        "role": "reference",
+        "model_name": "reference",
         "routine": "mle",
         "y": [[3.2, 0.1], [3.3, 0.2]],
         "observables": ["Infl", "Rate"],
@@ -466,7 +472,9 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
 
     # A run fills the bundle-bound slots: the spec describes the estimator it
     # just built, and neither slot carries anything the form invented.
-    workspace = client.get("/api/session").json()["workspace"]["estimation"]
+    workspace = client.get("/api/session").json()["workspace"]["estimation"][
+        "reference"
+    ]
     assert workspace["spec"]["params"]["estimated_params"] == ["beta"]
     assert workspace["spec"]["params"]["observables"] == ["Infl", "Rate"]
     assert len(workspace["spec"]["y"]) == 2
@@ -502,12 +510,12 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"role": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": "MODELS/test.yaml"},
         )
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
+            json={"model_name": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -518,6 +526,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "target": "dgp",
                     "T": 8,
                     "shocks": [
                         {
@@ -569,12 +578,13 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
 def _solve_reference(client: TestClient) -> None:
     for role in ("reference", "dgp"):  # simulation datagen needs a solved dgp
         loaded = client.post(
-            "/api/model/load-yaml", json={"role": role, "path": "MODELS/test.yaml"}
+            "/api/model/load-yaml",
+            json={"model_name": role, "path": "MODELS/test.yaml"},
         )
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
+            json={"model_name": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -586,6 +596,7 @@ _POSTPROC_PIPELINE = {
             "step_type": "simulation",
             "name": "datagen",
             "params": {
+                "target": "dgp",
                 "T": 25,
                 "shocks": [
                     {
@@ -674,12 +685,12 @@ def test_ui_backend_accepts_fanout() -> None:
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"role": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": "MODELS/test.yaml"},
         )
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
+            json={"model_name": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -690,6 +701,7 @@ def test_ui_backend_accepts_fanout() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "target": "dgp",
                     "T": 8,
                     "shocks": [
                         {
@@ -747,12 +759,12 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"role": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": "MODELS/test.yaml"},
         )
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
+            json={"model_name": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -763,6 +775,7 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "target": "dgp",
                     "T": 12,
                     "shocks": [
                         {
@@ -812,12 +825,12 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"role": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": "MODELS/test.yaml"},
         )
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
+            json={"model_name": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -828,6 +841,7 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "target": "dgp",
                     "T": 20,
                     "shocks": [
                         {
@@ -885,12 +899,12 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"role": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": "MODELS/test.yaml"},
         )
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
+            json={"model_name": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -901,6 +915,7 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "target": "dgp",
                     "T": 20,
                     "shocks": [
                         {
@@ -958,12 +973,12 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"role": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": "MODELS/test.yaml"},
         )
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
+            json={"model_name": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -974,6 +989,7 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "target": "dgp",
                     "T": 30,
                     "shocks": [
                         {
@@ -1029,12 +1045,12 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"role": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": "MODELS/test.yaml"},
         )
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
+            json={"model_name": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -1045,6 +1061,7 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "target": "dgp",
                     "T": 30,
                     "shocks": [
                         {
@@ -1100,12 +1117,12 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"role": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": "MODELS/test.yaml"},
         )
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
+            json={"model_name": role, "compile_kwargs": {}},
         )
         assert solved.status_code == 200
 
@@ -1116,6 +1133,7 @@ def test_ui_backend_runs_chow_monte_carlo_step() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "target": "dgp",
                     "T": 30,
                     "shocks": [
                         {
@@ -1257,6 +1275,7 @@ def test_ui_backend_binds_filter_dependencies_from_source_params() -> None:
                     "step_type": "simulation",
                     "name": "datagen",
                     "params": {
+                        "target": "dgp",
                         "T": 8,
                     },
                 },
@@ -1340,11 +1359,12 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         client.post(
-            "/api/model/load-yaml", json={"role": role, "path": "MODELS/test.yaml"}
+            "/api/model/load-yaml",
+            json={"model_name": role, "path": "MODELS/test.yaml"},
         )
         client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
+            json={"model_name": role, "compile_kwargs": {}},
         )
 
     pipeline = {
@@ -1354,6 +1374,7 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "target": "dgp",
                     "T": 25,
                     "shocks": [
                         {
@@ -1413,11 +1434,12 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         client.post(
-            "/api/model/load-yaml", json={"role": role, "path": "MODELS/test.yaml"}
+            "/api/model/load-yaml",
+            json={"model_name": role, "path": "MODELS/test.yaml"},
         )
         client.post(
             "/api/model/solve",
-            json={"role": role, "compile_kwargs": {}},
+            json={"model_name": role, "compile_kwargs": {}},
         )
 
     pipeline = {
@@ -1427,6 +1449,7 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
                 "step_type": "simulation",
                 "name": "datagen",
                 "params": {
+                    "target": "dgp",
                     "T": 8,
                     "shocks": [
                         {
@@ -1476,14 +1499,14 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, routi
     assert (
         client.post(
             "/api/model/load-yaml",
-            json={"role": "reference", "path": "MODELS/test.yaml"},
+            json={"model_name": "reference", "path": "MODELS/test.yaml"},
         ).status_code
         == 200
     )
     assert (
         client.post(
             "/api/model/solve",
-            json={"role": "reference", "compile_kwargs": {}},
+            json={"model_name": "reference", "compile_kwargs": {}},
         ).status_code
         == 200
     )
@@ -1509,7 +1532,7 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, routi
     response = client.post(
         "/api/run/estimation",
         json={
-            "role": "reference",
+            "model_name": "reference",
             "routine": routine,
             "y": [[0.1], [0.2], [0.3]],
             "observables": ["Obs"],

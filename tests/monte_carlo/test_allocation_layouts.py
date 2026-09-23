@@ -270,7 +270,9 @@ def test_selecting_a_field_the_producer_does_not_emit_is_rejected() -> None:
 def test_a_filter_needs_datagen_observables(solved: SolvedModel) -> None:
     steps = [
         simulation_step("sim", target="reference", T=T, observables=False),
-        filter_step("filter", obs_source="sim", obs_field="observables"),
+        filter_step(
+            "filter", target="reference", obs_source="sim", obs_field="observables"
+        ),
     ]
 
     with pytest.raises(ValueError, match="does not produce source field 'observables'"):

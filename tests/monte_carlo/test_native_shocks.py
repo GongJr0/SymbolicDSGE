@@ -40,7 +40,7 @@ T = 16
 
 
 def _plan(solved_test_model, shocks, shock_scale=1.0):
-    step = simulation_step(T=T, shocks=shocks, shock_scale=shock_scale)
+    step = simulation_step(target="dgp", T=T, shocks=shocks, shock_scale=shock_scale)
     return build_native_plan(solved_test_model, step, T)
 
 

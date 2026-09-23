@@ -83,9 +83,13 @@ def test_trace_to_csv_rejects_mismatched_lengths() -> None:
 
 def test_builder_writes_observed_with_semantic_headers() -> None:
     matrix = np.array([[1.0, 2.0], [3.0, 4.0]])
-    builder = BundleBuilder().add_estimation(
-        _estimation_source(_estimation_spec(matrix, observables=("gdp", "infl"))),
-        as_parquet=False,
+    builder = (
+        BundleBuilder()
+        .add_model("reference", _MODEL_YAML)
+        .add_estimation(
+            _estimation_source(_estimation_spec(matrix, observables=("gdp", "infl"))),
+            as_parquet=False,
+        )
     )
     manifest, files = builder.build()
 
@@ -109,8 +113,12 @@ def test_builder_writes_posterior_and_mc_traces_as_csv() -> None:
         burn_in=0,
         thin=1,
     )
-    builder = BundleBuilder().add_estimation(
-        _estimation_source(_estimation_spec()), result=result, as_parquet=False
+    builder = (
+        BundleBuilder()
+        .add_model("reference", _MODEL_YAML)
+        .add_estimation(
+            _estimation_source(_estimation_spec()), result=result, as_parquet=False
+        )
     )
     _, files = builder.build()
     assert "estimation/posterior.csv" in files
@@ -159,7 +167,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
             result=result,
             as_parquet=False,
         )
-        .add_mc(MCPipeline([simulation_step("sim", T=50)]))
+        .add_mc(MCPipeline([simulation_step("sim", target="reference", T=50)]))
         .write(tmp_path / "csv.sdsge")
     )
 
