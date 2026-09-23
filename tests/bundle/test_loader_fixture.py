@@ -41,8 +41,8 @@ def test_load_bundle_fixture_end_to_end():
     loaded = load_bundle(FIXTURE)
     assert isinstance(loaded, LoadedBundle)
     # models re-parsed + re-solved
-    assert isinstance(loaded.reference, SolvedModel)
-    assert isinstance(loaded.dgp, SolvedModel)
+    assert isinstance(loaded.models["reference"], SolvedModel)
+    assert isinstance(loaded.models["dgp"], SolvedModel)
     # estimation: MCMC result rebuilt from metadata + posterior traces
     assert isinstance(loaded.estimation, LoadedEstimation)
     assert isinstance(loaded.estimation.result, MCMCResult)
@@ -106,7 +106,7 @@ def test_rebuild_mcmc_result_ok():
 def test_load_estimation_optimization_result_dispatch():
     # A non-mcmc estimation_result routes through _rebuild_optimization_result,
     # with no estimation_data / estimation_trace members present.
-    spec_member = SimpleNamespace(path="spec.json")
+    spec_member = SimpleNamespace(path="spec.json", model_name="reference")
     result_member = SimpleNamespace(path="result.json")
 
     data_member = SimpleNamespace(path="observed.csv", format="csv", columns=None)
@@ -144,20 +144,20 @@ def test_load_estimation_optimization_result_dispatch():
     )
     reference = SimpleNamespace(compiled=_compiled_reference())
 
-    loaded = L._load_estimation(archive, manifest, reference)
+    loaded = L._load_estimation(archive, manifest, {"reference": reference})
     assert isinstance(loaded.result, OptimizationResult)
     np.testing.assert_allclose(np.asarray(loaded.estimator.y), [[1.0, 2.0], [3.0, 4.0]])
 
     # An estimation section is not loadable without a model to bind to, nor
     # without the data the estimator conditions on.
-    with pytest.raises(ValueError, match="no reference model"):
+    with pytest.raises(ValueError, match="associated with it.*reference.*not present"):
         L._load_estimation(archive, manifest, None)
 
     bare = SimpleNamespace(
         members_by_kind=lambda kind: [spec_member] if kind == "estimation_spec" else []
     )
     with pytest.raises(ValueError, match="estimation_data"):
-        L._load_estimation(archive, bare, reference)
+        L._load_estimation(archive, bare, {"reference": reference})
 
 
 def test_dropped_column_reads_back_as_the_authors_nans():

@@ -60,7 +60,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
         burn_in=10,
         thin=1,
     )
-    pipeline = MCPipeline([simulation_step("sim", T=50)])
+    pipeline = MCPipeline([simulation_step("sim", target="reference", T=50)])
 
     builder = (
         BundleBuilder(created_by="test-suite")
@@ -83,9 +83,9 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
     loaded = load_bundle(target)
 
     # model rebuilt and usable
-    assert isinstance(loaded.reference, SolvedModel)
-    assert loaded.dgp is None
-    sim = loaded.reference.sim(8)
+    assert isinstance(loaded.models["reference"], SolvedModel)
+    assert "dgp" not in loaded.models
+    sim = loaded.models["reference"].sim(8)
     assert sim.X.shape[0] == 8
 
     # estimation
@@ -140,7 +140,11 @@ def test_add_estimation_accepts_live_mcmc_result() -> None:
     )
     spec = _estimation_spec(rng.standard_normal((4, 2)), names=("a", "b"))
 
-    builder = BundleBuilder().add_estimation(_estimation_source(spec), result=mcmc)
+    builder = (
+        BundleBuilder()
+        .add_model("reference", _MODEL_YAML)
+        .add_estimation(_estimation_source(spec), result=mcmc)
+    )
     _, files = builder.build()
 
     # live result projected to meta, tagged mcmc

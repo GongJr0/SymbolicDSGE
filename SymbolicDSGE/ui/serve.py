@@ -11,14 +11,14 @@
 - ``None`` -> empty session (the Builder tab is the entry point);
 - a :class:`~SymbolicDSGE.core.solved_model.SolvedModel` -> preload as the
   ``reference`` slot;
-- a path / string -> open the ``.sdsge`` bundle, hydrate ``reference``/``dgp``
+- a path / string -> open the ``.sdsge`` bundle, hydrate named models
   and the estimation/MC/sim prefill into the session's :class:`Workspace`.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from ..monte_carlo.serialize import serialize_pipeline_result
 from ..monte_carlo.spec import pipeline_meta
@@ -27,7 +27,6 @@ from .estimation import (
     emit_estimation_wire,
     estimator_spec_wire,
 )
-from .schemas import Role
 from .session import TabState, Workspace
 
 if TYPE_CHECKING:
@@ -53,7 +52,7 @@ def serve_from(
 
     if isinstance(source, SolvedModel):
         run_server(
-            reference=source,
+            models={"reference": source},
             host=host,
             port=port,
             open_browser=open_browser,
@@ -71,8 +70,7 @@ def serve_from(
     loaded = load_bundle(path)
     workspace = build_workspace(loaded)
     run_server(
-        reference=loaded.reference,
-        dgp=loaded.dgp,
+        models=loaded.models,
         workspace=workspace,
         source=str(path),
         host=host,
@@ -90,22 +88,24 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
     its form posts back. The simulation prefill rides as the SimSpec dict so
     the Outputs tab pre-fills the seed/T/shock controls.
     """
+    eout: dict[str, TabState] = {}
     estimation = TabState()
+
     if loaded.estimation is not None:
         spec = loaded.estimation.estimator.to_spec()
         estimation.spec = estimator_spec_wire(spec)
         if loaded.estimation.result is not None:
             estimation.result = emit_estimation_wire(loaded.estimation.result)
-        if loaded.reference is not None:
-            # The form is per-role, so the view is keyed by it. A bundle holds
-            # one estimation, tied to the reference model it was run against.
-            estimation.view = {
-                "reference": build_estimation_prefill(
-                    spec,
-                    loaded.estimation.result,
-                    loaded.reference.compiled,
-                )
-            }
+        member = loaded.manifest.members_by_kind("estimation_spec")[0]
+        model_name = "reference" if member.model_name is None else member.model_name
+        model = loaded.models[model_name] if loaded.models is not None else None
+        if model is not None:
+            estimation.view = build_estimation_prefill(
+                spec,
+                loaded.estimation.result,
+                model.compiled,
+            )
+        eout = {model_name: estimation}
 
     mc = TabState()
     if loaded.mc is not None:
@@ -116,12 +116,12 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
     # Spec only: the session replays it against the model once both are
     # installed, which is what fills the result.
     simulation = {
-        cast(Role, role): TabState(spec=spec.to_dict())
-        for role, spec in (loaded.manifest.simulation or {}).items()
+        name: TabState(spec=spec.to_dict())
+        for name, spec in (loaded.manifest.simulation or {}).items()
     }
 
     return Workspace(
-        estimation=estimation,
+        estimation=eout,
         mc=mc,
         simulation=simulation,
     )

@@ -52,7 +52,10 @@ def _run(
         steps,
     )
     return pipeline.run(
-        reference=_REFERENCE, n_rep=n_rep, fail_fast=fail_fast, verbosity=verbosity
+        models={"reference": _REFERENCE},
+        n_rep=n_rep,
+        fail_fast=fail_fast,
+        verbosity=verbosity,
     )
 
 
@@ -141,7 +144,7 @@ def test_pcs_end_to_end_scalar_and_selection_vector() -> None:
             _postproc("pcs", pcs, expected=0),
         ],
     )
-    result = pipeline.run(reference=_REFERENCE, n_rep=n_rep, verbosity=0)
+    result = pipeline.run(models={"reference": _REFERENCE}, n_rep=n_rep, verbosity=0)
 
     # Recompute independently from the stored traces (same arrays the op saw).
     registry = traces_from_summaries(result.test_summaries, result.regression_summaries)
@@ -207,7 +210,7 @@ def test_postproc_receives_step_kwargs_and_can_colstack_traces() -> None:
         ],
         [_postproc("pcs", pcs, expected=0)],
     )
-    result = pipeline.run(reference=_REFERENCE, n_rep=8, verbosity=0)
+    result = pipeline.run(models={"reference": _REFERENCE}, n_rep=8, verbosity=0)
 
     value = result.postproc["pcs"]["summary"].value
     assert isinstance(value, float) and 0.0 <= value <= 1.0
@@ -230,7 +233,7 @@ def test_transform_payloads_are_stacked_into_traces() -> None:
         ],
         [_postproc("p", op)],
     )
-    result = pipeline.run(reference=_REFERENCE, n_rep=5, verbosity=0)
+    result = pipeline.run(models={"reference": _REFERENCE}, n_rep=5, verbosity=0)
 
     assert captured["has_payload"] is True
     assert captured["shape"][0] == 5  # stacked over replications
@@ -308,7 +311,7 @@ def test_kde_builtin_runs_and_returns_curve_and_descriptives() -> None:
         ],
         [kde_step("density", trace="payload.varying", grid_points=64)],
     )
-    result = pipeline.run(reference=_REFERENCE, n_rep=12, verbosity=0)
+    result = pipeline.run(models={"reference": _REFERENCE}, n_rep=12, verbosity=0)
 
     # kde returns a mapping; stored verbatim, so its entries nest under "density".
     curve = result.postproc["density"]["raw"]
@@ -365,6 +368,6 @@ def test_runtime_traces_match_available_registry() -> None:
         ],
         [postproc_step("probe", probe)],
     )
-    pipe.run(reference=_REFERENCE, n_rep=5, verbosity=0)
+    pipe.run(models={"reference": _REFERENCE}, n_rep=5, verbosity=0)
 
     assert captured["keys"] == set(_trace_keys(pipeline_meta(pipe.to_spec())))

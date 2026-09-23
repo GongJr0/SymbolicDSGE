@@ -11,7 +11,7 @@ import {
 } from "react";
 import { listFunctions, removeFunction, submitFunction } from "./api";
 import { registerPythonLsp } from "./lsp/registerPythonLsp";
-import type { FunctionKind, FunctionRecord, ModelSummary, Role } from "./types";
+import type { FunctionKind, FunctionRecord, ModelSummary } from "./types";
 
 function handleEditorMount(_editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco) {
   void registerPythonLsp(monaco);
@@ -73,7 +73,7 @@ def transform(${argStr}) -> ndarray:
 
 export const CodePanel = forwardRef<
   CodePanelHandle,
-  { role: Role; activeModel: ModelSummary; theme: "light" | "dark"; kind: FunctionKind }
+  { role: string; activeModel: ModelSummary; theme: "light" | "dark"; kind: FunctionKind }
 >(function CodePanel({ role, activeModel, theme, kind }, ref) {
   const initialTemplate = makeTemplate(activeModel, kind);
   const prevTemplateRef = useRef<string>(initialTemplate);

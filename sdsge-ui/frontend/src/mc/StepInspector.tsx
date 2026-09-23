@@ -4,10 +4,10 @@ import { Check, TriangleAlert, Trash2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { validateCustomOp } from "../api";
 import { registerPythonLsp } from "../lsp/registerPythonLsp";
-import type { MCFieldSpec, MCStepSpec, MCStepType, Role } from "../types";
+import type { MCFieldSpec, MCStepSpec, MCStepType } from "../types";
 import { ShockRegistryEditor } from "../shocks/ShockRegistryEditor";
 import { useShockRegistry } from "../shocks/useShockRegistry";
-import { stepDefinition } from "./catalog";
+import { stepDefinition, usesModelTarget } from "./catalog";
 import { getField, setField } from "./fields";
 import type { MCFlowNode, MCProducer } from "./types";
 
@@ -36,8 +36,8 @@ function channelOptionsFor(
     return catalogOptions.filter((option) => !DATA_CHANNELS.includes(option));
   }
   if (kind === "transform") return ["payload"];
-  // No producer selected yet: offer everything so the field stays editable.
-  return [...catalogOptions, "payload"];
+  // Fields are available only after an eligible producer is selected.
+  return [];
 }
 
 export function StepInspector({
@@ -48,6 +48,7 @@ export function StepInspector({
   producers,
   availableTraces,
   shockNamesByRole,
+  modelNames,
 }: {
   node: MCFlowNode | null;
   onChange: (node: MCFlowNode) => void;
@@ -55,7 +56,8 @@ export function StepInspector({
   theme: "light" | "dark";
   producers: MCProducer[];
   availableTraces: string[];
-  shockNamesByRole: Record<Role, string[]>;
+  shockNamesByRole: Record<string, string[]>;
+  modelNames: string[];
 }) {
   // The shock panel's editing state. Declared above the early return, since a
   // hook cannot be conditional.
@@ -137,8 +139,28 @@ export function StepInspector({
     for (let i = 0; i < fields.length; i++) {
       const field = fields[i];
       const key = `${node.id}:${field.key}`;
+      if (field.key === "target" && usesModelTarget(step.step_type)) {
+        const current = String(step.kwargs.target ?? "");
+        const options = current && !modelNames.includes(current)
+          ? [current, ...modelNames]
+          : modelNames;
+        items.push(
+          <label key={key}>
+            {field.label}
+            <select value={current} onChange={(event) => updateParam(field.key, event.target.value || null)}>
+              <option value="">Select a model</option>
+              {options.map((name) => (
+                <option key={name} value={name}>
+                  {name}{modelNames.includes(name) ? "" : " (missing)"}
+                </option>
+              ))}
+            </select>
+          </label>,
+        );
+        continue;
+      }
       if (field.type === "shock_registry") {
-        const targetRole = String(step.kwargs.target ?? "dgp") as Role;
+        const targetRole = String(step.kwargs.target ?? "") as string;
         items.push(
           <ShockRegistryEditor
             key={key}
@@ -312,6 +334,7 @@ function SourceLeg({
         {channelField.label}
         <select
           value={channelValue}
+          disabled={selected === undefined}
           onChange={(event) => onUpdate({ [channelField.key]: event.target.value })}
         >
           {channelOptions.map((option) => (

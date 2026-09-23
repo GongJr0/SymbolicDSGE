@@ -10,7 +10,7 @@ from SymbolicDSGE.core.config import ModelConfig
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.config import KalmanConfig
 
-from .schemas import ArrayEnvelope, Role
+from .schemas import ArrayEnvelope
 
 
 def encode_array(array: NDArray[Any]) -> ArrayEnvelope:
@@ -40,13 +40,13 @@ def encode_named_arrays(values: Mapping[str, NDArray[Any]]) -> list[dict[str, An
 
 def summarize_parsed_model(
     *,
-    role: Role,
+    model_name: str,
     model: ModelConfig,
     kalman: KalmanConfig | None,
     source: str | None,
 ) -> dict[str, Any]:
     return {
-        "role": role,
+        "model_name": model_name,
         "loaded": True,
         "solved": False,
         "source": source,
@@ -62,7 +62,7 @@ def summarize_parsed_model(
 
 def summarize_solved_model(
     *,
-    role: Role,
+    model_name: str,
     model: SolvedModel,
     source: str | None,
 ) -> dict[str, Any]:
@@ -70,7 +70,7 @@ def summarize_solved_model(
     layout = compiled.layout
     policy = model.policy
     return {
-        "role": role,
+        "model_name": model_name,
         "loaded": True,
         "solved": True,
         "source": source,
@@ -95,8 +95,8 @@ def summarize_solved_model(
     }
 
 
-def empty_model_summary(role: Role) -> dict[str, Any]:
-    return {"role": role, "loaded": False, "solved": False}
+def empty_model_summary(model_name: str) -> dict[str, Any]:
+    return {"model_name": model_name, "loaded": False, "solved": False}
 
 
 def _symbol_names(values: Sequence[Any]) -> list[str]:

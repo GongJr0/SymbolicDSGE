@@ -152,19 +152,15 @@ def mc_available_traces(doc: Mapping[str, Any]) -> dict[str, list[str]]:
 def run_pipeline(
     pipeline: MCPipeline,
     *,
-    reference: SolvedModel | None,
-    dgp: SolvedModel | None,
+    models: Mapping[str, SolvedModel],
     n_rep: int,
     fail_fast: bool,
     n_jobs: int | None = None,
     verbosity: int = 0,
 ) -> MCPipelineResult:
     """Run a built pipeline against the session's models."""
-    if reference is None:
-        raise ValueError("A solved reference model is required.")
     return pipeline.run(
-        reference=reference,
-        dgp=dgp,
+        models=models,
         n_rep=n_rep,
         fail_fast=fail_fast,
         n_jobs=n_jobs,

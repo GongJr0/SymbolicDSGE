@@ -83,7 +83,7 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
         burn_in=5,
         thin=1,
     )
-    pipeline = MCPipeline([simulation_step("sim", T=20)])
+    pipeline = MCPipeline([simulation_step("sim", target="reference", T=20)])
     return (
         BundleBuilder(created_by="serve-test")
         .add_model("reference", _MODEL_YAML, compile_kwargs={})
@@ -280,19 +280,23 @@ def test_session_summary_carries_empty_workspace_by_default() -> None:
 
 def test_session_summary_surfaces_workspace_preload() -> None:
     workspace = Workspace(
-        estimation=TabState(
-            spec={"y": [[1.0]], "params": {"estimated_params": ["beta"]}},
-            result={"kind": "mcmc", "param_names": ["beta"]},
-            view={"method": "mcmc"},
-        ),
+        estimation={
+            "reference": TabState(
+                spec={"y": [[1.0]], "params": {"estimated_params": ["beta"]}},
+                result={"kind": "mcmc", "param_names": ["beta"]},
+                view={"method": "mcmc"},
+            )
+        },
         mc=TabState(spec={"replication_steps": []}, result={"kind": "mc"}),
         simulation={"reference": TabState(spec={"T": 8})},
     )
     client = TestClient(create_app(workspace=workspace))
     payload = client.get("/api/session").json()["workspace"]
-    assert payload["estimation"]["spec"]["params"]["estimated_params"] == ["beta"]
-    assert payload["estimation"]["result"]["kind"] == "mcmc"
-    assert payload["estimation"]["view"]["method"] == "mcmc"
+    assert payload["estimation"]["reference"]["spec"]["params"]["estimated_params"] == [
+        "beta"
+    ]
+    assert payload["estimation"]["reference"]["result"]["kind"] == "mcmc"
+    assert payload["estimation"]["reference"]["view"]["method"] == "mcmc"
     assert payload["mc"] == {
         "spec": {"replication_steps": []},
         "result": {"kind": "mc"},
@@ -302,12 +306,12 @@ def test_session_summary_surfaces_workspace_preload() -> None:
 
 def test_session_summary_drops_unfilled_tab_slots() -> None:
     """A tab reports only the slots something filled, and vanishes with none."""
-    workspace = Workspace(estimation=TabState(view={"method": "mle"}))
+    workspace = Workspace(estimation={"reference": TabState(view={"method": "mle"})})
     client = TestClient(create_app(workspace=workspace))
 
     payload = client.get("/api/session").json()["workspace"]
 
-    assert payload == {"estimation": {"view": {"method": "mle"}}}
+    assert payload == {"estimation": {"reference": {"view": {"method": "mle"}}}}
 
 
 def test_session_summary_drops_unset_workspace_slots() -> None:
@@ -326,17 +330,20 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     ws = build_workspace(loaded)
 
     # The bundle's own two members, carried over untouched by the GUI shape.
-    assert ws.estimation.spec is not None
-    assert ws.estimation.spec["params"]["estimated_params"] == ["beta", "sigma"]
-    assert len(ws.estimation.spec["y"]) == 10
-    assert ws.estimation.result is not None
-    assert ws.estimation.result["param_names"] == ["beta", "sigma"]
+    assert ws.estimation["reference"].spec is not None
+    assert ws.estimation["reference"].spec["params"]["estimated_params"] == [
+        "beta",
+        "sigma",
+    ]
+    assert len(ws.estimation["reference"].spec["y"]) == 10
+    assert ws.estimation["reference"].result is not None
+    assert ws.estimation["reference"].result["param_names"] == ["beta", "sigma"]
     # bulk traces survived round-trip into the wire dict
-    assert len(ws.estimation.result["samples"]["beta"]) == 20
+    assert len(ws.estimation["reference"].result["samples"]["beta"]) == 20
 
     # The view is the pair projected into the form's own shape, per role.
-    assert ws.estimation.view is not None
-    view = ws.estimation.view["reference"]
+    assert ws.estimation["reference"].view is not None
+    view = ws.estimation["reference"].view
     assert view["routine"] == "mcmc"  # inferred from the result type
     rows = {row["name"]: row for row in view["parameters"]}
     assert rows["beta"]["estimate"] and rows["sigma"]["estimate"]
@@ -426,10 +433,10 @@ def test_build_workspace_keeps_gui_shape_out_of_the_bundle_slot(
     """
     ws = build_workspace(load_bundle(_hydrated_bundle(tmp_path)))
 
-    assert ws.estimation.spec is not None
-    assert set(ws.estimation.spec) == {"y", "params"}
-    assert "method" not in ws.estimation.spec["params"]
-    assert "parameters" not in ws.estimation.spec["params"]
+    assert ws.estimation["reference"].spec is not None
+    assert set(ws.estimation["reference"].spec) == {"y", "params"}
+    assert "method" not in ws.estimation["reference"].spec["params"]
+    assert "parameters" not in ws.estimation["reference"].spec["params"]
 
 
 def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None:
@@ -440,7 +447,7 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None
     this would need a reverse mapping to strip it.
     """
     ws = build_workspace(load_bundle(_hydrated_bundle(tmp_path)))
-    assert ws.estimation.spec is not None
+    assert ws.estimation["reference"].spec is not None
 
     written = (
         BundleBuilder(created_by="round-trip")
@@ -448,7 +455,8 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None
         .add_estimation(
             Estimator.from_spec(
                 EstimatorSpec(
-                    y=ws.estimation.spec["y"], params=ws.estimation.spec["params"]
+                    y=ws.estimation["reference"].spec["y"],
+                    params=ws.estimation["reference"].spec["params"],
                 ),
                 _compiled_reference(),
             )
@@ -474,8 +482,7 @@ def test_bundled_simulation_replays_into_an_output(tmp_path: Path) -> None:
     """
     loaded = load_bundle(_hydrated_bundle(tmp_path))
     app = create_app(
-        reference=loaded.reference,
-        dgp=loaded.dgp,
+        models=loaded.models,
         workspace=build_workspace(loaded),
     )
     client = TestClient(app)
@@ -488,7 +495,7 @@ def test_bundled_simulation_replays_into_an_output(tmp_path: Path) -> None:
     assert result["kind"] == "sim" and result["T"] == 8
     assert {"Infl", "Rate"} <= {series["name"] for series in result["series"]}
     # The replay lands in the tab's own result slot, which is where a run lives.
-    assert simulation["result"]["role"] == "reference"
+    assert simulation["result"]["model_name"] == "reference"
 
 
 def test_bundled_simulation_replay_reproduces_rather_than_redraws(
@@ -497,8 +504,14 @@ def test_bundled_simulation_replay_reproduces_rather_than_redraws(
     """The spec pins the seed, so two replays of it agree."""
     loaded = load_bundle(_hydrated_bundle(tmp_path))
 
-    first = create_app(reference=loaded.reference, workspace=build_workspace(loaded))
-    second = create_app(reference=loaded.reference, workspace=build_workspace(loaded))
+    first = create_app(
+        models={"reference": loaded.models["reference"]},
+        workspace=build_workspace(loaded),
+    )
+    second = create_app(
+        models={"reference": loaded.models["reference"]},
+        workspace=build_workspace(loaded),
+    )
 
     def series(app: Any) -> Any:
         payload = TestClient(app).get("/api/session").json()
@@ -525,14 +538,16 @@ def test_a_simulation_that_cannot_replay_leaves_the_session_usable(
         }
     ]
 
-    app = create_app(reference=loaded.reference, workspace=workspace)
+    app = create_app(
+        models={"reference": loaded.models["reference"]}, workspace=workspace
+    )
 
     assert "could not replay" in capsys.readouterr().out
     payload = TestClient(app).get("/api/session").json()
     # The spec survives for inspection, the result is simply absent, and the
     # estimation tab is untouched by any of it.
     assert "result" not in payload["workspace"]["simulation"]["reference"]
-    assert payload["workspace"]["estimation"]["result"] is not None
+    assert payload["workspace"]["estimation"]["reference"]["result"] is not None
 
 
 # -- workspace view updates ------------------------------------------------
@@ -544,14 +559,19 @@ def test_workspace_view_round_trips_through_the_session() -> None:
     This is the whole restore mechanism: the process outlives the refresh, so
     the view returns from server memory with nothing kept on the client.
     """
-    client = TestClient(create_app())
+    app = create_app()
+    app.state.ui_session.load_yaml(model_name="reference", content=_MODEL_YAML)
+    client = TestClient(app)
     view = {"method": "mcmc", "nDraws": 4000, "dataVectors": {"Infl": "1 2"}}
 
-    ack = client.put("/api/session/workspace", json={"tab": "estimation", "view": view})
+    ack = client.put(
+        "/api/session/workspace",
+        json={"tab": "estimation", "model_name": "reference", "view": view},
+    )
 
     assert ack.status_code == 200 and ack.json() == {"tab": "estimation"}
     reread = client.get("/api/session").json()["workspace"]
-    assert reread["estimation"] == {"view": view}
+    assert reread["estimation"]["reference"] == {"view": view}
 
 
 def test_workspace_view_is_held_verbatim() -> None:
@@ -566,21 +586,36 @@ def test_workspace_view_is_held_verbatim() -> None:
 
 def test_workspace_view_cannot_write_the_bundle_bound_slots() -> None:
     """A client naming ``spec`` or ``result`` is rejected, not partly obeyed."""
-    client = TestClient(create_app())
+    app = create_app()
+    app.state.ui_session.load_yaml(model_name="reference", content=_MODEL_YAML)
+    client = TestClient(app)
 
     refused = client.put(
         "/api/session/workspace",
-        json={"tab": "estimation", "view": {}, "spec": {"y": []}},
+        json={
+            "tab": "estimation",
+            "model_name": "reference",
+            "view": {},
+            "spec": {"y": []},
+        },
     )
 
     assert refused.status_code == 400
 
 
 def test_workspace_view_clears_when_set_to_null() -> None:
-    client = TestClient(create_app())
-    client.put("/api/session/workspace", json={"tab": "estimation", "view": {"a": 1}})
+    app = create_app()
+    app.state.ui_session.load_yaml(model_name="reference", content=_MODEL_YAML)
+    client = TestClient(app)
+    client.put(
+        "/api/session/workspace",
+        json={"tab": "estimation", "model_name": "reference", "view": {"a": 1}},
+    )
 
-    client.put("/api/session/workspace", json={"tab": "estimation", "view": None})
+    client.put(
+        "/api/session/workspace",
+        json={"tab": "estimation", "model_name": "reference", "view": None},
+    )
 
     assert client.get("/api/session").json()["workspace"] == {}
 
@@ -614,7 +649,7 @@ def test_serve_from_solved_model_preloads_reference(
     monkeypatch.setattr("SymbolicDSGE.ui.cli.run_server", fake_run_server)
     solved = _solved_test_model()
     serve_from(source=solved, open_browser=False)
-    assert captured["reference"] is solved
+    assert captured["models"]["reference"] is solved
     assert captured.get("workspace") is None
     # A model handed over in process has no origin to cite.
     assert captured.get("source") is None
@@ -631,8 +666,8 @@ def test_serve_from_bundle_path_hydrates_workspace(
     monkeypatch.setattr("SymbolicDSGE.ui.cli.run_server", fake_run_server)
     bundle = _hydrated_bundle(tmp_path)
     serve_from(source=bundle, open_browser=False)
-    assert isinstance(captured["reference"], SolvedModel)
-    assert captured["dgp"] is None
+    assert isinstance(captured["models"]["reference"], SolvedModel)
+    assert "dgp" not in captured["models"]
     assert isinstance(captured["workspace"], Workspace)
     assert captured["workspace"].estimation is not None
     assert captured["workspace"].simulation is not None
@@ -649,8 +684,7 @@ def test_preloaded_model_reports_its_source_and_yaml(tmp_path: Path) -> None:
     bundle = _hydrated_bundle(tmp_path)
     loaded = load_bundle(bundle)
     app = create_app(
-        reference=loaded.reference,
-        dgp=loaded.dgp,
+        models=loaded.models,
         workspace=build_workspace(loaded),
         source=str(bundle),
     )
@@ -664,7 +698,7 @@ def test_preloaded_model_reports_its_source_and_yaml(tmp_path: Path) -> None:
 
 def test_in_process_model_leaves_source_unset(tmp_path: Path) -> None:
     """``SolvedModel.serve()`` names no origin, so the GUI shows none."""
-    app = create_app(reference=_solved_test_model())
+    app = create_app(models={"reference": _solved_test_model()})
 
     reference = TestClient(app).get("/api/session").json()["models"]["reference"]
 

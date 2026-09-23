@@ -229,7 +229,7 @@ def test_log_of_a_non_positive_sample_is_rejected(
             log_step("log_bad", source="nonpositive", field="payload"),
         ]
     ).run(
-        solved_test_model,
+        {"reference": solved_test_model},
         n_rep=1,
         fail_fast=False,
         check_memory_availability=False,
@@ -246,7 +246,7 @@ def test_diff_order_at_the_sample_length_fails(mc_run, solved_test_model) -> Non
             diff_step("drained", source="dat", field="observables", order=PERIODS),
         ]
     ).run(
-        solved_test_model,
+        {"reference": solved_test_model},
         n_rep=1,
         fail_fast=False,
         check_memory_availability=False,

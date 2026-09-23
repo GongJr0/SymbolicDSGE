@@ -40,7 +40,7 @@ T = 16
 
 
 def _plan(solved_test_model, shocks, shock_scale=1.0):
-    step = simulation_step(T=T, shocks=shocks, shock_scale=shock_scale)
+    step = simulation_step(target="dgp", T=T, shocks=shocks, shock_scale=shock_scale)
     return build_native_plan(solved_test_model, step, T)
 
 
@@ -214,7 +214,7 @@ def _run_states(solved_test_model, shocks, n_rep, n_jobs):
         ]
     )
     lowered = lower_native_run(
-        pipeline, reference=solved_test_model, n_rep=n_rep, n_jobs=n_jobs
+        pipeline, models={"reference": solved_test_model}, n_rep=n_rep, n_jobs=n_jobs
     )
     assert (
         run_native(lowered.allocation, lowered.steps, lowered.input_bindings).status

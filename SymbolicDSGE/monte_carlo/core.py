@@ -19,10 +19,11 @@ from ..regression.result import MCRegressionResult
 from .allocation import (
     FieldLayout,
     _filter_mode,
+    get_target_model,
     is_empty,
     resolve_output_specs,
 )
-from .defaults import DEFAULT_SIMULATION_OBSERVABLES, DEFAULT_SIMULATION_TARGET
+from .defaults import DEFAULT_SIMULATION_OBSERVABLES
 from .memory import MCMemoryProfiler, MCMemoryReport
 from .native_lowering import LoweredMCRun, lower_native_run
 from .spec import PipelineSpec
@@ -100,8 +101,7 @@ class MCPipeline:
 
     def run(
         self,
-        reference: SolvedModel | None = None,
-        dgp: SolvedModel | None = None,
+        models: Mapping[str, SolvedModel] | None = None,
         *,
         n_rep: int,
         fail_fast: bool = False,
@@ -160,8 +160,7 @@ class MCPipeline:
 
         prep = lower_native_run(
             self,
-            reference=reference,
-            dgp=dgp,
+            models=models,
             n_rep=n_rep,
             n_jobs=n_jobs,
             check_memory_availability=check_memory_availability,
@@ -366,8 +365,7 @@ class MCPipeline:
     def validate_memory_requirements(
         self,
         *,
-        reference: SolvedModel,
-        dgp: SolvedModel | None = None,
+        models: Mapping[str, SolvedModel] | None = None,
         n_rep: int,
         n_jobs: int | None = None,
     ) -> "MCMemoryReport":
@@ -383,13 +381,12 @@ class MCPipeline:
         their memory is not a question the step graph can answer.
         """
         plan = resolve_output_specs(
-            self.replication_steps, self._source_indices, reference, dgp
+            self.replication_steps, self._source_indices, models
         )
         return MCMemoryProfiler(
             plan,
             self.replication_steps,
-            reference=reference,
-            dgp=dgp,
+            models=models,
             n_rep=n_rep,
             n_jobs=n_jobs,
         ).validate()
@@ -567,7 +564,7 @@ def _compile_tests(
 
 
 def _datagen_names(
-    step: MCStep, reference: SolvedModel | None, dgp: SolvedModel | None
+    step: MCStep, models: Mapping[str, SolvedModel] | None
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """The variable, shock and observable names of one datagen's columns.
 
@@ -586,10 +583,7 @@ def _datagen_names(
             f"Result semantics are not resolved for datagen step type "
             f"{step.step_type!r}."
         )
-    target = step.kwargs.get("target", DEFAULT_SIMULATION_TARGET)
-    model = reference if target == "reference" else dgp
-    if model is None:
-        raise ValueError("Simulation step requires its target model.")
+    model = get_target_model(step, models)
     comp = model.compiled
     return (
         tuple(comp.var_names),
@@ -630,9 +624,7 @@ def _compile_datagen(
             ),
             0,
         )
-        var_names, shock_names, observable_names = _datagen_names(
-            step, lowered.reference, lowered.dgp
-        )
+        var_names, shock_names, observable_names = _datagen_names(step, lowered.models)
 
         results[step.name] = MCDataGenResult(
             n_rep=n_rep,

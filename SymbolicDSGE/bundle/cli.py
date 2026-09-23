@@ -187,7 +187,7 @@ def compile_directory(
                 path=_archive_path_for(member),
                 kind=member.kind,
                 format=member.format,
-                role=member.role,
+                model_name=member.model_name,
                 columns=member.columns,
                 options=dict(member.options),
             ),
@@ -254,7 +254,7 @@ def decompile_bundle(
                 path=new_path,
                 kind=member.kind,
                 format=new_format,
-                role=member.role,
+                model_name=member.model_name,
                 columns=member.columns,
                 options=dict(member.options),
             )
@@ -279,11 +279,11 @@ def _authoring_path_for(member: Member) -> str:
     """Map a bundle member's archive path to its compile-input authoring path.
 
     Most kinds share the same path in both directions; ``model_config`` is the
-    exception because the bundle stores it under ``model/{role}.yaml`` while the
-    compile convention is ``{role}.yaml`` at the directory root.
+    exception because the bundle stores it under ``model/{model_name}.yaml`` while the
+    compile convention is ``{model_name}.yaml`` at the directory root.
     """
-    if member.kind == "model_config" and member.role:
-        return f"{member.role}.yaml"
+    if member.kind == "model_config" and member.model_name:
+        return f"{member.model_name}.yaml"
     return member.path
 
 
@@ -293,8 +293,8 @@ def _archive_path_for(member: Member) -> str:
     The mirror of :func:`_authoring_path_for`, and the only asymmetry between the
     two layouts: everything else sits at the same path in both.
     """
-    if member.kind == "model_config" and member.role:
-        return f"model/{member.role}.yaml"
+    if member.kind == "model_config" and member.model_name:
+        return f"model/{member.model_name}.yaml"
     return member.path
 
 

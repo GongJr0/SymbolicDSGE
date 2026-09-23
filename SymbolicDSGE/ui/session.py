@@ -29,7 +29,6 @@ from ..kalman.config import KalmanConfig
 from .schemas import (
     EstimationRunRequest,
     FunctionKind,
-    Role,
     WorkspaceTab,
 )
 from ..bundle.manifest import SimSpec
@@ -58,7 +57,6 @@ class FunctionRecord:
 
 @dataclass
 class ModelSlot:
-    role: Role
     source: str | None = None
     raw_yaml: str | None = None
     model_config: ModelConfig | None = None
@@ -106,65 +104,60 @@ class Workspace:
     that never went away rather than from anything stored on the client.
     """
 
-    estimation: TabState = field(default_factory=TabState)
+    estimation: dict[str, TabState] = field(default_factory=dict)
     mc: TabState = field(default_factory=TabState)
-    #: Per-role simulation tabs. The Outputs tab renders only ``T`` and the
+    #: Per-model simulation tabs. The Outputs tab renders only ``T`` and the
     #: observables toggle, both of them ``SimSpec`` fields, so there is no
     #: view to carry: the spec is the form.
-    simulation: dict[Role, TabState] = field(default_factory=dict)
+    simulation: dict[str, TabState] = field(default_factory=dict)
 
 
 class UISession:
     def __init__(
         self,
         *,
-        reference: SolvedModel | None = None,
-        dgp: SolvedModel | None = None,
+        models: Mapping[str, SolvedModel] | None = None,
         workspace: Workspace | None = None,
         source: str | None = None,
     ) -> None:
-        self.slots: dict[Role, ModelSlot] = {
-            "reference": ModelSlot(role="reference"),
-            "dgp": ModelSlot(role="dgp"),
-        }
-        self.functions: dict[Role, dict[str, FunctionRecord]] = {
-            "reference": {},
-            "dgp": {},
+        if models is None:
+            models = {}
+        self.slots: dict[str, ModelSlot] = {name: ModelSlot() for name in models}
+        self.functions: dict[str, dict[str, FunctionRecord]] = {
+            name: {} for name in self.slots
         }
         self.workspace: Workspace = workspace if workspace is not None else Workspace()
-        # Both roles preload from the one source, so they share its label.
-        if reference is not None:
-            self.set_solved_model("reference", reference, source=source)
-        if dgp is not None:
-            self.set_solved_model("dgp", dgp, source=source)
+        # Preloaded models share the source label.
+        for name, model in models.items():
+            self.set_solved_model(name, model, source=source)
         self.replay_bundled_simulations()
 
     def summary(self) -> dict[str, Any]:
-        roles: tuple[Role, Role] = ("reference", "dgp")
         return {
-            "models": {role: self.model_summary(role) for role in roles},
+            "models": {name: self.model_summary(name) for name in self.slots},
             "workspace": self._workspace_payload(),
         }
 
     def _workspace_payload(self) -> dict[str, Any]:
         """Wire shape for the workspace (omits tabs and slots nothing filled)."""
         out: dict[str, Any] = {}
+
+        if mc := self.workspace.mc.payload():
+            out["mc"] = mc
+
         for name, tab in (
             ("estimation", self.workspace.estimation),
-            ("mc", self.workspace.mc),
+            ("simulation", self.workspace.simulation),
         ):
-            if payload := tab.payload():
+            if payload := {n: t.payload() for n, t in tab.items() if t.payload()}:
                 out[name] = payload
-        if simulation := {
-            role: payload
-            for role, tab in self.workspace.simulation.items()
-            if (payload := tab.payload())
-        }:
-            out["simulation"] = simulation
         return out
 
     def set_workspace_view(
-        self, tab: WorkspaceTab, view: dict[str, Any] | None
+        self,
+        tab: WorkspaceTab,
+        view: dict[str, Any] | None,
+        model_name: str | None = None,
     ) -> None:
         """Replace a tab's view with what the client last had on screen.
 
@@ -172,12 +165,21 @@ class UISession:
         appears here without the server learning what it means. Writing it
         cannot disturb ``spec``/``result``, which only a run fills.
         """
-        getattr(self.workspace, tab).view = view
+        if tab == "estimation":
+            if model_name is None:
+                raise ValueError("Estimation view updates require a model_name.")
+            self._slot(model_name)
+            state = self.workspace.estimation.setdefault(model_name, TabState())
+        elif tab == "mc":
+            state = self.workspace.mc
+        else:
+            raise ValueError(f"Unknown workspace tab {tab!r}.")
+        state.view = view
 
     def set_solved_model(
-        self, role: Role, model: SolvedModel, *, source: str | None = None
+        self, name: str, model: SolvedModel, *, source: str | None = None
     ) -> dict[str, Any]:
-        """Install an already-solved model into ``role``'s slot.
+        """Install an already-solved model into the named slot.
 
         ``source`` labels where the model came from, e.g. the bundle path
         ``sdsge-ui`` was pointed at; it is what distinguishes one preloaded
@@ -186,7 +188,7 @@ class UISession:
         along on the config whenever the model was parsed rather than built,
         which is what lets the Builder tab open on the model it is serving.
         """
-        slot = self._slot(role)
+        slot = self._ensure_slot(name)
         slot.source = source
         slot.raw_yaml = model.config.source_yaml
         slot.model_config = model.config
@@ -194,12 +196,12 @@ class UISession:
         slot.solver = DSGESolver(model.config, cast(Any, model.kalman_config))
         slot.compiled = model.compiled
         slot.solved = model
-        return self.model_summary(role)
+        return self.model_summary(name)
 
     def load_yaml(
         self,
         *,
-        role: Role,
+        model_name: str,
         path: str | None = None,
         content: str | None = None,
     ) -> dict[str, Any]:
@@ -220,7 +222,7 @@ class UISession:
             raw_yaml = content
 
         model, kalman = parser.get_all()
-        slot = self._slot(role)
+        slot = self._ensure_slot(model_name)
         slot.source = source
         slot.raw_yaml = raw_yaml
         slot.model_config = model
@@ -228,47 +230,47 @@ class UISession:
         slot.solver = DSGESolver(model, cast(Any, kalman))
         slot.compiled = None
         slot.solved = None
-        return self.model_summary(role)
+        return self.model_summary(model_name)
 
     def solve_model(
         self,
         *,
-        role: Role,
+        model_name: str,
         compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        slot = self._slot(role)
+        slot = self._slot(model_name)
         if slot.solver is None:
-            raise ValueError(f"No model is loaded for role '{role}'.")
+            raise ValueError(f"No model is loaded for '{model_name}'.")
         compiled = slot.solver.compile(**dict(compile_kwargs or {}))
         solved = slot.solver.solve(compiled, **dict(solve_kwargs or {}))
         slot.compiled = compiled
         slot.solved = solved
-        return self.model_summary(role)
+        return self.model_summary(model_name)
 
-    def model_summary(self, role: Role) -> dict[str, Any]:
-        slot = self._slot(role)
+    def model_summary(self, name: str) -> dict[str, Any]:
+        slot = self._slot(name)
         if slot.solved is not None:
             summary = summarize_solved_model(
-                role=role,
+                model_name=name,
                 model=slot.solved,
                 source=slot.source,
             )
         elif slot.model_config is not None:
             summary = summarize_parsed_model(
-                role=role,
+                model_name=name,
                 model=slot.model_config,
                 kalman=slot.kalman_config,
                 source=slot.source,
             )
         else:
-            return empty_model_summary(role)
+            return empty_model_summary(name)
         if slot.raw_yaml is not None:
             summary["raw_yaml"] = slot.raw_yaml
         return summary
 
     def _record_sim_run(
-        self, *, role: Role, sim: Any, T: int, observables: bool
+        self, *, model_name: str, sim: Any, T: int, observables: bool
     ) -> dict[str, Any]:
         """Serialize a simulation into the shape the Outputs tab renders.
 
@@ -281,14 +283,14 @@ class UISession:
             sim_dict.update(sim.observables)
 
         all_series = encode_named_arrays(sim_dict)
-        extra, transform_errors = self._apply_array_functions(role, sim_dict)
+        extra, transform_errors = self._apply_array_functions(model_name, sim_dict)
 
         if extra:
             all_series = all_series + encode_named_arrays(extra)
-        figures = self._apply_figure_functions(role, sim_dict)
+        figures = self._apply_figure_functions(model_name, sim_dict)
         payload: dict[str, Any] = {
             "kind": "sim",
-            "role": role,
+            "model_name": model_name,
             "T": T,
             "observables": observables,
             "series": all_series,
@@ -310,31 +312,41 @@ class UISession:
         A spec that will not replay leaves its slot empty rather than taking
         the whole session down with it: the other tabs are unaffected by it.
         """
-        for role, tab in self.workspace.simulation.items():
-            if tab.spec is None or self._slot(role).solved is None:
+        for model_name, tab in self.workspace.simulation.items():
+            if tab.spec is None:
                 continue
             try:
-                tab.result = self.run_simulation_spec(role, SimSpec.from_dict(tab.spec))
+                if self._slot(model_name).solved is None:
+                    continue
+                tab.result = self.run_simulation_spec(
+                    model_name, SimSpec.from_dict(tab.spec)
+                )
             except Exception as exc:  # noqa: BLE001 - reported, never fatal
-                print(f"sdsge-ui: could not replay the '{role}' simulation: {exc}")
+                print(
+                    f"sdsge-ui: could not replay the '{model_name}' simulation: {exc}"
+                )
 
-    def run_simulation_spec(self, role: Role, spec: SimSpec) -> dict[str, Any]:
+    def run_simulation_spec(self, model_name: str, spec: SimSpec) -> dict[str, Any]:
         """Run a stored spec verbatim, materialized into ``sim``'s keywords."""
-        slot = self._slot(role)
+        slot = self._slot(model_name)
         if slot.solved is None:
-            raise ValueError(f"Role '{role}' does not have a solved model.")
+            raise ValueError(f"{model_name!r} is not a solved model.")
         kwargs = spec.to_sim_kwargs()
-        return self._record_sim_run(
-            role=role,
+        result = self._record_sim_run(
+            model_name=model_name,
             sim=slot.solved.sim(**kwargs),
             T=int(kwargs["T"]),
             observables=bool(kwargs["observables"]),
         )
+        state = self.workspace.simulation.setdefault(model_name, TabState())
+        state.spec = spec.to_dict()
+        state.result = result
+        return result
 
     def run_estimation(self, request: EstimationRunRequest) -> dict[str, Any]:
-        slot = self._slot(request["role"])
+        slot = self._slot(request["model_name"])
         if slot.solver is None:
-            raise ValueError(f"No model is loaded for role '{request['role']}'.")
+            raise ValueError(f"No model is loaded for '{request['model_name']}'.")
         if slot.compiled is None:
             slot.compiled = slot.solver.compile(**dict(request["compile_kwargs"]))
 
@@ -434,21 +446,22 @@ class UISession:
         result_wire = serialize_estimation_result(result)
         payload: dict[str, Any] = {
             "kind": "estimation",
-            "role": request["role"],
+            "model_name": request["model_name"],
             "routine": request["routine"],
             "solved": solved,
             "result": result_wire,
         }
         # The bundle-bound slots, filled from the run that just produced them.
         # The client's view is untouched: it already shows this.
-        self.workspace.estimation.spec = spec_wire
-        self.workspace.estimation.result = result_wire
+        state = self.workspace.estimation.setdefault(request["model_name"], TabState())
+        state.spec = spec_wire
+        state.result = result_wire
         return payload
 
     def submit_function(
         self,
         *,
-        role: Role,
+        model_name: str,
         code: str,
         kind: FunctionKind = "array",
     ) -> dict[str, Any]:
@@ -462,28 +475,28 @@ class UISession:
         namespace: dict[str, Any] = {"np": np, "numpy": np}
         exec(compile(tree, "<string>", "exec"), namespace)  # noqa: S102
         func = namespace[name]
-        self.functions[role][name] = FunctionRecord(
+        self.functions[model_name][name] = FunctionRecord(
             name=name, kind=kind, source=code, func=func
         )
         return {"name": name, "kind": kind, "source": code}
 
-    def remove_function(self, *, role: Role, name: str) -> None:
-        if name not in self.functions[role]:
+    def remove_function(self, *, model_name: str, name: str) -> None:
+        if name not in self.functions[model_name]:
             raise KeyError(name)
-        del self.functions[role][name]
+        del self.functions[model_name][name]
 
-    def list_functions(self, *, role: Role) -> list[dict[str, Any]]:
+    def list_functions(self, *, model_name: str) -> list[dict[str, Any]]:
         return [
-            {"name": r.name, "kind": r.kind, "source": r.source}
-            for r in self.functions[role].values()
+            {"name": f.name, "kind": f.kind, "source": f.source}
+            for f in self.functions[model_name].values()
         ]
 
-    def solved_model(self, role: Role) -> SolvedModel | None:
-        return self._slot(role).solved
+    def solved_model(self, name: str) -> SolvedModel | None:
+        return self._slot(name).solved
 
     def _apply_figure_functions(
         self,
-        role: Role,
+        model_name: str,
         sim_dict: dict[str, NDArray[np.float64]],
     ) -> list[dict[str, str]]:
         try:
@@ -499,7 +512,7 @@ class UISession:
             return [{"name": "__error__", "error": f"matplotlib unavailable: {exc}"}]
 
         results: list[dict[str, str]] = []
-        for name, record in self.functions[role].items():
+        for name, record in self.functions[model_name].items():
             if record.kind != "figure":
                 continue
             try:
@@ -519,10 +532,10 @@ class UISession:
 
     def _apply_array_functions(
         self,
-        role: Role,
+        model_name: str,
         sim_dict: dict[str, NDArray[np.float64]],
     ) -> tuple[dict[str, NDArray[np.float64]], list[dict[str, str]]]:
-        """Run this role's transforms, reporting the ones that did not run.
+        """Run this model's transforms, reporting the ones that did not run.
 
         A transform that fails produces no series, which on its own reads as
         the submit having silently not worked. The commonest cause is a
@@ -532,7 +545,7 @@ class UISession:
         """
         extra: dict[str, NDArray[np.float64]] = {}
         errors: list[dict[str, str]] = []
-        for name, record in self.functions[role].items():
+        for name, record in self.functions[model_name].items():
             if record.kind != "array":
                 continue
             try:
@@ -553,10 +566,16 @@ class UISession:
                 errors.append({"name": name, "error": str(exc)})
         return extra, errors
 
-    def _slot(self, role: Role) -> ModelSlot:
-        if role not in self.slots:
-            raise KeyError(role)
-        return self.slots[role]
+    def _ensure_slot(self, model_name: str) -> ModelSlot:
+        if model_name not in self.slots:
+            self.slots[model_name] = ModelSlot()
+            self.functions[model_name] = {}
+        return self.slots[model_name]
+
+    def _slot(self, model_name: str) -> ModelSlot:
+        if model_name not in self.slots:
+            raise KeyError(model_name)
+        return self.slots[model_name]
 
     @staticmethod
     def _parse_yaml_content(content: str) -> ModelParser:

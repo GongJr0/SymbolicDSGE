@@ -56,8 +56,11 @@ def _plan(steps: list[MCStep], reference: object = None) -> Any:
     return resolve_output_specs(
         pipeline.replication_steps,
         pipeline._source_indices,
-        cast(SolvedModel, reference if reference is not None else object()),
-        None,
+        {
+            "reference": cast(
+                SolvedModel, reference if reference is not None else object()
+            )
+        },
     )
 
 
@@ -267,7 +270,9 @@ def test_selecting_a_field_the_producer_does_not_emit_is_rejected() -> None:
 def test_a_filter_needs_datagen_observables(solved: SolvedModel) -> None:
     steps = [
         simulation_step("sim", target="reference", T=T, observables=False),
-        filter_step("filter", obs_source="sim", obs_field="observables"),
+        filter_step(
+            "filter", target="reference", obs_source="sim", obs_field="observables"
+        ),
     ]
 
     with pytest.raises(ValueError, match="does not produce source field 'observables'"):
@@ -284,7 +289,7 @@ def test_a_postproc_step_has_no_per_replication_layout() -> None:
     step = postproc_step("summary", func=lambda **_: None)
 
     with pytest.raises(NotImplementedError, match="Output-layout resolution"):
-        resolve_output_specs([step], [[]], cast(SolvedModel, object()), None)
+        resolve_output_specs([step], [[]], {"reference": cast(SolvedModel, object())})
 
 
 def test_a_negative_field_dimension_is_rejected() -> None:
@@ -301,7 +306,9 @@ def test_a_postproc_step_has_no_input_arena() -> None:
     step = postproc_step("summary", func=lambda **_: None)
 
     with pytest.raises(NotImplementedError, match="Input arena resolution"):
-        _resolve_input_asize(step, [], {}, [step], cast(SolvedModel, object()), None)
+        _resolve_input_asize(
+            step, [], {}, [step], {"reference": cast(SolvedModel, object())}
+        )
 
 
 # --------------------------------------------------------------------------

@@ -8,8 +8,14 @@ The `monte_carlo` module provides a bounded pipeline for repeated simulation, fi
 
 The replication loop is native. Building a pipeline resolves the step graph, lowering resolves it into buffer arenas and native step descriptors, and the loop itself then runs without holding the GIL, across as many workers as `n_jobs` requests. Nothing in the per-replication path calls back into Python except a custom transform, which is compiled by Numba and invoked through a pointer ABI.
 
-???+ info "Reference and DGP Roles"
-    The built-in simulation step draws data from the `dgp` by default, or from the `reference` model when configured with `target="reference"` (a size study, vs. a misspecification study against a distinct DGP).
+???+ tip "Model and data members"
+    The pipeline can take any number of models into its `models` mapping.
+    Native lowering makes model calibrations immutable, so studies targeting
+    multiple calibrations of a single model need to separate each calibration into its own `SolvedModel` object.
+
+    Alternatively, the `raw_model_data_step` can be used to add numerical simulation outputs with no model needed.
+    For arbitrary raw data, the `add_payload_step` can be used. These steps allow the Monte Carlo pipeline to be
+    used for arbitrary statistical testing and regression studies beyond the DSGE context.
 
 ## Pipeline Exports
 

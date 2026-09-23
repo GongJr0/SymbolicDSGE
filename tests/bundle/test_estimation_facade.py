@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -12,6 +13,8 @@ from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.parquet import collapse_columns, from_parquet_columns
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult, MAPResult
+
+_MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
 
 
 def _with_filter_prep(compiled: SimpleNamespace) -> SimpleNamespace:
@@ -99,8 +102,10 @@ def _optimization_result() -> MAPResult:
 
 
 def test_facade_flattens_optimization_run() -> None:
-    builder = BundleBuilder().add_estimation(
-        _estimator(), result=_optimization_result()
+    builder = (
+        BundleBuilder()
+        .add_model("reference", _MODEL_YAML)
+        .add_estimation(_estimator(), result=_optimization_result())
     )
     _, files = builder.build()
 
@@ -136,7 +141,11 @@ def test_facade_flattens_mcmc_run_with_posterior() -> None:
         sampler_config={"adapt": True, "proposal_scale": 0.2, "random_state": 7},
     )
 
-    builder = BundleBuilder().add_estimation(_estimator(), result=mcmc)
+    builder = (
+        BundleBuilder()
+        .add_model("reference", _MODEL_YAML)
+        .add_estimation(_estimator(), result=mcmc)
+    )
     _, files = builder.build()
 
     spec = json.loads(files["estimation/spec.json"])

@@ -480,7 +480,7 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs(
                 ),
             ]
         ).run(
-            reference,
+            {"reference": reference},
             n_rep=1,
             n_jobs=1,
             verbosity=0,
@@ -501,7 +501,7 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs(
             ),
         ]
     ).run(
-        reference,
+        {"reference": reference},
         n_rep=1,
         check_memory_availability=False,
         fail_fast=False,
@@ -529,7 +529,7 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs(
                 ),
             ]
         ).run(
-            reference,
+            {"reference": reference},
             n_rep=1,
             n_jobs=1,
             verbosity=0,
@@ -588,7 +588,7 @@ def test_breusch_godfrey_pipeline_validates_residual_and_regressor_inputs(
                 ),
             ]
         ).run(
-            reference,
+            {"reference": reference},
             n_rep=1,
             n_jobs=1,
             verbosity=0,
@@ -613,7 +613,7 @@ def test_breusch_godfrey_pipeline_validates_residual_and_regressor_inputs(
                 ),
             ]
         ).run(
-            reference,
+            {"reference": reference},
             n_rep=1,
             n_jobs=1,
             verbosity=0,
@@ -858,7 +858,9 @@ def test_output_shape_resolution_tracks_selected_transform_payloads(
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+        pipeline.replication_steps,
+        pipeline._source_indices,
+        {"reference": solved_test_model},
     )
 
     # A datagen step allocates all three of its fields; the ones its author did
@@ -906,7 +908,9 @@ def test_output_specs_for_non_ols_regressions(solved_test_model, kind: str) -> N
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+        pipeline.replication_steps,
+        pipeline._source_indices,
+        {"reference": solved_test_model},
     )
 
     _assert_output_plan(
@@ -940,6 +944,7 @@ def test_output_shape_resolution_includes_linear_filter_fields(
         [
             raw_model_data_step(observables=observables, observable_names=names),
             filter_step(
+                target="reference",
                 obs_source="datagen",
                 obs_field="observables",
                 filter_mode=filter_mode,
@@ -950,7 +955,9 @@ def test_output_shape_resolution_includes_linear_filter_fields(
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+        pipeline.replication_steps,
+        pipeline._source_indices,
+        {"reference": solved_test_model},
     )
 
     # The filter carries the full variable vector, not just the predetermined
@@ -988,7 +995,9 @@ def test_output_shape_resolution_includes_scalar_test_channels(
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+        pipeline.replication_steps,
+        pipeline._source_indices,
+        {"reference": solved_test_model},
     )
 
     _assert_output_plan(
@@ -1010,7 +1019,9 @@ def test_output_shape_resolution_normalizes_payload_values_to_source_shapes(
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+        pipeline.replication_steps,
+        pipeline._source_indices,
+        {"reference": solved_test_model},
     )
 
     _assert_output_plan(specs["vector"], "vector", ("payload", (4, 1), np.float64))
@@ -1025,7 +1036,9 @@ def test_output_plan_carries_step_retention_count(solved_test_model) -> None:
     pipeline = MCPipeline([datagen])
 
     specs = resolve_output_specs(
-        pipeline.replication_steps, pipeline._source_indices, solved_test_model, None
+        pipeline.replication_steps,
+        pipeline._source_indices,
+        {"reference": solved_test_model},
     )
 
     assert specs["datagen"].n_retain == 2
@@ -1053,13 +1066,16 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
                 observable_names=reference.compiled.observable_names,
             ),
             filter_step(
-                obs_source="datagen", obs_field="observables", filter_mode="unscented"
+                target="reference",
+                obs_source="datagen",
+                obs_field="observables",
+                filter_mode="unscented",
             ),
         ]
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps, pipeline._source_indices, reference, None
+        pipeline.replication_steps, pipeline._source_indices, {"reference": reference}
     )
     n_state = reference.compiled.n_state
     n_z = 2 * n_state

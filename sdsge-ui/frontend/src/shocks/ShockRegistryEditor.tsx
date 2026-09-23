@@ -11,7 +11,6 @@
 import { Check, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type {
-  Role,
   ShockDistribution,
   ShockRegistryEntry,
 } from "../types";
@@ -31,7 +30,7 @@ export function ShockRegistryEditor({
   entries,
   onChange,
 }: {
-  role: Role;
+  role: string;
   shockNames: string[];
   entries: ShockRegistryEntry[];
   onChange: (entries: ShockRegistryEntry[]) => void;

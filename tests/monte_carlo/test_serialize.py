@@ -58,7 +58,7 @@ def _run(n_rep: int = 4) -> MCPipelineResult:
             standardize_step("std", source="datagen", field="observables"),
         ]
     )
-    return pipeline.run(reference=_REFERENCE, n_rep=n_rep, verbosity=2)
+    return pipeline.run(models={"reference": _REFERENCE}, n_rep=n_rep, verbosity=2)
 
 
 def _empty_datagen() -> MCDataGenResult:

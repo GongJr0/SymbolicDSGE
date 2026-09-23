@@ -50,7 +50,9 @@ def test_dgp_only_simulation_and_filter_omit_reference(dgp_model: SolvedModel) -
         ]
     )
 
-    result = pipeline.run(dgp=dgp_model, n_rep=2, n_jobs=1, verbosity=0, fail_fast=True)
+    result = pipeline.run(
+        models={"dgp": dgp_model}, n_rep=2, n_jobs=1, verbosity=0, fail_fast=True
+    )
 
     assert not result.failures
     assert result.n_successful == 2

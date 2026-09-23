@@ -84,7 +84,9 @@ def test_transforms_consume_scalar_loglik_and_vector_payload(
     pipeline = MCPipeline(
         [
             raw_model_data_step("data", observables=_observations(linear)),
-            filter_step("filt", obs_source="data", obs_field="observables"),
+            filter_step(
+                "filt", target="reference", obs_source="data", obs_field="observables"
+            ),
             add_payload_step("vector", vector),
             transform_step(
                 "scalar_plus_one",
@@ -103,7 +105,9 @@ def test_transforms_consume_scalar_loglik_and_vector_payload(
         ]
     )
 
-    result = pipeline.run(linear, n_rep=N_REP, n_jobs=1, verbosity=0, fail_fast=True)
+    result = pipeline.run(
+        {"reference": linear}, n_rep=N_REP, n_jobs=1, verbosity=0, fail_fast=True
+    )
 
     assert not result.failures
     assert result.n_successful == N_REP
@@ -134,10 +138,10 @@ def _run(
                 observables=y,
                 observable_names=tuple(solved.compiled.observable_names),
             ),
-            filter_step(name, obs_source="data", obs_field="observables", **filter_kwargs),  # type: ignore[arg-type]
+            filter_step(name, target="reference", obs_source="data", obs_field="observables", **filter_kwargs),  # type: ignore[arg-type]
         ]
     )
-    return pipeline.run(solved, n_rep=n_rep, verbosity=0)
+    return pipeline.run({"reference": solved}, n_rep=n_rep, verbosity=0)
 
 
 # --------------------------------------------------------------------------
@@ -456,10 +460,15 @@ def test_filters_are_keyed_by_step_name(linear: SolvedModel) -> None:
                 observable_names=tuple(linear.compiled.observable_names),
             ),
             filter_step(
-                "kf", obs_source="data", obs_field="observables", filter_mode="linear"
+                "kf",
+                target="reference",
+                obs_source="data",
+                obs_field="observables",
+                filter_mode="linear",
             ),
             filter_step(
                 "ekf",
+                target="reference",
                 obs_source="data",
                 obs_field="observables",
                 filter_mode="extended",
@@ -467,7 +476,7 @@ def test_filters_are_keyed_by_step_name(linear: SolvedModel) -> None:
         ]
     )
 
-    result = pipeline.run(linear, n_rep=N_REP, verbosity=0)
+    result = pipeline.run({"reference": linear}, n_rep=N_REP, verbosity=0)
 
     assert set(result.filter_outputs) == {"kf", "ekf"}
     assert result.filter_outputs["kf"].filter_mode == "linear"
@@ -489,7 +498,7 @@ def test_a_pipeline_without_filters_reports_no_filter_outputs(
         ]
     )
 
-    result = pipeline.run(linear, n_rep=N_REP, verbosity=0)
+    result = pipeline.run({"reference": linear}, n_rep=N_REP, verbosity=0)
 
     assert result.filter_outputs == {}
 
@@ -522,7 +531,7 @@ def test_filter_reads_observations_from_payload(linear: SolvedModel) -> None:
         "filt",
     ]
     result = pipeline.run(
-        reference=linear, n_rep=2, n_jobs=1, verbosity=0, fail_fast=True
+        models={"reference": linear}, n_rep=2, n_jobs=1, verbosity=0, fail_fast=True
     )
     assert not result.failures
     assert result.datagen_outputs == {}

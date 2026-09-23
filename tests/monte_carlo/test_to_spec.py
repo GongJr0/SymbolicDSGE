@@ -31,11 +31,14 @@ def _simulation_pipeline() -> MCPipeline:
         [
             simulation_step(
                 "dgp",
+                target="dgp",
                 T=8,
                 observables=True,
                 shocks={"u": Shock(dist="norm", seed=0, dist_kwargs={"loc": 0.0})},
             ),
-            filter_step("filter", obs_source="dgp", obs_field="observables"),
+            filter_step(
+                "filter", target="reference", obs_source="dgp", obs_field="observables"
+            ),
             standardize_step("s", source="dgp", field="observables"),
             jarque_bera_test_step("jb", source="s", field="payload"),
             wald_test_step(
@@ -230,6 +233,7 @@ def test_to_spec_round_trips_a_postproc_pipeline() -> None:
         [
             simulation_step(
                 "dgp",
+                target="dgp",
                 T=8,
                 observables=True,
                 shocks={"u": Shock(dist="norm", seed=0)},

@@ -60,9 +60,9 @@ def test_save_sdsge_round_trips_via_load_bundle(tmp_path: Path) -> None:
     )
     loaded = load_bundle(target)
     assert isinstance(loaded, LoadedBundle)
-    assert loaded.reference is not None
+    assert loaded.models["reference"] is not None
     # Re-solved model is usable.
-    assert loaded.reference.sim(5).X.shape[0] == 5
+    assert loaded.models["reference"].sim(5).X.shape[0] == 5
 
 
 def test_to_bundle_builder_returns_chainable_builder(tmp_path: Path) -> None:
@@ -72,7 +72,7 @@ def test_to_bundle_builder_returns_chainable_builder(tmp_path: Path) -> None:
     target = builder.write(tmp_path / "chained.sdsge")
     loaded = load_bundle(target)
     assert loaded.manifest.created_by == "api-test"
-    assert loaded.reference is not None
+    assert loaded.models["reference"] is not None
 
 
 def test_save_sdsge_yaml_text_override_takes_precedence(tmp_path: Path) -> None:

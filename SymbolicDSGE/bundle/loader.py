@@ -98,8 +98,7 @@ class LoadedBundle:
     """Everything reconstructed from a ``.sdsge`` bundle."""
 
     manifest: Manifest
-    reference: SolvedModel | None = None
-    dgp: SolvedModel | None = None
+    models: Mapping[str, SolvedModel] | None = None
     estimation: LoadedEstimation | None = None
     mc: LoadedMC | None = None
     #: ``SolvedModel.sim`` keywords per role, ready to unpack into a run.
@@ -110,30 +109,38 @@ def load_bundle(path: str | Path) -> LoadedBundle:
     """Open a ``.sdsge`` bundle and rebuild its in-code objects."""
     archive = BundleArchive.open(path)
     manifest = archive.manifest
-    reference = _load_model(archive, manifest, "reference")
+    models = _load_models(archive, manifest)
     return LoadedBundle(
         manifest=manifest,
-        reference=reference,
-        dgp=_load_model(archive, manifest, "dgp"),
-        estimation=_load_estimation(archive, manifest, reference),
+        models=models,
+        estimation=_load_estimation(archive, manifest, models),
         mc=_load_mc(archive, manifest),
         simulation=_load_simulation(manifest),
     )
 
 
-def _load_model(
-    archive: BundleArchive, manifest: Manifest, role: str
-) -> SolvedModel | None:
-    member = manifest.model_member(role)
-    if member is None:
+def _load_models(
+    archive: BundleArchive, manifest: Manifest
+) -> Mapping[str, SolvedModel] | None:
+    models = manifest.members_by_kind("model_config")
+    if not models:
         return None
-    parser = ModelParser.from_string(archive.read_text(member.path))
-    model, kalman = parser.get_all()
-    solver = DSGESolver(model, cast(Any, kalman))
-    compile_kwargs = dict(member.options.get("compile_kwargs", {}))
-    solve_kwargs = dict(member.options.get("solve_kwargs", {}))
-    compiled = solver.compile(**compile_kwargs)
-    return solver.solve(compiled, **solve_kwargs)
+
+    out: dict[str, SolvedModel] = {}
+    for member in models:
+        if not member.model_name:
+            raise ValueError(
+                f"Bundle member {member.path!r} is a model_config but has no "
+                "model_name; cannot load it."
+            )
+        parser = ModelParser.from_string(archive.read_text(member.path))
+        model, kalman = parser.get_all()
+        solver = DSGESolver(model, cast(Any, kalman))
+        compile_kwargs = dict(member.options.get("compile_kwargs", {}))
+        solve_kwargs = dict(member.options.get("solve_kwargs", {}))
+        compiled = solver.compile(**compile_kwargs)
+        out[member.model_name] = solver.solve(compiled, **solve_kwargs)
+    return out
 
 
 def _load_simulation(manifest: Manifest) -> dict[str, dict[str, Any]] | None:
@@ -215,16 +222,20 @@ def _stack_observed(
 
 
 def _load_estimation(
-    archive: BundleArchive, manifest: Manifest, reference: SolvedModel | None
+    archive: BundleArchive, manifest: Manifest, models: Mapping[str, SolvedModel] | None
 ) -> LoadedEstimation | None:
     param_members = manifest.members_by_kind("estimation_spec")
     if not param_members:
         return None
-    if reference is None:
+    model_name = param_members[0].model_name
+    if model_name is None:
+        model_name = "reference"
+    if (models is None) or (model_name not in models):
         raise ValueError(
-            "Bundle carries an estimation section but no reference model, so the "
-            "estimator it describes cannot be bound to one."
+            "Bundle carries an estimation section but the model associated with it "
+            f"({model_name!r}) is not present in the bundle's models."
         )
+    model = models[model_name]
     data_members = manifest.members_by_kind("estimation_data")
     if not data_members:
         raise ValueError(
@@ -235,7 +246,7 @@ def _load_estimation(
     params = cast(EstimatorParams, json.loads(archive.read_text(param_members[0].path)))
     y = _stack_observed(_load_columns(archive, data_members[0]), data_members[0])
     spec = EstimatorSpec(y=y, params=params)
-    estimator = Estimator.from_spec(spec, compiled=reference.compiled)
+    estimator = Estimator.from_spec(spec, compiled=model.compiled)
     # Load the posterior first: the MCMC result is rebuilt from metadata + these
     # traces (the optimization result needs no traces).
     posterior: dict[str, NDArray[Any]] | None = None
@@ -681,7 +692,7 @@ def _mc_step_arrays(
 def _restore_array(column: NDArray[Any], shape: Sequence[int]) -> NDArray[Any]:
     """One column group as the array it was written from."""
     dims = tuple(int(size) for size in shape)
-    rows = int(np.prod(dims[:-1])) if len(dims) > 1 else dims[0]
+    rows = int(np.prod(dims[:-1])) if len(dims) > 1 else dims[0]  # pyright: ignore
     return np.asarray(column, dtype=np.float64)[:rows].reshape(dims)
 
 

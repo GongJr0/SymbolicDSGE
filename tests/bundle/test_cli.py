@@ -59,7 +59,9 @@ def _bundle(tmp_path: Path, *, with_result: bool = True) -> Path:
     """A bundle carrying every member kind the CLI has to move."""
     pipe = _pipeline()
     result = (
-        pipe.run(reference=cast(SolvedModel, object()), n_rep=4, verbosity=0)
+        pipe.run(
+            models={"reference": cast(SolvedModel, object())}, n_rep=4, verbosity=0
+        )
         if with_result
         else None
     )
@@ -109,7 +111,7 @@ def test_round_tripped_bundle_still_loads(tmp_path: Path) -> None:
     )
     loaded = load_bundle(packed)
 
-    assert loaded.reference is not None
+    assert loaded.models["reference"] is not None
     assert loaded.simulation is not None and loaded.simulation["reference"]["T"] == 8
     assert loaded.mc is not None and loaded.mc.result is not None
     np.testing.assert_array_equal(
