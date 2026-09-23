@@ -17,9 +17,9 @@ NDF = NDArray[np.float64]
 
 def simulation_step(
     name: str = "datagen",
-    target: Literal["reference", "dgp"] = "dgp",
     n_retain: int = -1,
     *,
+    target: str,
     T: int,
     shocks: (
         Mapping[str | Sequence[str], Shock | NDF] | Sequence[Shock | ShockPath] | None
@@ -36,10 +36,10 @@ def simulation_step(
         Periods to simulate.
     name : str
         Step name, used to reference the step in later steps and results.
-    target : Literal["reference", "dgp"]
-        Model role to simulate, defaulting to "dgp"; the selected model must be supplied to the run.
     n_retain : int
         Number of samples to retain. -1 means all, 0 means none.
+    target : str
+        Model role to simulate; the selected model must be supplied to the run.
     shocks : Mapping[str | Sequence[str], Shock | NDF] | Sequence[Shock | ShockPath] | None
         Shock specification for the simulation. Mirrors :meth:`SolvedModel.sim`.
     shock_scale : float
@@ -127,9 +127,9 @@ def raw_model_data_step(
 
 def filter_step(
     name: str = "filter",
-    target: Literal["reference", "dgp"] = "reference",
     n_retain: int = -1,
     *,
+    target: str,
     obs_source: str,
     obs_field: str,
     obs_columns: ColumnSelector = None,
@@ -149,10 +149,10 @@ def filter_step(
     ----------
     name : str
         Step name, used to reference the step in later steps and results.
-    target : Literal["reference", "dgp"]
-        Model role supplying filter components, defaulting to "reference"; the selected model must be supplied to the run.
     n_retain : int
         Number of samples to retain. -1 means all, 0 means none.
+    target : str
+        Model role supplying filter components; the selected model must be supplied to the run.
     obs_source : str
         Producer step supplying the observed data.
     obs_field : str

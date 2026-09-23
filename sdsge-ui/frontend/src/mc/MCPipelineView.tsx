@@ -318,12 +318,6 @@ function MCPipelineBuilder({
         return false;
       }
       if (target?.data.step.step_type === "simulation") return false;
-      if (
-        target.data.step.step_type === "filter" &&
-        source.data.step.step_type !== "simulation"
-      ) {
-        return false;
-      }
       // A node may now take several incoming edges — one per input leg (e.g. a
       // payload from a transform + a filter source). Only reject duplicate
       // edges between the same pair.

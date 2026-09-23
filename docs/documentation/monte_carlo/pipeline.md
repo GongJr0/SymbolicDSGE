@@ -27,8 +27,7 @@ __Contract:__
 
 ```python
 MCPipeline.run(
-    reference: SolvedModel,
-    dgp: SolvedModel | None = None,
+    models: dict[str, SolvedModel] | None = None,
     *,
     n_rep: int,
     fail_fast: bool = True,
@@ -42,8 +41,7 @@ __Inputs:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| reference | Reference `SolvedModel` used by reference-side operations such as Kalman filtering. |
-| dgp | Optional DGP `SolvedModel`. Required by `simulation_step` when it targets the DGP (`target="dgp"`, the default); not required for `target="reference"` or `raw_model_data_step`. |
+| models | Named collection of `SolvedModel` object that steps can refer to. Optional for runs that do not require a model. |
 | n_rep | Number of Monte Carlo replications. |
 | fail_fast | If `True`, raise on the first failed replication. If `False`, collect `MCFailure` entries and summarize successful replications. |
 | verbosity | Performance-reporting level: `0` prints nothing, `1` prints one aggregate throughput line, and `2` enables native per-step profiling and prints one throughput line per step. |

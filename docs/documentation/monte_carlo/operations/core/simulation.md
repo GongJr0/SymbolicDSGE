@@ -7,9 +7,9 @@ tags:
 ```python
 simulation_step(
     name: str = "datagen",
-    target: Literal["reference", "dgp"] = "dgp",
     n_retain: int = -1,
     *,
+    target: str,
     T: int,
     shocks: Mapping[str | Sequence[str], Shock | ndarray] | Sequence[Shock | ShockPath] | None = None,
     shock_scale: float = 1.0,
@@ -18,13 +18,13 @@ simulation_step(
 ) -> MCStep
 ```
 
-`simulation_step` generates one replication's data from a solved model: the DGP by default, or the reference model when `target="reference"`. The selected model must be supplied to `MCPipeline.run(...)`. It lives in `SymbolicDSGE.monte_carlo.step_factories`.
+`simulation_step` generates one replication's data from a solved model. The selected model must be supplied to `MCPipeline.run(...)`. It lives in `SymbolicDSGE.monte_carlo.step_factories`.
 
 __Inputs:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| target | Which solved model to simulate: `"dgp"` (default) or `"reference"`. |
+| target | Name of the model to simulate. Must be supplied to `MCPipeline.run(...)`. | 
 | n_retain | Number of replications to retain in the output. If `-1`, all replications are retained. |
 | T | Number of simulated periods, excluding the initial state. |
 | shocks | Shock spec resolved once and redrawn per replication. Mirrors `SolvedModel.sim(...)`: a sequence of bound `Shock` or `ShockPath` entries, or a mapping keyed by innovation symbol or tuple of symbols. With `None`, the simulation is deterministic. |

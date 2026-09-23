@@ -36,8 +36,8 @@ function channelOptionsFor(
     return catalogOptions.filter((option) => !DATA_CHANNELS.includes(option));
   }
   if (kind === "transform") return ["payload"];
-  // No producer selected yet: offer everything so the field stays editable.
-  return [...catalogOptions, "payload"];
+  // Fields are available only after an eligible producer is selected.
+  return [];
 }
 
 export function StepInspector({
@@ -334,6 +334,7 @@ function SourceLeg({
         {channelField.label}
         <select
           value={channelValue}
+          disabled={selected === undefined}
           onChange={(event) => onUpdate({ [channelField.key]: event.target.value })}
         >
           {channelOptions.map((option) => (

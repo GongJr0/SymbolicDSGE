@@ -7,9 +7,9 @@ tags:
 ```python
 filter_step(
     name: str = "filter",
-    target: Literal["reference", "dgp"] = "reference",
     n_retain: int = -1,
     *,
+    target: str,
     obs_source: str,
     obs_field: str,
     obs_columns: ColumnSelector = None,
@@ -35,7 +35,7 @@ __Inputs:__
 | __Name__ | __Default__ | __Description__ |
 |:---------|:-----------:|----------------:|
 | name | `"filter"` | Runtime step name. Downstream steps use this as `source`. |
-| target | `"reference"` | Model role supplying filter components: `"reference"` or `"dgp"`; supply the selected model to the run. |
+| target | Required | Model name supplying filter components. Must be supplied to `MCPipeline.run(...)`. | 
 | obs_source | Required | Producer step supplying observed data. |
 | obs_field | Required | Two-dimensional output field to read from the producer. |
 | obs_columns | `None` | Column index, sequence of indices, or slice; `None` selects all columns. |
