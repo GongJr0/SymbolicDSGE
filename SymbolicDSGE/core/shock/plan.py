@@ -6,7 +6,7 @@ replication) resolve a plan and then call :meth:`ShockPlan.fill` per draw.
 """
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import NamedTuple, Sequence
 from functools import cached_property
 
 import numpy as np
@@ -16,6 +16,16 @@ from numpy.typing import NDArray
 from .generators import Shock, ShockPath, ShockDrawFn
 
 NDF = NDArray[float64]
+
+
+class NativeShockEntry(NamedTuple):
+    """One entry in the layout ``_shocks.shock_plan`` consumes."""
+
+    family: int
+    columns: NDArray[np.int64]
+    factor: NDF | None
+    loc: NDF
+    key: int
 
 
 @dataclass(frozen=True)

@@ -4,7 +4,7 @@ from typing import NamedTuple
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from ...monte_carlo.shock_native import NativeShockEntry
+from ..core._shocks import NativeShockPlan
 from ...monte_carlo.native_lowering import FloatInputBinding
 
 from ._arenas import ArenaAllocation
@@ -37,9 +37,6 @@ class NativeStep:
         self,
     ) -> DistributionParameter | tuple[DistributionParameter, ...] | None: ...
 
-SHOCK_NORMAL: int
-SHOCK_UNIFORM: int
-
 DEFAULT_SYMMETRIZE: bool
 DEFAULT_JOSEPH_COV: bool
 DEFAULT_JITTER: float
@@ -66,19 +63,6 @@ DEFAULT_LJUNG_BOX_LAGS: int
 DEFAULT_BREUSCH_GODFREY_LAGS: int
 DEFAULT_T_BREAK: int
 
-class NativeShockPlan:
-    @property
-    def scratch_size(self) -> int: ...
-    @property
-    def n_entries(self) -> int: ...
-    def draw(self, rep_idx: int) -> NDF: ...
-
-def shock_plan(
-    entries: Sequence[NativeShockEntry],
-    T: int,
-    n_exog: int,
-    shock_scale: float,
-) -> NativeShockPlan: ...
 def payload_step(name: str, value: ArrayLike) -> NativeStep: ...
 def raw_model_data_step(
     name: str,

@@ -1,5 +1,6 @@
 #include "core_steps.h"
 #include "../core/core.h"
+#include "../core/shocks.h"
 #include "layout.h"
 #include <string.h>
 
@@ -69,9 +70,9 @@ int sdsge_mc_simulate_order1_runner(const i64 rep_idx,
   if (ctx->shocks != NULL) {
     const arena_offset in_off =
         sdsge_simulate_order1_arena_offset(ctx->n, ctx->k, ctx->T, ctx->n_par);
-    sdsge_mc_shock_draw(ctx->shocks, rep_idx,
-                        float_in_work + ctx->shock_scratch_offset,
-                        float_in_work + in_off.foffset[3]); // shock opens on x0
+    sdsge_shock_draw(ctx->shocks, rep_idx,
+                     float_in_work + ctx->shock_scratch_offset,
+                     float_in_work + in_off.foffset[3]); // shock opens on x0
   }
   sdsge_simulate_order1_step(float_in_work, ctx->measurement, ctx->T, ctx->n,
                              ctx->k, ctx->n_par, ctx->m, float_out);
@@ -90,9 +91,9 @@ int sdsge_mc_simulate_order2_runner(const i64 rep_idx,
     const arena_offset in_off = sdsge_simulate_order2_arena_offset(
         ctx->n_state, ctx->n_state + ctx->n_ctrl, ctx->n_exog, ctx->T,
         ctx->n_par);
-    sdsge_mc_shock_draw(
-        ctx->shocks, rep_idx, float_in_work + ctx->shock_scratch_offset,
-        float_in_work + in_off.foffset[12]); // shock opens on x0
+    sdsge_shock_draw(ctx->shocks, rep_idx,
+                     float_in_work + ctx->shock_scratch_offset,
+                     float_in_work + in_off.foffset[12]); // shock opens on x0
   }
   sdsge_simulate_order2_step(float_in_work, ctx->measurement, ctx->T,
                              ctx->n_state, ctx->n_ctrl, ctx->n_exog, ctx->n_par,

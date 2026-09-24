@@ -3,9 +3,9 @@
 
 #include "../_common/sdsge_common.h"
 #include "../core/core.h"
+#include "../core/shocks.h"
 #include "../kalman/kalman.h"
 #include "runner.h"
-#include "shocks.h"
 
 /* Static configuration for generic native MC step dispatch. Dynamic numeric
  * inputs, scratch, and outputs live in caller-owned arenas. */
@@ -44,7 +44,7 @@ typedef struct {
   i64 k;
   i64 n_par;
   i64 m;
-  const sdsge_mc_shock_plan *shocks;
+  const sdsge_shock_plan *shocks;
   i64 shock_scratch_offset;
 } sdsge_mc_simulate_order1_step_ctx;
 
@@ -56,7 +56,7 @@ typedef struct {
   i64 n_exog;
   i64 n_par;
   i64 m;
-  const sdsge_mc_shock_plan *shocks;
+  const sdsge_shock_plan *shocks;
   i64 shock_scratch_offset;
 } sdsge_mc_simulate_order2_step_ctx;
 

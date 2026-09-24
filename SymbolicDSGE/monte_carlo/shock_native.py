@@ -9,18 +9,22 @@ prematerialization route.
 from __future__ import annotations
 
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any, Mapping, NamedTuple, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from .._ckernels.monte_carlo._runner import NativeShockPlan, shock_plan
+from .._ckernels.core._shocks import (
+    NativeShockPlan,
+    shock_plan,
+    SHOCK_NORMAL,
+    SHOCK_UNIFORM,
+)
 from ..core.shock.generators import Shock, ShockPath
-from ..core.shock.plan import ShockPlan, ShockEntry
+from ..core.shock.plan import ShockPlan, ShockEntry, NativeShockEntry
 from ..core.shock.spec import resolve_shock_plan, _normalized_spec
 from .defaults import DEFAULT_SHOCK_SCALE
-from SymbolicDSGE._ckernels.monte_carlo import _runner
 
 if TYPE_CHECKING:  # pragma: no cover; import cycle at runtime
     from ..core.solved_model import SolvedModel
@@ -32,14 +36,13 @@ NDF = NDArray[float64]
 class ShockCode(IntEnum):
     """Integer codes for the shock families the native draw implements.
 
-    Mirrors the ``SDSGE_MC_SHOCK_*`` constants in
-    ``_ckernels/monte_carlo/shocks.h`` -- the two MUST stay in lockstep (same
-    names, same values). The code selects which standardized variate fills an
+    Uses the ``SDSGE_SHOCK_*`` enum values from ``_ckernels/core/shocks.h``,
+    exported by the ``_shocks`` extension. The code selects which variate fills an
     entry's draw; every other field an entry carries is family-independent.
     """
 
-    NORMAL = _runner.SHOCK_NORMAL
-    UNIFORM = _runner.SHOCK_UNIFORM
+    NORMAL = SHOCK_NORMAL
+    UNIFORM = SHOCK_UNIFORM
 
     @classmethod
     def for_dist(cls, dist: Any) -> "ShockCode | None":
@@ -54,16 +57,6 @@ class ShockCode(IntEnum):
         if dist == "uni":
             return cls.UNIFORM
         return None
-
-
-class NativeShockEntry(NamedTuple):
-    """One entry in the layout ``_runner.shock_plan`` consumes."""
-
-    family: int
-    columns: NDArray[np.int64]
-    factor: NDF | None
-    loc: NDF
-    key: int
 
 
 def _spec_family(shock: Shock | ShockPath) -> ShockCode | None:
