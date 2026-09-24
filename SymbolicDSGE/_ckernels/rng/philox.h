@@ -71,11 +71,6 @@ void sdsge_philox_chi2_fill(sdsge_philox_state *st, i64 n,
                             f64 *SDSGE_RESTRICT out,
                             sdsge_sampler_params params);
 
-/* Standard Student-t draws advancing st. */
-void sdsge_philox_standard_t_fill(sdsge_philox_state *st, i64 n,
-                                  f64 *SDSGE_RESTRICT out,
-                                  sdsge_sampler_params params);
-
 /* Beta draws advancing st. */
 void sdsge_philox_beta_fill(sdsge_philox_state *st, i64 n,
                             f64 *SDSGE_RESTRICT out,

@@ -49,8 +49,6 @@ cdef extern from "philox.h":
         double *out, sdsge_sampler_params params) nogil
     void sdsge_philox_chi2_fill(sdsge_philox_state *st, int64_t n,
                                 double *out, sdsge_sampler_params params) nogil
-    void sdsge_philox_standard_t_fill(sdsge_philox_state *st, int64_t n,
-                                      double *out, sdsge_sampler_params params) nogil
     void sdsge_philox_beta_fill(sdsge_philox_state *st, int64_t n,
                                 double *out, sdsge_sampler_params params) nogil
 
@@ -71,8 +69,6 @@ cdef extern from "rng.h":
                                        double *out, sdsge_sampler_params params) nogil
     void sdsge_rng_chi2_fill(bitgen_t *bg, int64_t n,
                              double *out, sdsge_sampler_params params) nogil
-    void sdsge_rng_standard_t_fill(bitgen_t *bg, int64_t n,
-                                   double *out, sdsge_sampler_params params) nogil
     void sdsge_rng_beta_fill(bitgen_t *bg, int64_t n,
                              double *out, sdsge_sampler_params params) nogil
 
@@ -176,24 +172,6 @@ def chi2(object rng, int64_t n, double df):
     params.df = df
     with nogil:
         sdsge_rng_chi2_fill(bg, n, &outv[0], params)
-    return out
-
-
-def standard_t(object rng, int64_t n, double df):
-    """Draw using NumPy's standard_t sampler, advancing rng's borrowed state."""
-    if n < 0:
-        raise ValueError("n must be non-negative.")
-    if not isfinite(df) or df <= 0:
-        raise ValueError("df must be finite and positive.")
-    out = np.empty(n, dtype=np.float64)
-    if n == 0:
-        return out
-    cdef bitgen_t *bg = _bitgen_ptr(rng)
-    cdef sdsge_sampler_params params
-    cdef double[::1] outv = out
-    params.df = df
-    with nogil:
-        sdsge_rng_standard_t_fill(bg, n, &outv[0], params)
     return out
 
 
@@ -335,26 +313,6 @@ def philox_chi2(uint64_t key0, uint64_t key1, uint64_t stream0,
     with nogil:
         sdsge_philox_seed(&st, key0, key1, stream0, stream1)
         sdsge_philox_chi2_fill(&st, n, &outv[0], params)
-    return out
-
-
-def philox_standard_t(uint64_t key0, uint64_t key1, uint64_t stream0,
-                      uint64_t stream1, int64_t n, double df):
-    """Standard Student-t draws from Philox, with positive finite parameters."""
-    if n < 0:
-        raise ValueError("n must be non-negative.")
-    if not isfinite(df) or df <= 0:
-        raise ValueError("df must be finite and positive.")
-    out = np.empty(n, dtype=np.float64)
-    if n == 0:
-        return out
-    cdef sdsge_philox_state st
-    cdef sdsge_sampler_params params
-    cdef double[::1] outv = out
-    params.df = df
-    with nogil:
-        sdsge_philox_seed(&st, key0, key1, stream0, stream1)
-        sdsge_philox_standard_t_fill(&st, n, &outv[0], params)
     return out
 
 

@@ -108,8 +108,6 @@ _ADDED_SAMPLERS = [
     pytest.param("standard_gamma", "standard_gamma", (7.5,), id="gamma-large"),
     pytest.param("chi2", "chisquare", (0.6,), id="chi2-small"),
     pytest.param("chi2", "chisquare", (9.0,), id="chi2-large"),
-    pytest.param("standard_t", "standard_t", (0.6,), id="t-small"),
-    pytest.param("standard_t", "standard_t", (9.0,), id="t-large"),
     pytest.param("beta", "beta", (0.3, 0.8), id="beta-johnk"),
     pytest.param("beta", "beta", (1e-110, 2e-110), id="beta-tiny"),
     pytest.param("beta", "beta", (0.3, 4.0), id="beta-mixed"),
@@ -172,7 +170,6 @@ def test_added_samplers_reject_negative_lengths_and_invalid_generators(
     [
         ("standard_gamma", (2.0,), 0, "a"),
         ("chi2", (2.0,), 0, "df"),
-        ("standard_t", (2.0,), 0, "df"),
         ("beta", (2.0, 3.0), 0, "a"),
         ("beta", (2.0, 3.0), 1, "b"),
     ],

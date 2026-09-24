@@ -52,17 +52,6 @@ void sdsge_rng_chi2_fill(bitgen_t *bg, i64 n, f64 *SDSGE_RESTRICT out,
   }
 }
 
-void sdsge_rng_standard_t_fill(bitgen_t *bg, i64 n, f64 *SDSGE_RESTRICT out,
-                               sdsge_sampler_params params) {
-  i64 i;
-  if (n <= 0) {
-    return;
-  }
-  for (i = 0; i < n; i++) {
-    out[i] = random_standard_t(bg, params.df);
-  }
-}
-
 void sdsge_rng_beta_fill(bitgen_t *bg, i64 n, f64 *SDSGE_RESTRICT out,
                          sdsge_sampler_params params) {
   i64 i;

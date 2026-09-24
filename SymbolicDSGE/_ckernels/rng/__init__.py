@@ -18,11 +18,9 @@ extension is not built, importing this module raises ``ImportError``.
 from ._rng import (
     standard_gamma,
     chi2,
-    standard_t,
     beta,
     philox_standard_gamma,
     philox_chi2,
-    philox_standard_t,
     philox_beta,
     philox_standard_exponential,
     standard_exponential,
@@ -36,11 +34,9 @@ from ._rng import (
 __all__ = [
     "standard_gamma",
     "chi2",
-    "standard_t",
     "beta",
     "philox_standard_gamma",
     "philox_chi2",
-    "philox_standard_t",
     "philox_beta",
     "philox_standard_exponential",
     "standard_exponential",

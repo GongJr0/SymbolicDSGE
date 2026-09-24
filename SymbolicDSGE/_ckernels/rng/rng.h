@@ -55,9 +55,6 @@ void sdsge_rng_standard_gamma_fill(bitgen_t *bg, i64 n, f64 *SDSGE_RESTRICT out,
 void sdsge_rng_chi2_fill(bitgen_t *bg, i64 n, f64 *SDSGE_RESTRICT out,
                          sdsge_sampler_params params);
 
-void sdsge_rng_standard_t_fill(bitgen_t *bg, i64 n, f64 *SDSGE_RESTRICT out,
-                               sdsge_sampler_params params);
-
 void sdsge_rng_beta_fill(bitgen_t *bg, i64 n, f64 *SDSGE_RESTRICT out,
                          sdsge_sampler_params params);
 

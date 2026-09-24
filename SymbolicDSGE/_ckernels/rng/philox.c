@@ -208,20 +208,6 @@ void sdsge_philox_chi2_fill(sdsge_philox_state *st, i64 n,
   }
 }
 
-void sdsge_philox_standard_t_fill(sdsge_philox_state *st, i64 n,
-                                  f64 *SDSGE_RESTRICT out,
-                                  sdsge_sampler_params params) {
-  bitgen_t bg;
-  i64 i;
-  if (n <= 0) {
-    return;
-  }
-  sdsge_philox_bind(&bg, st);
-  for (i = 0; i < n; i++) {
-    out[i] = random_standard_t(&bg, params.df);
-  }
-}
-
 void sdsge_philox_beta_fill(sdsge_philox_state *st, i64 n,
                             f64 *SDSGE_RESTRICT out,
                             sdsge_sampler_params params) {
