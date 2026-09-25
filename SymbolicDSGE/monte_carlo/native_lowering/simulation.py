@@ -26,7 +26,7 @@ from ..defaults import (
 )
 from ..allocation import get_target_model
 from ..mc_constructs import MCStep
-from ..shock_native import build_native_plan
+from ...core.shock.native import build_native_plan
 from .utils import (
     NDF,
     FloatInputBinding,
@@ -63,7 +63,12 @@ def lower_simulation_step(
         else 0
     )
     params = _model_params(model)
-    drawn = build_native_plan(model, step, T)
+    drawn = build_native_plan(
+        model.compiled,
+        step.kwargs.get("shocks"),
+        T,
+        float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE)),
+    )
     if drawn is None:
         shocks, shocks_batched = _simulation_shocks(model, step, T, n_rep)
     else:

@@ -19,7 +19,7 @@ from .._ckernels.monte_carlo._arenas import resolve_n_workers
 from .allocation import BufferPlan, get_target_model
 from .mc_constructs import MCStep, OpType
 from ..core.shock.spec import _normalized_spec
-from .shock_native import native_shock_families
+from ..core.shock.native import native_shock_families
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel

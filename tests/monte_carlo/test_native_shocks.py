@@ -26,7 +26,7 @@ from SymbolicDSGE._ckernels.rng import (
 )
 from SymbolicDSGE.monte_carlo import MCPipeline, replication_shocks
 from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
-from SymbolicDSGE.monte_carlo.shock_native import (
+from SymbolicDSGE.core.shock.native import (
     ShockCode,
     build_native_plan,
     native_shock_entries,
@@ -41,7 +41,12 @@ T = 16
 
 def _plan(solved_test_model, shocks, shock_scale=1.0):
     step = simulation_step(target="dgp", T=T, shocks=shocks, shock_scale=shock_scale)
-    return build_native_plan(solved_test_model, step, T)
+    return build_native_plan(
+        solved_test_model.compiled,
+        step.kwargs.get("shocks"),
+        T,
+        float(step.kwargs.get("shock_scale", 1.0)),
+    )
 
 
 def _entries(solved_test_model, shocks):
@@ -280,7 +285,15 @@ def test_replication_shocks_rejects_a_deterministic_step(solved_test_model) -> N
 def test_unported_spec_still_runs_off_the_python_slab(solved_test_model) -> None:
     shocks = {("e_u",): Shock("t", seed=3, dist_kwargs={"df": 5})}
     step = simulation_step(T=T, target="reference", shocks=shocks, observables=False)
-    assert build_native_plan(solved_test_model, step, T) is None
+    assert (
+        build_native_plan(
+            solved_test_model.compiled,
+            step.kwargs.get("shocks"),
+            T,
+            float(step.kwargs.get("shock_scale", 1.0)),
+        )
+        is None
+    )
 
     states = _run_states(solved_test_model, shocks, 3, 1)
     resolved = resolve_shock_plan(solved_test_model.compiled, shocks, T)

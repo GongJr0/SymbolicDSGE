@@ -33,7 +33,7 @@ from .defaults import (
     DEFAULT_WALD_KIND_NAME,
 )
 from .mc_constructs import MCStep, OpType, SourceArgs
-from .shock_native import native_shock_scratch
+from ..core.shock.native import native_shock_scratch
 
 Shape: TypeAlias = tuple[int, ...]
 
