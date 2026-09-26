@@ -3,6 +3,7 @@ import numpy as np
 from libc.stdint cimport int64_t, uint64_t
 from cpython.mem cimport PyMem_Malloc, PyMem_Free
 
+SHOCK_PATH = native_shock.SDSGE_SHOCK_PATH
 SHOCK_NORMAL = native_shock.SDSGE_SHOCK_NORMAL
 SHOCK_UNIFORM = native_shock.SDSGE_SHOCK_UNIFORM
 
@@ -32,7 +33,7 @@ cdef class NativeShockPlan:
     @property
     def scratch_size(self):
         """Extra float arena elements the draw needs, for step sizing."""
-        return sdsge_shock_scratch_size(&self._plan)
+        return sdsge_shock_plan_arena_size(&self._plan).n_float
 
     @property
     def n_entries(self):
@@ -52,7 +53,7 @@ cdef class NativeShockPlan:
             (self._plan.T, self._plan.n_exog), dtype=np.float64
         )
         cdef double[::1] scratch = np.empty(
-            max(sdsge_shock_scratch_size(&self._plan), 1), dtype=np.float64
+            max(sdsge_shock_plan_arena_size(&self._plan).n_float, 1), dtype=np.float64
         )
         with nogil:
             sdsge_shock_draw(&self._plan, rep_idx, &scratch[0], &out[0, 0])
@@ -85,12 +86,10 @@ def native_shock_plan(
     cdef NativeShockPlan plan = NativeShockPlan()
     cdef int64_t n = len(pyplan.entries)
     cdef int64_t i
-    cdef int64_t width
-    cdef int64_t max_width = 0
     cdef int64_t[::1] columns_mv
     cdef double[:, ::1] factor_mv
     cdef double[::1] loc_mv
-
+    cdef double[:, ::1] path_mv
     plan._entries = <sdsge_shock_entry *>PyMem_Malloc(
         <size_t>n * sizeof(sdsge_shock_entry)
     )
@@ -99,10 +98,26 @@ def native_shock_plan(
 
     for i, e in enumerate(pyplan.entries):
         columns_mv = np.ascontiguousarray(e.indices, dtype=np.int64)
-        width = columns_mv.shape[0]
-
         plan._backing.append(columns_mv)
+
+        plan._entries[i].family = <native_shock>e.family
+        plan._entries[i].width = e.width
         plan._entries[i].columns = &columns_mv[0]
+
+        if e.family == SHOCK_PATH:
+            if e.value.shape[0] != T:
+                raise ValueError(
+                    f"Path period length {e.value.shape[0]} does not match T={T}."
+                )
+            path = np.ascontiguousarray(e.value, dtype=np.float64)
+            plan._backing.append(path)
+            path_mv = path
+
+            plan._entries[i].path = &path_mv[0, 0]
+            plan._entries[i].factor = NULL
+            plan._entries[i].loc = NULL
+            plan._entries[i].key = 0
+            continue
 
         factor_mv = np.ascontiguousarray(e.factor, dtype=np.float64)
         plan._backing.append(factor_mv)
@@ -112,17 +127,11 @@ def native_shock_plan(
         plan._backing.append(loc_mv)
         plan._entries[i].loc = &loc_mv[0]
 
-        plan._entries[i].family = <native_shock>e.family
-        plan._entries[i].width = width
         plan._entries[i].key = <uint64_t>e._native_seed_key
-        # Scratch is reused between entries; reserve for the widest group.
-        if width > max_width:
-            max_width = width
 
     plan._plan.entries = plan._entries
     plan._plan.n_entries = n
     plan._plan.T = T
     plan._plan.n_exog = n_exog
     plan._plan.shock_scale = shock_scale
-    plan._plan.max_width = max_width
     return plan

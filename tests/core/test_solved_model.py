@@ -321,7 +321,7 @@ def test_solved_model_second_order_irf_subtracts_pruned_baseline() -> None:
 
 
 def test_solved_model_sim_rejects_wrong_shock_length(solved_test):
-    with pytest.raises(ValueError, match="must have length"):
+    with pytest.raises(ValueError, match="Path period length"):
         solved_test.sim(8, shocks={"e_u": np.ones(7)})
 
 

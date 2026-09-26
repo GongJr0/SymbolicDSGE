@@ -7,7 +7,7 @@ replication) resolve a plan and then call :meth:`ShockPlan.fill` per draw.
 
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Sequence
+from typing import ClassVar, Sequence
 from functools import cached_property
 
 import numpy as np
@@ -16,6 +16,7 @@ from numpy.typing import NDArray
 
 from .generators import Shock, ShockPath, ShockDrawFn
 from ..._ckernels.core._shocks import (
+    SHOCK_PATH,
     SHOCK_NORMAL,
     SHOCK_UNIFORM,
     NativeShockPlan,
@@ -26,13 +27,14 @@ NDF = NDArray[float64]
 
 
 class ShockCode(IntEnum):
-    """Integer codes for the shock families the native draw implements.
+    """Integer codes the native draw dispatches an entry on.
 
-    Uses the ``SDSGE_SHOCK_*`` enum values from ``_ckernels/core/shocks.h``,
-    exported by the ``_shocks`` extension. The code selects which variate fills an
-    entry's draw; every other field an entry carries is family-independent.
+    The ``SDSGE_SHOCK_*`` values from ``_ckernels/core/shocks.h``, exported by
+    the ``_shocks`` extension. A family code selects the variate an entry draws.
+    ``PATH`` is not a family: the kernel copies such an entry instead.
     """
 
+    PATH = SHOCK_PATH
     NORMAL = SHOCK_NORMAL
     UNIFORM = SHOCK_UNIFORM
 
@@ -136,8 +138,11 @@ class ArrayEntry:
     Nothing about a supplied path depends on the calibration: this carries no
     scale, no factor, and no seed. ``value`` is always ``(T, width)``. The
     resolution widens a single shock's one-dimensional path, which lets every
-    entry unpack the same way.
+    entry unpack the same way. ``family`` is fixed, not resolved, so a consumer
+    reads one attribute off either entry kind.
     """
+
+    family: ClassVar[ShockCode] = ShockCode.PATH
 
     key: tuple[str, ...]
     indices: tuple[int, ...]
@@ -239,45 +244,30 @@ def validate_shock_targets(
             owner[member] = ",".join(members)
 
 
-def is_native_spec_eligible(shocks: Sequence[Shock | ShockPath]) -> bool:
-    """Check a normalized specification without resolving a plan or drawing keys.
+def native_code(
+    shock: Shock | ShockPath | ShockEntry | ArrayEntry,
+) -> ShockCode | None:
+    """The code the native draw dispatches one entry on, or None if it cannot.
 
-    Empty specifications need no native draw. Any supplied path or unsupported
-    family/width combination selects whole-spec Python materialization.
+    Takes a spec member or a resolved entry, since the arena planner asks before
+    resolution and the lowering asks after.
     """
-    return bool(shocks) and all(
-        isinstance(shock, Shock)
-        and ShockCode.for_dist(shock.dist, len(shock.target)) is not None
-        for shock in shocks
-    )
-
-
-def _spec_family(shock: ShockEntry | ArrayEntry) -> ShockCode | None:
-    """The native family code for one raw spec entry, or None if C cannot draw it.
-
-    A spec qualifies when it names a family the kernel implements, which is
-    what :class:`ShockCode.for_dist` answers. A live scipy distribution object
-    draws through code we have not ported, and so does Student-t.
-    """
-    if not isinstance(shock, ShockEntry):
-        # A supplied path is data the kernel could copy. The entry struct has no
-        # family for one, and one ineligible entry sends the whole spec to the
-        # Python draw.
-        return None
-
+    if isinstance(shock, ShockPath):
+        return ShockCode.PATH
+    if isinstance(shock, Shock):
+        return ShockCode.for_dist(shock.dist, len(shock.target))
     return shock.family
 
 
-def is_native_eligible(
-    plan: ShockPlan,
-) -> bool:
-    """Family codes for a spec the native draw can take, else None.
+def is_native_eligible(shocks: ShockPlan | Sequence[Shock | ShockPath]) -> bool:
+    """Whether the native draw can take every entry of a spec or resolved plan.
 
-    Eligibility is all-or-nothing: one entry the kernel cannot draw sends the
-    whole spec back to the Python route, since a simulation step reads a single
-    shock block.
+    All-or-nothing: one entry the kernel cannot draw sends the whole spec to the
+    Python route, since a simulation step reads a single shock block. An empty
+    spec draws nothing, which that route already materializes as zeros.
     """
-    return all(_spec_family(entry) is not None for entry in plan.entries)
+    entries = shocks.entries if isinstance(shocks, ShockPlan) else shocks
+    return bool(entries) and all(native_code(e) is not None for e in entries)
 
 
 def get_native_shock_plan(

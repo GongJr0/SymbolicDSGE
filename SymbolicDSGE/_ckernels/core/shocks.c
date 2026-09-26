@@ -2,94 +2,145 @@
 #include "../rng/philox.h"
 #include <stddef.h>
 
-i64 sdsge_shock_scratch_size(const sdsge_shock_plan *plan) {
-  return plan->T * plan->max_width;
-}
+/* --- shared pieces -------------------------------------------------------- */
 
-/* A replication's stream is selected purely by (entry, rep_idx), never by
- * accumulated state, so the draw is identical under any worker schedule. */
+/* A replication's stream is selected purely by (entry, rep_idx, stream), never
+ * by accumulated state, so the draw is identical under any worker schedule. */
 static inline void sdsge_shock_seed(sdsge_philox_state *st,
                                     const sdsge_shock_entry *entry,
-                                    i64 rep_idx) {
-  /*
-   * entry->columns is the sorted canonical indices of each shock variable
-   * in the group. A variable cannot appear in more than one group, therefore
-entry->columns[0] is a unique identifier for the group. */
-  sdsge_philox_seed(st, entry->key, entry->columns[0], (u64)rep_idx, 0);
+                                    const i64 rep_idx, const u64 stream) {
+
+  /* entry->columns is the sorted canonical indices of each shock variable in
+   * the group. A variable cannot appear in more than one group, therefore
+   * entry->columns[0] is a unique identifier for the group. */
+  sdsge_philox_seed(st, entry->key, (u64)entry->columns[0], (u64)rep_idx,
+                    stream);
 }
 
-/* z @ factor.T, scattered into the entry's columns. Width is the number of
- * exogenous variables one entry drives, so it is small (typically 1 to 3) and
- * the straightforward loop beats any blocking. */
-static void sdsge_shock_apply_normal(const sdsge_shock_plan *plan,
+/* loc + factor @ v, scattered into the entry's columns, for any family whose
+ * variate arrives standardized. */
+static void sdsge_shock_apply_affine(const sdsge_shock_plan *plan,
                                      const sdsge_shock_entry *entry,
-                                     const f64 *SDSGE_RESTRICT z,
+                                     const f64 *SDSGE_RESTRICT v,
                                      f64 *SDSGE_RESTRICT out) {
   const i64 width = entry->width;
   const i64 n_exog = plan->n_exog;
+  const i64 T = plan->T;
   const f64 shock_scale = plan->shock_scale;
-  i64 t;
 
-  for (t = 0; t < plan->T; t++) {
-    const f64 *SDSGE_RESTRICT z_t = z + t * width;
+  for (i64 t = 0; t < T; ++t) {
+    const f64 *SDSGE_RESTRICT v_t = v + t * width;
     f64 *SDSGE_RESTRICT out_t = out + t * n_exog;
-    i64 i;
-    for (i = 0; i < width; i++) {
+    for (i64 i = 0; i < width; ++i) {
       const f64 *SDSGE_RESTRICT factor_row = entry->factor + i * width;
       f64 acc = (entry->loc == NULL) ? 0.0 : entry->loc[i];
-      i64 j;
       /* factor is lower-triangular on the Cholesky path, but the eigh
        * fallback for a semidefinite covariance is dense, so sum the full row.
        */
-      for (j = 0; j < width; j++) {
-        acc += factor_row[j] * z_t[j];
+      for (i64 j = 0; j < width; ++j) {
+        acc += factor_row[j] * v_t[j];
       }
       out_t[entry->columns[i]] = shock_scale * acc;
     }
   }
 }
 
-static void sdsge_shock_apply_uniform(const sdsge_shock_plan *plan,
-                                      const sdsge_shock_entry *entry,
-                                      const f64 *SDSGE_RESTRICT u,
-                                      f64 *SDSGE_RESTRICT out) {
+/* --- families ------------------------------------------------------------- */
+
+static void sdsge_shock_draw_normal(const sdsge_shock_plan *plan,
+                                    const sdsge_shock_entry *entry,
+                                    const i64 rep_idx,
+                                    f64 *SDSGE_RESTRICT scratch,
+                                    f64 *SDSGE_RESTRICT out) {
+  sdsge_philox_state st;
+
+  sdsge_shock_seed(&st, entry, rep_idx, 0);
+  sdsge_philox_standard_normal_fill(&st, plan->T * entry->width, scratch);
+  sdsge_shock_apply_affine(plan, entry, scratch, out);
+}
+
+/* Uniform is univariate by construction, and its standardization is a special
+ * case relative to multivariate-supporting distributions. Inlined here. */
+static void sdsge_shock_draw_uniform(const sdsge_shock_plan *plan,
+                                     const sdsge_shock_entry *entry,
+                                     const i64 rep_idx,
+                                     f64 *SDSGE_RESTRICT scratch,
+                                     f64 *SDSGE_RESTRICT out) {
   const i64 n_exog = plan->n_exog;
+  const i64 T = plan->T;
   const i64 column = entry->columns[0];
   const f64 shock_scale = plan->shock_scale;
-
   const f64 sqrt3 = sqrt(3.0);
-  const f64 lo = entry->loc[0] - sqrt3 * entry->factor[0];
+  const f64 loc = (entry->loc == NULL) ? 0.0 : entry->loc[0];
+  const f64 lo = loc - sqrt3 * entry->factor[0];
   const f64 sc = 2.0 * sqrt3 * entry->factor[0];
-  i64 t;
+  sdsge_philox_state st;
 
-  for (t = 0; t < plan->T; t++) {
-    out[t * n_exog + column] = shock_scale * (lo + sc * u[t]);
+  sdsge_shock_seed(&st, entry, rep_idx, 0);
+  sdsge_philox_standard_uniform_fill(&st, T, scratch);
+  for (i64 t = 0; t < T; ++t) {
+    out[t * n_exog + column] = shock_scale * (lo + sc * scratch[t]);
   }
+}
+
+/* Indexed by `native_shock`, in enum order. Draws only: what a family spends is
+ * stated in `sdsge_shock_entry_arena_size`, which no caller of this table reads
+ * and which runs once per entry at plan time rather than per replication. */
+static const sdsge_shock_draw_fn SDSGE_SHOCK_DRAW[] = {
+    sdsge_shock_draw_normal,
+    sdsge_shock_draw_uniform,
+};
+
+static void sdsge_shock_apply_path(const sdsge_shock_plan *plan,
+                                   const sdsge_shock_entry *entry,
+                                   f64 *SDSGE_RESTRICT out) {
+  const i64 n_exog = plan->n_exog;
+  const i64 width = entry->width;
+  const f64 shock_scale = plan->shock_scale;
+
+  for (i64 t = 0; t < plan->T; ++t) {
+    for (i64 j = 0; j < width; ++j) {
+      out[t * n_exog + entry->columns[j]] =
+          shock_scale * entry->path[t * width + j];
+    }
+  }
+}
+
+/* --- entry points --------------------------------------------------------- */
+
+arena_size sdsge_shock_entry_arena_size(const native_shock family,
+                                        const i64 width, const i64 T) {
+  switch (family) {
+  case SDSGE_SHOCK_PATH:
+    /* A path is read from `path` and needs no scratch. */
+    return make_sizer(0, 0);
+  case SDSGE_SHOCK_NORMAL:
+    return make_sizer(T * width, 0);
+  case SDSGE_SHOCK_UNIFORM:
+    return make_sizer(T * width, 0);
+  }
+}
+
+arena_size sdsge_shock_plan_arena_size(const sdsge_shock_plan *plan) {
+  arena_size total = make_sizer(0, 0);
+
+  for (i64 i = 0; i < plan->n_entries; ++i) {
+    const sdsge_shock_entry *entry = &plan->entries[i];
+    total = sdsge_max_arena(total, sdsge_shock_entry_arena_size(
+                                       entry->family, entry->width, plan->T));
+  }
+  return total;
 }
 
 void sdsge_shock_draw(const sdsge_shock_plan *plan, const i64 rep_idx,
                       f64 *SDSGE_RESTRICT scratch, f64 *SDSGE_RESTRICT out) {
-  const i64 total = plan->T * plan->n_exog;
-  sdsge_philox_state st;
-  i64 i;
-
-  /* An exogenous variable no entry targets stays at zero, matching the Python
-   * route, which fills only the columns its spec names. */
-  for (i = 0; i < total; i++) {
-    out[i] = 0.0;
-  }
-
-  for (i = 0; i < plan->n_entries; i++) {
+  for (i64 i = 0; i < plan->n_entries; ++i) {
     const sdsge_shock_entry *entry = &plan->entries[i];
-    sdsge_shock_seed(&st, entry, rep_idx);
 
-    if (entry->family == SDSGE_SHOCK_UNIFORM) {
-      sdsge_philox_standard_uniform_fill(&st, plan->T, scratch);
-      sdsge_shock_apply_uniform(plan, entry, scratch, out);
+    if (entry->family == SDSGE_SHOCK_PATH) {
+      sdsge_shock_apply_path(plan, entry, out);
       continue;
     }
-
-    sdsge_philox_standard_normal_fill(&st, plan->T * entry->width, scratch);
-    sdsge_shock_apply_normal(plan, entry, scratch, out);
+    SDSGE_SHOCK_DRAW[entry->family](plan, entry, rep_idx, scratch, out);
   }
 }

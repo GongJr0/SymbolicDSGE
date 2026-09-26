@@ -7,7 +7,7 @@ import pytest
 
 from SymbolicDSGE import Shock
 from SymbolicDSGE._ckernels.rng import philox_standard_normal
-from SymbolicDSGE.core.shock.plan import get_native_shock_plan, is_native_spec_eligible
+from SymbolicDSGE.core.shock.plan import get_native_shock_plan, is_native_eligible
 from SymbolicDSGE.core.shock.spec import _normalized_spec, resolve_shock_plan
 
 T = 16
@@ -26,7 +26,7 @@ def _entries(solved_test_model, shocks):
     "dist, targets", [("norm", ("e_u",)), ("norm", ("e_u", "e_v")), ("uni", ("e_u",))]
 )
 def test_native_spec_accepts_supported_families(dist, targets):
-    assert is_native_spec_eligible(_normalized_spec({targets: Shock(dist, seed=0)}))
+    assert is_native_eligible(_normalized_spec({targets: Shock(dist, seed=0)}))
 
 
 @pytest.mark.parametrize(
@@ -35,7 +35,6 @@ def test_native_spec_accepts_supported_families(dist, targets):
         {},
         {("e_u",): Shock("t", seed=0, dist_kwargs={"df": 5})},
         {("e_u", "e_v"): Shock("uni", seed=0)},
-        {("e_u",): np.zeros(T)},
         # One ineligible entry sends the whole specification back.
         {
             ("e_u",): Shock("norm", seed=0),
@@ -45,7 +44,7 @@ def test_native_spec_accepts_supported_families(dist, targets):
 )
 def test_native_families_rejects_unported_specs(shocks) -> None:
     spec = _normalized_spec(shocks)
-    assert not is_native_spec_eligible(spec)
+    assert not is_native_eligible(spec)
 
 
 # --- the draw itself --------------------------------------------------------

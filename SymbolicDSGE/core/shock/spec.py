@@ -16,7 +16,7 @@ from numpy.typing import NDArray
 from ..compiled_model import CompiledModel
 from ..config import make_Q
 
-from .plan import ShockCode
+from .plan import ShockCode, get_native_shock_plan
 from .generators import (
     Shock,
     ShockParameters,
@@ -236,6 +236,10 @@ def simulation_shock_matrix(
     """``(T, n_exog)`` innovations for a spec, or zeros when there is none."""
     if shocks is None:
         return np.zeros((T, compiled.n_exog), dtype=float64)
+    pyplan = resolve_shock_plan(compiled, shocks, T)
+    nplan = get_native_shock_plan(pyplan, T, compiled.n_exog, shock_scale)
+    if nplan is not None:
+        return nplan.draw(rep_idx=0)
     return resolve_shock_plan(
         compiled,
         _normalized_spec(shocks),
