@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Sequence, Mapping
+from typing import Sequence, Mapping, cast
 
 import numpy as np
+
+from SymbolicDSGE.core.shock.plan import get_native_shock_plan
 
 
 from ..._ckernels.monte_carlo import _offsets
@@ -16,6 +18,7 @@ from ..._ckernels.monte_carlo._runner import (
 from ...core.solved_model import SolvedModel
 from ...core.solver_backend import SecondOrderSolution
 from ...core.shock.spec import (
+    ShockSpec,
     _normalized_spec,
     resolve_shock_plan,
     simulation_shock_matrix,
@@ -26,7 +29,6 @@ from ..defaults import (
 )
 from ..allocation import get_target_model
 from ..mc_constructs import MCStep
-from ...core.shock.native import build_native_plan
 from .utils import (
     NDF,
     FloatInputBinding,
@@ -63,11 +65,16 @@ def lower_simulation_step(
         else 0
     )
     params = _model_params(model)
-    drawn = build_native_plan(
+    splan = resolve_shock_plan(
         model.compiled,
-        step.kwargs.get("shocks"),
+        cast(ShockSpec, step.kwargs.get("shocks")),
         T,
-        float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE)),
+    )
+    drawn = get_native_shock_plan(
+        splan,
+        T,
+        n_exog,
+        step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE),
     )
     if drawn is None:
         shocks, shocks_batched = _simulation_shocks(model, step, T, n_rep)

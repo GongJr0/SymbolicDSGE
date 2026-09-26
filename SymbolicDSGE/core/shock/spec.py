@@ -15,6 +15,8 @@ from numpy.typing import NDArray
 
 from ..compiled_model import CompiledModel
 from ..config import make_Q
+
+from .plan import ShockCode
 from .generators import (
     Shock,
     ShockParameters,
@@ -173,7 +175,6 @@ def resolve_shock_plan(
 
     for shock in spec:
         key = shock.target
-
         if isinstance(shock, ShockPath):
             entries.append(_array_entry(shock, shock_col))
             continue
@@ -211,6 +212,7 @@ def resolve_shock_plan(
             ShockEntry(
                 key=key,
                 indices=indices,
+                family=ShockCode.for_dist(shock.dist, len(indices)),
                 draw=shock.draw_fn(_require_horizon(T, key), len(indices) > 1),
                 loc=resolve_loc(shock.dist_kwargs, len(indices)),
                 factor=factor,

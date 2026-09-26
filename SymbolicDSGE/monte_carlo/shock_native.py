@@ -8,7 +8,7 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from ..core.shock.native import build_native_plan
+from ..core.shock.plan import get_native_shock_plan
 from ..core.shock.spec import resolve_shock_plan, _normalized_spec
 from .defaults import DEFAULT_SHOCK_SCALE
 
@@ -40,12 +40,18 @@ def replication_shocks(
         raise ValueError("The simulation step draws no shocks.")
 
     resolved = resolve_shock_plan(model.compiled, shocks, T)
-    plan = build_native_plan(
+    pyplan = resolve_shock_plan(
         model.compiled,
         shocks,
         T,
-        float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE)),
     )
+    plan = get_native_shock_plan(
+        pyplan,
+        T,
+        model.compiled.n_exog,
+        step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE),
+    )
+
     block = (
         resolved.matrix(
             T,

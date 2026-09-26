@@ -57,3 +57,15 @@ def dense_lkj_test_model_path() -> Path:
 @pytest.fixture(scope="session")
 def rbc_second_order_test_model_path() -> Path:
     return RBC_SECOND_ORDER_TEST_MODEL_PATH
+
+
+@pytest.fixture(scope="session")
+def solved_rbc_second_order(rbc_second_order_test_model_path):
+    """Second-order RBC model with positive observation noise for filter tests."""
+    import numpy as np
+    from SymbolicDSGE import DSGESolver, ModelParser
+    from SymbolicDSGE.kalman.config import KalmanConfig
+
+    model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
+    solver = DSGESolver(model, KalmanConfig(R=np.array([[0.01]], dtype=np.float64)))
+    return solver.solve(solver.compile(), order=2)

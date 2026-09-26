@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray
 
-from ...core.shock.plan import NativeShockEntry
+from ...core.shock.plan import ShockPlan
 
 _F64 = NDArray[np.float64]
 
@@ -15,8 +15,8 @@ class NativeShockPlan:
     def n_entries(self) -> int: ...
     def draw(self, rep_idx: int) -> _F64: ...
 
-def shock_plan(
-    entries: tuple[NativeShockEntry, ...],
+def native_shock_plan(
+    pyplan: ShockPlan,
     T: int,
     n_exog: int,
     shock_scale: float,

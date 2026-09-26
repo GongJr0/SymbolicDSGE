@@ -19,7 +19,7 @@ from .._ckernels.monte_carlo._arenas import resolve_n_workers
 from .allocation import BufferPlan, get_target_model
 from .mc_constructs import MCStep, OpType
 from ..core.shock.spec import _normalized_spec
-from ..core.shock.native import native_shock_families
+from ..core.shock.plan import is_native_spec_eligible
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
@@ -324,7 +324,7 @@ class MCMemoryProfiler:
             shocks = _normalized_spec(step.kwargs.get("shocks"))
             if not shocks:
                 continue  # A single (T, n_exog) matrix, shared by every replication.
-            if native_shock_families(shocks):
+            if is_native_spec_eligible(shocks):
                 continue
             model = get_target_model(step, self._models)
             T = int(step.kwargs["T"])

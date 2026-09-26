@@ -8,7 +8,9 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE import DSGESolver, ModelParser, Shock
+from SymbolicDSGE.core.shock.spec import _normalized_spec
+from SymbolicDSGE.monte_carlo.allocation import native_shock_scratch
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE._ckernels.monte_carlo._offsets import (
@@ -386,3 +388,10 @@ def test_a_custom_transform_output_shape_must_be_two_non_negative_dimensions() -
 
     with pytest.raises(ValueError, match="two non-negative dimensions"):
         _plan(steps)
+
+
+def test_native_scratch_sizes_on_the_widest_entry() -> None:
+    wide = _normalized_spec({("e_u", "e_v"): Shock("norm", seed=0)})
+    assert native_shock_scratch(wide, 16) == 16 * 2
+    narrow = _normalized_spec({("e_u",): Shock("norm", seed=0)})
+    assert native_shock_scratch(narrow, 16) == 16

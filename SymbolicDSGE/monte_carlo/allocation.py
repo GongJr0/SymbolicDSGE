@@ -33,7 +33,8 @@ from .defaults import (
     DEFAULT_WALD_KIND_NAME,
 )
 from .mc_constructs import MCStep, OpType, SourceArgs
-from ..core.shock.native import native_shock_scratch
+from ..core.shock.plan import is_native_spec_eligible
+from ..core.shock.generators import Shock, ShockPath
 
 Shape: TypeAlias = tuple[int, ...]
 
@@ -276,6 +277,18 @@ def _resolve_input_asize(
                 f"Input arena resolution is not implemented for step {step.name!r} "
                 f"({step.step_type!r})."
             )
+
+
+def native_shock_scratch(shocks: Sequence[Shock | ShockPath], T: int) -> int:
+    """Float arena elements the native draw needs.
+
+    Reads the raw spec so arena planning can size the scratch without resolving
+    a plan against the model or drawing keys it would immediately discard. The
+    widest entry sets the requirement, since entries are drawn one at a time.
+    """
+    if not is_native_spec_eligible(shocks):
+        return 0
+    return T * max(len(s.target) for s in shocks)
 
 
 def _resolve_datagen_input_asize(

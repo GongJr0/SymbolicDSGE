@@ -6,7 +6,8 @@ replication) resolve a plan and then call :meth:`ShockPlan.fill` per draw.
 """
 
 from dataclasses import dataclass
-from typing import NamedTuple, Sequence
+from enum import IntEnum
+from typing import Sequence
 from functools import cached_property
 
 import numpy as np
@@ -14,18 +15,37 @@ from numpy import float64
 from numpy.typing import NDArray
 
 from .generators import Shock, ShockPath, ShockDrawFn
+from ..._ckernels.core._shocks import (
+    SHOCK_NORMAL,
+    SHOCK_UNIFORM,
+    NativeShockPlan,
+    native_shock_plan,
+)
 
 NDF = NDArray[float64]
 
 
-class NativeShockEntry(NamedTuple):
-    """One entry in the layout ``_shocks.shock_plan`` consumes."""
+class ShockCode(IntEnum):
+    """Integer codes for the shock families the native draw implements.
 
-    family: int
-    columns: NDArray[np.int64]
-    factor: NDF | None
-    loc: NDF
-    key: int
+    Uses the ``SDSGE_SHOCK_*`` enum values from ``_ckernels/core/shocks.h``,
+    exported by the ``_shocks`` extension. The code selects which variate fills an
+    entry's draw; every other field an entry carries is family-independent.
+    """
+
+    NORMAL = SHOCK_NORMAL
+    UNIFORM = SHOCK_UNIFORM
+
+    @classmethod
+    def for_dist(cls, dist: object, width: int) -> "ShockCode | None":
+        """Return a code when the native kernel supports the family and width."""
+        if not isinstance(dist, str) or width < 1:
+            return None
+        if dist == "norm":
+            return cls.NORMAL
+        if dist == "uni" and width == 1:
+            return cls.UNIFORM
+        return None
 
 
 @dataclass(frozen=True)
@@ -45,6 +65,7 @@ class ShockEntry:
 
     key: tuple[str, ...]
     indices: tuple[int, ...]
+    family: ShockCode | None
     loc: NDF
     factor: NDF
     draw: ShockDrawFn
@@ -99,6 +120,13 @@ class ShockEntry:
                 entropy=self.base_seed, spawn_key=(self.indices[0], rep_idx)
             ).generate_state(1, dtype=np.uint64)[0]
         )
+
+    @property
+    def _native_seed_key(self) -> int:
+        if self.base_seed is None:
+            rng = np.random.default_rng()
+            return int(rng.integers(0, 2**64, dtype=np.uint64))
+        return int(self.base_seed) & 0xFFFFFFFFFFFFFFFF
 
 
 @dataclass(frozen=True)
@@ -209,3 +237,55 @@ def validate_shock_targets(
                     "in at most one entry."
                 )
             owner[member] = ",".join(members)
+
+
+def is_native_spec_eligible(shocks: Sequence[Shock | ShockPath]) -> bool:
+    """Check a normalized specification without resolving a plan or drawing keys.
+
+    Empty specifications need no native draw. Any supplied path or unsupported
+    family/width combination selects whole-spec Python materialization.
+    """
+    return bool(shocks) and all(
+        isinstance(shock, Shock)
+        and ShockCode.for_dist(shock.dist, len(shock.target)) is not None
+        for shock in shocks
+    )
+
+
+def _spec_family(shock: ShockEntry | ArrayEntry) -> ShockCode | None:
+    """The native family code for one raw spec entry, or None if C cannot draw it.
+
+    A spec qualifies when it names a family the kernel implements, which is
+    what :class:`ShockCode.for_dist` answers. A live scipy distribution object
+    draws through code we have not ported, and so does Student-t.
+    """
+    if not isinstance(shock, ShockEntry):
+        # A supplied path is data the kernel could copy. The entry struct has no
+        # family for one, and one ineligible entry sends the whole spec to the
+        # Python draw.
+        return None
+
+    return shock.family
+
+
+def is_native_eligible(
+    plan: ShockPlan,
+) -> bool:
+    """Family codes for a spec the native draw can take, else None.
+
+    Eligibility is all-or-nothing: one entry the kernel cannot draw sends the
+    whole spec back to the Python route, since a simulation step reads a single
+    shock block.
+    """
+    return all(_spec_family(entry) is not None for entry in plan.entries)
+
+
+def get_native_shock_plan(
+    plan: ShockPlan,
+    T: int,
+    n_exog: int,
+    shock_scale: float = 1.0,
+) -> NativeShockPlan | None:
+    if not is_native_eligible(plan):
+        return None
+    return native_shock_plan(plan, T, n_exog, shock_scale)
