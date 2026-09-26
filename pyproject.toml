@@ -19,7 +19,7 @@ dependencies = [
     "matplotlib>=3.11.2",
     "numba>=0.62.1,!=0.66.0",  # 0.66.0 cp311 wheel does not ship stubs for Windows.
     "numpy>=2.3.5",
-    "pandas>=2.3.3",
+    "pandas>=3.0.6",
     "parquet-engine>=0.2.0",
     "psutil>=7.2.2",
     "pyyaml>=6.0.3",
