@@ -392,6 +392,6 @@ def test_a_custom_transform_output_shape_must_be_two_non_negative_dimensions() -
 
 def test_native_scratch_sizes_on_the_widest_entry() -> None:
     wide = _normalized_spec({("e_u", "e_v"): Shock("norm", seed=0)})
-    assert native_shock_scratch(wide, 16) == 16 * 2
+    assert native_shock_scratch(wide, 16).n_float == 16 * 2
     narrow = _normalized_spec({("e_u",): Shock("norm", seed=0)})
-    assert native_shock_scratch(narrow, 16) == 16
+    assert native_shock_scratch(narrow, 16).n_float == 16

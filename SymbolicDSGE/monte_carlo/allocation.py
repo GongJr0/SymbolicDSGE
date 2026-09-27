@@ -33,7 +33,7 @@ from .defaults import (
     DEFAULT_WALD_KIND_NAME,
 )
 from .mc_constructs import MCStep, OpType, SourceArgs
-from ..core.shock.plan import is_native_eligible
+from ..core.shock.plan import is_native_eligible, native_code
 from ..core.shock.generators import Shock, ShockPath
 
 Shape: TypeAlias = tuple[int, ...]
@@ -279,7 +279,7 @@ def _resolve_input_asize(
             )
 
 
-def native_shock_scratch(shocks: Sequence[Shock | ShockPath], T: int) -> int:
+def native_shock_scratch(shocks: Sequence[Shock | ShockPath], T: int) -> ArenaSize:
     """Float arena elements the native draw needs.
 
     Reads the raw spec so arena planning can size the scratch without resolving
@@ -287,8 +287,17 @@ def native_shock_scratch(shocks: Sequence[Shock | ShockPath], T: int) -> int:
     widest entry sets the requirement, since entries are drawn one at a time.
     """
     if not is_native_eligible(shocks):
-        return 0
-    return T * max(len(s.target) for s in shocks)
+        return _asize((0, 0))
+    return _asize(
+        a.shock_scratch_arena_size(
+            [
+                (code, len(s.target))
+                for s in shocks
+                if (code := native_code(s)) is not None
+            ],
+            T,
+        )
+    )
 
 
 def _resolve_datagen_input_asize(
@@ -314,7 +323,9 @@ def _resolve_datagen_input_asize(
     shocks = _normalized_spec(step.kwargs.get("shocks"))
     scratch = native_shock_scratch(shocks, T)
     if scratch:
-        size = ArenaSize(n_float=size.n_float + scratch, n_int=size.n_int)
+        size = ArenaSize(
+            n_float=size.n_float + scratch.n_float, n_int=size.n_int + scratch.n_int
+        )
     return size
 
 
