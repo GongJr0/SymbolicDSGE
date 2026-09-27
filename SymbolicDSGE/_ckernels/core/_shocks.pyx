@@ -39,24 +39,31 @@ cdef class NativeShockPlan:
     def n_entries(self):
         return self._plan.n_entries
 
-    def draw(self, int64_t rep_idx):
-        """Materialize one replication's ``(T, n_exog)`` shock block.
-
-        The MC runner draws straight into its arena. This is the
-        route back out for a caller holding a replication index and wanting the
-        exact block that replication saw, which is what makes a single
-        replication reproducible outside the loop.
-        """
+    def fill(self, double[:, ::1] out, int64_t rep_idx):
+        """Draw one replication into a caller-owned ``(T, n_exog)`` block."""
         if rep_idx < 0:
             raise ValueError("rep_idx must be non-negative.")
-        cdef double[:, ::1] out = np.zeros(
-            (self._plan.T, self._plan.n_exog), dtype=np.float64
-        )
+        if out.shape[0] != self._plan.T or out.shape[1] != self._plan.n_exog:
+            raise ValueError(
+                f"Shock block must have shape ({self._plan.T}, "
+                f"{self._plan.n_exog}); got ({out.shape[0]}, {out.shape[1]})."
+            )
         cdef double[::1] scratch = np.empty(
             max(sdsge_shock_plan_arena_size(&self._plan).n_float, 1), dtype=np.float64
         )
         with nogil:
             sdsge_shock_draw(&self._plan, rep_idx, &scratch[0], &out[0, 0])
+
+    def draw(self, int64_t rep_idx):
+        """Materialize one replication's ``(T, n_exog)`` shock block.
+
+        This is the route makeing a single replication reproducible outside an
+        MC pipeline and lets sim use a native plan to draw.
+        """
+        cdef double[:, ::1] out = np.zeros(
+            (self._plan.T, self._plan.n_exog), dtype=np.float64
+        )
+        self.fill(out, rep_idx)
         return np.asarray(out)
 
 
