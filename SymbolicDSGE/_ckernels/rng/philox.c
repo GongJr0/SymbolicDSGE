@@ -117,6 +117,12 @@ u64 sdsge_philox_next_u64(sdsge_philox_state *st) {
   return st->buffer[st->buffer_pos++];
 }
 
+f64 sdsge_philox_next_double(sdsge_philox_state *st) {
+  /* The standard 53-bit construction, identical to what numpy's own bit
+   * generators use. */
+  return (f64)(sdsge_philox_next_u64(st) >> 11) * (1.0 / 9007199254740992.0);
+}
+
 /* bitgen_t vtable over the state above. numpy's transforms reach the engine
  * only through these, so binding them is all it takes to reuse npyrandom. */
 
@@ -129,11 +135,7 @@ static u32 sdsge_philox_bg_next_u32(void *st) {
 }
 
 static f64 sdsge_philox_bg_next_double(void *st) {
-  /* The standard 53-bit construction, identical to what numpy's own bit
-   * generators use, so the uniform transform sees the distribution it
-   * expects. */
-  return (f64)(sdsge_philox_next_u64((sdsge_philox_state *)st) >> 11) *
-         (1.0 / 9007199254740992.0);
+  return sdsge_philox_next_double((sdsge_philox_state *)st);
 }
 
 static u64 sdsge_philox_bg_next_raw(void *st) {

@@ -13,6 +13,8 @@ from SymbolicDSGE.monte_carlo.step_factories import simulation_step
 from SymbolicDSGE.core.shock.plan import get_native_shock_plan
 from SymbolicDSGE.core.shock.spec import resolve_shock_plan
 
+from scipy.stats import t
+
 T = 16
 
 
@@ -80,7 +82,7 @@ def test_replication_shocks_rejects_a_deterministic_step(solved_test_model) -> N
 
 
 def test_unported_spec_still_runs_off_the_python_slab(solved_test_model) -> None:
-    shocks = {("e_u",): Shock("t", seed=3, dist_kwargs={"df": 5})}
+    shocks = {("e_u",): Shock(t, seed=3, dist_kwargs={"df": 5})}
     assert _plan(solved_test_model, shocks) is None
 
     states = _run_states(solved_test_model, shocks, 3, 1)

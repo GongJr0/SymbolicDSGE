@@ -60,7 +60,10 @@ static void sdsge_shock_draw_normal(const sdsge_shock_plan *plan,
 }
 
 /* Uniform is univariate by construction, and its standardization is a special
- * case relative to multivariate-supporting distributions. Inlined here. */
+ * case relative to multivariate-supporting distributions. Inlined here.
+ *
+ * Each draw is transformed on its own, so it goes straight to its strided
+ * destination and the family stages nothing. */
 static void sdsge_shock_draw_uniform(const sdsge_shock_plan *plan,
                                      const sdsge_shock_entry *entry,
                                      const i64 rep_idx,
@@ -76,11 +79,39 @@ static void sdsge_shock_draw_uniform(const sdsge_shock_plan *plan,
   const f64 sc = 2.0 * sqrt3 * entry->factor[0];
   sdsge_philox_state st;
 
+  (void)scratch;
   sdsge_shock_seed(&st, entry, rep_idx, 0);
-  sdsge_philox_standard_uniform_fill(&st, T, scratch);
   for (i64 t = 0; t < T; ++t) {
-    out[t * n_exog + column] = shock_scale * (lo + sc * scratch[t]);
+    out[t * n_exog + column] =
+        shock_scale * (lo + sc * sdsge_philox_next_double(&st));
   }
+}
+
+static void sdsge_shock_draw_student_t(const sdsge_shock_plan *plan,
+                                       const sdsge_shock_entry *entry,
+                                       const i64 rep_idx,
+                                       f64 *SDSGE_RESTRICT scratch,
+                                       f64 *SDSGE_RESTRICT out) {
+  const i64 width = entry->width;
+  const i64 T = plan->T;
+  const f64 df = entry->params.df;
+  f64 *SDSGE_RESTRICT v = scratch;
+  f64 *SDSGE_RESTRICT g = scratch + T * width;
+  sdsge_philox_state st;
+
+  sdsge_shock_seed(&st, entry, rep_idx, 0);
+  sdsge_philox_standard_normal_fill(&st, T * width, v);
+  sdsge_shock_seed(&st, entry, rep_idx, 1);
+  sdsge_philox_chi2_fill(&st, T, g, entry->params);
+
+  for (i64 t = 0; t < T; ++t) {
+    const f64 s = sqrt(df / g[t]);
+    f64 *SDSGE_RESTRICT v_t = v + t * width;
+    for (i64 i = 0; i < width; ++i) {
+      v_t[i] *= s;
+    }
+  }
+  sdsge_shock_apply_affine(plan, entry, v, out);
 }
 
 /* Indexed by `native_shock`, in enum order. Draws only: what a family spends is
@@ -89,6 +120,7 @@ static void sdsge_shock_draw_uniform(const sdsge_shock_plan *plan,
 static const sdsge_shock_draw_fn SDSGE_SHOCK_DRAW[] = {
     sdsge_shock_draw_normal,
     sdsge_shock_draw_uniform,
+    sdsge_shock_draw_student_t,
 };
 
 static void sdsge_shock_apply_path(const sdsge_shock_plan *plan,
@@ -117,7 +149,11 @@ arena_size sdsge_shock_entry_arena_size(const native_shock family,
   case SDSGE_SHOCK_NORMAL:
     return make_sizer(T * width, 0);
   case SDSGE_SHOCK_UNIFORM:
-    return make_sizer(T * width, 0);
+    /* Transformed one draw at a time into `out`, staging nothing. */
+    return make_sizer(0, 0);
+  case SDSGE_SHOCK_STUDENT_T:
+    /* The Gaussian core, plus the chi-square it is divided by. */
+    return make_sizer(T * (width + 1), 0);
   }
 }
 

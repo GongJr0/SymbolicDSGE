@@ -10,6 +10,8 @@ from SymbolicDSGE._ckernels.rng import philox_standard_normal
 from SymbolicDSGE.core.shock.plan import get_native_shock_plan, native_code
 from SymbolicDSGE.core.shock.spec import _normalized_spec, resolve_shock_plan
 
+from scipy.stats import t
+
 T = 16
 
 
@@ -30,18 +32,6 @@ def test_native_code_accepts_supported_families(dist, targets) -> None:
     assert all(native_code(member) is not None for member in spec)
 
 
-@pytest.mark.parametrize(
-    "shocks",
-    [
-        {("e_u",): Shock("t", seed=0, dist_kwargs={"df": 5})},
-        {("e_u", "e_v"): Shock("uni", seed=0)},
-    ],
-)
-def test_native_code_rejects_unported_families(shocks) -> None:
-    spec = _normalized_spec(shocks)
-    assert all(native_code(member) is None for member in spec)
-
-
 def test_a_spec_with_no_entries_lowers_to_no_plan(solved_test_model) -> None:
     assert _plan(solved_test_model, {}) is None
 
@@ -51,7 +41,7 @@ def test_a_mixed_spec_splits_by_family(solved_test_model) -> None:
         solved_test_model.compiled,
         {
             ("e_u",): Shock("norm", seed=0),
-            ("e_v",): Shock("t", seed=1, dist_kwargs={"df": 5}),
+            ("e_v",): Shock(t, seed=1, dist_kwargs={"df": 5}),
         },
         T,
     )
@@ -186,21 +176,15 @@ def test_negative_replication_index_is_rejected(solved_test_model) -> None:
 # ``_native_draw`` asserts the lowering actually happened rather than trusting it.
 
 
-def _python_draw(solved_test_model, spec, rep_idx):
-    return resolve_shock_plan(solved_test_model.compiled, spec, T).matrix(
-        T, 1.0, rep_idx
-    )
-
-
-def _native_draw(solved_test_model, spec, rep_idx):
+def _draw(solved_test_model, spec, rep_idx):
     plan = _plan(solved_test_model, spec)
     assert plan is not None, "spec was expected to lower to the native draw"
     return plan.draw(rep_idx)
 
 
 ROUTES = [
-    pytest.param("t", _python_draw, id="python"),
-    pytest.param("norm", _native_draw, id="native"),
+    pytest.param("t", _draw, id="t"),
+    pytest.param("norm", _draw, id="norm"),
 ]
 
 

@@ -45,6 +45,10 @@ void sdsge_philox_seed(sdsge_philox_state *st, u64 key0, u64 key1, u64 stream0,
 /* One raw 64-bit draw advancing `st`. */
 u64 sdsge_philox_next_u64(sdsge_philox_state *st);
 
+/* One standard uniform in [0, 1) advancing `st`, the 53-bit construction
+ * numpy's own bit generators use. This is what the uniform fill loops over. */
+f64 sdsge_philox_next_double(sdsge_philox_state *st);
+
 /* Fill `out[0..n)` with standard normal draws (mean 0, var 1) advancing `st`.
  * The transform is numpy's ziggurat, linked from npyrandom. */
 void sdsge_philox_standard_normal_fill(sdsge_philox_state *st, i64 n,

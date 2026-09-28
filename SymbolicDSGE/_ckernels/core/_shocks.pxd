@@ -5,11 +5,22 @@ cdef extern from "../_common/sdsge_common.h":
         int64_t n_float
         int64_t n_int
 
+cdef extern from "../rng/philox.h":
+    ctypedef struct sdsge_beta_params:
+        double a
+        double b
+
+    ctypedef union sdsge_sampler_params:
+        double df
+        double a
+        sdsge_beta_params beta
+
 cdef extern from "shocks.h":
     ctypedef enum native_shock:
         SDSGE_SHOCK_PATH = -1
         SDSGE_SHOCK_NORMAL = 0
         SDSGE_SHOCK_UNIFORM = 1
+        SDSGE_SHOCK_STUDENT_T = 2
 
     ctypedef struct sdsge_shock_entry:
         native_shock family
@@ -18,6 +29,7 @@ cdef extern from "shocks.h":
         const int64_t *columns
         const double *factor
         const double *loc
+        sdsge_sampler_params params
         uint64_t key
 
     ctypedef struct sdsge_shock_plan:

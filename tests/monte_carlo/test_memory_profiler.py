@@ -19,6 +19,8 @@ from SymbolicDSGE.monte_carlo.memory import (
 )
 from SymbolicDSGE.monte_carlo.step_factories import simulation_step
 
+from scipy.stats import t
+
 ARENA_NAMES = (
     "float_in_work",
     "int_in_work",
@@ -175,7 +177,7 @@ def test_fallback_shocks_are_counted_outside_the_arenas(solved: SolvedModel) -> 
                 target="reference",
                 T=T,
                 shocks={
-                    name: Shock(dist="t", seed=index, dist_kwargs={"df": 8})
+                    name: Shock(dist=t, seed=index, dist_kwargs={"df": 8})
                     for index, name in enumerate(solved.compiled.shock_names)
                 },
             )

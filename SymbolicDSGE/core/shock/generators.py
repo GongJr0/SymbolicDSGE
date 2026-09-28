@@ -140,7 +140,7 @@ def _validate_dist(dist: object, dist_kwargs: Mapping[str, Any]) -> None:
     """Validate distribution and parameters before binding."""
     if dist is None:
         raise ValueError(
-            "A Distribution must be specified to draw shocks. "
+            "A distribution must be specified to draw shocks. "
             "Use `ShockPath` if you intend to supply a pre-generated "
             "shock array instead of drawing from a distribution."
         )
@@ -175,8 +175,16 @@ def validate_shock_family(
     """
     _validate_dist(dist, dist_kwargs)
     match dist:
-        case "t" if "df" not in dist_kwargs:
-            raise ValueError("Student-t shocks require 'df' in dist_kwargs.")
+        case "t":
+            if "df" not in dist_kwargs:
+                raise ValueError("Student-t shocks require 'df' in dist_kwargs.")
+
+            if dist_kwargs["df"] <= 2.0:
+                raise ValueError(
+                    "Student-t requires df > 2 for finite variance. "
+                    "The shock covariance specification cannot be satisfied with "
+                    f"df={dist_kwargs['df']}."
+                )
         case "uni" if width > 1:
             # A linear map of independent uniforms is not uniform in its
             # margins, so the factor form cannot express a grouped uniform.

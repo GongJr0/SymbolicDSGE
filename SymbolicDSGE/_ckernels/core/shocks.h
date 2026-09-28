@@ -2,6 +2,7 @@
 #define SDSGE_SHOCKS_H
 
 #include "../_common/sdsge_common.h"
+#include "../rng/philox.h" /* sdsge_sampler_params */
 
 /* Per-replication shock draw, executed inside the MC hot loop (issue #374).
  * Draws into a (T, n_exog) block via the Philox engine in ../rng/philox.h,
@@ -14,6 +15,7 @@ typedef enum {
   /* Dense from zero; the draw table in shocks.c is indexed by these. */
   SDSGE_SHOCK_NORMAL = 0,
   SDSGE_SHOCK_UNIFORM = 1,
+  SDSGE_SHOCK_STUDENT_T = 2,
 } native_shock;
 
 /* One resolved entry of a shock spec. A univariate entry is the width-1 case,
@@ -29,6 +31,9 @@ typedef struct {
   const f64 *factor;
   /* width-long mean vector */
   const f64 *loc;
+  /* The family's own parameters, by value. `family` selects the member, the
+   * same tag that selected the draw. Zero for a family that takes none. */
+  sdsge_sampler_params params;
   u64 key; /* the spec's seed; columns[0] separates entries sharing one. */
 } sdsge_shock_entry;
 

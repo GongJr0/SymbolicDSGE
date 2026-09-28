@@ -17,6 +17,7 @@ class ShockCode(IntEnum):
     PATH = native_shock.SDSGE_SHOCK_PATH
     NORMAL = native_shock.SDSGE_SHOCK_NORMAL
     UNIFORM = native_shock.SDSGE_SHOCK_UNIFORM
+    STUDENT_T = native_shock.SDSGE_SHOCK_STUDENT_T
 
     @classmethod
     def for_dist(cls, dist):
@@ -27,6 +28,8 @@ class ShockCode(IntEnum):
             return cls.NORMAL
         if dist == "uni":
             return cls.UNIFORM
+        if dist == "t":
+            return cls.STUDENT_T
         return None
 
 
@@ -98,9 +101,10 @@ def native_shock_plan(
 ):
     """Build a native shock plan from resolved entries.
 
-    Each entry is ``(family, columns, factor, loc, key)``. ``family`` is one of
-    native shock family codes and selects which standardized variate the
-    draw fills; every other field is read by both families. ``columns`` is the
+    Each entry is ``(family, columns, factor, loc, params, key)``. ``family`` is
+    one of the native shock family codes and selects both the standardized
+    variate the draw fills and the ``params`` member it reads; every other field
+    is read by every family. ``columns`` is the
     int64 array of exogenous column indices the entry drives, in the order its
     ``factor`` was built in. ``factor`` is the row-major ``(width, width)``
     matrix with ``factor @ factor.T`` equal to the covariance, a 1x1 holding the
@@ -156,6 +160,12 @@ def native_shock_plan(
         loc_mv = np.ascontiguousarray(e.loc, dtype=np.float64)
         plan._backing.append(loc_mv)
         plan._entries[i].loc = &loc_mv[0]
+        plan._entries[i].path = NULL
+
+        # `family` selects the union member the kernel reads. A spec's kwargs
+        # are checked against its family when it binds, so the key is here.
+        if e.family == native_shock.SDSGE_SHOCK_STUDENT_T:
+            plan._entries[i].params.df = <double>e.kwargs["df"]
 
         plan._entries[i].key = <uint64_t>e._native_seed_key
 
