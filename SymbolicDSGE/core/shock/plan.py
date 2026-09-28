@@ -8,7 +8,6 @@ replication) resolve a plan and then call :meth:`ShockPlan.fill` per draw.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import IntEnum
 from typing import ClassVar, Sequence
 from functools import cached_property
 
@@ -18,38 +17,12 @@ from numpy.typing import NDArray
 
 from .generators import Shock, ShockPath, ShockDrawFn
 from ..._ckernels.core._shocks import (
-    SHOCK_PATH,
-    SHOCK_NORMAL,
-    SHOCK_UNIFORM,
     NativeShockPlan,
+    ShockCode,
     native_shock_plan,
 )
 
 NDF = NDArray[float64]
-
-
-class ShockCode(IntEnum):
-    """Integer codes the native draw dispatches an entry on.
-
-    The ``SDSGE_SHOCK_*`` values from ``_ckernels/core/shocks.h``, exported by
-    the ``_shocks`` extension. A family code selects the variate an entry draws.
-    ``PATH`` is not a family: the kernel copies such an entry instead.
-    """
-
-    PATH = SHOCK_PATH
-    NORMAL = SHOCK_NORMAL
-    UNIFORM = SHOCK_UNIFORM
-
-    @classmethod
-    def for_dist(cls, dist: object, width: int) -> "ShockCode | None":
-        """Return a code when the native kernel supports the family and width."""
-        if not isinstance(dist, str) or width < 1:
-            return None
-        if dist == "norm":
-            return cls.NORMAL
-        if dist == "uni" and width == 1:
-            return cls.UNIFORM
-        return None
 
 
 @dataclass(frozen=True)
@@ -57,7 +30,8 @@ class ShockEntry:
     """One drawn entry of a shock spec, resolved against a model.
 
     ``draw`` is the entry's family resolved for one horizon, and it computes
-    ``loc + factor @ v`` over that family's standardized variate. ``factor`` is
+    ``loc + factor @ v`` over that family's standardized variate. It is None for
+    an entry carrying a ``family``, which the kernel draws instead. ``factor`` is
     the scale at any width: the 1x1 holding a standard deviation, or the
     covariance block's factor. ``loc`` is the ``width``-long location.
     ``base_seed`` is the spec's own seed as declared, which :meth:`_seed` keys a
@@ -72,7 +46,7 @@ class ShockEntry:
     family: ShockCode | None
     loc: NDF
     factor: NDF
-    draw: ShockDrawFn
+    draw: ShockDrawFn | None = None
     base_seed: int | None = None
     kwargs: dict | None = None
 
@@ -89,6 +63,11 @@ class ShockEntry:
         unseeded entry has no seed to key and redraws freshly whatever it is
         given.
         """
+        if self.draw is None:
+            raise ValueError(
+                f"Entry {self.key!r} has no draw function; it is native and "
+                "cannot be drawn in Python."
+            )
         drawn = self.draw(
             self.loc,
             self.factor,
@@ -267,7 +246,7 @@ def native_code(
     if isinstance(shock, ShockPath):
         return ShockCode.PATH
     if isinstance(shock, Shock):
-        return ShockCode.for_dist(shock.dist, len(shock.target))
+        return ShockCode.for_dist(shock.dist)
     return shock.family
 
 

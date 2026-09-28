@@ -1,11 +1,34 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 import numpy as np
+from enum import IntEnum, unique
+
 from libc.stdint cimport int64_t, uint64_t
 from cpython.mem cimport PyMem_Malloc, PyMem_Free
 
-SHOCK_PATH = native_shock.SDSGE_SHOCK_PATH
-SHOCK_NORMAL = native_shock.SDSGE_SHOCK_NORMAL
-SHOCK_UNIFORM = native_shock.SDSGE_SHOCK_UNIFORM
+
+@unique
+class ShockCode(IntEnum):
+    """Integer codes the native draw dispatches an entry on.
+
+    The ``SDSGE_SHOCK_*`` values from ``shocks.h``, exported
+    and enum-ified.
+    """
+
+    PATH = native_shock.SDSGE_SHOCK_PATH
+    NORMAL = native_shock.SDSGE_SHOCK_NORMAL
+    UNIFORM = native_shock.SDSGE_SHOCK_UNIFORM
+
+    @classmethod
+    def for_dist(cls, dist):
+        """Return a code when the native kernel supports the family."""
+        if not isinstance(dist, str):
+            return None
+        if dist == "norm":
+            return cls.NORMAL
+        if dist == "uni":
+            return cls.UNIFORM
+        return None
+
 
 cdef class NativeShockPlan:
     """A shock spec resolved into the layout the native draw reads.
@@ -111,7 +134,7 @@ def native_shock_plan(
         plan._entries[i].width = e.width
         plan._entries[i].columns = &columns_mv[0]
 
-        if e.family == SHOCK_PATH:
+        if e.family == native_shock.SDSGE_SHOCK_PATH:
             if e.value.shape[0] != T:
                 raise ValueError(
                     f"Path period length {e.value.shape[0]} does not match T={T}."

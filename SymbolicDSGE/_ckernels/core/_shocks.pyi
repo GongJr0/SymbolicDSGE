@@ -1,3 +1,4 @@
+from enum import IntEnum
 from typing import Sequence
 import numpy as np
 from numpy.typing import NDArray
@@ -6,9 +7,15 @@ from ...core.shock.plan import ShockEntry, ArrayEntry
 
 _F64 = NDArray[np.float64]
 
-SHOCK_PATH: int = ...
-SHOCK_NORMAL: int = ...
-SHOCK_UNIFORM: int = ...
+class ShockCode(IntEnum):
+    _value_: int
+
+    PATH = ...
+    NORMAL = ...
+    UNIFORM = ...
+
+    @classmethod
+    def for_dist(cls, dist: object) -> "ShockCode | None": ...
 
 class NativeShockPlan:
     @property

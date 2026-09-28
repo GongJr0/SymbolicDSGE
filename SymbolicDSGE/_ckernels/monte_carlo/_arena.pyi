@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from ...core.shock.plan import ShockCode
+from ..core._shocks import ShockCode
 
 def transform_arena_size(
     kind: str, n: int, p: int, order: int = 0, window: int = 0

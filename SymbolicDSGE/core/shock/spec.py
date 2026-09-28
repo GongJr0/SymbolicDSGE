@@ -16,7 +16,7 @@ from numpy.typing import NDArray
 from ..compiled_model import CompiledModel
 from ..config import make_Q
 
-from .plan import ShockCode, draw_shock_matrix
+from .plan import draw_shock_matrix, native_code
 from .generators import (
     Shock,
     ShockParameters,
@@ -161,8 +161,8 @@ def resolve_shock_plan(
     from the ``CompiledModel`` to create a container + callable that materializes
     shock matrices.
 
-    ``T`` is required only when the spec carries live :class:`Shock` entries,
-    which resolve their distribution family against a horizon.
+    ``T`` is required only for an entry the kernel cannot draw, which resolves
+    its family against a horizon to be drawn in Python.
     """
     calib = compiled.config.calibration
     shock_col = compiled.shock_idx
@@ -207,13 +207,17 @@ def resolve_shock_plan(
                 )
             scale = cov[np.ix_(indices, indices)]
             factor = _gaussian_factor(scale)
-
+        family = native_code(shock)
         entries.append(
             ShockEntry(
                 key=key,
                 indices=indices,
-                family=ShockCode.for_dist(shock.dist, len(indices)),
-                draw=shock.draw_fn(_require_horizon(T, key), len(indices) > 1),
+                family=family,
+                draw=(
+                    shock.draw_fn(_require_horizon(T, key), len(indices) > 1)
+                    if family is None
+                    else None
+                ),
                 loc=resolve_loc(shock.dist_kwargs, len(indices)),
                 factor=factor,
                 base_seed=None if shock.seed is None else int(shock.seed),
