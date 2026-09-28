@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from ..core.shock.plan import get_native_shock_plan
+from ..core.shock.plan import draw_shock_matrix
 from ..core.shock.spec import resolve_shock_plan, _normalized_spec
 from .defaults import DEFAULT_SHOCK_SCALE
 
@@ -35,35 +34,15 @@ def replication_shocks(
     a live ``SimResult`` including the shocks.
     """
     T = int(step.kwargs["T"])
+    scale = float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE))
     shocks = _normalized_spec(step.kwargs.get("shocks"))
     if not shocks:
         raise ValueError("The simulation step draws no shocks.")
 
-    resolved = resolve_shock_plan(model.compiled, shocks, T)
-    pyplan = resolve_shock_plan(
-        model.compiled,
-        shocks,
-        T,
-    )
-    plan = get_native_shock_plan(
-        pyplan,
-        T,
-        model.compiled.n_exog,
-        step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE),
-    )
+    plan = resolve_shock_plan(model.compiled, shocks, T)
+    drawn = draw_shock_matrix(plan, T, scale, rep_idx)
 
-    block = (
-        resolved.matrix(
-            T,
-            float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE)),
-            rep_idx,
-        )
-        if plan is None
-        else plan.draw(rep_idx)
-    )
-
-    out: dict[tuple[str, ...], NDF] = {}
-    for entry in resolved.entries:
-        columns = np.asarray(entry.indices, dtype=np.int64)
-        out[entry.key] = block[:, columns]
+    out = {}
+    for entry in plan.entries:
+        out[entry.key] = drawn[:, entry.indices]
     return out

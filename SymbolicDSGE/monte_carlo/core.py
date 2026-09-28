@@ -8,8 +8,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from SymbolicDSGE._ckernels.monte_carlo._status import MCStatus
-
+from .._ckernels.monte_carlo._status import MCStatus
 from .._ckernels.monte_carlo._arenas import StepArenas
 from .._ckernels.monte_carlo._runner import NativeRunResult, run
 from .._diag_tests.result import MCTestResult

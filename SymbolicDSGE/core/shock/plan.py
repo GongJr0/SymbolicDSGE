@@ -5,6 +5,8 @@ same spec under many seeds (the Monte Carlo lowering materializes one path per
 replication) resolve a plan and then call :meth:`ShockPlan.fill` per draw.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import ClassVar, Sequence
@@ -210,6 +212,16 @@ class ShockPlan:
         self.fill(out, T, shock_scale, rep_idx)
         return out
 
+    @cached_property
+    def native(self) -> ShockPlan:
+        native_entries = tuple(e for e in self.entries if native_code(e) is not None)
+        return ShockPlan(native_entries, self.n_exog)
+
+    @cached_property
+    def python(self) -> ShockPlan:
+        python_entries = tuple(e for e in self.entries if native_code(e) is None)
+        return ShockPlan(python_entries, self.n_exog)
+
 
 def validate_shock_targets(
     shocks: Sequence[Shock | ShockPath],
@@ -259,23 +271,31 @@ def native_code(
     return shock.family
 
 
-def is_native_eligible(shocks: ShockPlan | Sequence[Shock | ShockPath]) -> bool:
-    """Whether the native draw can take every entry of a spec or resolved plan.
-
-    All-or-nothing: one entry the kernel cannot draw sends the whole spec to the
-    Python route, since a simulation step reads a single shock block. An empty
-    spec draws nothing, which that route already materializes as zeros.
-    """
-    entries = shocks.entries if isinstance(shocks, ShockPlan) else shocks
-    return bool(entries) and all(native_code(e) is not None for e in entries)
-
-
 def get_native_shock_plan(
     plan: ShockPlan,
     T: int,
-    n_exog: int,
-    shock_scale: float = 1.0,
+    shock_scale: float,
 ) -> NativeShockPlan | None:
-    if not is_native_eligible(plan):
+    """The native plan over a plan's kernel-drawable entries, or None if none."""
+    if len(plan.native.entries) == 0:
         return None
-    return native_shock_plan(plan, T, n_exog, shock_scale)
+    return native_shock_plan(
+        plan.native.entries,
+        T,
+        plan.n_exog,
+        shock_scale,
+    )
+
+
+def draw_shock_matrix(
+    plan: ShockPlan, T: int, shock_scale: float = 1.0, rep_idx: int = 0
+) -> NDF:
+    """A ``(T, n_exog)`` block with every entry of a plan drawn into it.
+
+    The Python route allocates and zeroes the block; the native draw overlays
+    the columns it owns in place.
+    """
+    out = plan.python.matrix(T, shock_scale, rep_idx)
+    if (nplan := get_native_shock_plan(plan, T, shock_scale)) is not None:
+        nplan.fill(out, rep_idx)
+    return out

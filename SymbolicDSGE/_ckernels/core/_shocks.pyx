@@ -68,7 +68,7 @@ cdef class NativeShockPlan:
 
 
 def native_shock_plan(
-    object pyplan,
+    object entries,
     int64_t T,
     int64_t n_exog,
     double shock_scale,
@@ -91,7 +91,7 @@ def native_shock_plan(
     the replication index selects each entry's replication stream.
     """
     cdef NativeShockPlan plan = NativeShockPlan()
-    cdef int64_t n = len(pyplan.entries)
+    cdef int64_t n = len(entries)
     cdef int64_t i
     cdef int64_t[::1] columns_mv
     cdef double[:, ::1] factor_mv
@@ -103,7 +103,7 @@ def native_shock_plan(
     if plan._entries == NULL:
         raise MemoryError("Could not allocate native shock entries.")
 
-    for i, e in enumerate(pyplan.entries):
+    for i, e in enumerate(entries):
         columns_mv = np.ascontiguousarray(e.indices, dtype=np.int64)
         plan._backing.append(columns_mv)
 

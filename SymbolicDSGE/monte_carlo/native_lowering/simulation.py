@@ -6,9 +6,6 @@ from typing import Sequence, Mapping, cast
 
 import numpy as np
 
-from SymbolicDSGE.core.shock.plan import get_native_shock_plan
-
-
 from ..._ckernels.monte_carlo import _offsets
 from ..._ckernels.monte_carlo._runner import (
     NativeStep,
@@ -17,9 +14,9 @@ from ..._ckernels.monte_carlo._runner import (
 )
 from ...core.solved_model import SolvedModel
 from ...core.solver_backend import SecondOrderSolution
+from ...core.shock.plan import ShockPlan, get_native_shock_plan
 from ...core.shock.spec import (
     ShockSpec,
-    _normalized_spec,
     resolve_shock_plan,
     simulation_shock_matrix,
 )
@@ -65,27 +62,19 @@ def lower_simulation_step(
         else 0
     )
     params = _model_params(model)
-    splan = resolve_shock_plan(
+    shock_scale = float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE))
+    plan = resolve_shock_plan(
         model.compiled,
         cast(ShockSpec, step.kwargs.get("shocks")),
         T,
     )
-    drawn = get_native_shock_plan(
-        splan,
-        T,
-        n_exog,
-        step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE),
-    )
-    if drawn is None:
-        shocks, shocks_batched = _simulation_shocks(model, step, T, n_rep)
-    else:
-        # The step draws its own block per replication, so nothing is bound in.
-        shocks, shocks_batched = np.zeros((0, n_exog), dtype=np.float64), False
+    native_plan = get_native_shock_plan(plan, T, shock_scale)
+    shocks, shocks_batched = _simulation_shocks(model, plan, T, n_rep, shock_scale)
     order = model.policy.order
 
     if order == 1:
         native_step = simulate1_step(
-            step.name, measurement_addr, T, n_var, n_exog, n_par, n_obs, drawn
+            step.name, measurement_addr, T, n_var, n_exog, n_par, n_obs, native_plan
         )
         steady_state = _flat_f64(model.policy.steady_state)
         x0 = model._initial_state(step.kwargs.get("x0"))
@@ -102,7 +91,7 @@ def lower_simulation_step(
             n_exog,
             n_par,
             n_obs,
-            drawn,
+            native_plan,
         )
         steady_state = _flat_f64(model.policy.steady_state)
         x0_arr = model._initial_state(step.kwargs.get("x0"))
@@ -206,28 +195,28 @@ def _packed_bindings(
 
 def _simulation_shocks(
     model: SolvedModel,
-    step: MCStep,
+    plan: ShockPlan,
     T: int,
     n_rep: int,
+    shock_scale: float,
 ) -> tuple[NDF, bool]:
     """Materialize the ``(n_rep, T, n_exog)`` shock slab the native loop reads.
 
-    The spec resolves against the model once. Only the seed varies per
-    replication, so the loop below reseeds and draws straight into its own row
-    of the slab; the calibration lookups, the covariance assembly, and its
-    Cholesky are not repeated. An entry is seeded off its own spec member and
-    the replication index.
+    Holds the fallback entries alone; the kernel draws the rest itself. Only the
+    seed varies per replication, so the loop below reseeds and draws straight
+    into its own row of the slab; the calibration lookups, the covariance
+    assembly, and its Cholesky are not repeated. An entry is seeded off its own
+    spec member and the replication index.
     """
-    shocks = _normalized_spec(step.kwargs.get("shocks"))
-    shock_scale = float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE))
-    if not shocks:
+    if not plan.entries:
         return _array_shocks(model, T, shock_scale), False
+    if not plan.python.entries:
+        # Every column is drawn in the kernel, so nothing is bound in.
+        return np.zeros((0, plan.n_exog), dtype=np.float64), False
 
-    plan = resolve_shock_plan(model.compiled, shocks, T)
-
-    values = np.zeros((n_rep, T, model.compiled.n_exog), dtype=np.float64)
+    values = np.zeros((n_rep, T, plan.n_exog), dtype=np.float64)
     for rep_idx in range(n_rep):
-        plan.fill(values[rep_idx], T, shock_scale, rep_idx)
+        plan.python.fill(values[rep_idx], T, shock_scale, rep_idx)
     return values, True
 
 

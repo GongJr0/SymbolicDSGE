@@ -18,7 +18,7 @@ T = 16
 
 def _plan(solved_test_model, shocks, shock_scale=1.0):
     resolved = resolve_shock_plan(solved_test_model.compiled, shocks, T)
-    return get_native_shock_plan(resolved, T, resolved.n_exog, shock_scale)
+    return get_native_shock_plan(resolved, T, shock_scale)
 
 
 def _run_states(solved_test_model, shocks, n_rep, n_jobs):

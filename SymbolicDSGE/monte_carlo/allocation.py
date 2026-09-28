@@ -33,7 +33,7 @@ from .defaults import (
     DEFAULT_WALD_KIND_NAME,
 )
 from .mc_constructs import MCStep, OpType, SourceArgs
-from ..core.shock.plan import is_native_eligible, native_code
+from ..core.shock.plan import native_code
 from ..core.shock.generators import Shock, ShockPath
 
 Shape: TypeAlias = tuple[int, ...]
@@ -286,8 +286,6 @@ def native_shock_scratch(shocks: Sequence[Shock | ShockPath], T: int) -> ArenaSi
     a plan against the model or drawing keys it would immediately discard. The
     widest entry sets the requirement, since entries are drawn one at a time.
     """
-    if not is_native_eligible(shocks):
-        return _asize((0, 0))
     return _asize(
         a.shock_scratch_arena_size(
             [

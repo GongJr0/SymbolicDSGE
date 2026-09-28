@@ -145,7 +145,10 @@ def allocate_arenas(dict plan, int64_t n_rep, object n_jobs=None):
         retained_reps, retained_row_by_rep = resolve_retention(n_retain, n_rep)
 
         step_arenas = StepArenas()
-        step_arenas.float_in_work = np.empty(
+
+        # Zeros for float work arena acommodate sparse shocks
+        # All dense steps overwrite it in-full before a memcpy to the outputs
+        step_arenas.float_in_work = np.zeros(
             (n_workers, n_float_in), dtype=np.float64
         )
         step_arenas.int_in_work = np.empty((n_workers, n_int_in), dtype=np.int64)

@@ -1,4 +1,4 @@
-"""Native shock sampling, eligibility, and stream addressing."""
+"""Native shock sampling, family dispatch, and stream addressing."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pytest
 
 from SymbolicDSGE import Shock
 from SymbolicDSGE._ckernels.rng import philox_standard_normal
-from SymbolicDSGE.core.shock.plan import get_native_shock_plan, is_native_eligible
+from SymbolicDSGE.core.shock.plan import get_native_shock_plan, native_code
 from SymbolicDSGE.core.shock.spec import _normalized_spec, resolve_shock_plan
 
 T = 16
@@ -15,7 +15,7 @@ T = 16
 
 def _plan(solved_test_model, shocks, shock_scale=1.0):
     resolved = resolve_shock_plan(solved_test_model.compiled, shocks, T)
-    return get_native_shock_plan(resolved, T, resolved.n_exog, shock_scale)
+    return get_native_shock_plan(resolved, T, shock_scale)
 
 
 def _entries(solved_test_model, shocks):
@@ -25,26 +25,43 @@ def _entries(solved_test_model, shocks):
 @pytest.mark.parametrize(
     "dist, targets", [("norm", ("e_u",)), ("norm", ("e_u", "e_v")), ("uni", ("e_u",))]
 )
-def test_native_spec_accepts_supported_families(dist, targets):
-    assert is_native_eligible(_normalized_spec({targets: Shock(dist, seed=0)}))
+def test_native_code_accepts_supported_families(dist, targets) -> None:
+    spec = _normalized_spec({targets: Shock(dist, seed=0)})
+    assert all(native_code(member) is not None for member in spec)
 
 
 @pytest.mark.parametrize(
     "shocks",
     [
-        {},
         {("e_u",): Shock("t", seed=0, dist_kwargs={"df": 5})},
         {("e_u", "e_v"): Shock("uni", seed=0)},
-        # One ineligible entry sends the whole specification back.
+    ],
+)
+def test_native_code_rejects_unported_families(shocks) -> None:
+    spec = _normalized_spec(shocks)
+    assert all(native_code(member) is None for member in spec)
+
+
+def test_a_spec_with_no_entries_lowers_to_no_plan(solved_test_model) -> None:
+    assert _plan(solved_test_model, {}) is None
+
+
+def test_a_mixed_spec_splits_by_family(solved_test_model) -> None:
+    resolved = resolve_shock_plan(
+        solved_test_model.compiled,
         {
             ("e_u",): Shock("norm", seed=0),
             ("e_v",): Shock("t", seed=1, dist_kwargs={"df": 5}),
         },
-    ],
-)
-def test_native_families_rejects_unported_specs(shocks) -> None:
-    spec = _normalized_spec(shocks)
-    assert not is_native_eligible(spec)
+        T,
+    )
+    native = {entry.key for entry in resolved.native.entries}
+    python = {entry.key for entry in resolved.python.entries}
+
+    assert native == {("e_u",)}
+    assert python == {("e_v",)}
+    assert native.isdisjoint(python)
+    assert native | python == {entry.key for entry in resolved.entries}
 
 
 # --- the draw itself --------------------------------------------------------
