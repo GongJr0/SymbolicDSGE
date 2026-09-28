@@ -27,8 +27,6 @@ cdef extern from "rng.h":
                                         double *out) nogil
     void sdsge_rng_standard_uniform_fill(bitgen_t *bg, int64_t n,
                                          double *out) nogil
-    void sdsge_rng_standard_exponential_fill(bitgen_t *bg, int64_t n,
-                                             double *out) nogil
 
 
 cdef extern from "philox.h":
@@ -63,14 +61,6 @@ cdef extern from "philox.h":
     void sdsge_philox_standard_exponential_fill(sdsge_philox_state *st,
                                                 int64_t n, double *out) nogil
 
-
-cdef extern from "rng.h":
-    void sdsge_rng_standard_gamma_fill(bitgen_t *bg, int64_t n,
-                                       double *out, sdsge_sampler_params params) nogil
-    void sdsge_rng_chi2_fill(bitgen_t *bg, int64_t n,
-                             double *out, sdsge_sampler_params params) nogil
-    void sdsge_rng_beta_fill(bitgen_t *bg, int64_t n,
-                             double *out, sdsge_sampler_params params) nogil
 
 # numpy tags the BitGenerator capsule with this exact name; PyCapsule_GetPointer
 # rejects any mismatch, so a wrong/foreign capsule can't be dereferenced.
@@ -119,80 +109,6 @@ def standard_uniform(object rng, int64_t n):
     cdef double[::1] outv = out
     with nogil:
         sdsge_rng_standard_uniform_fill(bg, n, &outv[0])
-    return out
-
-
-def standard_exponential(object rng, int64_t n):
-    """``n`` standard exponential draws advancing ``rng``'s own PCG64 state.
-
-    Bit-identical to ``rng.standard_exponential(n)`` on the same generator state.
-    """
-    if n < 0:
-        raise ValueError("n must be non-negative.")
-    out = np.empty(n, dtype=np.float64)
-    if n == 0:
-        return out
-    cdef bitgen_t *bg = _bitgen_ptr(rng)
-    cdef double[::1] outv = out
-    with nogil:
-        sdsge_rng_standard_exponential_fill(bg, n, &outv[0])
-    return out
-
-
-def standard_gamma(object rng, int64_t n, double a):
-    """Draw using NumPy's standard_gamma sampler, advancing rng's borrowed state."""
-    if n < 0:
-        raise ValueError("n must be non-negative.")
-    if not isfinite(a) or a <= 0:
-        raise ValueError("a must be finite and positive.")
-    out = np.empty(n, dtype=np.float64)
-    if n == 0:
-        return out
-    cdef bitgen_t *bg = _bitgen_ptr(rng)
-    cdef sdsge_sampler_params params
-    cdef double[::1] outv = out
-    params.a = a
-    with nogil:
-        sdsge_rng_standard_gamma_fill(bg, n, &outv[0], params)
-    return out
-
-
-def chi2(object rng, int64_t n, double df):
-    """Draw using NumPy's chisquare sampler, advancing rng's borrowed state."""
-    if n < 0:
-        raise ValueError("n must be non-negative.")
-    if not isfinite(df) or df <= 0:
-        raise ValueError("df must be finite and positive.")
-    out = np.empty(n, dtype=np.float64)
-    if n == 0:
-        return out
-    cdef bitgen_t *bg = _bitgen_ptr(rng)
-    cdef sdsge_sampler_params params
-    cdef double[::1] outv = out
-    params.df = df
-    with nogil:
-        sdsge_rng_chi2_fill(bg, n, &outv[0], params)
-    return out
-
-
-def beta(object rng, int64_t n, double a, double b):
-    """Draw using NumPy's beta sampler, advancing rng's borrowed state."""
-    if n < 0:
-        raise ValueError("n must be non-negative.")
-    if not isfinite(a) or a <= 0:
-        raise ValueError("a must be finite and positive.")
-    if not isfinite(b) or b <= 0:
-        raise ValueError("b must be finite and positive.")
-    out = np.empty(n, dtype=np.float64)
-    if n == 0:
-        return out
-    cdef bitgen_t *bg = _bitgen_ptr(rng)
-    cdef sdsge_sampler_params params
-    cdef double[::1] outv = out
-    params.beta.a = a
-    params.beta.b = b
-    with nogil:
-        sdsge_rng_beta_fill(bg, n, &outv[0], params)
     return out
 
 

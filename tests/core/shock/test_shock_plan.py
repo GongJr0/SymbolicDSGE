@@ -34,11 +34,16 @@ T = 12
 
 
 #: One seeded spec per drawn family and arity, so the two replication properties
-#: below are checked against every route :meth:`Shock.draw_fn` resolves onto.
+#: below are checked against every family the kernel draws. A family that failed
+#: to lower would leave ``get_native_shock_plan`` returning None and fail here,
+#: which is what pins the dispatch for the families nothing else reaches.
 FAMILY_SPECS = [
     {("e_u",): Shock(dist="norm", seed=3)},
     {("e_u",): Shock(dist="t", seed=5, dist_kwargs={"df": 4})},
     {("e_u",): Shock(dist="uni", seed=7)},
+    {("e_u",): Shock(dist="exp", seed=17)},
+    {("e_u",): Shock(dist="gamma", seed=19, dist_kwargs={"a": 2.5})},
+    {("e_u",): Shock(dist="beta", seed=23, dist_kwargs={"a": 2.0, "b": 5.0})},
     {("e_u", "e_v"): Shock(dist="norm", seed=11)},
     {("e_u", "e_v"): Shock(dist="t", seed=13, dist_kwargs={"df": 6})},
 ]

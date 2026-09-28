@@ -185,25 +185,21 @@ def validate_shock_family(
             if "df" not in dist_kwargs:
                 raise ValueError("Student-t shocks require 'df' in dist_kwargs.")
 
-            if dist_kwargs["df"] <= 2.0:
+            if dist_kwargs["df"] <= 2.0 or not np.isfinite(dist_kwargs["df"]):
                 raise ValueError(
                     "Student-t requires df > 2 for finite variance. "
                     "The shock covariance specification cannot be satisfied with "
                     f"df={dist_kwargs['df']}."
                 )
-        case "uni" if width > 1:
-            # A linear map of independent uniforms is not uniform in its
-            # margins, so the factor form cannot express a grouped uniform.
-            raise NotImplementedError(
-                "Multivariate uniform shocks are not implemented."
-            )
+        case "uni":
+            _require_univariate(dist, width)  # pyright: ignore
         case "exp":
-            _require_univariate("exponential", width)
+            _require_univariate(dist, width)  # pyright: ignore
         case "gamma":
-            _require_univariate("gamma", width)
+            _require_univariate(dist, width)  # pyright: ignore
             if "a" not in dist_kwargs:
                 raise ValueError(
-                    "Gamma shocks require the shape " "parameter ('a') in dist_kwargs."
+                    "Gamma shocks require the shape parameter ('a') in dist_kwargs."
                 )
             if dist_kwargs["a"] <= 0 or not np.isfinite(dist_kwargs["a"]):
                 raise ValueError(
@@ -211,7 +207,7 @@ def validate_shock_family(
                     f"specification cannot be satisfied with `a={dist_kwargs['a']}`."
                 )
         case "beta":
-            _require_univariate("beta", width)
+            _require_univariate(dist, width)  # pyright: ignore
             if "a" not in dist_kwargs or "b" not in dist_kwargs:
                 raise ValueError(
                     "Beta shocks require the shape parameters ('a' and 'b') in dist_kwargs."

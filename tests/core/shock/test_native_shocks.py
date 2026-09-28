@@ -7,8 +7,8 @@ import pytest
 
 from SymbolicDSGE import Shock
 from SymbolicDSGE._ckernels.rng import philox_standard_normal
-from SymbolicDSGE.core.shock.plan import get_native_shock_plan, native_code
-from SymbolicDSGE.core.shock.spec import _normalized_spec, resolve_shock_plan
+from SymbolicDSGE.core.shock.plan import get_native_shock_plan
+from SymbolicDSGE.core.shock.spec import resolve_shock_plan
 
 from scipy.stats import t
 
@@ -22,14 +22,6 @@ def _plan(solved_test_model, shocks, shock_scale=1.0):
 
 def _entries(solved_test_model, shocks):
     return resolve_shock_plan(solved_test_model.compiled, shocks, T).entries
-
-
-@pytest.mark.parametrize(
-    "dist, targets", [("norm", ("e_u",)), ("norm", ("e_u", "e_v")), ("uni", ("e_u",))]
-)
-def test_native_code_accepts_supported_families(dist, targets) -> None:
-    spec = _normalized_spec({targets: Shock(dist, seed=0)})
-    assert all(native_code(member) is not None for member in spec)
 
 
 def test_a_spec_with_no_entries_lowers_to_no_plan(solved_test_model) -> None:

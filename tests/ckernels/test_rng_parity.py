@@ -116,27 +116,6 @@ _ADDED_SAMPLERS = [
 
 
 @pytest.mark.parametrize("name, numpy_name, params", _ADDED_SAMPLERS)
-@pytest.mark.parametrize("seed", [0, 42, 20260724])
-@pytest.mark.parametrize("n", [0, 1, 1000, 100_000])
-def test_added_sampler_matches_numpy_and_advances_state(
-    name, numpy_name, params, seed, n
-):
-    rng = np.random.default_rng(seed)
-    reference = np.random.default_rng(seed)
-    # Start from an already-used generator to catch accidental reseeding.
-    rng.random(7)
-    reference.random(7)
-    got = getattr(native, name)(rng, n, *params)
-    want = getattr(reference, numpy_name)(*params, size=n)
-    assert got.shape == (n,)
-    assert got.dtype == np.float64
-    np.testing.assert_array_equal(got.view(np.uint64), want.view(np.uint64))
-    np.testing.assert_array_equal(
-        rng.bit_generator.random_raw(16), reference.bit_generator.random_raw(16)
-    )
-
-
-@pytest.mark.parametrize("name, numpy_name, params", _ADDED_SAMPLERS)
 def test_added_philox_sampler_replays_and_preserves_prefix(name, numpy_name, params):
     draw = getattr(native, "philox_" + name)
     address = (17, 29, 41, 53)
@@ -158,11 +137,7 @@ def test_added_samplers_reject_negative_lengths_and_invalid_generators(
     name, numpy_name, params
 ):
     with pytest.raises(ValueError, match="n must be non-negative"):
-        getattr(native, name)(np.random.default_rng(0), -1, *params)
-    with pytest.raises(ValueError, match="n must be non-negative"):
         getattr(native, "philox_" + name)(0, 0, 0, 0, -1, *params)
-    with pytest.raises((ValueError, AttributeError)):
-        getattr(native, name)(object(), 1, *params)
 
 
 @pytest.mark.parametrize(
@@ -180,12 +155,5 @@ def test_sampler_parameters_are_validated_before_drawing(
 ):
     params = list(params)
     params[index] = invalid
-    rng = np.random.default_rng(42)
-    reference = np.random.default_rng(42)
-    with pytest.raises(ValueError, match=f"{parameter} must be finite and positive"):
-        getattr(native, name)(rng, 5, *params)
-    np.testing.assert_array_equal(
-        rng.bit_generator.random_raw(16), reference.bit_generator.random_raw(16)
-    )
     with pytest.raises(ValueError, match=f"{parameter} must be finite and positive"):
         getattr(native, "philox_" + name)(0, 0, 0, 0, 5, *params)
