@@ -43,19 +43,4 @@ void sdsge_rng_standard_normal_fill(bitgen_t *bg, i64 n,
 void sdsge_rng_standard_uniform_fill(bitgen_t *bg, i64 n,
                                      f64 *SDSGE_RESTRICT out);
 
-/* Fill `out[0..n)` with standard exponential draws (mean 1, var 1) advancing
- * `bg`'s state; bit-identical to numpy's `random_standard_exponential_fill`. */
-void sdsge_rng_standard_exponential_fill(bitgen_t *bg, i64 n,
-                                         f64 *SDSGE_RESTRICT out);
-
-/* Parameters must be finite and positive; callers validate before filling. */
-void sdsge_rng_standard_gamma_fill(bitgen_t *bg, i64 n, f64 *SDSGE_RESTRICT out,
-                                   sdsge_sampler_params params);
-
-void sdsge_rng_chi2_fill(bitgen_t *bg, i64 n, f64 *SDSGE_RESTRICT out,
-                         sdsge_sampler_params params);
-
-void sdsge_rng_beta_fill(bitgen_t *bg, i64 n, f64 *SDSGE_RESTRICT out,
-                         sdsge_sampler_params params);
-
 #endif /* SDSGE_RNG_H */

@@ -20,6 +20,7 @@ class ShockCode(IntEnum):
     STUDENT_T = native_shock.SDSGE_SHOCK_STUDENT_T
     EXPONENTIAL = native_shock.SDSGE_SHOCK_EXPONENTIAL
     GAMMA = native_shock.SDSGE_SHOCK_GAMMA
+    BETA = native_shock.SDSGE_SHOCK_BETA
 
     @classmethod
     def for_dist(cls, dist):
@@ -36,6 +37,8 @@ class ShockCode(IntEnum):
             return cls.EXPONENTIAL
         if dist == "gamma":
             return cls.GAMMA
+        if dist == "beta":
+            return cls.BETA
         return None
 
 
@@ -130,6 +133,7 @@ def native_shock_plan(
     cdef double[:, ::1] factor_mv
     cdef double[::1] loc_mv
     cdef double[:, ::1] path_mv
+    cdef sdsge_beta_params bparams
     plan._entries = <sdsge_shock_entry *>PyMem_Malloc(
         <size_t>n * sizeof(sdsge_shock_entry)
     )
@@ -174,7 +178,10 @@ def native_shock_plan(
             plan._entries[i].params.df = <double>e.kwargs["df"]
         elif e.family == native_shock.SDSGE_SHOCK_GAMMA:
             plan._entries[i].params.a = <double>e.kwargs["a"]
-
+        elif e.family == native_shock.SDSGE_SHOCK_BETA:
+            bparams.a = <double>e.kwargs["a"]
+            bparams.b = <double>e.kwargs["b"]
+            plan._entries[i].params.beta = bparams
         plan._entries[i].key = <uint64_t>e._native_seed_key
 
     plan._plan.entries = plan._entries

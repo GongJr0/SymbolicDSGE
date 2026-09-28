@@ -23,6 +23,7 @@ cdef extern from "shocks.h":
         SDSGE_SHOCK_STUDENT_T = 2
         SDSGE_SHOCK_EXPONENTIAL = 3
         SDSGE_SHOCK_GAMMA = 4
+        SDSGE_SHOCK_BETA = 5
 
     ctypedef struct sdsge_shock_entry:
         native_shock family

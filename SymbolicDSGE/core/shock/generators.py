@@ -10,7 +10,7 @@ from typing import Any, Callable, Literal, Mapping, TypedDict, Sequence, cast, g
 import copy
 
 #: The built-in families a spec may name.
-ShockDistribution = Literal["norm", "t", "uni", "exp", "gamma"]
+ShockDistribution = Literal["norm", "t", "uni", "exp", "gamma", "beta"]
 
 
 # A family-resolved draw: ``(loc, factor, seed) -> (T, width)``, computing
@@ -163,6 +163,12 @@ def _validate_dist(dist: object, dist_kwargs: Mapping[str, Any]) -> None:
         )
 
 
+def _require_univariate(dist: str, width: int) -> None:
+    """Raise if a family is not univariate at the width it drives."""
+    if width > 1:
+        raise NotImplementedError(f"Multivariate {dist!r} shocks are not implemented.")
+
+
 def validate_shock_family(
     dist: object,
     width: int,
@@ -191,15 +197,10 @@ def validate_shock_family(
             raise NotImplementedError(
                 "Multivariate uniform shocks are not implemented."
             )
-        case "exp" if width > 1:
-            raise NotImplementedError(
-                "Multivariate exponential shocks are not implemented."
-            )
+        case "exp":
+            _require_univariate("exponential", width)
         case "gamma":
-            if width > 1:
-                raise NotImplementedError(
-                    "Multivariate gamma shocks are not implemented."
-                )
+            _require_univariate("gamma", width)
             if "a" not in dist_kwargs:
                 raise ValueError(
                     "Gamma shocks require the shape " "parameter ('a') in dist_kwargs."
@@ -208,6 +209,23 @@ def validate_shock_family(
                 raise ValueError(
                     "Gamma shocks require finite and positive `a`. The shock covariance "
                     f"specification cannot be satisfied with `a={dist_kwargs['a']}`."
+                )
+        case "beta":
+            _require_univariate("beta", width)
+            if "a" not in dist_kwargs or "b" not in dist_kwargs:
+                raise ValueError(
+                    "Beta shocks require the shape parameters ('a' and 'b') in dist_kwargs."
+                )
+            if (
+                dist_kwargs["a"] <= 0
+                or dist_kwargs["b"] <= 0
+                or not np.isfinite(dist_kwargs["a"])
+                or not np.isfinite(dist_kwargs["b"])
+            ):
+                raise ValueError(
+                    "Beta shocks require finite and positive `a` and `b`. The shock "
+                    f"covariance specification cannot be satisfied with `a={dist_kwargs['a']}` "
+                    f"and `b={dist_kwargs['b']}`."
                 )
 
 

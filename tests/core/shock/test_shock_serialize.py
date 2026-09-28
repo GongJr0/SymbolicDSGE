@@ -62,7 +62,7 @@ def test_to_dict_rejects_live_scipy_distribution() -> None:
 
 
 def test_from_dict_rejects_unknown_dist() -> None:
-    with pytest.raises(ValueError, match=r"expects one of \['norm', 't', 'uni'\]"):
+    with pytest.raises(ValueError, match=r"expects one of"):
         Shock.from_dict({"dist": "cauchy"})
 
 

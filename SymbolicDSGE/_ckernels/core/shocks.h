@@ -18,6 +18,7 @@ typedef enum {
   SDSGE_SHOCK_STUDENT_T = 2,
   SDSGE_SHOCK_EXPONENTIAL = 3,
   SDSGE_SHOCK_GAMMA = 4,
+  SDSGE_SHOCK_BETA = 5,
 } native_shock;
 
 /* One resolved entry of a shock spec. A univariate entry is the width-1 case,

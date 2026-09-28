@@ -148,6 +148,28 @@ static void sdsge_shock_draw_gamma(const sdsge_shock_plan *plan,
   sdsge_shock_apply_affine(plan, entry, v, out);
 }
 
+static void sdsge_shock_draw_beta(const sdsge_shock_plan *plan,
+                                  const sdsge_shock_entry *entry,
+                                  const i64 rep_idx,
+                                  f64 *SDSGE_RESTRICT scratch,
+                                  f64 *SDSGE_RESTRICT out) {
+  f64 *SDSGE_RESTRICT v = scratch;
+  sdsge_philox_state st;
+
+  const f64 a = entry->params.beta.a;
+  const f64 b = entry->params.beta.b;
+  const f64 s = (a + b);
+  const f64 mean = a / s;
+  const f64 invstd = 1.0 / sqrt(mean * (b / s) / (s + 1.0));
+
+  sdsge_shock_seed(&st, entry, rep_idx, 0);
+  sdsge_philox_beta_fill(&st, plan->T, v, entry->params);
+  for (i64 t = 0; t < plan->T; ++t) {
+    v[t] = (v[t] - mean) * invstd; /* center at zero, scale to var 1 */
+  }
+  sdsge_shock_apply_affine(plan, entry, v, out);
+}
+
 /* Indexed by `native_shock`, in enum order. Draws only: what a family spends is
  * stated in `sdsge_shock_entry_arena_size`, which no caller of this table reads
  * and which runs once per entry at plan time rather than per replication. */
@@ -157,6 +179,7 @@ static const sdsge_shock_draw_fn SDSGE_SHOCK_DRAW[] = {
     [SDSGE_SHOCK_STUDENT_T] = sdsge_shock_draw_student_t,
     [SDSGE_SHOCK_EXPONENTIAL] = sdsge_shock_draw_exponential,
     [SDSGE_SHOCK_GAMMA] = sdsge_shock_draw_gamma,
+    [SDSGE_SHOCK_BETA] = sdsge_shock_draw_beta,
 };
 
 static void sdsge_shock_apply_path(const sdsge_shock_plan *plan,
@@ -190,9 +213,10 @@ arena_size sdsge_shock_entry_arena_size(const native_shock family,
   case SDSGE_SHOCK_STUDENT_T:
     /* The Gaussian core, plus the chi-square it is divided by. */
     return make_sizer(T * (width + 1), 0);
+
   case SDSGE_SHOCK_EXPONENTIAL:
-    return make_sizer(T, 0);
   case SDSGE_SHOCK_GAMMA:
+  case SDSGE_SHOCK_BETA:
     return make_sizer(T, 0);
   }
 }

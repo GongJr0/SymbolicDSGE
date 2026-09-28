@@ -100,6 +100,7 @@ cdef extern from "shocks.h":
         SDSGE_SHOCK_STUDENT_T
         SDSGE_SHOCK_EXPONENTIAL
         SDSGE_SHOCK_GAMMA
+        SDSGE_SHOCK_BETA
     arena_size sdsge_shock_entry_arena_size(native_shock family, int64_t width,
                                             int64_t T) nogil
 
