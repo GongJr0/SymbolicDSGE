@@ -21,6 +21,8 @@ cdef extern from "shocks.h":
         SDSGE_SHOCK_NORMAL = 0
         SDSGE_SHOCK_UNIFORM = 1
         SDSGE_SHOCK_STUDENT_T = 2
+        SDSGE_SHOCK_EXPONENTIAL = 3
+        SDSGE_SHOCK_GAMMA = 4
 
     ctypedef struct sdsge_shock_entry:
         native_shock family

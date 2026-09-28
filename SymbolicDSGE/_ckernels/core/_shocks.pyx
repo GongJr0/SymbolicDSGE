@@ -18,6 +18,8 @@ class ShockCode(IntEnum):
     NORMAL = native_shock.SDSGE_SHOCK_NORMAL
     UNIFORM = native_shock.SDSGE_SHOCK_UNIFORM
     STUDENT_T = native_shock.SDSGE_SHOCK_STUDENT_T
+    EXPONENTIAL = native_shock.SDSGE_SHOCK_EXPONENTIAL
+    GAMMA = native_shock.SDSGE_SHOCK_GAMMA
 
     @classmethod
     def for_dist(cls, dist):
@@ -30,6 +32,10 @@ class ShockCode(IntEnum):
             return cls.UNIFORM
         if dist == "t":
             return cls.STUDENT_T
+        if dist == "exp":
+            return cls.EXPONENTIAL
+        if dist == "gamma":
+            return cls.GAMMA
         return None
 
 
@@ -166,6 +172,8 @@ def native_shock_plan(
         # are checked against its family when it binds, so the key is here.
         if e.family == native_shock.SDSGE_SHOCK_STUDENT_T:
             plan._entries[i].params.df = <double>e.kwargs["df"]
+        elif e.family == native_shock.SDSGE_SHOCK_GAMMA:
+            plan._entries[i].params.a = <double>e.kwargs["a"]
 
         plan._entries[i].key = <uint64_t>e._native_seed_key
 

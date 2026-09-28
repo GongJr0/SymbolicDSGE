@@ -16,6 +16,8 @@ typedef enum {
   SDSGE_SHOCK_NORMAL = 0,
   SDSGE_SHOCK_UNIFORM = 1,
   SDSGE_SHOCK_STUDENT_T = 2,
+  SDSGE_SHOCK_EXPONENTIAL = 3,
+  SDSGE_SHOCK_GAMMA = 4,
 } native_shock;
 
 /* One resolved entry of a shock spec. A univariate entry is the width-1 case,
@@ -31,8 +33,7 @@ typedef struct {
   const f64 *factor;
   /* width-long mean vector */
   const f64 *loc;
-  /* The family's own parameters, by value. `family` selects the member, the
-   * same tag that selected the draw. Zero for a family that takes none. */
+  /* Distribution parameters for families that need them. */
   sdsge_sampler_params params;
   u64 key; /* the spec's seed; columns[0] separates entries sharing one. */
 } sdsge_shock_entry;

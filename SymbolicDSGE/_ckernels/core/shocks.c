@@ -105,7 +105,7 @@ static void sdsge_shock_draw_student_t(const sdsge_shock_plan *plan,
   sdsge_philox_chi2_fill(&st, T, g, entry->params);
 
   for (i64 t = 0; t < T; ++t) {
-    const f64 s = sqrt(df / g[t]);
+    const f64 s = sqrt((df - 2.0) / g[t]);
     f64 *SDSGE_RESTRICT v_t = v + t * width;
     for (i64 i = 0; i < width; ++i) {
       v_t[i] *= s;
@@ -114,13 +114,49 @@ static void sdsge_shock_draw_student_t(const sdsge_shock_plan *plan,
   sdsge_shock_apply_affine(plan, entry, v, out);
 }
 
+static void sdsge_shock_draw_exponential(const sdsge_shock_plan *plan,
+                                         const sdsge_shock_entry *entry,
+                                         const i64 rep_idx,
+                                         f64 *SDSGE_RESTRICT scratch,
+                                         f64 *SDSGE_RESTRICT out) {
+  f64 *SDSGE_RESTRICT v = scratch;
+  sdsge_philox_state st;
+
+  sdsge_shock_seed(&st, entry, rep_idx, 0);
+  sdsge_philox_standard_exponential_fill(&st, plan->T, v);
+  for (i64 t = 0; t < plan->T; ++t) {
+    v[t] -= 1.0; /* center at zero */
+  }
+  sdsge_shock_apply_affine(plan, entry, v, out);
+}
+
+static void sdsge_shock_draw_gamma(const sdsge_shock_plan *plan,
+                                   const sdsge_shock_entry *entry,
+                                   const i64 rep_idx,
+                                   f64 *SDSGE_RESTRICT scratch,
+                                   f64 *SDSGE_RESTRICT out) {
+  f64 *SDSGE_RESTRICT v = scratch;
+  sdsge_philox_state st;
+
+  sdsge_shock_seed(&st, entry, rep_idx, 0);
+  sdsge_philox_standard_gamma_fill(&st, plan->T, v, entry->params);
+  const f64 a = entry->params.a;
+  const f64 invsq_a = 1.0 / sqrt(a);
+  for (i64 t = 0; t < plan->T; ++t) {
+    v[t] = (v[t] - a) * invsq_a; /* center at zero, scale to var 1 */
+  }
+  sdsge_shock_apply_affine(plan, entry, v, out);
+}
+
 /* Indexed by `native_shock`, in enum order. Draws only: what a family spends is
  * stated in `sdsge_shock_entry_arena_size`, which no caller of this table reads
  * and which runs once per entry at plan time rather than per replication. */
 static const sdsge_shock_draw_fn SDSGE_SHOCK_DRAW[] = {
-    sdsge_shock_draw_normal,
-    sdsge_shock_draw_uniform,
-    sdsge_shock_draw_student_t,
+    [SDSGE_SHOCK_NORMAL] = sdsge_shock_draw_normal,
+    [SDSGE_SHOCK_UNIFORM] = sdsge_shock_draw_uniform,
+    [SDSGE_SHOCK_STUDENT_T] = sdsge_shock_draw_student_t,
+    [SDSGE_SHOCK_EXPONENTIAL] = sdsge_shock_draw_exponential,
+    [SDSGE_SHOCK_GAMMA] = sdsge_shock_draw_gamma,
 };
 
 static void sdsge_shock_apply_path(const sdsge_shock_plan *plan,
@@ -154,6 +190,10 @@ arena_size sdsge_shock_entry_arena_size(const native_shock family,
   case SDSGE_SHOCK_STUDENT_T:
     /* The Gaussian core, plus the chi-square it is divided by. */
     return make_sizer(T * (width + 1), 0);
+  case SDSGE_SHOCK_EXPONENTIAL:
+    return make_sizer(T, 0);
+  case SDSGE_SHOCK_GAMMA:
+    return make_sizer(T, 0);
   }
 }
 
