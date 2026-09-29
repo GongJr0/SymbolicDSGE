@@ -295,18 +295,32 @@ class ModelParser:
 
     @classmethod
     def validate_equations(cls, conf: ModelConfig) -> None:
-        """Reject a model equation naming a symbol the model declares nowhere.
+        """Validate model and observable equations for unknown or unpermitted symbols.
 
-        The same check regime replacements get, on the equations they replace: a
-        typo would otherwise survive parse as a live ``Symbol`` and only fail in
-        the printer, where the name is no longer attached to an equation.
+        Model equations are checked for unknown symbols only.
+        Observables extend the check to reject references to shocks.
         """
         for name, eq in conf.equations.model.items():
             unknown_atoms = cls._unknown_atoms(conf, eq)
             if unknown_atoms:
                 raise ValueError(
-                    f"Equation '{name}' references unknown symbols: "
+                    f"Equation {name!r} references unknown symbols: "
                     f"{sorted(str(a) for a in unknown_atoms)}"
+                )
+
+        for name, eq in conf.equations.observable.items():
+            unknown_atoms = cls._unknown_atoms(conf, eq)
+            if unknown_atoms:
+                raise ValueError(
+                    f"Observable {name!r} references unknown symbols: "
+                    f"{sorted(str(a) for a in unknown_atoms)}"
+                )
+            shock_refs = cls._shock_atoms(conf, eq)
+            if shock_refs:
+                raise ValueError(
+                    f"Observable {str(name)!r} references shock(s) "
+                    f"{sorted(str(a) for a in shock_refs)}; observables may only "
+                    f"reference model variables and parameters."
                 )
 
     @classmethod

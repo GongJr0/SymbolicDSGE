@@ -296,6 +296,31 @@ def test_parser_rejects_undeclared_variable_in_model_equation():
         ModelParser.from_string(yaml.safe_dump(data))
 
 
+def test_parser_rejects_unknown_symbol_in_observable():
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["equations"]["observables"]["x_obs"] = "x(t) + typo_symbol"
+
+    with pytest.raises(ValueError, match=r"Observable '?x_obs'? references unknown"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_undeclared_variable_in_observable():
+    # The measurement printer is where this used to land, several calls later.
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["equations"]["observables"]["x_obs"] = "x(t) + w(t)"
+
+    with pytest.raises(ValueError, match=r"Observable '?x_obs'? references unknown"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_shock_in_observable():
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["equations"]["observables"]["x_obs"] = "x(t) + e_x"
+
+    with pytest.raises(ValueError, match=r"Observable '?x_obs'? references shock\(s\)"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
 def test_validate_constraints_rejects_more_than_two(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)
