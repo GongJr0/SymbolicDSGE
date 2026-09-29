@@ -350,6 +350,62 @@ def test_parser_rejects_more_equations_than_variables():
         ModelParser.from_string(yaml.safe_dump(data))
 
 
+@pytest.mark.parametrize(
+    "block, duplicate, preamble",
+    [
+        ("shocks", "e_x", "shocks must be unique."),
+        ("observables", "x_obs", "observables must be unique."),
+    ],
+)
+def test_parser_rejects_duplicate_declarations(block, duplicate, preamble):
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data[block].append(duplicate)
+
+    with pytest.raises(
+        ValueError, match=rf"{preamble}\nDuplicate entries: \['{duplicate}'\]"
+    ):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_a_variable_declared_twice():
+    # The mapping form cannot express this; a list of names can.
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["variables"] = ["x", "y", "z", "x"]
+
+    with pytest.raises(ValueError, match=r"variables must be unique."):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+@pytest.mark.parametrize(
+    "line, repeat, key",
+    [
+        ("    rho: 0.9", "    rho: 0.5", "rho"),
+        (
+            '    x_process: "x(t+1) = rho * x(t) + e_x"',
+            '    x_process: "x(t+1) = 0"',
+            "x_process",
+        ),
+        ("    x_obs: x(t)", "    x_obs: 0", "x_obs"),
+    ],
+    ids=["parameter", "model-equation", "observable-equation"],
+)
+def test_parser_rejects_a_repeated_mapping_key(line, repeat, key):
+    # A repeat is legal YAML and resolves to the last value, so the loader has
+    # to reject it before anything downstream can see one entry.
+    text = _R_ARITHMETIC_MODEL.replace(line, f"{line}\n{repeat}")
+
+    with pytest.raises(yaml.YAMLError, match=rf"found duplicate key\(s\): \['{key}'\]"):
+        ModelParser.from_string(text)
+
+
+def test_parser_reports_where_a_repeated_key_is():
+    text = _R_ARITHMETIC_MODEL.replace("    rho: 0.9", "    rho: 0.9\n    rho: 0.5")
+
+    with pytest.raises(yaml.YAMLError) as exc:
+        ModelParser.from_string(text)
+    assert str(exc.value).count("line ") == 2
+
+
 def test_validate_constraints_rejects_more_than_two(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)

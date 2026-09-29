@@ -17,6 +17,7 @@ import warnings
 from sympy.core.basic import Basic
 from sympy.core.symbol import AppliedUndef
 import yaml
+from yaml.constructor import ConstructorError
 import sympy as sp
 from sympy import Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
@@ -624,9 +625,43 @@ class ModelParser:
 # ---------------- helpers ----------------
 
 
+class _StrictLoader(yaml.SafeLoader):
+    """``SafeLoader`` that rejects a mapping with a repeated key.
+
+    A repeat is legal YAML and resolves to the last value, so a parameter or an
+    equation written twice would otherwise resolve to the last one.
+    """
+
+    def construct_mapping(
+        self, node: yaml.MappingNode, deep: bool = False
+    ) -> dict[Any, Any]:
+        seen: set[Any] = set()
+        duplicates: list[Any] = []
+        mark = node.start_mark
+        for key_node, _ in node.value:
+            # Merge keys are removed by ``flatten_mapping`` below and have no
+            # constructor of their own, so they are never built here.
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                continue
+            key = self.construct_object(key_node, deep=deep)
+            if key in seen and key not in duplicates:
+                duplicates.append(key)
+                if len(duplicates) == 1:
+                    mark = key_node.start_mark
+            seen.add(key)
+        if duplicates:
+            raise ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key(s): {sorted(str(k) for k in duplicates)}",
+                mark,
+            )
+        return super().construct_mapping(node, deep=deep)
+
+
 def _load_yaml(path: Path) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        data = yaml.load(f, Loader=_StrictLoader)
     if not isinstance(data, dict):
         raise TypeError("YAML root must be a mapping/dict.")
     return data
@@ -689,6 +724,10 @@ def _build_namespace(
     list[Symbol],
 ]:
     ordered_var_names, _ = _coerce_variable_data(data)
+    _raise_if_not_unique(ordered_var_names, "variables must be unique.")
+    _raise_if_not_unique(data["observables"], "observables must be unique.")
+    _raise_if_not_unique(data["shocks"], "shocks must be unique.")
+
     t = sp.symbols("t", integer=True)
 
     variables: list[Function] = list(
