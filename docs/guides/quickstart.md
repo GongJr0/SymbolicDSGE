@@ -150,7 +150,7 @@ Shock specifications can take two forms.
 
 Shocks are specified as a sequence, where `#!python Shock` and `#!python ShockPath` can be mixed.
 `Shock` takes a distribution name or a scipy distribution implementing `rvs(...)`; `dist_kwargs` serve the parameters and `seed` handles reproducibility.
-`{"norm", "uni", "t"}` are built in distributions that `dist` can take as a string. A multivatiate uniform is not supported.
+`{"norm", "t", "uni", "exp", "gamma", "beta"}` are built in distributions that `dist` can take as a string. `"norm"` and `"t"` support multivariate draws with clear dependence structure while the others (not having a clear and unambiguous multivariate definition) do not resort to copulas or alternative definitions/parameterizations.
 Standard deviations and correlations come from the model configuration, and any `scale` or equivalent `dist_kwargs` are not accepted.
 A `Shock` is bound to target variable(s) after construction via the `.joint(*keys)` and `.independent(*keys)` methods.
 A joint bind for multiple variables encode the correlation structure of the shock, while independent bind returns a sequence of uncorrelated shocks.

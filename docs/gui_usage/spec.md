@@ -21,7 +21,7 @@ Select one of two shock sources:
 
 | Source | Description |
 | --- | --- |
-| Shock | Generate innovations from a normal, Student-t, or uniform distribution. |
+| Shock | Generate innovations from any natively supported distribution. (See [Shock]("../documentation/Shock.md")) |
 | Raw | Enter complete shock paths directly. |
 
 Generated shocks expose the distribution seed and parameters together with the model's configured shock standard deviations and correlations. Changes are applied when a simulation is run.

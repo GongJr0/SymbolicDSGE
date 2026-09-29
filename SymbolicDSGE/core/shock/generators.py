@@ -127,13 +127,19 @@ def resolve_loc(kwargs: Mapping[str, Any], width: int) -> ndarray:
     The resolver calls this once per entry and the result travels on the entry,
     which is what keeps the Python draw and the native lowering from reading the
     same keyword arguments under two different rules.
+
+    Any shape holding one value per variable is taken, since a location read out
+    of a matrix calculation arrives as a row or a column as readily as flat.
     """
-    loc = (
-        kwargs["mean"]
-        if "mean" in kwargs
-        else kwargs.get("loc", np.zeros(width, dtype=float64))
-    )
-    return asarray(loc, dtype=float64).reshape(width)
+    name = "mean" if "mean" in kwargs else "loc"
+    loc = asarray(kwargs.get(name, np.zeros(width)), dtype=float64)
+    if loc.size != width:
+        raise ValueError(
+            f"`{name}` needs one value per variable in the entry. "
+            f"Expected {width}, got {loc.size}. "
+            "Omit the keyword for a zero default."
+        )
+    return loc.reshape(width)
 
 
 def _validate_dist(dist: object, dist_kwargs: Mapping[str, Any]) -> None:
@@ -232,8 +238,8 @@ class Shock:
     ----------
     dist : ShockDistribution | rv_generic | multi_rv_generic | None
         Distribution to draw shocks from. Can be a family name ("norm", "t",
-        "uni") or a scipy.stats distribution object. Alternatively, a custom class
-        implementing ``rvs`` can be passed in.
+        "uni", "exp", "gamma", "beta") or a scipy.stats distribution object.
+        Alternatively, a custom class implementing ``rvs`` can be passed in.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
     dist_kwargs : dict | None
@@ -434,15 +440,15 @@ class Shock:
         """Serialize a generator-style Shock to a JSON-able dict.
 
         Only the generator form is representable: a string ``dist`` identifier
-        (``"norm"``/``"t"``/``"uni"``) and no materialized ``shock_arr``. A live
-        scipy distribution object cannot be faithfully reproduced from JSON, and
-        a placed shock array is bulk data that belongs with the parquet members,
-        not the pipeline spec.
+        and no materialized ``shock_arr``. A live scipy distribution object
+        cannot be faithfully reproduced from JSON, and a placed shock array is
+        bulk data that belongs with the parquet members, not the pipeline spec.
         """
         if not isinstance(self.dist, str):
             raise TypeError(
-                "Only string-identified distributions ('norm'/'t'/'uni') are "
-                "serializable; got a live scipy distribution object."
+                "Only string-identified distributions "
+                f"({list(get_args(ShockDistribution))}) are serializable; got a "
+                "live scipy distribution object."
             )
         return ShockParameters(
             target=self.target,
