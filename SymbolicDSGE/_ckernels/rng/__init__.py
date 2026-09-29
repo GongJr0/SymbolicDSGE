@@ -16,6 +16,10 @@ extension is not built, importing this module raises ``ImportError``.
 """
 
 from ._rng import (
+    philox_standard_gamma,
+    philox_chi2,
+    philox_beta,
+    philox_standard_exponential,
     philox_raw,
     philox_standard_normal,
     philox_standard_uniform,
@@ -24,6 +28,10 @@ from ._rng import (
 )
 
 __all__ = [
+    "philox_standard_gamma",
+    "philox_chi2",
+    "philox_beta",
+    "philox_standard_exponential",
     "philox_raw",
     "philox_standard_normal",
     "philox_standard_uniform",

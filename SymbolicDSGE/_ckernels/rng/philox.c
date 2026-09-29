@@ -40,7 +40,8 @@ static inline u64 sdsge_mulhilo64(u64 a, u64 b, u64 *hi) {
   u64 lo_hi = a_lo * b_hi;
   u64 hi_hi = a_hi * b_hi;
 
-  u64 carry = ((lo_lo >> 32) + (hi_lo & 0xFFFFFFFFULL) + (lo_hi & 0xFFFFFFFFULL)) >> 32;
+  u64 carry =
+      ((lo_lo >> 32) + (hi_lo & 0xFFFFFFFFULL) + (lo_hi & 0xFFFFFFFFULL)) >> 32;
   *hi = hi_hi + (hi_lo >> 32) + (lo_hi >> 32) + carry;
   return a * b;
 #endif
@@ -116,6 +117,12 @@ u64 sdsge_philox_next_u64(sdsge_philox_state *st) {
   return st->buffer[st->buffer_pos++];
 }
 
+f64 sdsge_philox_next_double(sdsge_philox_state *st) {
+  /* The standard 53-bit construction, identical to what numpy's own bit
+   * generators use. */
+  return (f64)(sdsge_philox_next_u64(st) >> 11) * (1.0 / 9007199254740992.0);
+}
+
 /* bitgen_t vtable over the state above. numpy's transforms reach the engine
  * only through these, so binding them is all it takes to reuse npyrandom. */
 
@@ -128,11 +135,7 @@ static u32 sdsge_philox_bg_next_u32(void *st) {
 }
 
 static f64 sdsge_philox_bg_next_double(void *st) {
-  /* The standard 53-bit construction, identical to what numpy's own bit
-   * generators use, so the uniform transform sees the distribution it
-   * expects. */
-  return (f64)(sdsge_philox_next_u64((sdsge_philox_state *)st) >> 11) *
-         (1.0 / 9007199254740992.0);
+  return sdsge_philox_next_double((sdsge_philox_state *)st);
 }
 
 static u64 sdsge_philox_bg_next_raw(void *st) {
@@ -167,4 +170,56 @@ void sdsge_philox_standard_uniform_fill(sdsge_philox_state *st, i64 n,
   }
   sdsge_philox_bind(&bg, st);
   random_standard_uniform_fill(&bg, (npy_intp)n, out);
+}
+
+void sdsge_philox_standard_exponential_fill(sdsge_philox_state *st, i64 n,
+                                            f64 *SDSGE_RESTRICT out) {
+  bitgen_t bg;
+  if (n <= 0) {
+    return;
+  }
+  sdsge_philox_bind(&bg, st);
+  random_standard_exponential_fill(&bg, (npy_intp)n, out);
+}
+
+void sdsge_philox_standard_gamma_fill(sdsge_philox_state *st, i64 n,
+                                      f64 *SDSGE_RESTRICT out,
+                                      sdsge_sampler_params params) {
+  bitgen_t bg;
+  i64 i;
+  if (n <= 0) {
+    return;
+  }
+  sdsge_philox_bind(&bg, st);
+  for (i = 0; i < n; i++) {
+    out[i] = random_standard_gamma(&bg, params.a);
+  }
+}
+
+void sdsge_philox_chi2_fill(sdsge_philox_state *st, i64 n,
+                            f64 *SDSGE_RESTRICT out,
+                            sdsge_sampler_params params) {
+  bitgen_t bg;
+  i64 i;
+  if (n <= 0) {
+    return;
+  }
+  sdsge_philox_bind(&bg, st);
+  for (i = 0; i < n; i++) {
+    out[i] = random_chisquare(&bg, params.df);
+  }
+}
+
+void sdsge_philox_beta_fill(sdsge_philox_state *st, i64 n,
+                            f64 *SDSGE_RESTRICT out,
+                            sdsge_sampler_params params) {
+  bitgen_t bg;
+  i64 i;
+  if (n <= 0) {
+    return;
+  }
+  sdsge_philox_bind(&bg, st);
+  for (i = 0; i < n; i++) {
+    out[i] = random_beta(&bg, params.beta.a, params.beta.b);
+  }
 }

@@ -15,29 +15,25 @@ import type {
   DrawnShock,
   PathRegistryEntry,
   PathShock,
-  ShockDistribution,
   ShockEntry,
   ShockRegistryEntry,
 } from "../types";
 
 // One registry entry becomes one shock, joint when it selects more than one
-// innovation. Uniform is univariate only, so a `uni` entry takes exactly one.
+// innovation.
 //
 // `loc` travels as the vector the entry holds. The library resolves `mean` and
 // `loc` identically at every width and requires one value per target, so there
 // is no spelling to pick and nothing to broadcast: a short vector is incomplete
 // input and is refused here rather than filled in.
+//
+// Neither the family nor the width it may be drawn at is checked. The library
+// owns both, names every valid family in its own error, and reports which ones
+// it draws univariate only. A check here could be a stale subset of either.
 function shockFor(entry: DrawnRegistryEntry): DrawnShock {
   const target = entry.target.map(String);
   const n = target.length;
   const loc = (entry.loc ?? []).map(Number);
-  const df = Number(entry.df ?? 5);
-  if (entry.dist === "uni" && n > 1) {
-    throw new Error(
-      "A 'uni' shock is univariate; select exactly one innovation per uniform " +
-        "entry (use separate entries for independent uniform shocks).",
-    );
-  }
   if (loc.length !== n) {
     throw new Error(
       `Shock entry '${target.join(", ")}' needs one location per innovation; ` +
@@ -47,16 +43,11 @@ function shockFor(entry: DrawnRegistryEntry): DrawnShock {
   if (loc.some((value) => !Number.isFinite(value))) {
     throw new Error(`Shock entry '${target.join(", ")}' has a non-numeric location.`);
   }
-  if (entry.dist !== "norm" && entry.dist !== "t" && entry.dist !== "uni") {
-    throw new Error(`Unsupported shock distribution: ${String(entry.dist)}`);
-  }
-  const distKwargs: Record<string, unknown> =
-    entry.dist === "t" ? { loc, df } : { loc };
   return {
     target,
     dist: entry.dist,
     seed: entry.seed ?? null,
-    dist_kwargs: distKwargs,
+    dist_kwargs: { ...entry.params, loc },
   };
 }
 
@@ -127,7 +118,10 @@ function entryFromSpec(dict: Record<string, unknown>): ShockRegistryEntry {
   if ("path" in dict) {
     return { kind: "path", target, path: pathMatrix(dict.path) };
   }
-  const dist = asDist(dict.dist);
+  // Carried through as written rather than narrowed to a family the panel knows.
+  // A family it does not recognize still has to survive the round trip, and the
+  // library is what decides whether it is one.
+  const dist = typeof dict.dist === "string" ? dict.dist : "norm";
   const kwargs = (dict.dist_kwargs ?? {}) as Record<string, unknown>;
   // The library reads `mean` and `loc` identically and prefers `mean` when a
   // spec carries both, so this reads them in that order and keeps the whole
@@ -140,9 +134,20 @@ function entryFromSpec(dict: Record<string, unknown>): ShockRegistryEntry {
     target,
     dist,
     loc: locVector(declared, target.length),
-    df: dist === "t" ? Number(kwargs.df ?? 5) : 5,
+    params: paramsFrom(kwargs),
     seed: dict.seed === null || dict.seed === undefined ? null : Number(dict.seed),
   };
+}
+
+// Everything a family takes beyond its location, read by exclusion rather than
+// by family so a parameter the panel offers no field for still round-trips.
+function paramsFrom(kwargs: Record<string, unknown>): Record<string, number> {
+  const params: Record<string, number> = {};
+  for (const [key, value] of Object.entries(kwargs)) {
+    if (key === "loc" || key === "mean") continue;
+    params[key] = Number(value);
+  }
+  return params;
 }
 
 // A serialized path as rows. The spec's shape is (T, width), so a flat list is
@@ -162,10 +167,6 @@ function locVector(declared: unknown, width: number): number[] {
   }
   if (Array.isArray(declared)) return declared.map(Number);
   return [Number(declared)];
-}
-
-function asDist(value: unknown): ShockDistribution {
-  return value === "t" || value === "uni" ? value : "norm";
 }
 
 // One period per line, one value per innovation within it, separated by any

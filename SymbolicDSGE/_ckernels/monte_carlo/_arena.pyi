@@ -1,3 +1,7 @@
+from collections.abc import Sequence
+
+from ..core._shocks import ShockCode
+
 def transform_arena_size(
     kind: str, n: int, p: int, order: int = 0, window: int = 0
 ) -> tuple[int, int]: ...
@@ -9,6 +13,9 @@ def simulation_arena_size(
 ) -> tuple[int, int]: ...
 def simulation_output_arena_size(
     order: int, n_var: int, n_exog: int, T: int, n_obs: int
+) -> tuple[int, int]: ...
+def shock_scratch_arena_size(
+    entries: Sequence[tuple[ShockCode, int]], T: int
 ) -> tuple[int, int]: ...
 def filter_arena_size(
     kind: str, n_state: int, n_ctrl: int, n_exog: int, n_obs: int, T: int, n_par: int

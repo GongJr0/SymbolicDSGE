@@ -1045,15 +1045,10 @@ def test_output_plan_carries_step_retention_count(solved_test_model) -> None:
 
 
 def test_output_shape_resolution_includes_unscented_filter_fields(
-    rbc_second_order_test_model_path,
+    solved_rbc_second_order,
 ) -> None:
-    model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
-    solver = DSGESolver(
-        model,
-        KalmanConfig(R=np.array([[0.01]], dtype=np.float64)),
-    )
-    compiled = solver.compile()
-    reference = solver.solve(compiled=compiled, order=2)
+    reference = solved_rbc_second_order
+    compiled = reference.compiled
 
     # The state paths span the compiled layout, generated variables included.
     n_var = len(compiled.var_names)

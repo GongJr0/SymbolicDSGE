@@ -5,8 +5,10 @@ same spec under many seeds (the Monte Carlo lowering materializes one path per
 replication) resolve a plan and then call :meth:`ShockPlan.fill` per draw.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Sequence
+from typing import ClassVar, Sequence
 from functools import cached_property
 
 import numpy as np
@@ -14,6 +16,11 @@ from numpy import float64
 from numpy.typing import NDArray
 
 from .generators import Shock, ShockPath, ShockDrawFn
+from ..._ckernels.core._shocks import (
+    NativeShockPlan,
+    ShockCode,
+    native_shock_plan,
+)
 
 NDF = NDArray[float64]
 
@@ -23,7 +30,8 @@ class ShockEntry:
     """One drawn entry of a shock spec, resolved against a model.
 
     ``draw`` is the entry's family resolved for one horizon, and it computes
-    ``loc + factor @ v`` over that family's standardized variate. ``factor`` is
+    ``loc + factor @ v`` over that family's standardized variate. It is None for
+    an entry carrying a ``family``, which the kernel draws instead. ``factor`` is
     the scale at any width: the 1x1 holding a standard deviation, or the
     covariance block's factor. ``loc`` is the ``width``-long location.
     ``base_seed`` is the spec's own seed as declared, which :meth:`_seed` keys a
@@ -35,9 +43,10 @@ class ShockEntry:
 
     key: tuple[str, ...]
     indices: tuple[int, ...]
+    family: ShockCode | None
     loc: NDF
     factor: NDF
-    draw: ShockDrawFn
+    draw: ShockDrawFn | None = None
     base_seed: int | None = None
     kwargs: dict | None = None
 
@@ -54,6 +63,11 @@ class ShockEntry:
         unseeded entry has no seed to key and redraws freshly whatever it is
         given.
         """
+        if self.draw is None:
+            raise ValueError(
+                f"Entry {self.key!r} has no draw function; it is native and "
+                "cannot be drawn in Python."
+            )
         drawn = self.draw(
             self.loc,
             self.factor,
@@ -90,6 +104,13 @@ class ShockEntry:
             ).generate_state(1, dtype=np.uint64)[0]
         )
 
+    @property
+    def _native_seed_key(self) -> int:
+        if self.base_seed is None:
+            rng = np.random.default_rng()
+            return int(rng.integers(0, 2**64, dtype=np.uint64))
+        return int(self.base_seed) & 0xFFFFFFFFFFFFFFFF
+
 
 @dataclass(frozen=True)
 class ArrayEntry:
@@ -98,8 +119,11 @@ class ArrayEntry:
     Nothing about a supplied path depends on the calibration: this carries no
     scale, no factor, and no seed. ``value`` is always ``(T, width)``. The
     resolution widens a single shock's one-dimensional path, which lets every
-    entry unpack the same way.
+    entry unpack the same way. ``family`` is fixed, not resolved, so a consumer
+    reads one attribute off either entry kind.
     """
+
+    family: ClassVar[ShockCode] = ShockCode.PATH
 
     key: tuple[str, ...]
     indices: tuple[int, ...]
@@ -167,6 +191,16 @@ class ShockPlan:
         self.fill(out, T, shock_scale, rep_idx)
         return out
 
+    @cached_property
+    def native(self) -> ShockPlan:
+        native_entries = tuple(e for e in self.entries if native_code(e) is not None)
+        return ShockPlan(native_entries, self.n_exog)
+
+    @cached_property
+    def python(self) -> ShockPlan:
+        python_entries = tuple(e for e in self.entries if native_code(e) is None)
+        return ShockPlan(python_entries, self.n_exog)
+
 
 def validate_shock_targets(
     shocks: Sequence[Shock | ShockPath],
@@ -199,3 +233,48 @@ def validate_shock_targets(
                     "in at most one entry."
                 )
             owner[member] = ",".join(members)
+
+
+def native_code(
+    shock: Shock | ShockPath | ShockEntry | ArrayEntry,
+) -> ShockCode | None:
+    """The code the native draw dispatches one entry on, or None if it cannot.
+
+    Takes a spec member or a resolved entry, since the arena planner asks before
+    resolution and the lowering asks after.
+    """
+    if isinstance(shock, ShockPath):
+        return ShockCode.PATH
+    if isinstance(shock, Shock):
+        return ShockCode.for_dist(shock.dist)
+    return shock.family
+
+
+def get_native_shock_plan(
+    plan: ShockPlan,
+    T: int,
+    shock_scale: float,
+) -> NativeShockPlan | None:
+    """The native plan over a plan's kernel-drawable entries, or None if none."""
+    if len(plan.native.entries) == 0:
+        return None
+    return native_shock_plan(
+        plan.native.entries,
+        T,
+        plan.n_exog,
+        shock_scale,
+    )
+
+
+def draw_shock_matrix(
+    plan: ShockPlan, T: int, shock_scale: float = 1.0, rep_idx: int = 0
+) -> NDF:
+    """A ``(T, n_exog)`` block with every entry of a plan drawn into it.
+
+    The Python route allocates and zeroes the block; the native draw overlays
+    the columns it owns in place.
+    """
+    out = plan.python.matrix(T, shock_scale, rep_idx)
+    if (nplan := get_native_shock_plan(plan, T, shock_scale)) is not None:
+        nplan.fill(out, rep_idx)
+    return out

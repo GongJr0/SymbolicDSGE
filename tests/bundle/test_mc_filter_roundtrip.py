@@ -15,7 +15,6 @@ import pytest
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.bundle import BundleBuilder, load_bundle
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.kalman.config import KalmanConfig
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.mc_constructs import MCFilterResult
 from SymbolicDSGE.monte_carlo.step_factories import (
@@ -48,13 +47,6 @@ def linear() -> SolvedModel:
     model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
     solver = DSGESolver(model, kalman)
     return solver.solve(solver.compile())
-
-
-@pytest.fixture(scope="module")
-def second_order() -> SolvedModel:
-    model, _ = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
-    solver = DSGESolver(model, KalmanConfig(R=np.array([[0.01]], dtype=np.float64)))
-    return solver.solve(solver.compile(), order=2)
 
 
 def _pipeline(solved: SolvedModel, *filters: object) -> MCPipeline:
@@ -131,11 +123,11 @@ def test_a_filter_round_trips_every_field_it_produced(
 
 
 def test_the_unscented_pruned_state_survives_the_bundle(
-    second_order: SolvedModel, tmp_path
+    solved_rbc_second_order: SolvedModel, tmp_path
 ) -> None:
     """Only this mode opens those four buffers, and the mode is what says so."""
     pipeline = _pipeline(
-        second_order,
+        solved_rbc_second_order,
         filter_step(
             "filt",
             target="reference",
@@ -145,7 +137,7 @@ def test_the_unscented_pruned_state_survives_the_bundle(
         ),
     )
 
-    before, after = _roundtrip(second_order, pipeline, tmp_path)
+    before, after = _roundtrip(solved_rbc_second_order, pipeline, tmp_path)
 
     _assert_same(before["filt"], after["filt"])
     for name in _PRUNED:

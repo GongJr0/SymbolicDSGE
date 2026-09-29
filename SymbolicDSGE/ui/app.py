@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Mapping, cast
+import logging
+from collections.abc import Awaitable, Callable
+from typing import Any, Mapping, cast, get_args
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from ..core.shock.generators import ShockDistribution
 from ..core.solved_model import SolvedModel
 from ..monte_carlo.spec import pipeline_meta
 from ..bundle.manifest import SimSpec
@@ -26,6 +30,8 @@ from .schemas import (
     SubmitFunctionRequest,
 )
 from .session import UISession, Workspace
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -50,6 +56,19 @@ def create_app(
         allow_headers=["*"],
     )
 
+    # Every endpoint's failure in one place.
+    # Logged here because nothing reaches the server to be logged.
+    @app.middleware("http")
+    async def report_exceptions(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            logger.exception("%s %s failed", request.method, request.url.path)
+            return JSONResponse(status_code=400, content={"detail": _error_detail(exc)})
+
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -67,12 +86,8 @@ def create_app(
         of anything the browser kept. Acknowledges only, since the caller is
         the one that already has the state.
         """
-        try:
-            ui_session.set_workspace_view(**cast(WorkspaceViewUpdate, request))
-            return {"tab": request["tab"]}
-
-        except (KeyError, TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
+        ui_session.set_workspace_view(**cast(WorkspaceViewUpdate, request))
+        return {"tab": request["tab"]}
 
     @app.get("/api/mc/custom/template")
     def monte_carlo_custom_template() -> dict[str, str]:
@@ -93,71 +108,53 @@ def create_app(
     def get_estimation_catalog() -> dict[str, Any]:
         return estimation_catalog()
 
+    @app.get("/api/shocks/catalog")
+    def get_shock_catalog() -> dict[str, Any]:
+        """The families a shock spec may name, so the panel offers exactly them."""
+        return {"families": list(get_args(ShockDistribution))}
+
     @app.post("/api/run/estimation")
     def run_estimation(request: dict[str, Any]) -> dict[str, Any]:
-        try:
-            return ui_session.run_estimation(cast(EstimationRunRequest, request))
-        except (KeyError, TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
+        return ui_session.run_estimation(cast(EstimationRunRequest, request))
 
     @app.post("/api/mc/validate")
     def validate_monte_carlo_pipeline(request: dict[str, Any]) -> dict[str, Any]:
-        try:
-
-            # Compile and catch.
-            pipe = build_pipeline(request)
-            return {
-                "valid": True,
-                "steps": [step.name for step in pipe.replication_steps],
-                "postprocs": [pp.name for pp in pipe.postproc_steps],
-            }
-        except (KeyError, TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
+        pipe = build_pipeline(request)
+        return {
+            "valid": True,
+            "steps": [step.name for step in pipe.replication_steps],
+            "postprocs": [pp.name for pp in pipe.postproc_steps],
+        }
 
     @app.post("/api/run/mc")
     def run_monte_carlo_pipeline(request: dict[str, Any]) -> dict[str, Any]:
-        try:
-            pipeline = build_pipeline(request["pipeline"])
-            result = run_pipeline(
-                pipeline,
-                models={
-                    name: slot.solved
-                    for name, slot in ui_session.slots.items()
-                    if slot.solved is not None
-                },
-                n_rep=int(request.get("n_rep", 100)),
-                fail_fast=bool(request.get("fail_fast", True)),
-                n_jobs=request.get("n_jobs"),
-                verbosity=int(request.get("verbosity", 0)),
-            )
-            payload = serialize_pipeline_result(result)
-            # Off the built pipeline, not the body that described it: the slot
-            # is what a bundle stores, and only `to_spec` produces that.
-            ui_session.workspace.mc.spec = dict(pipeline_meta(pipeline.to_spec()))
-            ui_session.workspace.mc.result = payload
-            return payload
-        except (KeyError, TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
+        pipeline = build_pipeline(request["pipeline"])
+        result = run_pipeline(
+            pipeline,
+            models={
+                name: slot.solved
+                for name, slot in ui_session.slots.items()
+                if slot.solved is not None
+            },
+            n_rep=int(request.get("n_rep", 100)),
+            fail_fast=bool(request.get("fail_fast", True)),
+            n_jobs=request.get("n_jobs"),
+            verbosity=int(request.get("verbosity", 0)),
+        )
+        payload = serialize_pipeline_result(result)
+        # Off the built pipeline, not the body that described it: the slot is what
+        # a bundle stores, and only `to_spec` produces that.
+        ui_session.workspace.mc.spec = dict(pipeline_meta(pipeline.to_spec()))
+        ui_session.workspace.mc.result = payload
+        return payload
 
     @app.post("/api/model/load-yaml")
     def load_yaml(request: dict[str, Any]) -> dict[str, Any]:
-        try:
-            return ui_session.load_yaml(**cast(LoadYamlRequest, request))
-        except (TypeError, ValueError, FileNotFoundError) as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=_error_detail(exc),
-            ) from exc
+        return ui_session.load_yaml(**cast(LoadYamlRequest, request))
 
     @app.post("/api/model/solve")
     def solve_model(request: dict[str, Any]) -> dict[str, Any]:
-        try:
-            return ui_session.solve_model(**cast(SolveModelRequest, request))
-        except (KeyError, TypeError, ValueError) as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=_error_detail(exc),
-            ) from exc
+        return ui_session.solve_model(**cast(SolveModelRequest, request))
 
     @app.get("/api/model/{model_name}/summary")
     def model_summary(model_name: str) -> dict[str, Any]:
@@ -171,25 +168,13 @@ def create_app(
 
     @app.post("/api/run/sim")
     def run_simulation(request: dict[str, Any]) -> dict[str, Any]:
-        try:
-            model_name = request["model_name"]
-            spec = SimSpec.from_dict(request["spec"])
-            return ui_session.run_simulation_spec(model_name, spec)
-        except (KeyError, ValueError) as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=_error_detail(exc),
-            ) from exc
+        model_name = request["model_name"]
+        spec = SimSpec.from_dict(request["spec"])
+        return ui_session.run_simulation_spec(model_name, spec)
 
     @app.post("/api/code/submit")
     def submit_function(request: dict[str, Any]) -> dict[str, Any]:
-        try:
-            return ui_session.submit_function(**cast(SubmitFunctionRequest, request))
-        except (SyntaxError, ValueError) as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=_error_detail(exc),
-            ) from exc
+        return ui_session.submit_function(**cast(SubmitFunctionRequest, request))
 
     @app.delete("/api/code/{model_name}/{name}")
     def remove_function(model_name: str, name: str) -> dict[str, Any]:

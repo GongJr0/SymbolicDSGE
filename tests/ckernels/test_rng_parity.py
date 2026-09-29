@@ -97,3 +97,63 @@ def test_negative_length_raises(fn):
 def test_non_generator_raises(fn):
     with pytest.raises((ValueError, AttributeError)):
         fn(object(), 3)
+
+
+# Gamma's below-one, exponential, and Marsaglia-Tsang paths, plus Beta's
+# Johnk, tiny-shape, and Gamma-ratio paths. Unequal Beta shapes catch swaps.
+_ADDED_SAMPLERS = [
+    pytest.param("standard_exponential", "standard_exponential", (), id="exp"),
+    pytest.param("standard_gamma", "standard_gamma", (0.3,), id="gamma-small"),
+    pytest.param("standard_gamma", "standard_gamma", (1.0,), id="gamma-unit"),
+    pytest.param("standard_gamma", "standard_gamma", (7.5,), id="gamma-large"),
+    pytest.param("chi2", "chisquare", (0.6,), id="chi2-small"),
+    pytest.param("chi2", "chisquare", (9.0,), id="chi2-large"),
+    pytest.param("beta", "beta", (0.3, 0.8), id="beta-johnk"),
+    pytest.param("beta", "beta", (1e-110, 2e-110), id="beta-tiny"),
+    pytest.param("beta", "beta", (0.3, 4.0), id="beta-mixed"),
+    pytest.param("beta", "beta", (2.0, 7.0), id="beta-ratio"),
+]
+
+
+@pytest.mark.parametrize("name, numpy_name, params", _ADDED_SAMPLERS)
+def test_added_philox_sampler_replays_and_preserves_prefix(name, numpy_name, params):
+    draw = getattr(native, "philox_" + name)
+    address = (17, 29, 41, 53)
+    whole = draw(*address, 1000, *params)
+    replay = draw(*address, 1000, *params)
+    prefix = draw(*address, 13, *params)
+    assert whole.shape == (1000,)
+    assert whole.dtype == np.float64
+    assert np.isfinite(whole).all()
+    np.testing.assert_array_equal(whole.view(np.uint64), replay.view(np.uint64))
+    np.testing.assert_array_equal(whole[:13].view(np.uint64), prefix.view(np.uint64))
+    empty = draw(*address, 0, *params)
+    assert empty.shape == (0,)
+    assert empty.dtype == np.float64
+
+
+@pytest.mark.parametrize("name, numpy_name, params", _ADDED_SAMPLERS)
+def test_added_samplers_reject_negative_lengths_and_invalid_generators(
+    name, numpy_name, params
+):
+    with pytest.raises(ValueError, match="n must be non-negative"):
+        getattr(native, "philox_" + name)(0, 0, 0, 0, -1, *params)
+
+
+@pytest.mark.parametrize(
+    "name, params, index, parameter",
+    [
+        ("standard_gamma", (2.0,), 0, "a"),
+        ("chi2", (2.0,), 0, "df"),
+        ("beta", (2.0, 3.0), 0, "a"),
+        ("beta", (2.0, 3.0), 1, "b"),
+    ],
+)
+@pytest.mark.parametrize("invalid", [0.0, -1.0, np.nan, np.inf, -np.inf])
+def test_sampler_parameters_are_validated_before_drawing(
+    name, params, index, parameter, invalid
+):
+    params = list(params)
+    params[index] = invalid
+    with pytest.raises(ValueError, match=f"{parameter} must be finite and positive"):
+        getattr(native, "philox_" + name)(0, 0, 0, 0, 5, *params)

@@ -12,6 +12,7 @@ import type {
   MCPipelineSpec,
   MCStepType,
   SessionSummary,
+  ShockCatalog,
   SimResult,
   SimSpecWire,
   WorkspaceTab,
@@ -101,6 +102,10 @@ export function runSimulation(
 
 export function getEstimationCatalog(): Promise<EstimationCatalog> {
   return requestJson<EstimationCatalog>("/api/estimation/catalog");
+}
+
+export function getShockCatalog(): Promise<ShockCatalog> {
+  return requestJson<ShockCatalog>("/api/shocks/catalog");
 }
 
 export function runEstimation(

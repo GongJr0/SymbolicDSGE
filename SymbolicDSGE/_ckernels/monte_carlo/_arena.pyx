@@ -15,6 +15,7 @@ cdef extern from "sdsge_common.h":
 
     arena_size make_sizer(int64_t n_float, int64_t n_int) nogil
     arena_size add_arena(arena_size a, arena_size b) nogil
+    arena_size sdsge_max_arena(arena_size a, arena_size b) nogil
 
 cdef extern from "layout.h":
     ctypedef enum sdsge_mc_transform_kind:
@@ -89,6 +90,19 @@ cdef extern from "diag_wald.h":
     arena_size sdsge_wald_mean_hac_arena_size(int64_t n, int64_t q) nogil
     arena_size sdsge_wald_covariance_hac_arena_size(int64_t n, int64_t q) nogil
     arena_size sdsge_wald_second_moment_hac_arena_size(int64_t n, int64_t q) nogil
+
+
+cdef extern from "shocks.h":
+    ctypedef enum native_shock:
+        SDSGE_SHOCK_PATH
+        SDSGE_SHOCK_NORMAL
+        SDSGE_SHOCK_UNIFORM
+        SDSGE_SHOCK_STUDENT_T
+        SDSGE_SHOCK_EXPONENTIAL
+        SDSGE_SHOCK_GAMMA
+        SDSGE_SHOCK_BETA
+    arena_size sdsge_shock_entry_arena_size(native_shock family, int64_t width,
+                                            int64_t T) nogil
 
 
 cdef inline tuple _size(arena_size size):
@@ -190,6 +204,26 @@ def simulation_output_arena_size(
     if order == 2:
         return _size(sdsge_simulate_order2_output_arena_size(n_var, n_exog, T, n_obs))
     raise ValueError(f"Unsupported native simulation order: {order}.")
+
+
+def shock_scratch_arena_size(object entries, int64_t T):
+    """Return the scratch a shock spec's native draw needs.
+
+    ``entries`` holds one ``(family, width)`` pair per spec entry.
+    """
+    cdef arena_size total = make_sizer(0, 0)
+    cdef int64_t family
+    cdef int64_t width
+
+    # A negative horizon would size every entry below the empty total and fold
+    # away to nothing rather than to something visibly wrong.
+    if T < 0:
+        raise ValueError("Native shock horizon must be non-negative.")
+    for family, width in entries:
+        total = sdsge_max_arena(
+            total, sdsge_shock_entry_arena_size(<native_shock>family, width, T)
+        )
+    return _size(total)
 
 
 def filter_arena_size(

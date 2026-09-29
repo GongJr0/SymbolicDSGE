@@ -22,7 +22,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from SymbolicDSGE._ckernels.core._shocks import ShockCode
 from SymbolicDSGE.core.shock.generators import Shock
+from SymbolicDSGE.core.shock.plan import ShockEntry, get_native_shock_plan
 import SymbolicDSGE.core.shock.spec as shocks_mod
 from SymbolicDSGE.core.shock.spec import (
     resolve_shock_plan,
@@ -33,11 +35,16 @@ T = 12
 
 
 #: One seeded spec per drawn family and arity, so the two replication properties
-#: below are checked against every route :meth:`Shock.draw_fn` resolves onto.
+#: below are checked against every family the kernel draws. A family that failed
+#: to lower would leave ``get_native_shock_plan`` returning None and fail here,
+#: which is what pins the dispatch for the families nothing else reaches.
 FAMILY_SPECS = [
     {("e_u",): Shock(dist="norm", seed=3)},
     {("e_u",): Shock(dist="t", seed=5, dist_kwargs={"df": 4})},
     {("e_u",): Shock(dist="uni", seed=7)},
+    {("e_u",): Shock(dist="exp", seed=17)},
+    {("e_u",): Shock(dist="gamma", seed=19, dist_kwargs={"a": 2.5})},
+    {("e_u",): Shock(dist="beta", seed=23, dist_kwargs={"a": 2.0, "b": 5.0})},
     {("e_u", "e_v"): Shock(dist="norm", seed=11)},
     {("e_u", "e_v"): Shock(dist="t", seed=13, dist_kwargs={"df": 6})},
 ]
@@ -48,10 +55,10 @@ FAMILY_SPECS = [
 def test_plan_draw_is_reproducible_per_replication(solved_test, spec, rep_idx):
     """Every family draws one fixed path per replication index."""
     plan = resolve_shock_plan(solved_test.compiled, spec, T)
-
+    native = get_native_shock_plan(plan, T, 2.5)
     np.testing.assert_array_equal(
-        plan.matrix(T, 2.5, rep_idx),
-        plan.matrix(T, 2.5, rep_idx),
+        native.draw(rep_idx),
+        native.draw(rep_idx),
     )
 
 
@@ -60,36 +67,37 @@ def test_plan_draw_is_reproducible_per_replication(solved_test, spec, rep_idx):
 def test_plan_draw_differs_across_replications(solved_test, spec, rep_idx):
     """And a different index is a different path, for every family."""
     plan = resolve_shock_plan(solved_test.compiled, spec, T)
-
+    native = get_native_shock_plan(plan, T, 2.5)
     assert not np.array_equal(
-        plan.matrix(T, 2.5, rep_idx),
-        plan.matrix(T, 2.5, rep_idx + 1),
+        native.draw(rep_idx),
+        native.draw(rep_idx + 1),
     )
 
 
 def test_plan_reseeds_independently_across_draws(solved_test):
     spec = {("e_u", "e_v"): Shock(dist="norm", seed=11)}
     plan = resolve_shock_plan(solved_test.compiled, spec, T)
+    native = get_native_shock_plan(plan, T, 1.0)
 
-    first = plan.matrix(T, 1.0, 0)
-    second = plan.matrix(T, 1.0, 1)
-    again = plan.matrix(T, 1.0, 0)
+    first = native.draw(0)
+    second = native.draw(1)
+    again = native.draw(0)
 
     # Redrawing is a pure function of the index: same index, same path.
     np.testing.assert_array_equal(first, again)
     assert not np.array_equal(first, second)
 
 
-def test_unseeded_spec_redraws_each_time(solved_test):
+def test_unseeded_spec_reproduces_with_the_same_plan(solved_test):
     plan = resolve_shock_plan(
         solved_test.compiled, {("e_u",): Shock(dist="norm", seed=None)}, T
     )
+    native = get_native_shock_plan(plan, T, 1.0)
 
-    first = plan.matrix(T, 1.0, 0)
-    second = plan.matrix(T, 1.0, 0)
+    first = native.draw(0)
+    second = native.draw(0)
 
-    # A seedless spec draws fresh entropy per call; the offset cannot pin it.
-    assert not np.array_equal(first, second)
+    assert np.array_equal(first, second)
 
 
 def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
@@ -105,11 +113,12 @@ def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
     monkeypatch.setattr(shocks_mod, "make_Q", counting_make_Q)
 
     plan = resolve_shock_plan(solved_test.compiled, spec, T)
+    native = get_native_shock_plan(plan, T, 1.0)
     resolved = calls["n"]
     assert resolved > 0
 
     for offset in range(25):
-        plan.matrix(T, 1.0, offset)
+        native.draw(offset)
 
     # The covariance is spec-level, so redrawing must not rebuild it.
     assert calls["n"] == resolved
@@ -118,13 +127,8 @@ def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
 def test_passthrough_entries_ignore_the_replication_index(solved_test):
     values = np.arange(T, dtype=np.float64)
     plan = resolve_shock_plan(solved_test.compiled, {("e_u",): values}, T)
-
-    np.testing.assert_array_equal(plan.matrix(T, 1.0, 0), plan.matrix(T, 1.0, 9))
-
-
-def test_live_shock_requires_a_horizon(solved_test):
-    with pytest.raises(ValueError, match="needs a horizon T"):
-        resolve_shock_plan(solved_test.compiled, {("e_u",): Shock(dist="norm", seed=1)})
+    native = get_native_shock_plan(plan, T, 1.0)
+    np.testing.assert_array_equal(native.draw(0), native.draw(9))
 
 
 # ---- entry invariance (#507) ---------------------------------------------
@@ -147,17 +151,18 @@ def _t_shock(seed, target):
 def test_entry_draw_does_not_depend_on_its_position_in_the_spec(solved_post82):
     spec = [_t_shock(11, "e_g"), _t_shock(12, "e_z"), _t_shock(13, "e_r")]
 
-    forward = resolve_shock_plan(solved_post82.compiled, spec, T).matrix(T, 1.0, 3)
-    backward = resolve_shock_plan(
-        solved_post82.compiled, list(reversed(spec)), T
-    ).matrix(T, 1.0, 3)
+    forward = resolve_shock_plan(solved_post82.compiled, spec, T)
+    fnative = get_native_shock_plan(forward, T, 1.0).draw(3)
+
+    backward = resolve_shock_plan(solved_post82.compiled, list(reversed(spec)), T)
+    bnative = get_native_shock_plan(backward, T, 1.0).draw(3)
 
     # Columns are addressed by shock, so reordering the spec must move nothing.
     # Unlike the three below, this one also held under the additive scheme: the
     # Python route was always position-invariant and it was the native keying
     # that was not. Pinned here so the derivation cannot regress into using
     # anything positional.
-    np.testing.assert_array_equal(forward, backward)
+    np.testing.assert_array_equal(fnative, bnative)
 
 
 def test_entry_draw_does_not_depend_on_the_rest_of_the_spec(solved_post82):
@@ -165,13 +170,14 @@ def test_entry_draw_does_not_depend_on_the_rest_of_the_spec(solved_post82):
     pair = [_t_shock(11, "e_g"), _t_shock(12, "e_z")]
     trio = pair + [_t_shock(13, "e_r")]
 
-    without = resolve_shock_plan(solved_post82.compiled, pair, T).matrix(T, 1.0, 3)
-    with_extra = resolve_shock_plan(solved_post82.compiled, trio, T).matrix(T, 1.0, 3)
-
+    without = resolve_shock_plan(solved_post82.compiled, pair, T)
+    wnative = get_native_shock_plan(without, T, 1.0).draw(3)
+    with_extra = resolve_shock_plan(solved_post82.compiled, trio, T)
+    wenative = get_native_shock_plan(with_extra, T, 1.0).draw(3)
     # Adding a third seeded entry leaves the first two untouched. Under the old
     # per-replication stride it shifted both at every replication past zero.
     for name in ("e_g", "e_z"):
-        np.testing.assert_array_equal(without[:, col[name]], with_extra[:, col[name]])
+        np.testing.assert_array_equal(wnative[:, col[name]], wenative[:, col[name]])
 
 
 def test_entries_with_congruent_seeds_do_not_share_a_stream(solved_post82):
@@ -182,9 +188,9 @@ def test_entries_with_congruent_seeds_do_not_share_a_stream(solved_post82):
     # two columns identical, not merely correlated.
     spec = [_t_shock(0, "e_g"), _t_shock(2, "e_r")]
     plan = resolve_shock_plan(solved_post82.compiled, spec, T)
-
-    e_g_at_1 = plan.matrix(T, 1.0, 1)[:, col["e_g"]]
-    e_r_at_0 = plan.matrix(T, 1.0, 0)[:, col["e_r"]]
+    native = get_native_shock_plan(plan, T, 1.0)
+    e_g_at_1 = native.draw(1)[:, col["e_g"]]
+    e_r_at_0 = native.draw(0)[:, col["e_r"]]
 
     assert not np.array_equal(e_g_at_1, e_r_at_0)
 
@@ -209,13 +215,73 @@ def test_every_entry_and_replication_pair_draws_its_own_stream(solved_post82):
     # stride collided on: every pairwise difference is a multiple of three.
     spec = [_t_shock(0, "e_g"), _t_shock(3, "e_z"), _t_shock(6, "e_r")]
     plan = resolve_shock_plan(solved_post82.compiled, spec, T)
-
+    native = get_native_shock_plan(plan, T, 1.0)
     seen: dict[bytes, tuple[str, int]] = {}
     for rep_idx in range(6):
-        block = plan.matrix(T, 1.0, rep_idx)
+        block = native.draw(rep_idx)
         for name in ("e_g", "e_z", "e_r"):
             drawn = block[:, col[name]].tobytes()
             assert (
                 drawn not in seen
             ), f"{name} at replication {rep_idx} repeats {seen.get(drawn)}"
             seen[drawn] = (name, rep_idx)
+
+
+# ---- the seed derivation (#507) ------------------------------------------
+#
+# Both routes key off the triple (declared seed, canonical column, replication),
+# and every draw test reads the result back off the entry, so only a literal can
+# fail when the derivation moves. ``_seed`` mixes through numpy's
+# ``SeedSequence``, which puts these values inside the drift surface of #527.
+
+
+def _seed_entry(base_seed, column):
+    return ShockEntry(
+        key=("x",),
+        indices=(column,),
+        family=ShockCode.NORMAL,
+        loc=np.zeros(1),
+        factor=np.ones((1, 1)),
+        base_seed=base_seed,
+    )
+
+
+@pytest.mark.parametrize(
+    "base_seed, key",
+    [
+        (0, 0),
+        (7, 7),
+        (2**63, 2**63),
+        (2**64 - 1, 2**64 - 1),
+        # A declared seed is an unbounded Python int and the kernel key is a u64,
+        # so both ends fold in: a negative seed is its two's complement, and one
+        # past the range is congruent to a seed inside it.
+        (-1, 2**64 - 1),
+        (2**64, 0),
+        (2**64 + 5, 5),
+    ],
+)
+def test_native_seed_key_is_the_declared_seed_masked_to_64_bits(base_seed, key):
+    assert _seed_entry(base_seed, 0)._native_seed_key == key
+
+
+@pytest.mark.parametrize(
+    "base_seed, column, rep_idx, seed",
+    [
+        (7, 0, 0, 13432090166537452992),
+        (7, 0, 1, 15529291740490724314),
+        (7, 1, 0, 23751027488930731),
+        (0, 0, 0, 2635072618980576772),
+        (5, 3, 41, 10328991043790977369),
+    ],
+)
+def test_replication_seed_is_the_mixed_triple(base_seed, column, rep_idx, seed):
+    assert _seed_entry(base_seed, column)._seed(rep_idx) == seed
+
+
+def test_an_unseeded_entry_has_no_replication_seed_and_a_fresh_key():
+    # The key is drawn per access, which is why a plan reads it once at build and
+    # a draw is reproducible within that plan but not across two of them.
+    entry = _seed_entry(None, 0)
+    assert entry._seed(0) is None
+    assert len({entry._native_seed_key for _ in range(4)}) == 4

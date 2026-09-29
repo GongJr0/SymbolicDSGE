@@ -23,6 +23,20 @@ typedef struct {
   i64 buffer_pos; /* 4 means exhausted; the next draw refills. */
 } sdsge_philox_state;
 
+/* Distribution parameters passed by value. The sampler selects the member.
+ * Gamma uses a; chi-square and Student-t use df; Beta uses beta.a and beta.b.
+ */
+typedef struct {
+  f64 a;
+  f64 b;
+} sdsge_beta_params;
+
+typedef union {
+  f64 df;
+  f64 a;
+  sdsge_beta_params beta;
+} sdsge_sampler_params;
+
 /* Seed a stream. Any distinct combination of the four words yields an
  * independent sequence (zero is fine) and always replays the same draws. */
 void sdsge_philox_seed(sdsge_philox_state *st, u64 key0, u64 key1, u64 stream0,
@@ -30,6 +44,10 @@ void sdsge_philox_seed(sdsge_philox_state *st, u64 key0, u64 key1, u64 stream0,
 
 /* One raw 64-bit draw advancing `st`. */
 u64 sdsge_philox_next_u64(sdsge_philox_state *st);
+
+/* One standard uniform in [0, 1) advancing `st`, the 53-bit construction
+ * numpy's own bit generators use. This is what the uniform fill loops over. */
+f64 sdsge_philox_next_double(sdsge_philox_state *st);
 
 /* Fill `out[0..n)` with standard normal draws (mean 0, var 1) advancing `st`.
  * The transform is numpy's ziggurat, linked from npyrandom. */
@@ -40,5 +58,26 @@ void sdsge_philox_standard_normal_fill(sdsge_philox_state *st, i64 n,
  * transform is numpy's, linked from npyrandom. */
 void sdsge_philox_standard_uniform_fill(sdsge_philox_state *st, i64 n,
                                         f64 *SDSGE_RESTRICT out);
+
+/* Fill `out[0..n)` with standard exponential draws (mean 1, var 1) advancing
+ * `st`. The transform is numpy's, linked from npyrandom. */
+void sdsge_philox_standard_exponential_fill(sdsge_philox_state *st, i64 n,
+                                            f64 *SDSGE_RESTRICT out);
+
+/* Parameters must be finite and positive; callers validate before filling. */
+/* Unit-scale Gamma draws advancing st. */
+void sdsge_philox_standard_gamma_fill(sdsge_philox_state *st, i64 n,
+                                      f64 *SDSGE_RESTRICT out,
+                                      sdsge_sampler_params params);
+
+/* Chi-square draws advancing st. */
+void sdsge_philox_chi2_fill(sdsge_philox_state *st, i64 n,
+                            f64 *SDSGE_RESTRICT out,
+                            sdsge_sampler_params params);
+
+/* Beta draws advancing st. */
+void sdsge_philox_beta_fill(sdsge_philox_state *st, i64 n,
+                            f64 *SDSGE_RESTRICT out,
+                            sdsge_sampler_params params);
 
 #endif /* SDSGE_PHILOX_H */

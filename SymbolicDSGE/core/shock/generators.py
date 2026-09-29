@@ -10,7 +10,7 @@ from typing import Any, Callable, Literal, Mapping, TypedDict, Sequence, cast, g
 import copy
 
 #: The built-in families a spec may name.
-ShockDistribution = Literal["norm", "t", "uni"]
+ShockDistribution = Literal["norm", "t", "uni", "exp", "gamma", "beta"]
 
 
 # A family-resolved draw: ``(loc, factor, seed) -> (T, width)``, computing
@@ -127,52 +127,108 @@ def resolve_loc(kwargs: Mapping[str, Any], width: int) -> ndarray:
     The resolver calls this once per entry and the result travels on the entry,
     which is what keeps the Python draw and the native lowering from reading the
     same keyword arguments under two different rules.
+
+    Any shape holding one value per variable is taken, since a location read out
+    of a matrix calculation arrives as a row or a column as readily as flat.
     """
-    loc = (
-        kwargs["mean"]
-        if "mean" in kwargs
-        else kwargs.get("loc", np.zeros(width, dtype=float64))
-    )
-    return asarray(loc, dtype=float64).reshape(width)
+    name = "mean" if "mean" in kwargs else "loc"
+    loc = asarray(kwargs.get(name, np.zeros(width)), dtype=float64)
+    if loc.size != width:
+        raise ValueError(
+            f"`{name}` needs one value per variable in the entry. "
+            f"Expected {width}, got {loc.size}. "
+            "Omit the keyword for a zero default."
+        )
+    return loc.reshape(width)
 
 
-def _draw_normal(
-    T: int, seed: int | None, loc: float | ndarray, factor: ndarray
-) -> ndarray:
-    """``(T, width)`` normals with mean ``loc`` and covariance ``factor @ factor.T``.
+def _validate_dist(dist: object, dist_kwargs: Mapping[str, Any]) -> None:
+    """Validate distribution and parameters before binding."""
+    if dist is None:
+        raise ValueError(
+            "A distribution must be specified to draw shocks. "
+            "Use `ShockPath` if you intend to supply a pre-generated "
+            "shock array instead of drawing from a distribution."
+        )
+    if isinstance(dist, str):
+        if dist not in get_args(ShockDistribution):
+            raise ValueError(
+                f"Unknown shock distribution family: {dist!r}. "
+                f"Valid families: {list(get_args(ShockDistribution))}."
+            )
+    elif not isinstance(dist, rv_generic | multi_rv_generic):
+        raise TypeError(
+            f"dist must be one of {list(get_args(ShockDistribution))} or a "
+            f"scipy.stats distribution object; got {type(dist).__name__}."
+        )
+    if "scale" in dist_kwargs:
+        raise ValueError(
+            "Shock scale comes from the model, not from dist_kwargs: adjust the "
+            "shock std/corr variables in the config, or pass shock_scale to the "
+            "simulation and irf functions, which multiply the drawn shocks directly."
+        )
 
-    One expression covers every width: a scalar standard deviation is the 1x1
-    factor, which is how the native draw already reads both cases.
+
+def _require_univariate(dist: str, width: int) -> None:
+    """Raise if a family is not univariate at the width it drives."""
+    if width > 1:
+        raise NotImplementedError(f"Multivariate {dist!r} shocks are not implemented.")
+
+
+def validate_shock_family(
+    dist: object,
+    width: int,
+    dist_kwargs: Mapping[str, Any],
+) -> None:
+    """Check a spec against what its family requires at the width it drives.
+
+    Runs at bind. Scipy distributions are not checked since their parameterization
+    requirements are not known to the library.
     """
-    z = random.default_rng(seed).standard_normal((T, factor.shape[0]))
-    return cast(ndarray, (loc + z @ factor.T).astype(float64))
+    _validate_dist(dist, dist_kwargs)
+    match dist:
+        case "t":
+            if "df" not in dist_kwargs:
+                raise ValueError("Student-t shocks require 'df' in dist_kwargs.")
 
-
-def _draw_t(
-    T: int, seed: int | None, df: float, loc: float | ndarray, factor: ndarray
-) -> ndarray:
-    """``(T, width)`` Student-t draws, as a normal scaled by a chi-square.
-
-    ``factor`` scales the Gaussian core, so the drawn covariance is
-    ``factor @ factor.T`` only up to the t's own ``df/(df - 2)`` inflation.
-    """
-    k = factor.shape[0]
-    rng = random.default_rng(seed)
-    z = rng.standard_normal((T, k)) @ factor.T
-    g = rng.chisquare(df, size=T) / df
-    return cast(ndarray, (loc + z / np.sqrt(g)[:, None]).astype(float64))
-
-
-def _draw_uniform(
-    T: int, seed: int | None, loc: float | ndarray, factor: ndarray
-) -> ndarray:
-    """``(T, width)`` uniforms centred on ``loc``.
-
-    The standardized variate is ``U(-sqrt(3), sqrt(3))``, so a 1x1 ``factor`` of ``sig``
-    results in a standard deviation ``sig``.
-    """
-    u = random.default_rng(seed).random((T, factor.shape[0])) - np.sqrt(3.0)
-    return cast(ndarray, (loc + u @ factor.T).astype(float64))
+            if dist_kwargs["df"] <= 2.0 or not np.isfinite(dist_kwargs["df"]):
+                raise ValueError(
+                    "Student-t requires df > 2 for finite variance. "
+                    "The shock covariance specification cannot be satisfied with "
+                    f"df={dist_kwargs['df']}."
+                )
+        case "uni":
+            _require_univariate(dist, width)  # pyright: ignore
+        case "exp":
+            _require_univariate(dist, width)  # pyright: ignore
+        case "gamma":
+            _require_univariate(dist, width)  # pyright: ignore
+            if "a" not in dist_kwargs:
+                raise ValueError(
+                    "Gamma shocks require the shape parameter ('a') in dist_kwargs."
+                )
+            if dist_kwargs["a"] <= 0 or not np.isfinite(dist_kwargs["a"]):
+                raise ValueError(
+                    "Gamma shocks require finite and positive `a`. The shock covariance "
+                    f"specification cannot be satisfied with `a={dist_kwargs['a']}`."
+                )
+        case "beta":
+            _require_univariate(dist, width)  # pyright: ignore
+            if "a" not in dist_kwargs or "b" not in dist_kwargs:
+                raise ValueError(
+                    "Beta shocks require the shape parameters ('a' and 'b') in dist_kwargs."
+                )
+            if (
+                dist_kwargs["a"] <= 0
+                or dist_kwargs["b"] <= 0
+                or not np.isfinite(dist_kwargs["a"])
+                or not np.isfinite(dist_kwargs["b"])
+            ):
+                raise ValueError(
+                    "Beta shocks require finite and positive `a` and `b`. The shock "
+                    f"covariance specification cannot be satisfied with `a={dist_kwargs['a']}` "
+                    f"and `b={dist_kwargs['b']}`."
+                )
 
 
 class Shock:
@@ -182,8 +238,8 @@ class Shock:
     ----------
     dist : ShockDistribution | rv_generic | multi_rv_generic | None
         Distribution to draw shocks from. Can be a family name ("norm", "t",
-        "uni") or a scipy.stats distribution object. Alternatively, a custom class
-        implementing ``rvs`` can be passed in.
+        "uni", "exp", "gamma", "beta") or a scipy.stats distribution object.
+        Alternatively, a custom class implementing ``rvs`` can be passed in.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
     dist_kwargs : dict | None
@@ -224,15 +280,10 @@ class Shock:
         # A Shock is a horizon-independent distribution spec: the number of
         # periods ``T`` is supplied by the caller at generation time, not baked
         # in here. The simulation is the single authority on its own horizon.
-        if dist is None:
-            raise ValueError(
-                "Distribution must be specified to draw shocks. "
-                "Use `ShockPath` if you intend to supply a pre-generated "
-                "shock array instead of drawing from a distribution."
-            )
         self.dist = dist
         self.seed = seed
         self.dist_kwargs = dict(dist_kwargs) if dist_kwargs is not None else {}
+        _validate_dist(self.dist, self.dist_kwargs)
 
         # Binding Slot (post-construction)
         self._target: tuple[str, ...] | None = None
@@ -262,7 +313,9 @@ class Shock:
         object rebound twice. ``dist_kwargs`` is copied with it, since two binds
         of one template must not drift into each other.
 
-        Raises :class:`ValueError` when this spec is already bound.
+        Raises :class:`ValueError` when this spec is already bound. The family's
+        own requirements are checked here as well, since a bind is the first
+        point a width exists and the last one a caller cannot avoid.
         """
         if self.is_bound:
             raise ValueError(
@@ -270,6 +323,7 @@ class Shock:
                 "Maybe you passed a bound `Shock` in a mapping-style shock specification? "
                 "If so, use a sequence-style spec or pass the unbound templates as values."
             )
+        validate_shock_family(self.dist, len(keys), self.dist_kwargs)
         bound = copy.copy(self)
         bound.dist_kwargs = dict(self.dist_kwargs)
         bound._target = keys
@@ -350,42 +404,15 @@ class Shock:
         The returned callable is ``f(loc, factor, seed)``, returning ``(T, width)``.
         ``factor`` is the entry's scale with standard deviations represented as a
         1x1.
-
-        Family validation is eager: an unknown family, a Student-t without
-        ``df``, or a multivariate uniform raises here rather than at draw time.
         """
-        if self.dist is None:
-            raise ValueError("Distribution must be specified to draw shocks.")
-        if "scale" in self.dist_kwargs:
-            raise ValueError(
-                "The generator function returns a callable that takes scale as an argument."
-                " Please adjust `sig_` variables in the config to change the distribution scale."
-                " Alternatively, the scale parameter in simulation and irf functions are multiplied directly with the shocks generated."
-            )
-
         kwargs = self.dist_kwargs.copy()
-
-        # A linear map of independent uniforms is not uniform in its margins,
-        # so the factor form cannot express a grouped uniform. Refused here,
-        # where the arity is known, rather than at the first draw.
-        if self.dist == "uni" and multivar:
-            raise NotImplementedError(
-                "Multivariate uniform shocks are not implemented."
-            )
-
-        # A named family is drawn by the numpy fast paths, a live distribution
-        # object by its own ``.rvs``. The route follows what ``dist`` is and
-        # nothing else: every scipy family takes its parameters by keyword, so no
-        # parameter a caller supplies can change which implementation draws it.
-        if isinstance(self.dist, str):
-            return self._numpy_draw_fn(T, kwargs)
 
         # A grouped object is handed its covariance under the keyword
         # ``multivariate_normal`` declares. An object that names it otherwise
         # (``multivariate_t`` calls it ``shape``) is not supported here and says
         # so through scipy rather than silently drawing something else.
         scale_key = "cov" if multivar else "scale"
-        dist = self._get_dist(multivar)
+        dist = cast(rv_generic | multi_rv_generic, self.dist)
 
         def _scipy_draw(
             loc: NDArray[float64],
@@ -409,54 +436,19 @@ class Shock:
 
         return _scipy_draw
 
-    def _numpy_draw_fn(self, T: int, kwargs: dict) -> ShockDrawFn:
-        """Resolve a named family onto the numpy Generator fast paths.
-
-        One closure per family: the factor carries the arity, so width 1 and a
-        grouped block take the same expression, the way the native draw does.
-        """
-        if self.dist == "norm":
-            return lambda loc, factor, seed: _draw_normal(T, seed, loc, factor)
-
-        if self.dist == "t":
-            if "df" not in kwargs:
-                raise ValueError("Student-t shocks require 'df' in dist_kwargs.")
-            df = kwargs["df"]
-            return lambda loc, factor, seed: _draw_t(T, seed, df, loc, factor)
-
-        if self.dist == "uni":
-            return lambda loc, factor, seed: _draw_uniform(T, seed, loc, factor)
-
-        raise ValueError(f"Unknown shock distribution family: {self.dist!r}")
-
-    def _get_dist(self, multivar: bool) -> rv_generic | multi_rv_generic:
-        """The distribution object the scipy route draws through.
-
-        Only a live object reaches here: a named family is drawn by the numpy
-        fast paths, so the built-in names never take this route.
-        """
-        del multivar
-        dist = self.dist
-        if not isinstance(dist, rv_generic | multi_rv_generic):
-            raise TypeError(
-                f"dist must be one of {list(get_args(ShockDistribution))} or a "
-                f"scipy.stats distribution object; got {type(dist).__name__}."
-            )
-        return dist
-
     def to_dict(self) -> ShockParameters:
         """Serialize a generator-style Shock to a JSON-able dict.
 
         Only the generator form is representable: a string ``dist`` identifier
-        (``"norm"``/``"t"``/``"uni"``) and no materialized ``shock_arr``. A live
-        scipy distribution object cannot be faithfully reproduced from JSON, and
-        a placed shock array is bulk data that belongs with the parquet members,
-        not the pipeline spec.
+        and no materialized ``shock_arr``. A live scipy distribution object
+        cannot be faithfully reproduced from JSON, and a placed shock array is
+        bulk data that belongs with the parquet members, not the pipeline spec.
         """
         if not isinstance(self.dist, str):
             raise TypeError(
-                "Only string-identified distributions ('norm'/'t'/'uni') are "
-                "serializable; got a live scipy distribution object."
+                "Only string-identified distributions "
+                f"({list(get_args(ShockDistribution))}) are serializable; got a "
+                "live scipy distribution object."
             )
         return ShockParameters(
             target=self.target,

@@ -13,45 +13,15 @@ from typing import NamedTuple
 import numpy as np
 
 from cpython.mem cimport PyMem_Free, PyMem_Malloc
-from libc.stdint cimport int64_t, uint64_t, uintptr_t
+from libc.stdint cimport int64_t, uintptr_t
 
+from ..core._shocks cimport NativeShockPlan, sdsge_shock_plan
 from SymbolicDSGE._diag_tests.distributions import ReferenceDistribution
 
 cdef extern from "sdsge_common.h":
     ctypedef struct arena_size:
         int64_t n_float
         int64_t n_int
-
-cdef extern from "shocks.h":
-    int SDSGE_MC_SHOCK_NORMAL
-    int SDSGE_MC_SHOCK_UNIFORM
-
-    ctypedef struct sdsge_mc_shock_entry:
-        int family
-        int64_t width
-        const int64_t *columns
-        const double *factor
-        const double *loc
-        uint64_t key
-
-    ctypedef struct sdsge_mc_shock_plan:
-        const sdsge_mc_shock_entry *entries
-        int64_t n_entries
-        int64_t T
-        int64_t n_exog
-        double shock_scale
-        int64_t max_width
-
-    int64_t sdsge_mc_shock_scratch_size(
-        const sdsge_mc_shock_plan *plan,
-    ) noexcept nogil
-
-    void sdsge_mc_shock_draw(
-        const sdsge_mc_shock_plan *plan,
-        int64_t rep_idx,
-        double *scratch,
-        double *out,
-    ) noexcept nogil
 
 
 cdef extern from "runner.h":
@@ -203,7 +173,7 @@ cdef extern from "core_steps.h":
         int64_t k
         int64_t n_par
         int64_t m
-        const sdsge_mc_shock_plan *shocks
+        const sdsge_shock_plan *shocks
         int64_t shock_scratch_offset
 
     ctypedef struct sdsge_mc_simulate_order2_step_ctx:
@@ -214,7 +184,7 @@ cdef extern from "core_steps.h":
         int64_t n_exog
         int64_t n_par
         int64_t m
-        const sdsge_mc_shock_plan *shocks
+        const sdsge_shock_plan *shocks
         int64_t shock_scratch_offset
 
     int sdsge_mc_simulate_order1_runner(
@@ -641,138 +611,6 @@ class NativeRunResult(NamedTuple):
     step_counts_by_worker: object
     step_failures_by_worker: object
 
-
-cdef class NativeShockPlan:
-    """A shock spec resolved into the layout the native draw reads.
-
-    Owns the C entry array and holds a reference to every NumPy buffer its
-    entries point at, so the plan is the single lifetime anchor: a simulation
-    step keeps one of these alive for as long as its context references it.
-
-    The plan is immutable and shared read-only across workers. Nothing here is
-    touched during the run, which is what lets the draw be reentrant.
-    """
-
-    cdef sdsge_mc_shock_plan _plan
-    cdef sdsge_mc_shock_entry *_entries
-    cdef object _backing
-
-    def __cinit__(self):
-        self._entries = NULL
-        self._backing = []
-
-    def __dealloc__(self):
-        if self._entries != NULL:
-            PyMem_Free(self._entries)
-            self._entries = NULL
-
-    cdef const sdsge_mc_shock_plan *c_plan(self) noexcept:
-        return &self._plan
-
-    @property
-    def scratch_size(self):
-        """Extra float arena elements the draw needs, for step sizing."""
-        return sdsge_mc_shock_scratch_size(&self._plan)
-
-    @property
-    def n_entries(self):
-        return self._plan.n_entries
-
-    def draw(self, int64_t rep_idx):
-        """Materialize one replication's ``(T, n_exog)`` shock block.
-
-        The run never calls this; it draws straight into its arena. This is the
-        route back out for a caller holding a replication index and wanting the
-        exact block that replication saw, which is what makes a single
-        replication reproducible outside the loop.
-        """
-        if rep_idx < 0:
-            raise ValueError("rep_idx must be non-negative.")
-        cdef double[:, ::1] out = np.zeros(
-            (self._plan.T, self._plan.n_exog), dtype=np.float64
-        )
-        cdef double[::1] scratch = np.empty(
-            max(sdsge_mc_shock_scratch_size(&self._plan), 1), dtype=np.float64
-        )
-        with nogil:
-            sdsge_mc_shock_draw(&self._plan, rep_idx, &scratch[0], &out[0, 0])
-        return np.asarray(out)
-
-
-def shock_plan(
-    tuple entries,
-    int64_t T,
-    int64_t n_exog,
-    double shock_scale,
-):
-    """Build a native shock plan from resolved entries.
-
-    Each entry is ``(family, columns, factor, loc, key)``. ``family`` is one of
-    the ``SHOCK_*`` constants below and selects which standardized variate the
-    draw fills; every other field is read by both families. ``columns`` is the
-    int64 array of exogenous column indices the entry drives, in the order its
-    ``factor`` was built in. ``factor`` is the row-major ``(width, width)``
-    matrix with ``factor @ factor.T`` equal to the covariance, a 1x1 holding the
-    standard deviation at width 1. ``loc`` is the width-long location.
-
-    The resolver settles every one of those shapes, so nothing is re-checked
-    here: the declarations below accept only a contiguous array of the right
-    rank and dtype, and a mismatch is a lowering bug rather than user input.
-
-    An entry's position in this list becomes its stream selector, so two entries
-    sharing a seed still draw independently.
-    """
-    cdef NativeShockPlan plan = NativeShockPlan()
-    cdef int64_t n = len(entries)
-    cdef int64_t i
-    cdef int64_t width
-    cdef int64_t max_width = 0
-    cdef int family
-    cdef int64_t[::1] columns_mv
-    cdef double[:, ::1] factor_mv
-    cdef double[::1] loc_mv
-
-    plan._entries = <sdsge_mc_shock_entry *>PyMem_Malloc(
-        <size_t>n * sizeof(sdsge_mc_shock_entry)
-    )
-    if plan._entries == NULL:
-        raise MemoryError("Could not allocate native shock entries.")
-
-    for i in range(n):
-        family, columns, factor, loc, key = entries[i]
-
-        columns_mv = np.ascontiguousarray(columns, dtype=np.int64)
-        width = columns_mv.shape[0]
-
-        plan._backing.append(columns_mv)
-        plan._entries[i].columns = &columns_mv[0]
-
-        factor_mv = np.ascontiguousarray(factor, dtype=np.float64)
-        plan._backing.append(factor_mv)
-        plan._entries[i].factor = &factor_mv[0, 0]
-
-        loc_mv = np.ascontiguousarray(loc, dtype=np.float64)
-        plan._backing.append(loc_mv)
-        plan._entries[i].loc = &loc_mv[0]
-
-        plan._entries[i].family = family
-        plan._entries[i].width = width
-        plan._entries[i].key = <uint64_t>key
-        # Position in the spec, so entries sharing a seed stay independent.
-        if width > max_width:
-            max_width = width
-
-    plan._plan.entries = plan._entries
-    plan._plan.n_entries = n
-    plan._plan.T = T
-    plan._plan.n_exog = n_exog
-    plan._plan.shock_scale = shock_scale
-    plan._plan.max_width = max_width
-    return plan
-
-
-SHOCK_NORMAL = SDSGE_MC_SHOCK_NORMAL
-SHOCK_UNIFORM = SDSGE_MC_SHOCK_UNIFORM
 
 # Step-builder defaults. A knob is valued once here and shared by every builder
 # that carries it, so a caller that omits one still narrows a complete context.

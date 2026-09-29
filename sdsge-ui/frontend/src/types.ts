@@ -8,7 +8,15 @@ export interface NamedArray {
     array: ArrayEnvelope;
 }
 
-export type ShockDistribution = "norm" | "t" | "uni";
+// A shock family code. Deliberately not a union: the library's own
+// ``ShockDistribution`` Literal is the authority and `/api/shocks/catalog`
+// serves it, so a family added there reaches the panel without a second
+// declaration to keep in step.
+export type ShockDistribution = string;
+
+export interface ShockCatalog {
+    families: string[];
+}
 
 export interface ModelSummary {
     model_name: string;
@@ -359,7 +367,10 @@ export interface DrawnRegistryEntry {
     target: string[];
     dist: ShockDistribution;
     loc: number[];
-    df: number;
+    // Whatever the family takes beyond its location, by the name the library
+    // reads it under: `df` for t, `a` for gamma, `a` and `b` for beta. Held
+    // open rather than as a field per family so an unknown one round-trips.
+    params: Record<string, number>;
     seed: number | null;
 }
 

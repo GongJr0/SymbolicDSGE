@@ -24,16 +24,40 @@ _COMMON = os.path.join(_CKERNELS, "_common")
 # share symbols). Keyed by extension subdir name. `_common` is linked into every
 # extension already; this is for the higher-level subsystems (core, kalman, ...).
 _EXTRA_DEPS = {
+    "core": ["rng"],
     "estimation": ["core", "kalman", "optim", "rng"],
-    "monte_carlo": ["core", "kalman", "rng", "regression", "diag"],
+    "monte_carlo": ["core", "kalman", "regression", "diag"],
     "occbin": ["core"],
 }
 
 # Subsystems whose hand-written C draws randoms through numpy's low-level RNG
 # C-API (numpy/random headers + the `npyrandom` static lib). An extension needs
 # the numpy include path and the `npyrandom` link iff it compiles `rng` sources:
-# either it IS `rng`, or it lists `rng` in _EXTRA_DEPS. Keeping this scoped means
-# the six RNG-free subsystems never pull the numpy build dependency.
+# either it IS `rng`, or it depends on `rng` directly or transitively.
+
+
+def _dependency_closure(subname: str) -> list[str]:
+    """Collect dependencies once in discovery order, rejecting cycles."""
+    dependencies: list[str] = []
+    visited: set[str] = set()
+    active: list[str] = []
+
+    def visit(name: str) -> None:
+        if name in active:
+            cycle = " -> ".join([*active, name])
+            raise ValueError(f"Cyclic kernel dependency: {cycle}")
+        if name in visited:
+            return
+        visited.add(name)
+        active.append(name)
+        if name != subname:
+            dependencies.append(name)
+        for dependency in _EXTRA_DEPS.get(name, []):
+            visit(dependency)
+        active.pop()
+
+    visit(subname)
+    return dependencies
 
 
 def _hand_c(subdir: str) -> list[str]:
@@ -193,20 +217,18 @@ def _extensions() -> list[Extension]:
         module = os.path.relpath(pyx, ".").replace(os.sep, ".")[: -len(".pyx")]
         hand_c = _hand_c(subdir)
 
-        dep_dirs = [
-            os.path.join(_CKERNELS, dep)
-            for dep in _EXTRA_DEPS.get(os.path.basename(subdir), [])
-        ]
+        subname = os.path.basename(subdir)
+        dependencies = _dependency_closure(subname)
+        dep_dirs = [os.path.join(_CKERNELS, dep) for dep in dependencies]
         dep_c = [c for d in dep_dirs for c in _hand_c(d)]
 
         sources = [pyx] + hand_c + dep_c + common_sources
 
-        subname = os.path.basename(subdir)
         include_dirs = [subdir, *dep_dirs, _COMMON]
         library_dirs: list[str] = []
         libraries: list[str] = []
         ext_kwargs: dict[str, object] = {}
-        if subname == "rng" or "rng" in _EXTRA_DEPS.get(subname, []):
+        if subname == "rng" or "rng" in dependencies:
             import numpy as np
 
             include_dirs.append(np.get_include())

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
@@ -9,9 +8,7 @@ from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.monte_carlo._runner import run as run_native
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE._diag_tests.status import TestStatus
-from SymbolicDSGE.core.solved_model import SecondOrderSolvedModel, SolvedModel
-from SymbolicDSGE.core.solver_backend import SecondOrderSolution
-from SymbolicDSGE.kalman.config import KalmanConfig
+from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
 from SymbolicDSGE.monte_carlo.step_factories import (
@@ -428,52 +425,8 @@ def test_native_lowering_runs_first_order_simulation_with_observables() -> None:
         np.testing.assert_allclose(actual, expected_values, rtol=1e-12, atol=1e-12)
 
 
-def test_native_lowering_runs_second_order_simulation() -> None:
-    hx = np.array([[0.5, 0.1], [0.0, 0.8]], dtype=np.float64)
-    gx = np.array([[2.0, -1.0]], dtype=np.float64)
-    bx = np.array([[1.0], [0.25]], dtype=np.float64)
-    hxx = np.array(
-        [
-            [[0.2, 0.1], [0.1, -0.2]],
-            [[0.0, 0.3], [0.3, 0.1]],
-        ],
-        dtype=np.float64,
-    )
-    gxx = np.array([[[0.4, -0.1], [-0.1, 0.2]]], dtype=np.float64)
-    hss = np.array([0.01, -0.02], dtype=np.float64)
-    gss = np.array([0.03], dtype=np.float64)
-    compiled = SimpleNamespace(
-        var_names=["e", "k", "c"],
-        shock_names=("eps",),
-        n_exog=1,
-        n_var=3,
-        n_state=2,
-        n_ctrl=1,
-        n_par=0,
-        n_obs=0,
-        observable_names=[],
-        calib_params=[],
-        config=SimpleNamespace(calibration=SimpleNamespace(parameters={})),
-    )
-    policy = SecondOrderSolution(
-        p=hx,
-        f=gx,
-        stab=0,
-        eig=np.empty(0, dtype=np.complex128),
-        order=2,
-        hxx=hxx,
-        gxx=gxx,
-        hxu=np.zeros((2, 2, 1), dtype=np.float64),
-        gxu=np.zeros((1, 2, 1), dtype=np.float64),
-        huu=np.zeros((2, 1, 1), dtype=np.float64),
-        guu=np.zeros((1, 1, 1), dtype=np.float64),
-        hss=hss,
-        gss=gss,
-        steady_state=np.zeros(3, dtype=np.float64),
-        A=np.eye(3, dtype=np.float64),
-        B=np.vstack([bx, np.zeros((1, 1), dtype=np.float64)]),
-    )
-    solved = SecondOrderSolvedModel(compiled=compiled, policy=policy)
+def test_native_lowering_runs_second_order_simulation(solved_rbc_second_order) -> None:
+    solved = solved_rbc_second_order
     pipeline = MCPipeline(
         [simulation_step("sim", target="reference", T=6, observables=False)]
     )
@@ -632,13 +585,10 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides() -> None:
         )
 
 
-def test_native_lowering_runs_unscented_filter_with_rbc_fixture() -> None:
-    model, _ = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
-    solver = DSGESolver(
-        model,
-        KalmanConfig(R=np.array([[0.01]], dtype=np.float64)),
-    )
-    solved = solver.solve(solver.compile(), order=2)
+def test_native_lowering_runs_unscented_filter_with_rbc_fixture(
+    solved_rbc_second_order,
+) -> None:
+    solved = solved_rbc_second_order
     T = 5
     y = np.zeros((T, len(solved.compiled.observable_names)), dtype=np.float64)
     pipeline = MCPipeline(

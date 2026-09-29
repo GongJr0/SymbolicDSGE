@@ -6,7 +6,7 @@ tags:
 
 ```python
 class Shock(
-    dist: Literal["norm", "t", "uni"] | rv_generic | multi_rv_generic | None = None,
+    dist: Literal["norm", "t", "uni", "exp", "gamma", "beta"] | rv_generic | multi_rv_generic, 
     seed: int | None = 0,
     dist_kwargs: dict | None = None,
 )
@@ -18,13 +18,28 @@ __Inputs:__
 
 | __Name__    |                                                                                                     __Description__ |
 |:------------|--------------------------------------------------------------------------------------------------------------------:|
-| dist        |                                      Distribution family (`"norm"`, `"t"`, `"uni"`) or a scipy distribution object. |
+| dist        |                                      Distribution family (`"norm"`, `"t"`, `"uni"`, `"exp"`, `"gamma"`, `"beta"`) or a scipy distribution object. |
 | seed        |                                                                        Random seed. Pass `None` for unseeded draws. |
 | dist_kwargs | Keyword arguments passed to the distribution draw method. Do not pass `scale`; simulation supplies the model scale. |
 
 ???+ warning "Scale is model supplied"
     A `Shock` stores distribution shape and location parameters only. The standard deviation of a single shock, and the covariance of a grouped one, come from the `SolvedModel` calibration at simulation time.
 
+???+ note "Supported kwargs for native distributions"
+    The following keyword arguments are supported for the native distribution families:
+
+    | __Distribution__ |     __Supported kwargs__    |
+    |:-----------------|:----------------------------|
+    | `"norm"`         | `loc | mean`                |
+    | `"t"`            | `loc | mean, df`            |
+    | `"uni"`          | `loc | mean`                |
+    | `"exp"`          | `loc | mean`                |
+    | `"gamma"`        | `loc | mean, a`             |
+    | `"beta"`         | `loc | mean, a, b`          |
+    
+    `loc` and `mean` are interchangeable and multivariate distributions must specify it as a dense vector.
+    A mean of zero is only assumed when `loc` is omitted as a keyword argument. 
+    
 &nbsp;
 
 ```python
