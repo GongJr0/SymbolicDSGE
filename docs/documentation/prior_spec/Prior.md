@@ -24,16 +24,16 @@ __Core API:__
 
 ```python
 make_prior(
-    distribution: str, # (1)!
+    distribution: str | DistributionFamily, # (1)!
     parameters: dict[str, Any], # (2)!
-    transform: str, # (3)!
+    transform: str | TransformMethod | None = None, # (3)!
     transform_kwargs: dict[str, Any] | None = None, # (4)!
 ) -> Prior
 ```
 
-1. Distribution family string from `DistributionFamily`.
+1. Distribution family string (or enum member) from `DistributionFamily`.
 2. Parameter overrides merged with distribution defaults.
-3. Transform method string from `TransformMethod` dispatch.
+3. Transform method string (or enum member) from `TransformMethod`.
 4. Extra kwargs for transform constructors that require bounds.
 
 ???+ note "Space Convention"
@@ -54,6 +54,10 @@ Accepted `distribution` values in `make_prior(...)`:
 | `INVGAMMA` | `"inv_gamma"` | `mean`, `std`, `random_state` | `1.0`, `1.0`, `None` |
 | `UNIFORM` | `"uniform"` | `low`, `high`, `random_state` | `0.0`, `1.0`, `None` |
 | `LKJCHOL` | `"lkj_chol"` | `eta`, `K`, `random_state` | `1.0`, `-1`, `None` |
+
+???+ note "Family Enum"
+    `DistributionFamily` is exported from `SymbolicDSGE.bayesian` and `SymbolicDSGE.estimation` alongside `make_prior(...)`
+    Importing it gives a shortcut for viewing the available families and getting LSP completions.
 
 ???+ note "Parameterization Convention"
     Distribution constructors use the current library API directly.
@@ -80,7 +84,12 @@ Dispatched `transform` values accepted by `make_prior(...)`:
 | `TANH` | `"tanh"` | none |
 | `CHOLESKY_CORR` | `"cholesky_corr"` | `K` |
 
-???+ note
+???+ note "Transform Enum"
+    `TransformMethod` is exported from `SymbolicDSGE.bayesian` and `SymbolicDSGE.estimation` alongside `make_prior(...)`
+    Importing it gives a shortcut for viewing the available methods and getting LSP completions.
+
+
+???+ note "Cholesky Transform for LKJ"
     `CHOLESKY_CORR` is only valid on an `lkj_chol` prior. `K` defaults to the
     distribution's own `K` and must match it if given.
 

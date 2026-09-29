@@ -28,13 +28,14 @@ TRANSFORM_METHOD_DISPATCH: dict[TransformMethod, type[Transform]] = {
 }
 
 
-def get_transform(method: str | None) -> type[Transform]:
+def get_transform(method: str | TransformMethod | None) -> type[Transform]:
     """Get the transform class corresponding to the given method.
 
     Parameters
     ----------
-    method : str | None
+    method : str | TransformMethod | None
         Method name of the transform. If None, returns the Identity transform.
+        Must be a member of the :class:`TransformMethod` enum.
 
     Returns
     -------

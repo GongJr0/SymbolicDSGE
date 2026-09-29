@@ -29,12 +29,12 @@ DISTRIBUTION_DISPATCH: dict[DistributionFamily, type[Distribution]] = {
 }
 
 
-def get_distribution(family: str) -> type[Distribution]:
+def get_distribution(family: str | DistributionFamily) -> type[Distribution]:
     """Get the distribution class for a given distribution family.
 
     Parameters
     ----------
-    family : str
+    family : str | DistributionFamily
         Family name of the distribution. Must be a member of the :class:`DistributionFamily` enum.
 
     Returns

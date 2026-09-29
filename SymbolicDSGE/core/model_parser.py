@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import copy
+import io
 import re
 import sys
 from dataclasses import dataclass
 from io import StringIO
 from itertools import combinations
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from types import FrameType
 from typing import Any, Callable, Iterator, TypeAlias, Sequence
 import warnings
@@ -76,8 +76,8 @@ _ALLOWED_R_KEYS = frozenset({"std", "corr"})
 def _caller_stacklevel() -> int:
     """``warnings.warn`` stacklevel of the first frame outside this module.
 
-    Entry depth varies: ``from_string`` re-enters through ``__init__``, so it
-    sits one frame deeper than path-based construction.
+    Entry depth varies with which constructor was used, so the frames are
+    walked rather than counted.
     """
     frame: FrameType | None = sys._getframe(1)
     level = 1
@@ -161,13 +161,20 @@ class ModelParser:
     Attributes
     ----------
     config_path : str | Path
-        Path the configuration was read from.
+        Path the configuration was read from, or the source name when it was
+        built from text.
     """
 
     def __init__(self, config_path: str | Path) -> None:
-        self.config_path = Path(config_path)
+        path = Path(config_path)
+        self._build(path.read_text(encoding="utf-8"), str(path), path)
+
+    def _build(self, text: str, name: str, config_path: str | Path) -> None:
+        self.config_path = config_path
+        self._text = text
+        self._name = name
         self.raw_data, self.parsed = self.from_yaml()
-        self.parsed.model.source_yaml = self.config_path.read_text(encoding="utf-8")
+        self.parsed.model.source_yaml = text
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -203,25 +210,14 @@ class ModelParser:
         return self.parsed
 
     @classmethod
-    def from_string(cls, text: str) -> "ModelParser":
+    def from_string(cls, text: str, name: str = "<yaml string>") -> "ModelParser":
         """Construct a parser from YAML *text* (e.g. a bundle config member).
 
-        Mirrors path-based construction by routing the text through a temporary
-        file, so the full parse pipeline (including the Kalman block) runs
-        unchanged.
+        ``name`` is what a parse error names as its source, so a caller holding
+        one (a bundle member, say) should pass it.
         """
-        with NamedTemporaryFile(
-            "w", suffix=".yaml", encoding="utf-8", delete=False
-        ) as handle:
-            handle.write(text)
-            tmp_path = Path(handle.name)
-        try:
-            parser = cls(tmp_path)
-        finally:
-            tmp_path.unlink(missing_ok=True)
-        # Preserve the caller's original text verbatim (the temp-file round-trip
-        # is a no-op today, but pin it here so callers can rely on equality).
-        parser.parsed.model.source_yaml = text
+        parser = cls.__new__(cls)
+        parser._build(text, name, name)
         return parser
 
     @classmethod
@@ -505,7 +501,7 @@ class ModelParser:
             Object containing model and (if present) Kalman configuration. The first element is the raw YAML data as a dictionary, and the second element is the parsed configuration.
 
         """
-        data = _load_yaml(self.config_path)
+        data = _load_yaml(self._text, self._name)
         _validate_schema(data)
 
         ns = _build_namespace(data)
@@ -659,9 +655,18 @@ class _StrictLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep=deep)
 
 
-def _load_yaml(path: Path) -> dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.load(f, Loader=_StrictLoader)
+class _NamedStringIO(io.StringIO):
+    """``StringIO`` that reports a name, which YAML marks cite as the source."""
+
+    def __init__(self, text: str, name: str) -> None:
+        super().__init__(text)
+        self.name = name
+
+
+def _load_yaml(text: str, name: str) -> dict[str, Any]:
+    # A fresh buffer per call: PyYAML reads the stream to EOF, and `name` is
+    # what puts the source in every mark it raises.
+    data = yaml.load(_NamedStringIO(text, name), Loader=_StrictLoader)
     if not isinstance(data, dict):
         raise TypeError("YAML root must be a mapping/dict.")
     return data

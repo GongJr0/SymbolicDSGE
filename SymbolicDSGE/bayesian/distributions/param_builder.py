@@ -28,12 +28,12 @@ DIST_PARAMS_DISPATCH: dict[DistributionFamily, Mapping[str, Any]] = {
 }
 
 
-def get_dist_params(family: str) -> dict[str, Any]:
+def get_dist_params(family: str | DistributionFamily) -> dict[str, Any]:
     """Get the default parameters for the given :class:`DistributionFamily` member.
 
     Parameters
     ----------
-    family : str
+    family : str | DistributionFamily
         Distribution family name, must be one of the members of :class:`DistributionFamily`.
 
     Returns

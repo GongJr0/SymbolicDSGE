@@ -398,6 +398,33 @@ def test_parser_rejects_a_repeated_mapping_key(line, repeat, key):
         ModelParser.from_string(text)
 
 
+def test_from_string_errors_name_the_source_not_a_temp_file(tmp_path):
+    bad = "name: X\nvariables: [x\nshocks: [e]\n"
+
+    with pytest.raises(yaml.YAMLError) as default:
+        ModelParser.from_string(bad)
+    assert '"<yaml string>"' in str(default.value)
+
+    with pytest.raises(yaml.YAMLError) as named:
+        ModelParser.from_string(bad, name="config/model.yaml")
+    assert '"config/model.yaml"' in str(named.value)
+
+
+def test_path_errors_name_the_file(tmp_path):
+    bad = tmp_path / "broken.yaml"
+    bad.write_text("name: X\nvariables: [x\nshocks: [e]\n", encoding="utf-8")
+
+    with pytest.raises(yaml.YAMLError) as exc:
+        ModelParser(bad)
+    assert str(bad) in str(exc.value)
+
+
+def test_from_string_keeps_the_text_verbatim():
+    parser = ModelParser.from_string(_R_ARITHMETIC_MODEL)
+    assert parser.parsed.model.source_yaml == _R_ARITHMETIC_MODEL
+    assert parser.config_path == "<yaml string>"
+
+
 def test_parser_reports_where_a_repeated_key_is():
     text = _R_ARITHMETIC_MODEL.replace("    rho: 0.9", "    rho: 0.9\n    rho: 0.5")
 

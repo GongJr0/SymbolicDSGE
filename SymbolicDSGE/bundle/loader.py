@@ -133,7 +133,7 @@ def _load_models(
                 f"Bundle member {member.path!r} is a model_config but has no "
                 "model_name; cannot load it."
             )
-        parser = ModelParser.from_string(archive.read_text(member.path))
+        parser = ModelParser.from_string(archive.read_text(member.path), member.path)
         model, kalman = parser.get_all()
         solver = DSGESolver(model, cast(Any, kalman))
         compile_kwargs = dict(member.options.get("compile_kwargs", {}))
