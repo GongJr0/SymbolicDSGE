@@ -44,7 +44,7 @@ def get_dist_params(family: str) -> dict[str, Any]:
     """
     if family not in DIST_PARAMS_DISPATCH:
         raise ValueError(
-            f"Unsupported distribution family: {family}\n please choose from: {list(DIST_PARAMS_DISPATCH.keys())}"
+            f"Unsupported distribution family: {family}\n please choose from: [{', '.join(DistributionFamily)}]"
         )
     family_enum = DistributionFamily(family)
     return cast(dict, DIST_PARAMS_DISPATCH[family_enum])

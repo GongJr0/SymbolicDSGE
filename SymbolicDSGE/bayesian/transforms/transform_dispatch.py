@@ -46,7 +46,7 @@ def get_transform(method: str | None) -> type[Transform]:
         return Identity
     if method not in TRANSFORM_METHOD_DISPATCH:
         raise ValueError(
-            f"Unsupported transform method: {method}\n please choose from: {list(TRANSFORM_METHOD_DISPATCH.values())}"
+            f"Unsupported transform method: {method}\n please choose from: [{', '.join(TransformMethod)}]"
         )
     method_enum = TransformMethod(method)
     return TRANSFORM_METHOD_DISPATCH[method_enum]
