@@ -299,6 +299,8 @@ class ModelParser:
 
         Model equations are checked for unknown symbols only.
         Observables extend the check to reject references to shocks.
+        Finally, the specification is checked for a one-to-one mapping between
+        variables and model equations.
         """
         for name, eq in conf.equations.model.items():
             unknown_atoms = cls._unknown_atoms(conf, eq)
@@ -312,7 +314,7 @@ class ModelParser:
             unknown_atoms = cls._unknown_atoms(conf, eq)
             if unknown_atoms:
                 raise ValueError(
-                    f"Observable {name!r} references unknown symbols: "
+                    f"Observable {str(name)!r} references unknown symbols: "
                     f"{sorted(str(a) for a in unknown_atoms)}"
                 )
             shock_refs = cls._shock_atoms(conf, eq)
@@ -322,6 +324,25 @@ class ModelParser:
                     f"{sorted(str(a) for a in shock_refs)}; observables may only "
                     f"reference model variables and parameters."
                 )
+
+        defining = list(conf.equations.model.values())
+        for replacements in (conf.equations.regime or {}).values():
+            defining.extend(replacements.values())
+        used = {call.func for eq in defining for call in eq.atoms(AppliedUndef)}
+
+        absent = [v for v in conf.variables.variables if v not in used]
+        if absent:
+            raise ValueError(
+                f"Variable(s) {sorted(str(v) for v in absent)} occur in no model "
+                "equation."
+            )
+
+        n_var, n_eq = len(conf.variables.variables), len(conf.equations.model)
+        if n_var != n_eq:
+            raise ValueError(
+                f"The model block has {n_eq} equation(s) for {n_var} variable(s); "
+                f"each variable needs exactly one equation."
+            )
 
     @classmethod
     def validate_constraints(cls, conf: ModelConfig) -> None:

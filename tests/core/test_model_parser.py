@@ -300,7 +300,7 @@ def test_parser_rejects_unknown_symbol_in_observable():
     data = yaml.safe_load(_R_ARITHMETIC_MODEL)
     data["equations"]["observables"]["x_obs"] = "x(t) + typo_symbol"
 
-    with pytest.raises(ValueError, match=r"Observable '?x_obs'? references unknown"):
+    with pytest.raises(ValueError, match=r"Observable 'x_obs' references unknown"):
         ModelParser.from_string(yaml.safe_dump(data))
 
 
@@ -309,7 +309,7 @@ def test_parser_rejects_undeclared_variable_in_observable():
     data = yaml.safe_load(_R_ARITHMETIC_MODEL)
     data["equations"]["observables"]["x_obs"] = "x(t) + w(t)"
 
-    with pytest.raises(ValueError, match=r"Observable '?x_obs'? references unknown"):
+    with pytest.raises(ValueError, match=r"Observable 'x_obs' references unknown"):
         ModelParser.from_string(yaml.safe_dump(data))
 
 
@@ -317,7 +317,36 @@ def test_parser_rejects_shock_in_observable():
     data = yaml.safe_load(_R_ARITHMETIC_MODEL)
     data["equations"]["observables"]["x_obs"] = "x(t) + e_x"
 
-    with pytest.raises(ValueError, match=r"Observable '?x_obs'? references shock\(s\)"):
+    with pytest.raises(ValueError, match=r"Observable 'x_obs' references shock\(s\)"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_variable_with_no_model_equation():
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["variables"]["ghost"] = {"ss_seed": None}
+
+    with pytest.raises(ValueError, match=r"\['ghost'\] occur in no model equation"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_a_variable_defined_only_by_an_observable():
+    # An observable gives the variable an incidence bit, so the kernel's own
+    # absent-variable check never sees it.
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["variables"]["ghost"] = {"ss_seed": None}
+    data["observables"].append("ghost_obs")
+    data["equations"]["observables"]["ghost_obs"] = "ghost(t)"
+    data["kalman"]["R"]["std"]["ghost_obs"] = "sig_x"
+
+    with pytest.raises(ValueError, match=r"\['ghost'\] occur in no model equation"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_more_equations_than_variables():
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["equations"]["model"]["extra"] = "x(t) = rho * y(t)"
+
+    with pytest.raises(ValueError, match=r"4 equation\(s\) for 3 variable\(s\)"):
         ModelParser.from_string(yaml.safe_dump(data))
 
 
