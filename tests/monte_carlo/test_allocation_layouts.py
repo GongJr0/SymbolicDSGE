@@ -390,8 +390,50 @@ def test_a_custom_transform_output_shape_must_be_two_non_negative_dimensions() -
         _plan(steps)
 
 
-def test_native_scratch_sizes_on_the_widest_entry() -> None:
-    wide = _normalized_spec({("e_u", "e_v"): Shock("norm", seed=0)})
-    assert native_shock_scratch(wide, 16).n_float == 16 * 2
-    narrow = _normalized_spec({("e_u",): Shock("norm", seed=0)})
-    assert native_shock_scratch(narrow, 16).n_float == 16
+#: What each family stages, stated independently of ``sdsge_shock_entry_arena_size``.
+#: Undersizing this is a scratch overrun rather than a wrong number, since
+#: ``NativeShockPlan.fill`` allocates off it and the kernel writes without a
+#: bound. Uniform and a path stage nothing: one transforms a draw at a time
+#: straight into ``out``, the other is already materialized.
+ARENA_CASES = [
+    pytest.param(("e_u",), np.zeros((T, 1)), 0, id="path"),
+    pytest.param(("e_u", "e_v"), np.zeros((T, 2)), 0, id="path-pair"),
+    pytest.param(("e_u",), Shock("uni", seed=0), 0, id="uni"),
+    pytest.param(("e_u",), Shock("exp", seed=0), T, id="exp"),
+    pytest.param(
+        ("e_u",), Shock("gamma", seed=0, dist_kwargs={"a": 2.0}), T, id="gamma"
+    ),
+    pytest.param(
+        ("e_u",),
+        Shock("beta", seed=0, dist_kwargs={"a": 2.0, "b": 3.0}),
+        T,
+        id="beta",
+    ),
+    pytest.param(("e_u",), Shock("norm", seed=0), T, id="norm"),
+    pytest.param(("e_u", "e_v"), Shock("norm", seed=0), 2 * T, id="norm-pair"),
+    # The Gaussian core plus the chi-square it is divided by, one per period.
+    pytest.param(("e_u",), Shock("t", seed=0, dist_kwargs={"df": 5}), 2 * T, id="t"),
+    pytest.param(
+        ("e_u", "e_v"),
+        Shock("t", seed=0, dist_kwargs={"df": 5}),
+        3 * T,
+        id="t-pair",
+    ),
+]
+
+
+@pytest.mark.parametrize("targets, entry, n_float", ARENA_CASES)
+def test_native_scratch_sizes_each_family(targets, entry, n_float) -> None:
+    spec = _normalized_spec({targets: entry})
+    assert native_shock_scratch(spec, T).n_float == n_float
+
+
+def test_native_scratch_takes_the_widest_entry_not_their_sum() -> None:
+    # Entries are drawn one at a time off one arena, so a spec costs its maximum.
+    spec = _normalized_spec(
+        {
+            ("e_u",): Shock("gamma", seed=0, dist_kwargs={"a": 2.0}),
+            ("e_v",): Shock("t", seed=1, dist_kwargs={"df": 5}),
+        }
+    )
+    assert native_shock_scratch(spec, T).n_float == 2 * T

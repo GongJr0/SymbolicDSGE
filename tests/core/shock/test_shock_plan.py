@@ -22,8 +22,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from SymbolicDSGE._ckernels.core._shocks import ShockCode
 from SymbolicDSGE.core.shock.generators import Shock
-from SymbolicDSGE.core.shock.plan import get_native_shock_plan
+from SymbolicDSGE.core.shock.plan import ShockEntry, get_native_shock_plan
 import SymbolicDSGE.core.shock.spec as shocks_mod
 from SymbolicDSGE.core.shock.spec import (
     resolve_shock_plan,
@@ -224,3 +225,63 @@ def test_every_entry_and_replication_pair_draws_its_own_stream(solved_post82):
                 drawn not in seen
             ), f"{name} at replication {rep_idx} repeats {seen.get(drawn)}"
             seen[drawn] = (name, rep_idx)
+
+
+# ---- the seed derivation (#507) ------------------------------------------
+#
+# Both routes key off the triple (declared seed, canonical column, replication),
+# and every draw test reads the result back off the entry, so only a literal can
+# fail when the derivation moves. ``_seed`` mixes through numpy's
+# ``SeedSequence``, which puts these values inside the drift surface of #527.
+
+
+def _seed_entry(base_seed, column):
+    return ShockEntry(
+        key=("x",),
+        indices=(column,),
+        family=ShockCode.NORMAL,
+        loc=np.zeros(1),
+        factor=np.ones((1, 1)),
+        base_seed=base_seed,
+    )
+
+
+@pytest.mark.parametrize(
+    "base_seed, key",
+    [
+        (0, 0),
+        (7, 7),
+        (2**63, 2**63),
+        (2**64 - 1, 2**64 - 1),
+        # A declared seed is an unbounded Python int and the kernel key is a u64,
+        # so both ends fold in: a negative seed is its two's complement, and one
+        # past the range is congruent to a seed inside it.
+        (-1, 2**64 - 1),
+        (2**64, 0),
+        (2**64 + 5, 5),
+    ],
+)
+def test_native_seed_key_is_the_declared_seed_masked_to_64_bits(base_seed, key):
+    assert _seed_entry(base_seed, 0)._native_seed_key == key
+
+
+@pytest.mark.parametrize(
+    "base_seed, column, rep_idx, seed",
+    [
+        (7, 0, 0, 13432090166537452992),
+        (7, 0, 1, 15529291740490724314),
+        (7, 1, 0, 23751027488930731),
+        (0, 0, 0, 2635072618980576772),
+        (5, 3, 41, 10328991043790977369),
+    ],
+)
+def test_replication_seed_is_the_mixed_triple(base_seed, column, rep_idx, seed):
+    assert _seed_entry(base_seed, column)._seed(rep_idx) == seed
+
+
+def test_an_unseeded_entry_has_no_replication_seed_and_a_fresh_key():
+    # The key is drawn per access, which is why a plan reads it once at build and
+    # a draw is reproducible within that plan but not across two of them.
+    entry = _seed_entry(None, 0)
+    assert entry._seed(0) is None
+    assert len({entry._native_seed_key for _ in range(4)}) == 4
