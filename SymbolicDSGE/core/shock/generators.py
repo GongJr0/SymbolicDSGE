@@ -440,9 +440,9 @@ class Shock:
         """Serialize a generator-style Shock to a JSON-able dict.
 
         Only the generator form is representable: a string ``dist`` identifier
-        and no materialized ``shock_arr``. A live scipy distribution object
-        cannot be faithfully reproduced from JSON, and a placed shock array is
-        bulk data that belongs with the parquet members, not the pipeline spec.
+        and no materialized ``path``. A live scipy distribution object cannot be
+        faithfully reproduced from JSON, and a placed shock array is bulk data
+        that belongs with the parquet members, not the pipeline spec.
         """
         if not isinstance(self.dist, str):
             raise TypeError(
