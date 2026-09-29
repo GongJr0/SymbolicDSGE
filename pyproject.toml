@@ -19,7 +19,7 @@ dependencies = [
     "matplotlib>=3.11.2",
     "numba>=0.62.1,!=0.66.0",  # 0.66.0 cp311 wheel does not ship stubs for Windows.
     "numpy>=2.3.5",
-    "pandas>=2.3.3",
+    "pandas>=3.0.6",
     "parquet-engine>=0.2.0",
     "psutil>=7.2.2",
     "pyyaml>=6.0.3",
@@ -64,7 +64,7 @@ dev = [
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
     "ipykernel>=7.2.0",
-    "jupyterlab>=4.6.3",
+    "jupyterlab>=4.6.4",
     "jupyter>=1.1.1",
     "jupytext>=1.19.1",
     "pip>=26.2.1",
@@ -74,7 +74,7 @@ dev = [
     "cython-lint>=0.21.0",
     "pytest-xdist>=3.8.0",
     "mkdocs-charts-plugin>=0.0.13",
-    "ruff>=0.16.7",
+    "ruff>=0.16.8",
 ]
 
 [build-system]
