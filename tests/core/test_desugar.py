@@ -21,7 +21,8 @@ import sympy as sp
 import yaml
 from sympy.core.function import AppliedUndef
 
-from SymbolicDSGE.core import ModelParser, desugar_model
+from SymbolicDSGE.core import ModelParser
+from SymbolicDSGE.core.desugar import desugar_model
 from SymbolicDSGE.core.linearization import LinearizationMethod
 
 t = sp.Symbol("t", integer=True)

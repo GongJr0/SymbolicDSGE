@@ -8,7 +8,7 @@ tags:
 @dataclass(frozen=True)
 class SecondOrderSolution(
     steady_state: ndarray,
-    stab: int,
+    stab: BKStatus,
     eig: ndarray,
     order: int,
     p: ndarray,
@@ -31,7 +31,7 @@ Second-order policy data returned by the perturbation solver. `SecondOrderSoluti
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | `steady_state` | `ndarray[float]`, shape `(n_var,)` | Newton-resolved expansion point of the solution. |
-| `stab` | `int` | Stability indicator: `-1` means too few stable eigenvalues, `0` means the required number, and `1` means too many. |
+| `stab` | `BKStatus` | `IntEnum` stability indicator: `-1` means too few stable eigenvalues (no stable solutions), `0` means the required number (determinate), and `1` means too many (indeterminate). |
 | `eig` | `ndarray[complex]` | Eigenvalues of the linearized system. |
 | `order` | `int` | Always `2`. |
 | `p`, `hx` | `ndarray[float]`, shape `(n_state, n_state)` | First-order state transition. `hx` is the perturbation-notation alias of `p`. |
@@ -46,3 +46,9 @@ Second-order policy data returned by the perturbation solver. `SecondOrderSoluti
 | `huu` | `ndarray[float]`, shape `(n_state, n_shock, n_shock)` | State correction for two shocks. |
 | `gss` | `ndarray[float]`, shape `(n_control,)` | Risk correction scaled by shock variance for controls. |
 | `hss` | `ndarray[float]`, shape `(n_state,)` | Risk correction scaled by shock variance for states. |
+
+__Properties:__
+
+|__Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| `is_determinate` | `bool` | Whether the solution is determinate (stable and unique). |

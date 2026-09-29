@@ -8,7 +8,7 @@ tags:
 @dataclass(frozen=True)
 class PiecewiseSolution(
     steady_state: ndarray,
-    stab: int,
+    stab: BKStatus,
     eig: ndarray,
     order: int,
     a: ndarray,
@@ -26,7 +26,7 @@ Piecewise-linear policy data returned by the OccBin solver. `PiecewiseSolution` 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | `steady_state` | `ndarray[float]`, shape `(n_var,)` | Expansion point of the relaxed reference regime. |
-| `stab` | `int` | Reference-regime stability indicator: `-1` means too few stable eigenvalues, `0` means the required number, and `1` means too many. |
+| `stab` | `BKStatus` | `IntEnum` stability indicator for the reference regime: `-1` means too few stable eigenvalues (no stable solutions), `0` means the required number (determinate), and `1` means too many (indeterminate). |
 | `eig` | `ndarray[complex]` | Eigenvalues of the relaxed reference regime. |
 | `order` | `int` | Always `1`, because each regime is linear. |
 | `a`, `b`, `c` | `ndarray[float]`, shape `(n_regime, n_var, n_var)` | Lead, current, and lag coefficients of each regime pencil. |
@@ -43,5 +43,12 @@ __Properties:__
 |:---------|:--------:|----------------:|
 | `A` | `ndarray[float]`, shape `(n_var, n_var)` | `ref.A`, the relaxed reference regime's state transition. |
 | `B` | `ndarray[float]`, shape `(n_var, n_shock)` | `ref.B`, the relaxed reference regime's shock impact. |
+| `is_determinate` | `bool` | Whether the reference regime's solution is determinate (stable and unique). |
 
 These forward the reference regime's state space, so a consumer that reads a first-order `A`/`B` reaches it without unpacking `ref`. Filtering and estimation take this route: they describe the model with its constraints ignored, which is the reference regime by definition.
+
+???+ note "Stability of regimes"
+    Regimes often describe unstable environments, and the solution routine does not
+    require them to abide by the conventional Blanchard-Kahn stability conditions.
+    `stab` therefore only describes the relaxed regime, which is equivalent to
+    a first-order perturbation solution.

@@ -142,11 +142,11 @@ sol = solver.solve(
     parameters=None,
     ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
 )
-print("Is stable: ", sol.policy.stab == 0)
+print("Is determinate: ", sol.is_determinate)
 print("Eigenvalues: ", sol.policy.eig)
 ```
 ```text
->>> Is stable:  True
+>>> Is determinate:  True
 Eigenvalues:  [0.28 +0.j 0.83 +0.j 0.85 +0.j 2.605+0.j 1.185+0.j]
 ```
 ```python

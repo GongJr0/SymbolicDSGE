@@ -240,6 +240,7 @@ cdef extern from "klein_solve.h" nogil:
         int64_t n_exog, int64_t nd)
     int64_t sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out,
                                double *arena, int64_t *iarena)
+    int SDSGE_KLEIN_SOLVE_OK
     int SDSGE_KLEIN_SOLVE_SS_SINGULAR
     int SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE
     int SDSGE_KLEIN_SOLVE_QZ
@@ -247,6 +248,9 @@ cdef extern from "klein_solve.h" nogil:
     int SDSGE_KLEIN_SOLVE_NO_STATES
     int SDSGE_KLEIN_SOLVE_SECOND_ORDER
     int SDSGE_KLEIN_SOLVE_RISK
+    int SDSGE_KLEIN_SOLVE_ABSENT_VAR
+    int SDSGE_KLEIN_SOLVE_QR
+    int SDSGE_KLEIN_SOLVE_STATIC
 
     arena_size sdsge_sgu_klein_solve2_arena_size(
         int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par,
@@ -282,7 +286,13 @@ cdef extern from "second_order.h" nogil:
 cdef _raise_solve_error(int64_t err, str who):
     """Map a fused-solve status onto the staged shims' messages, verbatim:
     callers match on them.
+
+    Every nonzero status raises. An unrecognized one means the kernel grew a
+    code this table has not been told about; the fallback names it rather than
+    returning output the kernel never wrote.
     """
+    if err == SDSGE_KLEIN_SOLVE_OK:
+        return
     if err == SDSGE_KLEIN_SOLVE_SS_SINGULAR:
         raise ValueError("steady_state_newton: singular Jacobian (a - b).")
     if err == SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE:
@@ -302,6 +312,13 @@ cdef _raise_solve_error(int64_t err, str who):
         raise ValueError("solve_second_order: singular second-order system.")
     if err == SDSGE_KLEIN_SOLVE_RISK:
         raise ValueError("solve_second_order: singular risk-correction system.")
+    if err == SDSGE_KLEIN_SOLVE_ABSENT_VAR:
+        raise ValueError("pencil_partition: a variable occurs at no date.")
+    if err == SDSGE_KLEIN_SOLVE_QR:
+        raise RuntimeError("pencil_rotate_static: LAPACK dgeqrf/dormqr failed.")
+    if err == SDSGE_KLEIN_SOLVE_STATIC:
+        raise ValueError("klein_postprocess: singular static block.")
+    raise RuntimeError(f"{who}: unhandled solve status {err}.")
 
 
 def assemble_transition(p, f, n_state, n_control):
