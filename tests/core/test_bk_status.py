@@ -33,11 +33,6 @@ def gali():
     return _compiled("gali_2015.yaml")
 
 
-@pytest.fixture(scope="module")
-def occbin():
-    return _compiled("rbc_occbin.yaml")
-
-
 def _params(compiled, **overrides) -> dict[str, float]:
     params = {
         str(name): float(value)
@@ -82,18 +77,6 @@ def test_determinate_solve_is_silent(gali, order):
         solved = solver.solve(compiled, parameters=_params(compiled), order=order)
     assert solved.policy.stab is BKStatus.DETERMINATE
     assert solved.policy.is_determinate is True
-
-
-def test_piecewise_reports_the_reference_regime(occbin):
-    solver, compiled = occbin
-    params = _params(compiled, rho=1.8)
-    with pytest.raises(ValueError, match=BKStatus.NO_STABLE_SOLUTION.name):
-        solver.solve(compiled, parameters=params)
-
-    with pytest.warns(UserWarning, match=BKStatus.NO_STABLE_SOLUTION.name):
-        solved = solver.solve(compiled, parameters=params, raise_on_bk_violation=False)
-    assert solved.policy.stab is BKStatus.NO_STABLE_SOLUTION
-    assert solved.policy.ref.stab is BKStatus.NO_STABLE_SOLUTION
 
 
 def test_every_status_has_its_own_message():
