@@ -139,6 +139,7 @@ cdef extern from "klein_postproc.h" nogil:
         const c128 *s, const c128 *t, const c128 *z, int64_t n_s, int64_t n_cs,
         c128 *f, c128 *p, int64_t *stab, c128 *eig, double *arena,
         int64_t *iarena)
+    int SDSGE_KLEIN_STAB_UNSET
     int SDSGE_KLEIN_POSTPROC_SINGULAR
     int SDSGE_KLEIN_POSTPROC_INVALID
 
@@ -533,7 +534,7 @@ def klein_postprocess(s, t, z, int64_t n_states):
     cdef double complex[:, ::1] fv = f
     cdef double complex[:, ::1] pv = p
     cdef double complex[::1] ev = eig
-    cdef int64_t stab = 0
+    cdef int64_t stab = SDSGE_KLEIN_STAB_UNSET
     cdef int64_t err
     cdef arena_size sz = klein_postproc_arena_size(n_s, n_cs)
     arena = np.empty(sz.n_float, dtype=np.float64)
@@ -802,7 +803,7 @@ def klein_solve1(
     out.f = &fv[0, 0] if n_ctrl > 0 else NULL
     out.p = &pv[0, 0]
     out.eig = <c128 *>&eigv[0]
-    out.stab = 0
+    out.stab = SDSGE_KLEIN_STAB_UNSET
     out.A = &Av[0, 0]
     out.B = &Bv[0, 0] if n_exog > 0 else NULL
     out.order = &orderv[0]
@@ -947,7 +948,7 @@ def sgu_klein_solve2(
     out.f = &fv[0, 0] if n_ctrl > 0 else NULL
     out.p = &pv[0, 0]
     out.eig = <c128 *>&eigv[0]
-    out.stab = 0
+    out.stab = SDSGE_KLEIN_STAB_UNSET
     out.A = &Av[0, 0]
     out.B = &Bv[0, 0] if n_exog > 0 else NULL
     out.order = &orderv[0]

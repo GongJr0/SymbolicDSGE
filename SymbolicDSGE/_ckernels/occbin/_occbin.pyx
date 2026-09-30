@@ -89,6 +89,8 @@ cdef extern from "../core/klein_solve.h" nogil:
     int SDSGE_KLEIN_SOLVE_QR
     int SDSGE_KLEIN_SOLVE_STATIC
 
+cdef extern from "../core/klein_postproc.h" nogil:
+    int SDSGE_KLEIN_STAB_UNSET
 
 # LAPACK ``zgges`` reached through its scipy ``cython_lapack`` capsule address,
 # the same runtime-address mechanism ``_core.pyx`` uses. Each extension casts
@@ -1097,7 +1099,7 @@ def occbin_solve1(size_t residual_addr, seed, params, incidence,
     out.ref.p = &ghxv[0, 0]
     out.ref.f = &ghxv[n_state, 0] if n_ctrl > 0 else NULL
     out.ref.eig = <c128 *>&eigv[0]
-    out.ref.stab = 0
+    out.ref.stab = SDSGE_KLEIN_STAB_UNSET
     out.ref.A = &Av[0, 0]
     out.ref.B = &Bv[0, 0] if n_exog > 0 else NULL
     out.ref.order = &orderv[0]

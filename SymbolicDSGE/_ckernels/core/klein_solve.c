@@ -103,8 +103,8 @@ arena_size sdsge_sgu_klein_solve2_arena_size(const i64 n_var, const i64 n_state,
   size = sdsge_max_arena(size, sdsge_pencil_stage_arena(n_var, n_exog, nd));
   size = sdsge_max_arena(
       size, sdsge_bicomplex_hessian_arena_size(n_var, n_par, n_exog, n_var));
-  size = sdsge_max_arena(
-      size, sdsge_second_order_arena_size(n_var, n_state, n_exog));
+  size = sdsge_max_arena(size,
+                         sdsge_second_order_arena_size(n_var, n_state, n_exog));
   /* Second-order stages run past the same head: solve1 is nested inside. */
   size.n_float += sdsge_solve1_fp_reserve(n_state, n_ctrl);
   return size;
@@ -314,6 +314,7 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
     }
   }
   if (sdsge_solve(amat, d_rot, n, ne, ghu) != SDSGE_LU_SUCCESS) {
+    out->stab = SDSGE_KLEIN_STAB_UNSET;
     return SDSGE_KLEIN_SOLVE_SINGULAR;
   }
 
