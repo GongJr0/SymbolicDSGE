@@ -20,7 +20,9 @@ def model_loader(monkeypatch):
     monkeypatch.setattr(
         loader.ModelParser,
         "from_string",
-        lambda text: SimpleNamespace(get_all=lambda: (text, None)),
+        lambda text, name="<yaml string>": SimpleNamespace(
+            get_all=lambda: (text, None)
+        ),
     )
 
     class Solver:

@@ -296,6 +296,143 @@ def test_parser_rejects_undeclared_variable_in_model_equation():
         ModelParser.from_string(yaml.safe_dump(data))
 
 
+def test_parser_rejects_unknown_symbol_in_observable():
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["equations"]["observables"]["x_obs"] = "x(t) + typo_symbol"
+
+    with pytest.raises(ValueError, match=r"Observable 'x_obs' references unknown"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_undeclared_variable_in_observable():
+    # The measurement printer is where this used to land, several calls later.
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["equations"]["observables"]["x_obs"] = "x(t) + w(t)"
+
+    with pytest.raises(ValueError, match=r"Observable 'x_obs' references unknown"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_shock_in_observable():
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["equations"]["observables"]["x_obs"] = "x(t) + e_x"
+
+    with pytest.raises(ValueError, match=r"Observable 'x_obs' references shock\(s\)"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_variable_with_no_model_equation():
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["variables"]["ghost"] = {"ss_seed": None}
+
+    with pytest.raises(ValueError, match=r"\['ghost'\] occur in no model equation"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_a_variable_defined_only_by_an_observable():
+    # An observable gives the variable an incidence bit, so the kernel's own
+    # absent-variable check never sees it.
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["variables"]["ghost"] = {"ss_seed": None}
+    data["observables"].append("ghost_obs")
+    data["equations"]["observables"]["ghost_obs"] = "ghost(t)"
+    data["kalman"]["R"]["std"]["ghost_obs"] = "sig_x"
+
+    with pytest.raises(ValueError, match=r"\['ghost'\] occur in no model equation"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_more_equations_than_variables():
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["equations"]["model"]["extra"] = "x(t) = rho * y(t)"
+
+    with pytest.raises(ValueError, match=r"4 equation\(s\) for 3 variable\(s\)"):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+@pytest.mark.parametrize(
+    "block, duplicate, preamble",
+    [
+        ("shocks", "e_x", "shocks must be unique."),
+        ("observables", "x_obs", "observables must be unique."),
+    ],
+)
+def test_parser_rejects_duplicate_declarations(block, duplicate, preamble):
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data[block].append(duplicate)
+
+    with pytest.raises(
+        ValueError, match=rf"{preamble}\nDuplicate entries: \['{duplicate}'\]"
+    ):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+def test_parser_rejects_a_variable_declared_twice():
+    # The mapping form cannot express this; a list of names can.
+    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
+    data["variables"] = ["x", "y", "z", "x"]
+
+    with pytest.raises(ValueError, match=r"variables must be unique."):
+        ModelParser.from_string(yaml.safe_dump(data))
+
+
+@pytest.mark.parametrize(
+    "line, repeat, key",
+    [
+        ("    rho: 0.9", "    rho: 0.5", "rho"),
+        (
+            '    x_process: "x(t+1) = rho * x(t) + e_x"',
+            '    x_process: "x(t+1) = 0"',
+            "x_process",
+        ),
+        ("    x_obs: x(t)", "    x_obs: 0", "x_obs"),
+    ],
+    ids=["parameter", "model-equation", "observable-equation"],
+)
+def test_parser_rejects_a_repeated_mapping_key(line, repeat, key):
+    # A repeat is legal YAML and resolves to the last value, so the loader has
+    # to reject it before anything downstream can see one entry.
+    text = _R_ARITHMETIC_MODEL.replace(line, f"{line}\n{repeat}")
+
+    with pytest.raises(yaml.YAMLError, match=rf"found duplicate key\(s\): \['{key}'\]"):
+        ModelParser.from_string(text)
+
+
+def test_from_string_errors_name_the_source_not_a_temp_file(tmp_path):
+    bad = "name: X\nvariables: [x\nshocks: [e]\n"
+
+    with pytest.raises(yaml.YAMLError) as default:
+        ModelParser.from_string(bad)
+    assert '"<yaml string>"' in str(default.value)
+
+    with pytest.raises(yaml.YAMLError) as named:
+        ModelParser.from_string(bad, name="config/model.yaml")
+    assert '"config/model.yaml"' in str(named.value)
+
+
+def test_path_errors_name_the_file(tmp_path):
+    bad = tmp_path / "broken.yaml"
+    bad.write_text("name: X\nvariables: [x\nshocks: [e]\n", encoding="utf-8")
+
+    with pytest.raises(yaml.YAMLError) as exc:
+        ModelParser(bad)
+    assert str(bad) in str(exc.value)
+
+
+def test_from_string_keeps_the_text_verbatim():
+    parser = ModelParser.from_string(_R_ARITHMETIC_MODEL)
+    assert parser.parsed.model.source_yaml == _R_ARITHMETIC_MODEL
+    assert parser.config_path == "<yaml string>"
+
+
+def test_parser_reports_where_a_repeated_key_is():
+    text = _R_ARITHMETIC_MODEL.replace("    rho: 0.9", "    rho: 0.9\n    rho: 0.5")
+
+    with pytest.raises(yaml.YAMLError) as exc:
+        ModelParser.from_string(text)
+    assert str(exc.value).count("line ") == 2
+
+
 def test_validate_constraints_rejects_more_than_two(parsed_test):
     conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)

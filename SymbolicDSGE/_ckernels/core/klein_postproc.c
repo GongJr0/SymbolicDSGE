@@ -2,10 +2,10 @@
 
 arena_size klein_postproc_arena_size(const i64 n_s, const i64 n_cs) {
   const i64 sq = n_s * n_s;
-  return make_sizer(2 * (6 * sq        /* z11, s11, t11, z11i, dyn, tmp */
-                         + n_cs * n_s  /* z21 */
-                         + sq          /* LU factor copy */
-                         + sq),        /* identity RHS for the inverse */
+  return make_sizer(2 * (6 * sq       /* z11, s11, t11, z11i, dyn, tmp */
+                         + n_cs * n_s /* z21 */
+                         + sq         /* LU factor copy */
+                         + sq),       /* identity RHS for the inverse */
                     n_s /* LU pivot */);
 }
 
@@ -22,8 +22,8 @@ i64 klein_postproc(const c128 *SDSGE_RESTRICT s, const c128 *SDSGE_RESTRICT t,
    * with the real 0 / -1 / +1 on the successful path. */
   *stab = SDSGE_KLEIN_STAB_UNSET;
 
-  /* A model with no states has no Klein solution. Fail fast: the state/inv/solve
-   * routines all assume n_s >= 1. */
+  /* A model with no states has no Klein solution. Fail fast: the
+   * state/inv/solve routines all assume n_s >= 1. */
   if (n_s <= 0) {
     return SDSGE_KLEIN_POSTPROC_INVALID;
   }
@@ -64,6 +64,25 @@ i64 klein_postproc(const c128 *SDSGE_RESTRICT s, const c128 *SDSGE_RESTRICT t,
     }
   }
 
+  if (c128_abs(t[(n_s - 1) * N + (n_s - 1)]) >
+      c128_abs(s[(n_s - 1) * N + (n_s - 1)])) {
+    *stab = -1; /* Too Few stable eigenvalues */
+  }
+
+  if (n_s < N) {
+    if (c128_abs(t[n_s * N + n_s]) < c128_abs(s[n_s * N + n_s])) {
+      *stab = 1; /* Too Many stable eigenvalues */
+    }
+  }
+  /* eig[i] = t[i,i] / s[i,i] */
+  for (i64 i = 0; i < N; ++i) {
+    if (c128_abs(s[i * N + i]) > 1e-12) {
+      eig[i] = c128_div(t[i * N + i], s[i * N + i]);
+    } else {
+      eig[i] = c128_make(INFINITY, 0.0);
+    }
+  }
+
   /* z11i = z11^-1, factored out of place because z11 is still needed below. A
    * singular z11 is a Blanchard-Kahn failure. */
   for (i64 i = 0; i < sq; ++i) {
@@ -75,34 +94,15 @@ i64 klein_postproc(const c128 *SDSGE_RESTRICT s, const c128 *SDSGE_RESTRICT t,
     }
   }
   if (c128_lu_factor_inplace(lu, iarena, n_s) != SDSGE_LU_SUCCESS) {
+    *stab = SDSGE_KLEIN_STAB_UNSET;
     return SDSGE_KLEIN_POSTPROC_SINGULAR;
   }
   c128_lu_solve(lu, iarena, eye, z11i, n_s, n_s);
 
-  *stab = 0;
-  if (c128_abs(t[(n_s - 1) * N + (n_s - 1)]) >
-      c128_abs(s[(n_s - 1) * N + (n_s - 1)])) {
-    *stab = -1; /* Too Few stable eigenvalues */
-  }
-
-  if (n_s < N) {
-    if (c128_abs(t[n_s * N + n_s]) < c128_abs(s[n_s * N + n_s])) {
-      *stab = 1; /* Too Many stable eigenvalues */
-    }
-  }
-
-  /* eig[i] = t[i,i] / s[i,i] */
-  for (i64 i = 0; i < N; ++i) {
-    if (c128_abs(s[i * N + i]) > 1e-12) {
-      eig[i] = c128_div(t[i * N + i], s[i * N + i]);
-    } else {
-      eig[i] = c128_make(INFINITY, 0.0);
-    }
-  }
-
   /* dyn = solve(s11, t11). s11 is dead after this, so it factors in place.
    * Singular s11 is again a Blanchard-Kahn failure. */
   if (c128_lu_factor_inplace(s11, iarena, n_s) != SDSGE_LU_SUCCESS) {
+    *stab = SDSGE_KLEIN_STAB_UNSET;
     return SDSGE_KLEIN_POSTPROC_SINGULAR;
   }
   c128_lu_solve(s11, iarena, t11, dyn, n_s, n_s);
@@ -111,5 +111,6 @@ i64 klein_postproc(const c128 *SDSGE_RESTRICT s, const c128 *SDSGE_RESTRICT t,
   c128_matmul(z11, dyn, n_s, n_s, n_s, tmp);
   c128_matmul(tmp, z11i, n_s, n_s, n_s, p);
 
+  *stab = (*stab == SDSGE_KLEIN_STAB_UNSET) ? 0 : *stab;
   return SDSGE_KLEIN_POSTPROC_SUCCESS;
 }

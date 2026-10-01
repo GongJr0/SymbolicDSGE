@@ -139,6 +139,7 @@ cdef extern from "klein_postproc.h" nogil:
         const c128 *s, const c128 *t, const c128 *z, int64_t n_s, int64_t n_cs,
         c128 *f, c128 *p, int64_t *stab, c128 *eig, double *arena,
         int64_t *iarena)
+    int SDSGE_KLEIN_STAB_UNSET
     int SDSGE_KLEIN_POSTPROC_SINGULAR
     int SDSGE_KLEIN_POSTPROC_INVALID
 
@@ -240,6 +241,7 @@ cdef extern from "klein_solve.h" nogil:
         int64_t n_exog, int64_t nd)
     int64_t sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out,
                                double *arena, int64_t *iarena)
+    int SDSGE_KLEIN_SOLVE_OK
     int SDSGE_KLEIN_SOLVE_SS_SINGULAR
     int SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE
     int SDSGE_KLEIN_SOLVE_QZ
@@ -247,6 +249,9 @@ cdef extern from "klein_solve.h" nogil:
     int SDSGE_KLEIN_SOLVE_NO_STATES
     int SDSGE_KLEIN_SOLVE_SECOND_ORDER
     int SDSGE_KLEIN_SOLVE_RISK
+    int SDSGE_KLEIN_SOLVE_ABSENT_VAR
+    int SDSGE_KLEIN_SOLVE_QR
+    int SDSGE_KLEIN_SOLVE_STATIC
 
     arena_size sdsge_sgu_klein_solve2_arena_size(
         int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par,
@@ -282,7 +287,13 @@ cdef extern from "second_order.h" nogil:
 cdef _raise_solve_error(int64_t err, str who):
     """Map a fused-solve status onto the staged shims' messages, verbatim:
     callers match on them.
+
+    Every nonzero status raises. An unrecognized one means the kernel grew a
+    code this table has not been told about; the fallback names it rather than
+    returning output the kernel never wrote.
     """
+    if err == SDSGE_KLEIN_SOLVE_OK:
+        return
     if err == SDSGE_KLEIN_SOLVE_SS_SINGULAR:
         raise ValueError("steady_state_newton: singular Jacobian (a - b).")
     if err == SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE:
@@ -302,6 +313,13 @@ cdef _raise_solve_error(int64_t err, str who):
         raise ValueError("solve_second_order: singular second-order system.")
     if err == SDSGE_KLEIN_SOLVE_RISK:
         raise ValueError("solve_second_order: singular risk-correction system.")
+    if err == SDSGE_KLEIN_SOLVE_ABSENT_VAR:
+        raise ValueError("pencil_partition: a variable occurs at no date.")
+    if err == SDSGE_KLEIN_SOLVE_QR:
+        raise RuntimeError("pencil_rotate_static: LAPACK dgeqrf/dormqr failed.")
+    if err == SDSGE_KLEIN_SOLVE_STATIC:
+        raise ValueError("klein_postprocess: singular static block.")
+    raise RuntimeError(f"{who}: unhandled solve status {err}.")
 
 
 def assemble_transition(p, f, n_state, n_control):
@@ -516,7 +534,7 @@ def klein_postprocess(s, t, z, int64_t n_states):
     cdef double complex[:, ::1] fv = f
     cdef double complex[:, ::1] pv = p
     cdef double complex[::1] ev = eig
-    cdef int64_t stab = 0
+    cdef int64_t stab = SDSGE_KLEIN_STAB_UNSET
     cdef int64_t err
     cdef arena_size sz = klein_postproc_arena_size(n_s, n_cs)
     arena = np.empty(sz.n_float, dtype=np.float64)
@@ -785,7 +803,7 @@ def klein_solve1(
     out.f = &fv[0, 0] if n_ctrl > 0 else NULL
     out.p = &pv[0, 0]
     out.eig = <c128 *>&eigv[0]
-    out.stab = 0
+    out.stab = SDSGE_KLEIN_STAB_UNSET
     out.A = &Av[0, 0]
     out.B = &Bv[0, 0] if n_exog > 0 else NULL
     out.order = &orderv[0]
@@ -930,7 +948,7 @@ def sgu_klein_solve2(
     out.f = &fv[0, 0] if n_ctrl > 0 else NULL
     out.p = &pv[0, 0]
     out.eig = <c128 *>&eigv[0]
-    out.stab = 0
+    out.stab = SDSGE_KLEIN_STAB_UNSET
     out.A = &Av[0, 0]
     out.B = &Bv[0, 0] if n_exog > 0 else NULL
     out.order = &orderv[0]

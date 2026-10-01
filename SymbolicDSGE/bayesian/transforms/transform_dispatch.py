@@ -28,13 +28,14 @@ TRANSFORM_METHOD_DISPATCH: dict[TransformMethod, type[Transform]] = {
 }
 
 
-def get_transform(method: str | None) -> type[Transform]:
+def get_transform(method: str | TransformMethod | None) -> type[Transform]:
     """Get the transform class corresponding to the given method.
 
     Parameters
     ----------
-    method : str | None
+    method : str | TransformMethod | None
         Method name of the transform. If None, returns the Identity transform.
+        Must be a member of the :class:`TransformMethod` enum.
 
     Returns
     -------
@@ -46,7 +47,7 @@ def get_transform(method: str | None) -> type[Transform]:
         return Identity
     if method not in TRANSFORM_METHOD_DISPATCH:
         raise ValueError(
-            f"Unsupported transform method: {method}\n please choose from: {list(TRANSFORM_METHOD_DISPATCH.values())}"
+            f"Unsupported transform method: {method}\n please choose from: [{', '.join(TransformMethod)}]"
         )
     method_enum = TransformMethod(method)
     return TRANSFORM_METHOD_DISPATCH[method_enum]

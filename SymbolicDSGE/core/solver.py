@@ -41,6 +41,7 @@ from .solved_model import (
     SecondOrderSolvedModel,
 )
 from .solver_backend import (
+    BKStatus,
     FirstOrderSolution,
     PiecewiseSolution,
     SecondOrderSolution,
@@ -199,7 +200,7 @@ class DSGESolver:
             idx=idx,
             objective_eqs=compiled_numeric,
             observable_names=[v.name for v in conf.observables],
-            observable_eqs=observable_exprs,
+            observable_eqs=observable_exprs,  # pyright: ignore
             measurement_jacobian_eqs=measurement_jacobian_eqs,
             constraint_names=constraint_names,
             constraint_exprs=constraint_exprs,
@@ -637,11 +638,13 @@ class DSGESolver:
         return ss
 
     @staticmethod
-    def _raise_or_warn_stability_error(stab: int, *, should_raise: bool = True) -> None:
+    def _raise_or_warn_stability_error(
+        stab: BKStatus, *, should_raise: bool = True
+    ) -> None:
         """Raise or warn on a Klein stability/uniqueness violation."""
-        if stab == 0:
+        if stab == BKStatus.DETERMINATE:
             return
-        msg = f"Klein stability/uniqueness condition violated (stab={stab})."
+        msg = f"Blanchard-Kahn condition violated. {stab.name} ({stab.value}): {stab.message}"
         if should_raise:
             raise ValueError(msg)
         warnings.warn(msg, UserWarning, stacklevel=2)

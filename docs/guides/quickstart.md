@@ -93,15 +93,15 @@ sol = solver.solve(
     ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
 )
 
-print("Is stable: ", sol.policy.stab == 0)  # stable if sol.policy.stab == 0
+print("Is determinate ", sol.is_determinate)
 print("Eigenvalues: ", sol.policy.eig.round(3))
 ```
 
-`parameters=None` uses the calibration values from the model configuration. `stab == 0` indicates that the number of stable roots matches the model's state count. The returned `SolvedModel` retains the compiled representation, its calibration, and the policy solution.
+`parameters=None` uses the calibration values from the model configuration. `is_determinate` indicates that the number of stable roots matches the model's state count. The returned `SolvedModel` retains the compiled representation, its calibration, and the policy solution.
 
 <div class="annotate" markdown>
 ```
-Is stable:  True
+Is determinate:  True
 Eigenvalues:  [0.28 +0.j 0.83 +0.j 0.85 +0.j 2.605+0.j 1.185+0.j] (1)
 ```
 </div>
@@ -186,7 +186,7 @@ shocks = [
     Shock("norm", dist_kwargs={"mean": 0.0}, seed=43).joint("e_r"),
 ]
 sim_data = sol.sim(
-    T=T,
+    T=200,
     x0=[0.0, 0.0, 0.0, 0.0, 0.0], # (1)!
     shocks=shocks,
     shock_scale=1.0, # (2)!
@@ -204,16 +204,16 @@ Each value in `sim_shocks` is a `Shock` specification. `sim` supplies the horizo
 
 |    |      g |      z |      r |      x |     Pi |   OutGap |   Infl |   Rate |
 |---:|-------:|-------:|-------:|-------:|-------:|---------:|-------:|-------:|
-|  0 |  0.062 |  0.570 |  0.001 |  0.472 | -0.080 |    0.472 | 3.110  | 6.445  |
-|  1 |  0.111 | -0.217 |  0.020 |  0.128 |  0.274 |    0.128 | 4.527  | 6.518  |
-|  2 |  0.255 |  0.290 |  0.053 |  0.634 |  0.270 |    0.634 | 4.509  | 6.652  |
-|  3 |  0.115 |  0.470 | -0.118 |  1.319 |  0.674 |    1.319 | 6.127  | 5.969  |
-|  4 |  0.161 |  0.659 |  0.094 |  0.264 | -0.319 |    0.264 | 2.156  | 6.817  |
-|  5 |  0.139 |  0.893 |  0.094 |  0.312 | -0.467 |    0.312 | 1.563  | 6.815  |
-|  6 | -0.017 |  0.492 | -0.027 |  0.350 | -0.114 |    0.350 | 2.974  | 6.334  |
-|  7 | -0.101 |  0.665 | -0.033 |  0.207 | -0.365 |    0.207 | 1.969  | 6.308  |
-|  8 | -0.077 |  0.400 | -0.041 |  0.204 | -0.156 |    0.204 | 2.806  | 6.275  |
-|  9 | -0.204 |  0.006 | -0.116 |  0.059 |  0.045 |    0.059 | 3.609  | 5.976  |
+|  0 |  0.184 |  0.689 |  0.058 |  0.574 | -0.095 |    0.574 |  3.05  |  6.671 |
+|  1 |  0.108 |  0.793 | -0.027 |  0.901 |  0.083 |    0.901 |  3.764 |  6.332 |
+|  2 |  0.185 |  0.37  |  0.003 |  0.756 |  0.304 |    0.756 |  4.646 |  6.451 |
+|  3 | -0.149 | -0.694 |  0.017 | -0.92  | -0.177 |   -0.92  |  2.723 |  6.507 |
+|  4 | -0.101 | -0.073 | -0.004 | -0.335 | -0.207 |   -0.335 |  2.601 |  6.424 |
+|  5 | -0.09  | -0.525 |  0.044 | -0.816 | -0.229 |   -0.816 |  2.513 |  6.617 |
+|  6 |  0.192 |  0.713 |  0.138 |  0.122 | -0.475 |    0.122 |  1.531 |  6.992 |
+|  7 |  0.126 | -0.042 |  0.207 | -0.881 | -0.67  |   -0.881 |  0.75  |  7.266 |
+|  8 | -0.029 |  1.654 | -0.063 |  1.111 | -0.435 |    1.111 |  1.689 |  6.186 |
+|  9 | -0.01  |  1.986 | -0.091 |  1.502 | -0.389 |    1.502 |  1.873 |  6.077 |
 
 Alternative to a DataFrame, we can also plot the simulated paths:
 
@@ -231,7 +231,7 @@ for i, (var, path) in enumerate(sim_df.items()):
     ax[i].plot(path)
     ax[i].set_title(var)
     ax[i].grid(linestyle=":")
-plt.suptitle(f"Simulation over {T} periods with stochastic shocks", fontsize=16)
+plt.suptitle("Simulation over 200 periods with stochastic shocks", fontsize=16)
 plt.tight_layout()
 ```
 

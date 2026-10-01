@@ -8,7 +8,7 @@ tags:
 @dataclass(frozen=True)
 class FirstOrderSolution(
     steady_state: ndarray,
-    stab: int,
+    stab: BKStatus,
     eig: ndarray,
     order: int,
     p: ndarray,
@@ -23,7 +23,7 @@ First-order policy data returned by the Klein solver. `FirstOrderSolution` exten
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | `steady_state` | `ndarray[float]`, shape `(n_var,)` | Newton-resolved expansion point of the solution. |
-| `stab` | `int` | Stability indicator: `-1` means too few stable eigenvalues, `0` means the required number, and `1` means too many. |
+| `stab` | `BKStatus` | `IntEnum` stability indicator: `-1` means too few stable eigenvalues (no stable solutions), `0` means the required number (determinate), and `1` means too many (indeterminate). |
 | `eig` | `ndarray[complex]` | Eigenvalues of the linearized system. |
 | `order` | `int` | Always `1`. |
 | `p` | `ndarray[float]`, shape `(n_state, n_state)` | State transition matrix. |
@@ -32,3 +32,9 @@ First-order policy data returned by the Klein solver. `FirstOrderSolution` exten
 | `B` | `ndarray[float]`, shape `(n_var, n_shock)` | Innovation impact matrix in compiled shock order. |
 
 `p` and `f` use the model's state and control partition. `A` and `B` give the full affine state-space transition in compiled order: `x(t+1) = A x(t) + B ε(t+1)`.
+
+__Properties:__
+
+|__Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| `is_determinate` | `bool` | Whether the solution is determinate (stable and unique). |

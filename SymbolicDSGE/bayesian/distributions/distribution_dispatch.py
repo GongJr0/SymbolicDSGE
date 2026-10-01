@@ -29,23 +29,22 @@ DISTRIBUTION_DISPATCH: dict[DistributionFamily, type[Distribution]] = {
 }
 
 
-def get_distribution(family: str) -> type[Distribution]:
+def get_distribution(family: str | DistributionFamily) -> type[Distribution]:
     """Get the distribution class for a given distribution family.
 
     Parameters
     ----------
-    family : str
+    family : str | DistributionFamily
         Family name of the distribution. Must be a member of the :class:`DistributionFamily` enum.
 
     Returns
     -------
     type[Distribution]
         Distribution class corresponding to the given family.
-
     """
     if family not in DISTRIBUTION_DISPATCH:
         raise ValueError(
-            f"Unsupported distribution family: {family}\n please choose from: {list(DISTRIBUTION_DISPATCH.values())}"
+            f"Unsupported distribution family: {family}\n please choose from: [{', '.join(DistributionFamily)}]"
         )
     family_enum = DistributionFamily(family)
     return DISTRIBUTION_DISPATCH[family_enum]

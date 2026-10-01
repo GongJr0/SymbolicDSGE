@@ -29,6 +29,7 @@ __Properties:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
+| is_determinate | `bool` | Whether the model solution is unique and stable. Reports for the reference regime in piecewise models. |
 | config | `#!python ModelConfig` | Parsed model configuration object. |
 | kalman_config | `#!python KalmanConfig | None` | Parsed Kalman Filter configuration object. |
 

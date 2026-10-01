@@ -562,6 +562,11 @@ class SolvedModel(ABC, Generic[Policy]):
         raise ValueError(f"Unrecognized filter mode: {filter_mode!r}")
 
     @property
+    def is_determinate(self) -> bool:
+        """Whether the model's policy solution is determinate (stable and unique)."""
+        return self.policy.is_determinate
+
+    @property
     def config(self) -> ModelConfig:
         """Model configuration, including calibration, equations, and metadata."""
         return self.compiled.config

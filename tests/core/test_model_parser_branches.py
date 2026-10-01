@@ -42,11 +42,9 @@ def test_reject_unknown_keys():
         _reject_unknown_keys({"z": 1}, frozenset({"a"}), "block")
 
 
-def test_load_yaml_rejects_non_mapping_root(tmp_path):
-    p = tmp_path / "root_list.yaml"
-    p.write_text("- a\n- b\n", encoding="utf-8")
+def test_load_yaml_rejects_non_mapping_root():
     with pytest.raises(TypeError, match="root must be a mapping"):
-        _load_yaml(p)
+        _load_yaml("- a\n- b\n", "<test>")
 
 
 def test_sympy_parsers_relational_and_expr_guards():

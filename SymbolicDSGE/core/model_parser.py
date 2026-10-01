@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import copy
+import io
 import re
 import sys
 from dataclasses import dataclass
 from io import StringIO
 from itertools import combinations
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from types import FrameType
 from typing import Any, Callable, Iterator, TypeAlias, Sequence
 import warnings
@@ -17,6 +17,7 @@ import warnings
 from sympy.core.basic import Basic
 from sympy.core.symbol import AppliedUndef
 import yaml
+from yaml.constructor import ConstructorError
 import sympy as sp
 from sympy import Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
@@ -75,8 +76,8 @@ _ALLOWED_R_KEYS = frozenset({"std", "corr"})
 def _caller_stacklevel() -> int:
     """``warnings.warn`` stacklevel of the first frame outside this module.
 
-    Entry depth varies: ``from_string`` re-enters through ``__init__``, so it
-    sits one frame deeper than path-based construction.
+    Entry depth varies with which constructor was used, so the frames are
+    walked rather than counted.
     """
     frame: FrameType | None = sys._getframe(1)
     level = 1
@@ -160,13 +161,20 @@ class ModelParser:
     Attributes
     ----------
     config_path : str | Path
-        Path the configuration was read from.
+        Path the configuration was read from, or the source name when it was
+        built from text.
     """
 
     def __init__(self, config_path: str | Path) -> None:
-        self.config_path = Path(config_path)
+        path = Path(config_path)
+        self._build(path.read_text(encoding="utf-8"), str(path), path)
+
+    def _build(self, text: str, name: str, config_path: str | Path) -> None:
+        self.config_path = config_path
+        self._text = text
+        self._name = name
         self.raw_data, self.parsed = self.from_yaml()
-        self.parsed.model.source_yaml = self.config_path.read_text(encoding="utf-8")
+        self.parsed.model.source_yaml = text
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -202,25 +210,14 @@ class ModelParser:
         return self.parsed
 
     @classmethod
-    def from_string(cls, text: str) -> "ModelParser":
+    def from_string(cls, text: str, name: str = "<yaml string>") -> "ModelParser":
         """Construct a parser from YAML *text* (e.g. a bundle config member).
 
-        Mirrors path-based construction by routing the text through a temporary
-        file, so the full parse pipeline (including the Kalman block) runs
-        unchanged.
+        ``name`` is what a parse error names as its source, so a caller holding
+        one (a bundle member, say) should pass it.
         """
-        with NamedTemporaryFile(
-            "w", suffix=".yaml", encoding="utf-8", delete=False
-        ) as handle:
-            handle.write(text)
-            tmp_path = Path(handle.name)
-        try:
-            parser = cls(tmp_path)
-        finally:
-            tmp_path.unlink(missing_ok=True)
-        # Preserve the caller's original text verbatim (the temp-file round-trip
-        # is a no-op today, but pin it here so callers can rely on equality).
-        parser.parsed.model.source_yaml = text
+        parser = cls.__new__(cls)
+        parser._build(text, name, name)
         return parser
 
     @classmethod
@@ -295,19 +292,54 @@ class ModelParser:
 
     @classmethod
     def validate_equations(cls, conf: ModelConfig) -> None:
-        """Reject a model equation naming a symbol the model declares nowhere.
+        """Validate model and observable equations for unknown or unpermitted symbols.
 
-        The same check regime replacements get, on the equations they replace: a
-        typo would otherwise survive parse as a live ``Symbol`` and only fail in
-        the printer, where the name is no longer attached to an equation.
+        Model equations are checked for unknown symbols only.
+        Observables extend the check to reject references to shocks.
+        Finally, the specification is checked for a one-to-one mapping between
+        variables and model equations.
         """
         for name, eq in conf.equations.model.items():
             unknown_atoms = cls._unknown_atoms(conf, eq)
             if unknown_atoms:
                 raise ValueError(
-                    f"Equation '{name}' references unknown symbols: "
+                    f"Equation {name!r} references unknown symbols: "
                     f"{sorted(str(a) for a in unknown_atoms)}"
                 )
+
+        for name, eq in conf.equations.observable.items():
+            unknown_atoms = cls._unknown_atoms(conf, eq)
+            if unknown_atoms:
+                raise ValueError(
+                    f"Observable {str(name)!r} references unknown symbols: "
+                    f"{sorted(str(a) for a in unknown_atoms)}"
+                )
+            shock_refs = cls._shock_atoms(conf, eq)
+            if shock_refs:
+                raise ValueError(
+                    f"Observable {str(name)!r} references shock(s) "
+                    f"{sorted(str(a) for a in shock_refs)}; observables may only "
+                    f"reference model variables and parameters."
+                )
+
+        defining = list(conf.equations.model.values())
+        for replacements in (conf.equations.regime or {}).values():
+            defining.extend(replacements.values())
+        used = {call.func for eq in defining for call in eq.atoms(AppliedUndef)}
+
+        absent = [v for v in conf.variables.variables if v not in used]
+        if absent:
+            raise ValueError(
+                f"Variable(s) {sorted(str(v) for v in absent)} occur in no model "
+                "equation."
+            )
+
+        n_var, n_eq = len(conf.variables.variables), len(conf.equations.model)
+        if n_var != n_eq:
+            raise ValueError(
+                f"The model block has {n_eq} equation(s) for {n_var} variable(s); "
+                f"each variable needs exactly one equation."
+            )
 
     @classmethod
     def validate_constraints(cls, conf: ModelConfig) -> None:
@@ -469,7 +501,7 @@ class ModelParser:
             Object containing model and (if present) Kalman configuration. The first element is the raw YAML data as a dictionary, and the second element is the parsed configuration.
 
         """
-        data = _load_yaml(self.config_path)
+        data = _load_yaml(self._text, self._name)
         _validate_schema(data)
 
         ns = _build_namespace(data)
@@ -589,9 +621,52 @@ class ModelParser:
 # ---------------- helpers ----------------
 
 
-def _load_yaml(path: Path) -> dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+class _StrictLoader(yaml.SafeLoader):
+    """``SafeLoader`` that rejects a mapping with a repeated key.
+
+    A repeat is legal YAML and resolves to the last value, so a parameter or an
+    equation written twice would otherwise resolve to the last one.
+    """
+
+    def construct_mapping(
+        self, node: yaml.MappingNode, deep: bool = False
+    ) -> dict[Any, Any]:
+        seen: set[Any] = set()
+        duplicates: list[Any] = []
+        mark = node.start_mark
+        for key_node, _ in node.value:
+            # Merge keys are removed by ``flatten_mapping`` below and have no
+            # constructor of their own, so they are never built here.
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                continue
+            key = self.construct_object(key_node, deep=deep)
+            if key in seen and key not in duplicates:
+                duplicates.append(key)
+                if len(duplicates) == 1:
+                    mark = key_node.start_mark
+            seen.add(key)
+        if duplicates:
+            raise ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key(s): {sorted(str(k) for k in duplicates)}",
+                mark,
+            )
+        return super().construct_mapping(node, deep=deep)
+
+
+class _NamedStringIO(io.StringIO):
+    """``StringIO`` that reports a name, which YAML marks cite as the source."""
+
+    def __init__(self, text: str, name: str) -> None:
+        super().__init__(text)
+        self.name = name
+
+
+def _load_yaml(text: str, name: str) -> dict[str, Any]:
+    # A fresh buffer per call: PyYAML reads the stream to EOF, and `name` is
+    # what puts the source in every mark it raises.
+    data = yaml.load(_NamedStringIO(text, name), Loader=_StrictLoader)
     if not isinstance(data, dict):
         raise TypeError("YAML root must be a mapping/dict.")
     return data
@@ -654,6 +729,10 @@ def _build_namespace(
     list[Symbol],
 ]:
     ordered_var_names, _ = _coerce_variable_data(data)
+    _raise_if_not_unique(ordered_var_names, "variables must be unique.")
+    _raise_if_not_unique(data["observables"], "observables must be unique.")
+    _raise_if_not_unique(data["shocks"], "shocks must be unique.")
+
     t = sp.symbols("t", integer=True)
 
     variables: list[Function] = list(

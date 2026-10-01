@@ -9,7 +9,13 @@ from __future__ import annotations
 from .transforms.transform import TransformMethod, Transform
 from .transforms.transform_dispatch import get_transform
 
-from .distributions.distribution import Distribution, RandomState, Size, VecF64
+from .distributions.distribution import (
+    Distribution,
+    DistributionFamily,
+    RandomState,
+    Size,
+    VecF64,
+)
 from .distributions.distribution_dispatch import get_distribution
 from .distributions.param_builder import get_dist_params
 
@@ -219,9 +225,9 @@ class Prior:
 
 
 def make_prior(
-    distribution: str,
+    distribution: str | DistributionFamily,
     parameters: dict[str, Any],
-    transform: str | None = None,
+    transform: str | TransformMethod | None = None,
     transform_kwargs: dict[str, Any] | None = None,
 ) -> Prior:
     """Build a :class:`Prior` from the text names a spec carries.

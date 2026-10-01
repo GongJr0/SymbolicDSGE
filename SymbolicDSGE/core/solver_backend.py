@@ -6,6 +6,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from collections.abc import Sequence
+from enum import IntEnum, unique
 from typing import Any
 
 from numpy import complex128, float64, int8, int64
@@ -16,6 +17,38 @@ from .._ckernels.occbin import occbin_solve1
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
+
+
+@unique
+class BKStatus(IntEnum):
+    """Blanchard-Kahn stability indicator."""
+
+    NO_STABLE_SOLUTION = -1
+    DETERMINATE = 0
+    INDETERMINATE = 1
+
+    # C sentinel value unreachable from Python. Has a member so real raises are not
+    # blocked by a missing member if the C code ever leaks out.
+    UNSET = 2
+
+    @property
+    def message(self) -> str:
+        """Human-readable message for the stability indicator."""
+        match self:
+            case BKStatus.NO_STABLE_SOLUTION:
+                return (
+                    "There are more unstable eigenvalues than forward-looking variables. "
+                    "This specification cannot yield a stable solution."
+                )
+            case BKStatus.DETERMINATE:
+                return "The solution for this specification is unique and stable."
+            case BKStatus.INDETERMINATE:
+                return (
+                    "There are more forward-looking variables than unstable eigenvalues. "
+                    "This solution is one of multiple that exist for this specification."
+                )
+            case BKStatus.UNSET:
+                return "This is a C sentinel value. Please file a bug report if you reached this message."
 
 
 @dataclass(frozen=True, repr=False)
@@ -29,9 +62,14 @@ class BaseSolution:
     """
 
     steady_state: NDF
-    stab: int
+    stab: BKStatus
     eig: NDC
     order: int
+
+    @property
+    def is_determinate(self) -> bool:
+        """Whether the solution is determinate (unique and stable)."""
+        return self.stab == BKStatus.DETERMINATE
 
 
 @dataclass(frozen=True, repr=False)
@@ -177,7 +215,7 @@ def klein_solve(
             residual_cfunc.address, ss_seed, params, incidence, n_states, n_exog
         )
     return FirstOrderSolution(
-        steady_state=ss, stab=stab, eig=eig, order=1, p=p, f=f, A=A, B=B
+        steady_state=ss, stab=BKStatus(stab), eig=eig, order=1, p=p, f=f, A=A, B=B
     )
 
 
@@ -234,7 +272,7 @@ def sgu_solve(
         )
     return SecondOrderSolution(
         steady_state=ss,
-        stab=stab,
+        stab=BKStatus(stab),
         eig=eig,
         order=2,
         p=p,
@@ -291,7 +329,7 @@ def piecewise_solve(
         )
     return PiecewiseSolution(
         steady_state=ss,
-        stab=stab,
+        stab=BKStatus(stab),
         eig=eig,
         order=1,
         a=a,
@@ -304,7 +342,7 @@ def piecewise_solve(
         # stack the recursion wants is already the two blocks end to end.
         ref=FirstOrderSolution(
             steady_state=ss,
-            stab=stab,
+            stab=BKStatus(stab),
             eig=eig,
             order=1,
             p=ghx[:n_states],
