@@ -65,7 +65,7 @@ def solved(compiled, par):
     """(ss, reference pencil, ghx, B) for the reference regime."""
     seed = DSGESolver._resolve_ss_seed(None, compiled)
     addr = compiled.construct_objective_cfunc().address
-    ss, f, p, _, _, _, B = klein_solve1(
+    _, ss, f, p, _, _, _, B = klein_solve1(
         addr,
         seed,
         par,
