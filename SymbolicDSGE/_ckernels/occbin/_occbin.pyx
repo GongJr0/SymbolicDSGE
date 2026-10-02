@@ -77,17 +77,6 @@ cdef extern from "../core/klein_solve.h" nogil:
         int64_t n_pred
         int64_t n_both
         int64_t n_fwd
-    int SDSGE_KLEIN_SOLVE_OK
-    int SDSGE_KLEIN_SOLVE_SS_SINGULAR
-    int SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE
-    int SDSGE_KLEIN_SOLVE_QZ
-    int SDSGE_KLEIN_SOLVE_SINGULAR
-    int SDSGE_KLEIN_SOLVE_NO_STATES
-    int SDSGE_KLEIN_SOLVE_SECOND_ORDER
-    int SDSGE_KLEIN_SOLVE_RISK
-    int SDSGE_KLEIN_SOLVE_ABSENT_VAR
-    int SDSGE_KLEIN_SOLVE_QR
-    int SDSGE_KLEIN_SOLVE_STATIC
 
 cdef extern from "../core/klein_postproc.h" nogil:
     int SDSGE_KLEIN_STAB_UNSET
@@ -892,7 +881,7 @@ def occbin_sim(a, b, c, d, cst, ghx_ref, ss, par, size_t cond_addr,
 
 
 cdef _sim_error(int64_t status, occbin_diag *diag, int64_t max_iter):
-    """Dynare's error code for a period that never settled, as a message."""
+    """Error code for a period that never settled. In Dynare's vocab."""
     cdef int64_t s = diag.fail_period
     if status == SDSGE_OCCBIN_RECURSION_SINGULAR:
         return (
@@ -909,45 +898,6 @@ cdef _sim_error(int64_t status, occbin_diag *diag, int64_t max_iter):
             f"iterations."
         )
     return f"occbin_sim: shock period {s} failed with status {status}."
-
-
-cdef _raise_klein_error(int64_t err, str who):
-    """The reference solve's failures, worded as ``_core.pyx`` words them.
-
-    ``solver_backend._bk_dating_hint`` matches on the Blanchard-Kahn text, so a
-    piecewise model has to fail in the same words a reference one does. The
-    table covers the whole status set for the same reason, the second-order
-    codes included: a piecewise solve cannot reach those, but a table that
-    matches arm for arm is one that stays worded alike.
-    """
-    if err == SDSGE_KLEIN_SOLVE_OK:
-        return
-    if err == SDSGE_KLEIN_SOLVE_SS_SINGULAR:
-        raise ValueError("steady_state_newton: singular Jacobian (a - b).")
-    if err == SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE:
-        raise ValueError(
-            "steady_state_newton: did not converge within max_iter "
-            "(or the residual went non-finite)."
-        )
-    if err == SDSGE_KLEIN_SOLVE_QZ:
-        raise RuntimeError("klein_qz: LAPACK zgges failed.")
-    if err == SDSGE_KLEIN_SOLVE_SINGULAR:
-        raise ValueError(
-            "klein_postprocess: singular z11/s11 (Blanchard-Kahn failure)."
-        )
-    if err == SDSGE_KLEIN_SOLVE_NO_STATES:
-        raise ValueError("klein_postprocess: model has no states.")
-    if err == SDSGE_KLEIN_SOLVE_SECOND_ORDER:
-        raise ValueError("solve_second_order: singular second-order system.")
-    if err == SDSGE_KLEIN_SOLVE_RISK:
-        raise ValueError("solve_second_order: singular risk-correction system.")
-    if err == SDSGE_KLEIN_SOLVE_ABSENT_VAR:
-        raise ValueError("pencil_partition: a variable occurs at no date.")
-    if err == SDSGE_KLEIN_SOLVE_QR:
-        raise RuntimeError("pencil_rotate_static: LAPACK dgeqrf/dormqr failed.")
-    if err == SDSGE_KLEIN_SOLVE_STATIC:
-        raise ValueError("klein_postprocess: singular static block.")
-    raise RuntimeError(f"{who}: unhandled solve status {err}.")
 
 
 def occbin_solve1(size_t residual_addr, seed, params, incidence,
@@ -1120,5 +1070,4 @@ def occbin_solve1(size_t residual_addr, seed, params, incidence,
     with nogil:
         err = sdsge_occbin_solve1(&spec, &out, &arv[0], &iarv[0])
 
-    _raise_klein_error(err, "occbin_solve1")
-    return ss, ghx, int(out.ref.stab), eig, A, B, a, b, c, d, cst
+    return err, ss, ghx, int(out.ref.stab), eig, A, B, a, b, c, d, cst

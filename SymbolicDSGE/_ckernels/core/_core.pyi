@@ -78,8 +78,8 @@ def klein_postprocess(
     t: _C128,
     z: _C128,
     n_states: int,
-) -> tuple[_C128, _C128, int, _C128]:
-    """(f, p, stab, eig) from the ordered Schur factors."""
+) -> tuple[int, _C128, _C128, int, _C128]:
+    """(err, f, p, stab, eig) from the ordered Schur factors."""
 
 def spike_drive(fn_addr: int, a: _C128, b: _C128, out: _C128) -> None:
     """Stage-0 (#248): call a numba @cfunc (by ``.address``) from native C, nogil."""
@@ -127,8 +127,8 @@ def klein_solve1(
     incidence: _I8,
     n_state: int,
     n_exog: int = ...,
-) -> tuple[_F64, _F64, _F64, int, _C128, _F64, _F64]:
-    """(ss, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
+) -> tuple[int, _F64, _F64, _F64, int, _C128, _F64, _F64]:
+    """(rc, ss, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
 
     Fuses steady_state_newton, klein_preprocess, klein_qz, klein_postprocess and
     assemble_transition into one GIL release. ``f``/``p`` are real; the Schur
@@ -146,6 +146,7 @@ def sgu_klein_solve2(
     n_state: int,
     n_exog: int = ...,
 ) -> tuple[
+    int,
     _F64,
     _F64,
     _F64,
@@ -162,7 +163,7 @@ def sgu_klein_solve2(
     _F64,
     _F64,
 ]:
-    """(ss, f, p, stab, eig, gxx, hxx, gxu, hxu, guu, huu, gss, hss, A, B) <-
+    """(rc, ss, f, p, stab, eig, gxx, hxx, gxu, hxu, guu, huu, gss, hss, A, B) <-
     one-shot second-order solve.
 
     klein_solve1 plus bicomplex_hessian and second_order in one GIL release. The

@@ -99,8 +99,8 @@ def occbin_solve1(
     rows: Sequence[_I64],
     n_constraint: int,
     n_exog: int = ...,
-) -> tuple[_F64, _F64, int, _C128, _F64, _F64, _F64, _F64, _F64, _F64, _F64]:
-    """(ss, ghx, stab, eig, A, B, a, b, c, d, cst) <- reference solve and every pencil.
+) -> tuple[int, _F64, _F64, int, _C128, _F64, _F64, _F64, _F64, _F64, _F64, _F64]:
+    """(err, ss, ghx, stab, eig, A, B, a, b, c, d, cst) <- reference solve and every pencil.
 
     ``pencil_addrs`` and ``rows`` are indexed by binding bitmask and dense over
     ``0..2 ** n_constraint - 1``, slot 0 the reference with address 0 and no

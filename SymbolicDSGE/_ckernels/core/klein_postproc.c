@@ -40,12 +40,6 @@ i64 klein_postproc(const c128 *SDSGE_RESTRICT s, const c128 *SDSGE_RESTRICT t,
    * checking the return code still sees a violation. */
   *stab = SDSGE_KLEIN_STAB_UNSET;
 
-  /* A model with no states has no Klein solution. Fail fast: the
-   * state/inv/solve routines all assume n_s >= 1. */
-  if (n_s <= 0) {
-    return SDSGE_KLEIN_POSTPROC_INVALID;
-  }
-
   const i64 sq = n_s * n_s;
   c128 *SDSGE_RESTRICT z11 = (c128 *)arena;
   c128 *SDSGE_RESTRICT z21 = z11 + sq;
@@ -81,12 +75,17 @@ i64 klein_postproc(const c128 *SDSGE_RESTRICT s, const c128 *SDSGE_RESTRICT t,
     }
   }
 
+  if (c128_abs(t[(n_s - 1) * N + (n_s - 1)]) >
+      c128_abs(s[(n_s - 1) * N + (n_s - 1)])) {
+    return SDSGE_KLEIN_NO_STABLE_SOLUTION; /* Too Few stable eigenvalues */
+  }
+
   /* An s11 diagonal entry at the eig loop's bound is the singular s11 the dyn
    * solve would otherwise factor. Written as that test negated, so the two
    * cannot drift apart and a NAN cannot pass either. */
   for (i64 i = 0; i < n_s; ++i) {
     if (!(c128_abs(s[i * N + i]) > 1e-12)) {
-      return SDSGE_KLEIN_POSTPROC_SINGULAR;
+      return SDSGE_KLEIN_POSTPROC_INFINITE_ROOT;
     }
   }
 
@@ -100,23 +99,21 @@ i64 klein_postproc(const c128 *SDSGE_RESTRICT s, const c128 *SDSGE_RESTRICT t,
     }
   }
   if (c128_lu_factor_inplace(tmp, iarena, n_s) != SDSGE_LU_SUCCESS) {
-    return SDSGE_KLEIN_POSTPROC_SINGULAR;
+    return SDSGE_KLEIN_POSTPROC_RANK_FAIL;
   }
   c128_lu_solve(tmp, iarena, eye, z11i, n_s, n_s);
 
-  /* A z11 the factorization accepted but whose inverse carries no digits. The
-   * norms cost two traversals and no factorization, and the rule that comes off
-   * a 1e16-scale inverse is not a solution. */
+  /* A z11 the factorization accepted but whose inverse carries no digits. */
   const f64 rcond = 1.0 / (c128_norm1(z11, n_s) * c128_norm1(z11i, n_s));
   if (!(rcond > 1e-9)) {
-    return SDSGE_KLEIN_POSTPROC_SINGULAR;
+    return SDSGE_KLEIN_POSTPROC_RANK_FAIL;
   }
 
   /* dyn = solve(s11, t11). s11 is dead after this, so it factors in place.
    * An upper triangular block pivots on its own diagonal, so the gate above has
    * already rejected what this arm could catch. */
   if (c128_lu_factor_inplace(s11, iarena, n_s) != SDSGE_LU_SUCCESS) {
-    return SDSGE_KLEIN_POSTPROC_SINGULAR;
+    return SDSGE_KLEIN_POSTPROC_INFINITE_ROOT;
   }
   c128_lu_solve(s11, iarena, t11, dyn, n_s, n_s);
 
@@ -124,17 +121,14 @@ i64 klein_postproc(const c128 *SDSGE_RESTRICT s, const c128 *SDSGE_RESTRICT t,
   c128_matmul(z11, dyn, n_s, n_s, n_s, tmp);
   c128_matmul(tmp, z11i, n_s, n_s, n_s, p);
 
-  /* The verdict, last: only a rule that cleared every rejection gets one. The
-   * tests read the const factors, not the s11 copy the dyn solve consumed. */
   *stab = 0;
-  if (c128_abs(t[(n_s - 1) * N + (n_s - 1)]) >
-      c128_abs(s[(n_s - 1) * N + (n_s - 1)])) {
-    *stab = -1; /* Too Few stable eigenvalues */
-  }
-
   if (n_s < N) {
     if (c128_abs(t[n_s * N + n_s]) < c128_abs(s[n_s * N + n_s])) {
-      *stab = 1; /* Too Many stable eigenvalues */
+      /* Too Many stable eigenvalues.
+       * The solution remains valid, having cleared the singularity and rcond
+       * tests. It is a BK failure that the user can choose to ignore without
+       * hindering any following library interaction. */
+      *stab = 1;
     }
   }
   return SDSGE_KLEIN_POSTPROC_SUCCESS;

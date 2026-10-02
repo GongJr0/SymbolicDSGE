@@ -119,14 +119,12 @@ i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out, f64 *arena,
    * a params draw with no steady state fails and is rejected as infeasible. */
   i64 iters = 0;
   f64 *stage = arena + sdsge_solve1_fp_reserve(spec->n_state, spec->n_ctrl);
-  const i64 rc = sdsge_steady_state_newton(
+
+  i64 rc = sdsge_steady_state_newton(
       spec->residual, spec->ss_seed, spec->params, n, spec->n_par, spec->n_exog,
       SDSGE_SS_MAX_ITER, SDSGE_SS_TOL, out->ss, &iters, stage, iarena);
   if (rc != SDSGE_NEWTON_OK) {
-    /* Translated rather than forwarded: the caller reports a klein solve, and
-     * the two families no longer share numbers. */
-    return rc == SDSGE_NEWTON_SINGULAR ? SDSGE_KLEIN_SOLVE_SS_SINGULAR
-                                       : SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE;
+    return rc;
   }
 
   klein_preproc(spec->residual, out->ss, spec->params, n, spec->n_par,
@@ -162,36 +160,22 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
     return SDSGE_KLEIN_SOLVE_NO_STATES;
   }
 
-  f64 *cur = arena + sdsge_solve1_fp_reserve(spec->n_state, spec->n_ctrl);
-  f64 *a_rot = cur;
-  cur += n * n;
-  f64 *b_rot = cur;
-  cur += n * n;
-  f64 *c_rot = cur;
-  cur += n * n;
-  f64 *d_rot = cur;
-  cur += n * ne;
-  f64 *emat = cur;
-  cur += nd * nd;
-  f64 *dmat = cur;
-  cur += nd * nd;
-  c128 *gx_c = (c128 *)cur;
-  cur += 2 * nsfwrd * nspred;
-  c128 *hx_c = (c128 *)cur;
-  cur += 2 * nspred * nspred;
-  f64 *gx = cur;
-  cur += nsfwrd * nspred;
-  f64 *hx = cur;
-  cur += nspred * nspred;
-  f64 *ghx = cur;
-  cur += n * nspred;
-  f64 *amat = cur;
-  cur += n * n;
-  f64 *work = cur; /* n by nspred: C@gx, then the static right-hand side */
-  cur += n * nspred;
-  f64 *ghu = cur;
-  cur += n * ne;
-  f64 *stage = cur;
+  /* The two complex blocks step in c128 units */
+  f64 *a_rot = arena + sdsge_solve1_fp_reserve(spec->n_state, spec->n_ctrl);
+  f64 *b_rot = a_rot + n * n;
+  f64 *c_rot = b_rot + n * n;
+  f64 *d_rot = c_rot + n * n;
+  f64 *emat = d_rot + n * ne;
+  f64 *dmat = emat + nd * nd;
+  c128 *gx_c = (c128 *)(dmat + nd * nd);
+  c128 *hx_c = gx_c + nsfwrd * nspred;
+  f64 *gx = (f64 *)(hx_c + nspred * nspred);
+  f64 *hx = gx + nsfwrd * nspred;
+  f64 *ghx = hx + nspred * nspred;
+  f64 *amat = ghx + n * nspred;
+  f64 *work = amat + n * n; /* n by nspred: C@gx, then the static RHS */
+  f64 *ghu = work + n * nspred;
+  f64 *stage = ghu + n * ne;
 
   for (i64 k = 0; k < n * n; ++k) {
     a_rot[k] = out->a_real[k];
@@ -227,14 +211,10 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
   sdsge_transpose_sq(out->t, nd);
   sdsge_transpose_sq(out->z, nd);
 
-  switch (klein_postproc(out->s, out->t, out->z, nspred, nsfwrd, gx_c, hx_c,
-                         &out->stab, out->eig, stage, iarena)) {
-  case SDSGE_KLEIN_POSTPROC_SUCCESS:
-    break;
-  case SDSGE_KLEIN_POSTPROC_INVALID:
-    return SDSGE_KLEIN_SOLVE_NO_STATES;
-  default:
-    return SDSGE_KLEIN_SOLVE_SINGULAR;
+  i64 rc = klein_postproc(out->s, out->t, out->z, nspred, nsfwrd, gx_c, hx_c,
+                          &out->stab, out->eig, stage, iarena);
+  if (rc != SDSGE_KLEIN_POSTPROC_SUCCESS) {
+    return rc;
   }
   sdsge_real_part(gx_c, gx, nsfwrd * nspred);
   sdsge_real_part(hx_c, hx, nspred * nspred);
@@ -285,7 +265,7 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
       }
     }
     if (sdsge_solve(amat, work, nstatic, nspred, ghx) != SDSGE_LU_SUCCESS) {
-      return SDSGE_KLEIN_SOLVE_STATIC;
+      return SDSGE_KLEIN_SOLVE_STATIC_SINGULAR;
     }
   }
 
@@ -315,7 +295,7 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
   }
   if (sdsge_solve(amat, d_rot, n, ne, ghu) != SDSGE_LU_SUCCESS) {
     out->stab = SDSGE_KLEIN_STAB_UNSET;
-    return SDSGE_KLEIN_SOLVE_SINGULAR;
+    return SDSGE_KLEIN_SOLVE_SHOCK_SINGULAR;
   }
 
   /* Scatter decision-rule order back to the canonical layout. Row i is variable
@@ -343,7 +323,7 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
 
 i64 sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out, f64 *arena,
                        i64 *iarena) {
-  const i64 rc = sdsge_klein_linearize(spec, out, arena, iarena);
+  i64 rc = sdsge_klein_linearize(spec, out, arena, iarena);
   if (rc != SDSGE_KLEIN_SOLVE_OK) {
     return rc;
   }
@@ -353,7 +333,7 @@ i64 sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out, f64 *arena,
 i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
                            sdsge_solve2 *out2, f64 *arena, i64 *iarena) {
   const klein_spec *s1 = &spec->first;
-  const i64 rc = sdsge_klein_solve1(s1, out1, arena, iarena);
+  i64 rc = sdsge_klein_solve1(s1, out1, arena, iarena);
   if (rc != SDSGE_KLEIN_SOLVE_OK)
     return rc;
 
@@ -361,16 +341,14 @@ i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
   sdsge_bx_from_B(out1->B, s1->n_state, s1->n_exog, out2->bx);
   sdsge_bicomplex_hessian(spec->bc_residual, out1->ss, s1->params, s1->n_var,
                           s1->n_par, s1->n_exog, s1->n_var, out2->f_xx, stage);
-  const i64 rc2 = sdsge_second_order(
-      out1->a_real, out1->b_real, out2->f_xx, out1->f, out1->p, out1->B,
-      spec->Q, s1->n_var, s1->n_state, s1->n_exog, out2->gxx, out2->hxx,
-      out2->gxu, out2->hxu, out2->guu, out2->huu, out2->gss, out2->hss, stage,
-      iarena);
-  if (rc2 != SDSGE_SECOND_ORDER_OK) {
-    /* Translated rather than forwarded: the caller reports a klein solve, and
-     * the two families no longer share numbers. */
-    return rc2 == SDSGE_SECOND_ORDER_RISK ? SDSGE_KLEIN_SOLVE_RISK
-                                          : SDSGE_KLEIN_SOLVE_SECOND_ORDER;
+  rc = sdsge_second_order(out1->a_real, out1->b_real, out2->f_xx, out1->f,
+                          out1->p, out1->B, spec->Q, s1->n_var, s1->n_state,
+                          s1->n_exog, out2->gxx, out2->hxx, out2->gxu,
+                          out2->hxu, out2->guu, out2->huu, out2->gss, out2->hss,
+                          stage, iarena);
+
+  if (rc != SDSGE_SECOND_ORDER_OK) {
+    return rc;
   }
   return SDSGE_KLEIN_SOLVE_OK;
 }

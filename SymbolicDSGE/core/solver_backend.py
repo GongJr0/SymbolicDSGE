@@ -2,21 +2,166 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
-from contextlib import contextmanager
 from dataclasses import dataclass
-from collections.abc import Sequence
 from enum import IntEnum, unique
-from typing import Any
 
-from numpy import complex128, float64, int8, int64
+from numpy import array2string, complex128, empty, float64, int64
 from numpy.typing import NDArray
 
-from .._ckernels.core import klein_solve1, sgu_klein_solve2
+from .._ckernels.core import INC_LAG, INC_LEAD, klein_solve1, sgu_klein_solve2
+from .._ckernels.core._solve_errors import SolveStatus
 from .._ckernels.occbin import occbin_solve1
+from .compiled_model import CompiledModel, _shock_covariance
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
+
+
+# Solve failures. One class per message shape rather than per status: what a
+# failure can report is fixed by how far the solve got, which is also what the
+# templates below compose.
+
+_CODE = "Code: {status.name} ({status.value})\nDescription: {description}"
+_CLASSIFICATION = (
+    "\nState space: {n_state} state(s) {states}, {n_jump} jump(s) {jumps}{mixed}"
+)
+_EIGENVALUES = "\nGeneralized eigenvalues: {eig}"
+_SECOND_ORDER = "\nThe first-order rule was obtained; the correction over it was not."
+
+
+class SolveError(RuntimeError):
+    """A native solve that produced no usable rule.
+
+    :attr:`status` is the kernel's verdict. The remaining fields are whatever the
+    failing stage had produced, and each subclass renders the ones it has.
+    """
+
+    template = _CODE
+
+    def __init__(
+        self,
+        status: SolveStatus,
+        description: str,
+        states: tuple[str, ...] | None = None,
+        jumps: tuple[str, ...] | None = None,
+        mixed: tuple[str, ...] | None = None,
+        eig: NDC | None = None,
+    ) -> None:
+        self.status = status
+        self.states = states
+        self.jumps = jumps
+        self.mixed = mixed
+        self.eig = eig
+        super().__init__(
+            self.template.format(
+                status=status,
+                description=description,
+                n_state=len(states or ()),
+                n_jump=len(jumps or ()),
+                states=states,
+                jumps=jumps,
+                mixed=(
+                    f", {mixed} occurring at both dates and counted in each"
+                    if mixed
+                    else ""
+                ),
+                eig=(
+                    array2string(eig, precision=4, max_line_width=72)
+                    if eig is not None
+                    else ""
+                ),
+            )
+        )
+
+
+class SteadyStateError(SolveError):
+    """The steady state did not resolve, which happens before anything else runs."""
+
+
+class DecompositionError(SolveError):
+    """The decomposition the rule is read from failed in LAPACK."""
+
+    template = _CODE + _CLASSIFICATION
+
+
+class DecisionRuleError(DecompositionError):
+    """The rule could not be read off a decomposition that succeeded."""
+
+    template = _CODE + _CLASSIFICATION + _EIGENVALUES
+
+
+class SecondOrderError(DecisionRuleError):
+    """The quadratic terms or the risk correction failed over a first-order rule."""
+
+    template = _CODE + _CLASSIFICATION + _EIGENVALUES + _SECOND_ORDER
+
+
+_FAILURES: dict[SolveStatus, tuple[type[SolveError], str]] = {
+    SolveStatus.NEWTON_SINGULAR: (
+        SteadyStateError,
+        "The steady-state Jacobian is singular at this parameter point.",
+    ),
+    SolveStatus.NEWTON_NO_CONVERGE: (
+        SteadyStateError,
+        "The steady state did not converge within the kernel's iteration budget, "
+        "or the residual went non-finite.",
+    ),
+    SolveStatus.QR: (
+        DecompositionError,
+        "The rotation separating `t`-only variables failed.",
+    ),
+    SolveStatus.QZ: (
+        DecompositionError,
+        "The generalized Schur decomposition failed.",
+    ),
+    SolveStatus.RANK_FAIL: (
+        DecisionRuleError,
+        "Some combination of the model's states does not enter the solution.",
+    ),
+    SolveStatus.INFINITE_ROOT: (
+        DecisionRuleError,
+        "One of the roots taken as stable is infinite.",
+    ),
+    SolveStatus.NO_STABLE_SOLUTION: (
+        DecisionRuleError,
+        "Fewer stable eigenvalues than states: the model cannot yield a stable solution.",
+    ),
+    SolveStatus.STATIC_SINGULAR: (
+        DecisionRuleError,
+        "The subsystem of variables occurring only at 't' is singular.",
+    ),
+    SolveStatus.SHOCK_SINGULAR: (
+        DecisionRuleError,
+        "The shock loading cannot be recovered: matrix inversion failed "
+        "due to singularity.",
+    ),
+    SolveStatus.SECOND_ORDER_SINGULAR: (
+        SecondOrderError,
+        "Quadratic terms cannot be recovered: second-order system is singular.",
+    ),
+    SolveStatus.SECOND_ORDER_RISK: (
+        SecondOrderError,
+        "Risk-correction terms cannot be recovered: risk system is singular.",
+    ),
+}
+
+
+def raise_solve_error(
+    status: int,
+    *,
+    states: tuple[str, ...] | None = None,
+    jumps: tuple[str, ...] | None = None,
+    mixed: tuple[str, ...] | None = None,
+    eig: NDC | None = None,
+) -> None:
+    """Raise the failure a nonzero solve status names.
+
+    A status the table does not carry means the kernel grew a code, which the
+    enum reports before this gets the chance.
+    """
+    resolved = SolveStatus(status)
+    cls, description = _FAILURES[resolved]
+    raise cls(resolved, description, states, jumps, mixed, eig)
 
 
 @unique
@@ -167,109 +312,96 @@ class PiecewiseSolution(BaseSolution):
         return self.ref.B
 
 
-@contextmanager
-def _bk_dating_hint() -> Generator[None]:
-    """Name the model-authoring mistake behind a Blanchard-Kahn failure.
+def _classify(
+    compiled: CompiledModel,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """States, jumps, and the variables counted in both, by incidence bits."""
+    states: list[str] = []
+    jumps: list[str] = []
+    mixed: list[str] = []
+    for name, bits in zip(compiled.var_names, compiled._incidence):
+        if bits & INC_LAG:
+            states.append(name)
+        if bits & INC_LEAD:
+            jumps.append(name)
+        if bits & INC_LAG and bits & INC_LEAD:
+            mixed.append(name)
+    return tuple(states), tuple(jumps), tuple(mixed)
 
-    The kernel reports the factor it could not invert. This is the first frame
-    that knows the factors came from a model someone wrote, so the dating that
-    fails the same way is named here rather than there.
-    """
-    try:
-        yield
-    except ValueError as exc:
-        if "Blanchard-Kahn" not in str(exc):
-            raise
-        raise ValueError(
-            f"{exc} An equation shifted forward in time fails this way too: "
-            f"the compiler lifts lags into states of its own, so a process "
-            f"belongs in its natural form `v(t) = rho*v(t-1) + e` rather than "
-            f"`v(t+1) = rho*v(t) + e`."
-        ) from exc
+
+def _raise_for(compiled: CompiledModel, status: int, eig: NDC) -> None:
+    """Raise what a nonzero solve status names, with this model's classification."""
+    states, jumps, mixed = _classify(compiled)
+    raise_solve_error(status, states=states, jumps=jumps, mixed=mixed, eig=eig)
 
 
 def klein_solve(
-    residual_cfunc: Any,
-    params: NDF,
-    ss_seed: NDF,
-    incidence: NDArray[int8],
-    n_states: int,
-    *,
-    n_exog: int = 0,
+    compiled: CompiledModel, params: NDF, ss_seed: NDF
 ) -> FirstOrderSolution:
-    """First-order Klein solve of the compiled model at ``params``.
+    """First-order Klein solve of ``compiled`` at ``params``.
 
-    ``residual_cfunc`` is the compiled residual as a numba @cfunc
-    (``construct_objective_cfunc()``); it drives the complex-step preproc in C.
-    ``ss_seed`` seeds a Newton solve of ``F(ss, ss) = 0``; the solve linearizes
-    at the resolved steady state, which the returned :class:`KleinSolution`
-    carries in ``steady_state``.
-
-    One native call runs the whole solve (steady state, pencil, QZ, post-proc,
-    state space) under a single GIL release, so ``n_exog`` is needed here to size
-    the ``B`` block. A nonzero ``stab`` returns normally; the caller decides
-    whether to raise.
+    ``ss_seed`` seeds a Newton solve of ``F(ss, ss) = 0``; the solve linearizes at
+    the resolved steady state, which the returned solution carries in
+    ``steady_state``. One native call runs the whole solve under a single GIL
+    release. A nonzero ``stab`` returns normally and the caller decides whether
+    indeterminacy is fatal; anything the kernel rejects raises here.
     """
-    with _bk_dating_hint():
-        ss, f, p, stab, eig, A, B = klein_solve1(
-            residual_cfunc.address, ss_seed, params, incidence, n_states, n_exog
-        )
+    err, ss, f, p, stab, eig, A, B = klein_solve1(
+        compiled.construct_objective_cfunc().address,
+        ss_seed,
+        params,
+        compiled._incidence,
+        compiled.n_state,
+        compiled.n_exog,
+    )
+    if err:
+        _raise_for(compiled, err, eig)
     return FirstOrderSolution(
         steady_state=ss, stab=BKStatus(stab), eig=eig, order=1, p=p, f=f, A=A, B=B
     )
 
 
 def sgu_solve(
-    residual_cfunc: Any,
-    bc_residual_cfunc: Any,
-    params: NDF,
-    ss_seed: NDF,
-    Q: NDF,
-    incidence: NDArray[int8],
-    n_states: int,
-    *,
-    n_exog: int = 0,
+    compiled: CompiledModel, params: NDF, ss_seed: NDF
 ) -> SecondOrderSolution:
-    """Second-order solve of the compiled model at ``params``.
+    """Second-order solve of ``compiled`` at ``params``.
 
-    The first-order half is :func:`klein_solve`. ``bc_residual_cfunc``
-    is the bicomplex residual (``construct_objective_cfunc_bicomplex()``) that
-    drives the Hessian sweep, and ``Q`` is the ``(n_exog, n_exog)`` shock
-    covariance matrix the risk correction integrates against.
+    The first-order half is :func:`klein_solve`. The bicomplex residual drives the
+    Hessian sweep and the shock covariance is what the risk correction integrates
+    against, both taken from ``compiled``. One native call runs both orders.
 
-    One native call runs both orders under a single GIL release. A nonzero ``stab``
-    returns normally; the caller decides whether to raise.
-
-    ``A``/``B`` come back beside the solution. They are the
-    first-order state space, which ``SolvedModel`` already exposes directly.
+    ``A``/``B`` come back beside the solution. They are the first-order state
+    space, which ``SolvedModel`` already exposes directly.
     """
-    with _bk_dating_hint():
-        (
-            ss,
-            f,
-            p,
-            stab,
-            eig,
-            gxx,
-            hxx,
-            gxu,
-            hxu,
-            guu,
-            huu,
-            gss,
-            hss,
-            A,
-            B,
-        ) = sgu_klein_solve2(
-            residual_cfunc.address,
-            bc_residual_cfunc.address,
-            ss_seed,
-            params,
-            Q,
-            incidence,
-            n_states,
-            n_exog,
-        )
+    (
+        err,
+        ss,
+        f,
+        p,
+        stab,
+        eig,
+        gxx,
+        hxx,
+        gxu,
+        hxu,
+        guu,
+        huu,
+        gss,
+        hss,
+        A,
+        B,
+    ) = sgu_klein_solve2(
+        compiled.construct_objective_cfunc().address,
+        compiled.construct_objective_cfunc_bicomplex().address,
+        ss_seed,
+        params,
+        _shock_covariance(compiled),
+        compiled._incidence,
+        compiled.n_state,
+        compiled.n_exog,
+    )
+    if err:
+        _raise_for(compiled, err, eig)
     return SecondOrderSolution(
         steady_state=ss,
         stab=BKStatus(stab),
@@ -291,42 +423,43 @@ def sgu_solve(
 
 
 def piecewise_solve(
-    residual_cfunc: Any,
-    pencil_addrs: Sequence[int],
-    rows: Sequence[NDArray[int64]],
-    params: NDF,
-    ss_seed: NDF,
-    incidence: NDArray[int8],
-    n_states: int,
-    n_constraint: int,
-    *,
-    n_exog: int = 0,
+    compiled: CompiledModel, params: NDF, ss_seed: NDF
 ) -> PiecewiseSolution:
-    """Piecewise-linear (OccBin) solve of the compiled model at ``params``.
+    """Piecewise-linear (OccBin) solve of ``compiled`` at ``params``.
 
-    The reference regime is an ordinary Klein solve, and every other regime is
-    the pencil it linearized at with that regime's rows replaced. Both halves
-    run in one native call, so the reference pencil never crosses back into
-    Python between them.
+    The reference regime is an ordinary Klein solve, and every other regime is the
+    pencil it linearized at with that regime's rows replaced. Both halves run in
+    one native call, so the reference pencil never crosses back into Python
+    between them.
 
-    ``pencil_addrs`` and ``rows`` are indexed by binding bitmask and dense over
-    ``0..2 ** n_constraint - 1``; slot 0 is the reference and carries address 0
-    and no rows. A nonzero ``stab`` returns normally and is the reference
-    regime's: a binding regime alone is routinely indeterminate, which is not an
-    error, so only the reference verdict means anything.
+    The regime table is indexed by binding bitmask and dense over
+    ``0..2 ** n_constraint - 1``. Slot 0 is the reference and carries address 0
+    and no rows. A nonzero ``stab`` is the reference regime's: a binding regime
+    alone is routinely indeterminate, which is not an error.
     """
-    with _bk_dating_hint():
-        ss, ghx, stab, eig, A, B, a, b, c, d, cst = occbin_solve1(
-            residual_cfunc.address,
-            ss_seed,
-            params,
-            incidence,
-            n_states,
-            pencil_addrs,
-            rows,
-            n_constraint,
-            n_exog,
-        )
+    pencil = compiled.construct_regime_pencil_func()
+    if pencil is None:
+        raise ValueError("Piecewise solve needs a model with constraints.")
+
+    n_constraint = len(compiled.constraint_names)
+    n_regime = 1 << n_constraint
+    addrs = [0] + [pencil.address(m) for m in range(1, n_regime)]
+    rows = [empty(0, dtype=int64)] + [pencil.rows[m] for m in range(1, n_regime)]
+
+    n_state = compiled.n_state
+    err, ss, ghx, stab, eig, A, B, a, b, c, d, cst = occbin_solve1(
+        compiled.construct_objective_cfunc().address,
+        ss_seed,
+        params,
+        compiled._incidence,
+        n_state,
+        addrs,
+        rows,
+        n_constraint,
+        compiled.n_exog,
+    )
+    if err:
+        _raise_for(compiled, err, eig)
     return PiecewiseSolution(
         steady_state=ss,
         stab=BKStatus(stab),
@@ -345,8 +478,8 @@ def piecewise_solve(
             stab=BKStatus(stab),
             eig=eig,
             order=1,
-            p=ghx[:n_states],
-            f=ghx[n_states:],
+            p=ghx[:n_state],
+            f=ghx[n_state:],
             A=A,
             B=B,
         ),

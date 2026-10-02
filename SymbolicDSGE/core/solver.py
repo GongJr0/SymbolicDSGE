@@ -23,7 +23,6 @@ from .compiled_model import (
     CompiledModel,
     VariableLayout,
     RegimeBlock,
-    _shock_covariance,
 )
 from sympy.core.function import AppliedUndef
 
@@ -657,14 +656,7 @@ class DSGESolver:
         raise_on_bk_violation: bool = True,
     ) -> SolvedModel[FirstOrderSolution]:
         """First-order (Klein) solve."""
-        sol = klein_solve(
-            compiled.construct_objective_cfunc(),
-            param_vec,
-            seed,
-            compiled._incidence,
-            compiled.n_state,
-            n_exog=compiled.n_exog,
-        )
+        sol = klein_solve(compiled, param_vec, seed)
         self._raise_or_warn_stability_error(
             sol.stab, should_raise=raise_on_bk_violation
         )
@@ -685,16 +677,7 @@ class DSGESolver:
         risk correction into a :class:`SecondOrderSolution`. Requires the native
         extension.
         """
-        pert = sgu_solve(
-            compiled.construct_objective_cfunc(),
-            compiled.construct_objective_cfunc_bicomplex(),
-            param_vec,
-            seed,
-            _shock_covariance(compiled),
-            compiled._incidence,
-            compiled.n_state,
-            n_exog=compiled.n_exog,
-        )
+        pert = sgu_solve(compiled, param_vec, seed)
         self._raise_or_warn_stability_error(
             pert.stab, should_raise=raise_on_bk_violation
         )
@@ -714,29 +697,7 @@ class DSGESolver:
         same reference steady state, so the whole table is built here and the
         per-date guess-and-verify happens in ``sim``.
         """
-        pencil = compiled.construct_regime_pencil_func()
-        if pencil is None:  # pragma: no cover - solve() gates on the same thing
-            raise ValueError("Piecewise solve needs a model with constraints.")
-
-        n_constraint = len(compiled.constraint_names)
-        # Slot 0 is the reference regime: no cfunc, no replaced rows, so the
-        # kernel fills it with the pencil the reference solve linearized at.
-        addrs = [0] + [pencil.address(m) for m in range(1, 1 << n_constraint)]
-        rows = [np.empty(0, dtype=np.int64)] + [
-            pencil.rows[m] for m in range(1, 1 << n_constraint)
-        ]
-
-        sol = piecewise_solve(
-            compiled.construct_objective_cfunc(),
-            addrs,
-            rows,
-            param_vec,
-            seed,
-            compiled._incidence,
-            compiled.n_state,
-            n_constraint,
-            n_exog=compiled.n_exog,
-        )
+        sol = piecewise_solve(compiled, param_vec, seed)
 
         # Only the reference regime has to be determinate.
         self._raise_or_warn_stability_error(

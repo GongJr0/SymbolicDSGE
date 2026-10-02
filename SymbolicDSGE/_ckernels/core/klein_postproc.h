@@ -12,9 +12,11 @@ i64 klein_postproc(const c128 *SDSGE_RESTRICT s, const c128 *SDSGE_RESTRICT t,
                    f64 *SDSGE_RESTRICT arena, i64 *SDSGE_RESTRICT iarena);
 
 #define SDSGE_KLEIN_POSTPROC_SUCCESS 0
-#define SDSGE_KLEIN_POSTPROC_SINGULAR -301
-#define SDSGE_KLEIN_POSTPROC_INVALID -302
+#define SDSGE_KLEIN_POSTPROC_RANK_FAIL -301
+#define SDSGE_KLEIN_POSTPROC_INFINITE_ROOT -302
+#define SDSGE_KLEIN_NO_STABLE_SOLUTION -303
 
-/* Stamped into *stab up front; 2 is not a stability status the solve returns. */
+/* Stamped into *stab up front; 2 is not a stability status the solve returns.
+ */
 #define SDSGE_KLEIN_STAB_UNSET 2
 #endif /* SDSGE_KLEIN_POSTPROC_H */
