@@ -8,10 +8,10 @@ tags:
 ??? tip "__TL;DR__"
     Open a `.sdsge` bundle with `load_bundle(...)` and reach every component through the typed `LoadedBundle` fields:
 
-    - `reference` and `dgp`: Solved models.
+    - `models`: Dictionary of solved models (`SolvedModel`) by name, or `None` if no models were included.
     - `estimation.estimator` and `estimation.result`: Estimator and `*Result` (MLE, MAP, or MCMC).
     - `mc.pipeline` and `mc.result`: Monte Carlo pipeline and result.
-    - `simulation`: Dictionary of Simulation prefills (`SimSpec`) for each model slot
+    - `simulation`: Dictionary of simulation prefills for each model slot
 
     You can find a demonstration notebook [here](../assets/bundle_loading.ipynb).
 
@@ -51,25 +51,20 @@ print("Format version:", loaded.manifest.sdsge_version)
 
 ## Reach the solved models
 
-`reference` and `dgp` are full `SolvedModel` instances. They behave exactly like models you would have solved in process, including IRFs, simulation, and Kalman filtering.
+`LoadedBundle.models` is a `{name: SolvedModel}` map when models are present in the bundle. It can be `None` if the author did not include any models (e.g. for a MC pipeline with raw data only).
 
 ```python
-# Cast so type checkers do not treat these values as optional.
-reference = cast(SolvedModel, loaded.reference)
-dgp = cast(SolvedModel, loaded.dgp)
+# Assert so type checker doesn't think it can be `None`; completely optional.
+assert loaded.models
 
-# The `if` check narrows the type if casting is not preferred.
-if reference is not None:
-    print("Stable:", reference.policy.stab == 0)
-    print("Eigenvalues:", reference.policy.eig.round(2), "\n")
+for name, model in loaded.models.items():
+    print(f"Model: {name!r}")
+    print("Determinate:", model.policy.is_determinate)
+    print("Eigenvalues:", model.policy.eig.round(2), "\n")
 
-if dgp is not None:
-    print("Stable:", dgp.policy.stab == 0)
-    print("Eigenvalues:", dgp.policy.eig.round(2))
+reference = loaded.models["reference"]
+dgp = loaded.models["dgp"]
 ```
-
-???+ note "DGP slot may be absent"
-    `loaded.dgp` is `None` whenever the bundle did not carry a `dgp.yaml`. Test before use.
 
 ## Reach the estimation tab
 
@@ -112,7 +107,7 @@ See the [Estimation Guide](estimation_guide.md) for the run methods in detail.
 
 ```python
 mc = loaded.mc
-assert mc, "No Monte Carlo tab found in the bundle."
+assert mc
 
 print("Runtime Steps:", [step.name for step in mc.pipeline.replication_steps])
 print("Post-Processing:", [step.name for step in mc.pipeline.postproc_steps])
@@ -123,11 +118,9 @@ print("Post-Processing:", [step.name for step in mc.pipeline.postproc_steps])
 The monte carlo section unpacks into a `LoadedMC` object containing a pipeline and an optional run result.
 
 ```python
-# The pipeline's simulation datagen needs a DGP. The authoring notebook
-# bundles a model under role "dgp", so `loaded.dgp` resolves. If a bundle
-# omits `reference` or `dgp`, provide the missing model when running again.
-assert mc, "No Monte Carlo tab found in the bundle."
-assert mc.result, "No Monte Carlo result found in the bundle."
+
+assert mc
+assert mc.result
 
 pipeline = mc.pipeline
 result = mc.result
@@ -141,22 +134,22 @@ print(stat_ci, pval_ci, sep="\n")
 
 ### Reproduce a Monte Carlo run
 
-Use the `run_config` to produce the deterministic pipeline result. Model instances are not stored in the config, so `reference` and `dgp` should be provided from the loaded bundle.
+`MCPipeline.run`'s `models` argument is a `{name: SolvedModel} | None` exactly like `LoadedBundle.models`, the bundles models directly pass into the pipeline.
+Additionally, the `run_config` on the result can be used to produce the deterministic pipeline result by parameterizing the run as the author did.
 
 ```python
 mc_repro = pipeline.run(
-    reference=reference,
-    dgp=dgp,
+    models=loaded.models,
     **result.run_config,
 )
 ```
 
 ```text
->>> MC run concluded successfully in 0.00s with 755524.40 it/s.
+>>> MC run concluded successfully in 0.00s with 357538.70 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 133343.00 worker it/s (0.01 worker-s), 755524.40 wall it/s.
-    jb_test: 0 failures, 2631307.40 worker it/s (0.00 worker-s), 755524.40 wall it/s.
+    datagen: 0 failures, 34183.71 worker it/s (0.03 worker-s), 357538.70 wall it/s.
+    jb_test: 0 failures, 1177024.11 worker it/s (0.00 worker-s), 357538.70 wall it/s.
 ```
 
 ```python

@@ -22,10 +22,10 @@ from ..core.shock.generators import ShockParameters, ShockPathParameters
 from ..core.shock.spec import shock_from_json
 
 #: Bundle format version. Bump on every manifest change.
-SDSGE_FORMAT_VERSION = 9
+SDSGE_FORMAT_VERSION = 10
 
 #: Oldest bundle format this reader can reconstruct.
-SDSGE_MIN_READABLE_VERSION = 8
+SDSGE_MIN_READABLE_VERSION = 10
 
 #: Most recent format change requiring a newer reader. Written into the
 #: manifest so older readers reject bundles they cannot interpret.

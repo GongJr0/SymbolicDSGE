@@ -27,11 +27,18 @@ __Fields:__
 | checksums | `#!python dict[str, str]` | SHA-256 hex digests keyed by member path. |
 
 ???+ note "Simulation prefills"
-    Prefills are keyed by name and a bundle can incldue multiple.
+    Prefills are keyed by name and a bundle can include multiple.
     The values unpack directly as `SolvedModel.sim(**prefill)`.
 
 ???+ warning "Forward / backward compatibility"
-    The version pair is validated when a bundle is read, and an incompatible one raises `ValueError`. Compatibility is judged against breaks, not against version equality: a reader rejects a bundle older than its own `SDSGE_LAST_BREAKING_VERSION`, and rejects one whose `last_breaking_version` exceeds its `SDSGE_FORMAT_VERSION`. A newer bundle from a bump that broke nothing reads fine.
+    Each bundle on disk carries two version numbers, and validation during a read relies on them plus an additional constant.
+    The version and its breaks/readability are defined through the constants below:
+
+    | __Manifest Field__ | __Library Constant__ | __Description__ |
+    |:------------------|:-------------------|----------------:|
+    | `sdsge_version` | `SDSGE_FORMAT_VERSION` | The current bundle format. A mismatch of this version does not indicate unreadability. |
+    | `last_breaking_version` | `SDSGE_LAST_BREAKING_VERSION` | The last version that broke backward compatibility. A reader with `SDSGE_FORMAT_VERSION` predating the bundle's `last_breaking_version` cannot read the bundle. |
+    | N/A | `SDSGE_MIN_READABLE_VERSION` | The library's minimum readable version. Lets the reader declare what versions can be read regardless of breaks. Denotes the oldest bundle version that's forward compatible with the current library. |
 
 ## `Member`
 

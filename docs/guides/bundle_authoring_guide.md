@@ -116,6 +116,7 @@ res = estim.mcmc(  # (1)!
 
 # Add the estimation to the bundle with results
 bundle.add_estimation(  # (2)!
+    model_name="reference", # (3)!
     source=estim,
     result=res,
 )
@@ -123,6 +124,7 @@ bundle.add_estimation(  # (2)!
 
 1. We can bundle results from an executed estimation, or we can bundle an estimation spec without results.
 2. `add_estimation` can bundle live results and initialized `Estimator` instances. These are converted to readable specifications for storage. Bundling live objects does not make the final bundle depend on unreadable binary objects.
+3. `model_name` specifies which model the estimation is supposed to be run on. If no model is named, the bundle loader will look for the `"reference"` model. Estimation can use a model name that's not yet bundled, however when `write()`-ing or `build()`-ing the bundle, validation will fail if the named model is not present.
 
 ## Build a Monte Carlo pipeline
 
@@ -143,7 +145,7 @@ mc_pipeline = MCPipeline(
     [
         simulation_step(
             "datagen",
-            n_retain=100,
+            n_retain=0,
             target="dgp",
             T=200,
             shocks=[gz_shock, r_shock],
@@ -158,8 +160,10 @@ mc_pipeline = MCPipeline(
     ]
 )
 mc_res = mc_pipeline.run(
-    reference=sol,
-    dgp=sol,
+    models={
+        "reference": sol,
+        "dgp": sol,
+    },
     n_rep=1000,
     n_jobs=-1,
     verbosity=2,

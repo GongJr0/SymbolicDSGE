@@ -910,7 +910,7 @@ def occbin_solve1(size_t residual_addr, seed, params, incidence,
     slot 0: that is the reference regime, and it comes back as the pencil the
     reference solve linearized at.
 
-    Returns ``(ss, ghx, stab, eig, A, B, a, b, c, d, cst)``. ``ghx`` is the
+    Returns ``(err, ss, ghx, stab, eig, A, B, a, b, c, d, cst)``. ``ghx`` is the
     reference regime's whole rule ``(n_var, n_state)``, which is ``p`` stacked
     over ``f``, and ``A`` ``(n_var, n_var)``/``B`` ``(n_var, n_exog)`` are that
     same regime's state space: the model with its constraints ignored.
