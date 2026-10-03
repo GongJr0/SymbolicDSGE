@@ -113,16 +113,6 @@ cdef inline int64_t _nspred(signed char[::1] incidence) noexcept:
     return out
 
 
-def pencil_dim(incidence, int64_t n_var):
-    """Size of the pencil an incidence implies, ``ndynamic + n_both``.
-
-    ``n_var`` does not bound it: a variable carrying both a lag and a lead needs
-    a companion row. Callers own the Schur and eigenvalue buffers, so they size
-    them from here."""
-    cdef signed char[::1] incv = np.ascontiguousarray(incidence, dtype=np.int8)
-    return int(sdsge_pencil_dim(&incv[0], n_var))
-
-
 cdef extern from "klein_preproc.h" nogil:
     ctypedef void (*sdsge_residual_fn)(
         c128 *fwd, c128 *cur, c128 *prev, c128 *eps, c128 *par, c128 *out)

@@ -97,9 +97,6 @@ def klein_preprocess(
     ``d`` is (n_eq, n_exog), the rest (n_eq, n_var).
     """
 
-def pencil_dim(incidence: _I8, n_var: int) -> int:
-    """Pencil size ``ndynamic + n_both`` from an incidence."""
-
 def klein_qz(a: _F64 | _C128, b: _F64 | _C128) -> tuple[_C128, _C128, _C128]:
     """Ordered generalized Schur (QZ) with the Klein 'ouc' ordering via LAPACK zgges.
 
