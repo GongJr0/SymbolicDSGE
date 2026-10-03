@@ -14,7 +14,7 @@ PiecewiseSolvedModel(SolvedModel[PiecewiseSolution])
 
 ???+ info "Type Parameterization"
     `SolvedModel` is a generic class parameterized by the solution type.
-    Methods implemented for specific solution types are documented as `SolvedModel[SolutionType].method`. Methods that are solution-type agnostic are documented as `SolvedModel.method`.
+    The `SolvedModel` interface is implemented in full by the three concrete classes above.
 
 __Fields:__
 
@@ -121,10 +121,9 @@ __Returns:__
 
 &nbsp;
 
-## `SolvedModel[PiecewiseSolution].sim_reference`
 
 ```python
-SolvedModel[PiecewiseSolution].sim_reference(
+SolvedModel.sim_reference(
     T: int,
     shocks: Mapping[str | Sequence[str], Shock | np.ndarray] | Sequence[Shock | ShockPath] | None = None,
     shock_scale: float = 1.0,
@@ -133,9 +132,10 @@ SolvedModel[PiecewiseSolution].sim_reference(
 ) -> SimResult
 ```
 
-Simulate the unconstrained first-order reference policy of a piecewise model. This method accepts the same inputs as `SolvedModel.sim(...)`, but ignores every constraint and does not run the OccBin regime search.
+Simulate the unconstrained reference policy of a model. For `FirstOrderSolvedModel` and `SecondOrderSolvedModel`, which do not define OBCs, this is equivalent to `SolvedModel.sim`.
+For `PiecewiseSolvedModel`, the underlying relaxed regime is treated as a [`FirstOrderSolution`](./model_solutions/FirstOrderSolution.md) and the simulation runs on that subset of the model.
 
-The result contains the reference policy's level path. It has no `regimes` or `diagnostics`, because it is an ordinary first-order simulation.
+The result contains the reference policy's level path. It has no `regimes` or `diagnostics`, because it is an ordinary simulation. See [`SolvedModel.sim`](#solvedmodelsim) for the full description of the simulation interface.
 
 &nbsp;
 
