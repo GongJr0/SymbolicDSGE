@@ -39,15 +39,7 @@ from .solved_model import (
     PiecewiseSolvedModel,
     SecondOrderSolvedModel,
 )
-from .solver_backend import (
-    BKStatus,
-    FirstOrderSolution,
-    PiecewiseSolution,
-    SecondOrderSolution,
-    klein_solve,
-    piecewise_solve,
-    sgu_solve,
-)
+from .solver_backend import klein_solve, piecewise_solve, sgu_solve
 
 if TYPE_CHECKING:
     from ..estimation.estimator import Estimator
@@ -507,20 +499,54 @@ class DSGESolver:
         parameters: dict[str, float] | None = None,
         ss_seed: list[float] | ndarray | dict[str, float] | None = None,
         order: int = 1,
-        raise_on_bk_violation: bool = True,
     ) -> SolvedModel:
-        """Solve the model to first (``order=1``) or second (``order=2``) order.
+        """Solve ``compiled`` at a parameter point to the requested order.
 
-        ``order=1`` is the Klein linear solve (policy is a
-        ``FirstOrderSolution``). ``order=2`` additionally computes the
-        second-order tensors and the sigma^2 risk correction (policy is a
-        ``SecondOrderSolution``); it requires the native extension and a
-        nonlinear steady state (see ``_solve_second_order``). The state-space
-        ``A``/``B`` are the first-order transition in both cases.
+        Parameters
+        ----------
+        compiled : CompiledModel
+            Compiled model carrying the residual, the incidence, and the
+            calibration the solve reads.
+        parameters : dict[str, float] | None
+            Mapping of {name: value} covering every calibrated parameter. If
+            None, the model's own calibration is used.
+        ss_seed : list[float] | ndarray | dict[str, float] | None
+            Initial guess of the steady state Newton solver. List or array in
+            declaration order or mapping of {name: guess} for the model's
+            declared variables.
+        order : int
+            1 for the Klein linear solve, 2 to add the second-order tensors and
+            the sigma^2 risk correction. Those terms are zero for a symbolically
+            linearized model, whose expansion is already exact at first order.
 
-        When ``raise_on_bk_violation`` is ``False`` a Klein stability/uniqueness
-        failure warns instead of raising, so batch callers (e.g. an estimation
-        search) can tally the failure and continue.
+        Returns
+        -------
+        SolvedModel
+            Policy is a ``FirstOrderSolution`` at ``order=1`` and a
+            ``SecondOrderSolution`` at ``order=2``. A model with constraints
+            returns a ``PiecewiseSolution`` instead, solved by OccBin at first
+            order. ``A``/``B`` are the first-order transition in every case.
+
+        Warns
+        -----
+        UserWarning
+            The solution is indeterminate: there are more forward-looking
+            variables than unstable eigenvalues, and the rule returned is one
+            of many that solve the model.
+
+        Raises
+        ------
+        ValueError
+            ``order`` is neither 1 nor 2, or ``ss_seed`` is the wrong length or
+            names a variable the model does not have.
+        KeyError
+            ``parameters`` omits a calibrated parameter.
+        NotImplementedError
+            ``order=2`` was asked of a model with constraints.
+        SolveError
+            The kernel rejected the model. The subclass and its message report
+            how far the solve got and what it found.
+
         """
         if order not in (1, 2):
             raise ValueError(f"order must be 1 or 2, got {order}.")
@@ -546,15 +572,29 @@ class DSGESolver:
                 [parameters[p] for p in compiled.calib_params], dtype=float64
             )
 
+        sol: SolvedModel[Any]
+
         if piecewise:
-            return self._solve_piecewise(
-                compiled, param_vec, seed, raise_on_bk_violation
+            sol = PiecewiseSolvedModel(
+                compiled=compiled, policy=piecewise_solve(compiled, param_vec, seed)
             )
-        if order == 2:
-            return self._solve_second_order(
-                compiled, param_vec, seed, raise_on_bk_violation
+        elif order == 2:
+            sol = SecondOrderSolvedModel(
+                compiled=compiled, policy=sgu_solve(compiled, param_vec, seed)
             )
-        return self._solve_first_order(compiled, param_vec, seed, raise_on_bk_violation)
+        else:
+            sol = FirstOrderSolvedModel(
+                compiled=compiled, policy=klein_solve(compiled, param_vec, seed)
+            )
+
+        if not sol.is_determinate:
+            stab = sol.policy.stab
+            warnings.warn(
+                f"Blanchard-Kahn condition violated. {stab.name} ({stab.value}): {stab.message}",
+                UserWarning,
+                stacklevel=2,
+            )
+        return sol
 
     @staticmethod
     def _resolve_ss_seed(
@@ -635,75 +675,6 @@ class DSGESolver:
                     f"ss_seed for '{name}' did not evaluate to a number: {val}"
                 ) from exc
         return ss
-
-    @staticmethod
-    def _raise_or_warn_stability_error(
-        stab: BKStatus, *, should_raise: bool = True
-    ) -> None:
-        """Raise or warn on a Klein stability/uniqueness violation."""
-        if stab == BKStatus.DETERMINATE:
-            return
-        msg = f"Blanchard-Kahn condition violated. {stab.name} ({stab.value}): {stab.message}"
-        if should_raise:
-            raise ValueError(msg)
-        warnings.warn(msg, UserWarning, stacklevel=2)
-
-    def _solve_first_order(
-        self,
-        compiled: CompiledModel,
-        param_vec: NDF,
-        seed: NDF,
-        raise_on_bk_violation: bool = True,
-    ) -> SolvedModel[FirstOrderSolution]:
-        """First-order (Klein) solve."""
-        sol = klein_solve(compiled, param_vec, seed)
-        self._raise_or_warn_stability_error(
-            sol.stab, should_raise=raise_on_bk_violation
-        )
-        return FirstOrderSolvedModel(compiled=compiled, policy=sol)
-
-    def _solve_second_order(
-        self,
-        compiled: CompiledModel,
-        param_vec: NDF,
-        seed: NDF,
-        raise_on_bk_violation: bool = True,
-    ) -> SolvedModel[SecondOrderSolution]:
-        """Second-order solve.
-
-        Runs the Klein first order (which Newton-resolves the steady state from
-        ``seed``), sweeps the bicomplex Hessian at that steady state, and assembles
-        the quadratic blocks over the states, the shocks and their cross plus the
-        risk correction into a :class:`SecondOrderSolution`. Requires the native
-        extension.
-        """
-        pert = sgu_solve(compiled, param_vec, seed)
-        self._raise_or_warn_stability_error(
-            pert.stab, should_raise=raise_on_bk_violation
-        )
-        # p/f are the first-order solution unchanged, so its state space stands.
-        return SecondOrderSolvedModel(compiled=compiled, policy=pert)
-
-    def _solve_piecewise(
-        self,
-        compiled: CompiledModel,
-        param_vec: NDF,
-        seed: NDF,
-        raise_on_bk_violation: bool = True,
-    ) -> SolvedModel[PiecewiseSolution]:
-        """Piecewise-linear (OccBin) solve: the reference regime and every pencil.
-
-        A draw fixes one pencil per binding combination, all linearized at the
-        same reference steady state, so the whole table is built here and the
-        per-date guess-and-verify happens in ``sim``.
-        """
-        sol = piecewise_solve(compiled, param_vec, seed)
-
-        # Only the reference regime has to be determinate.
-        self._raise_or_warn_stability_error(
-            sol.stab, should_raise=raise_on_bk_violation
-        )
-        return PiecewiseSolvedModel(compiled=compiled, policy=sol)
 
     def _estimator(
         self,

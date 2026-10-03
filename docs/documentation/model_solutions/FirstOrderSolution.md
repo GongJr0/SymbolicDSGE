@@ -23,7 +23,7 @@ First-order policy data returned by the Klein solver. `FirstOrderSolution` exten
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | `steady_state` | `ndarray[float]`, shape `(n_var,)` | Newton-resolved expansion point of the solution. |
-| `stab` | `BKStatus` | `IntEnum` stability indicator: `-1` means too few stable eigenvalues (no stable solutions), `0` means the required number (determinate), and `1` means too many (indeterminate). |
+| `stab` | `BKStatus` | `IntEnum` stability indicator: `1` marks an indeterminate (too many stable eigenvalues) but stable solution. Errors that do not produce a usable state space `raise` directly. |
 | `eig` | `ndarray[complex]` | Eigenvalues of the linearized system. |
 | `order` | `int` | Always `1`. |
 | `p` | `ndarray[float]`, shape `(n_state, n_state)` | State transition matrix. |

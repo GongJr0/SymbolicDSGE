@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
 from dataclasses import dataclass
 from enum import IntEnum, unique
 
@@ -36,16 +37,16 @@ class SolveError(RuntimeError):
     failing stage had produced, and each subclass renders the ones it has.
     """
 
-    template = _CODE
+    template: ClassVar[str]
 
     def __init__(
         self,
         status: SolveStatus,
         description: str,
-        states: tuple[str, ...] | None = None,
-        jumps: tuple[str, ...] | None = None,
-        mixed: tuple[str, ...] | None = None,
-        eig: NDC | None = None,
+        states: tuple[str, ...],
+        jumps: tuple[str, ...],
+        mixed: tuple[str, ...],
+        eig: NDC,
     ) -> None:
         self.status = status
         self.states = states
@@ -76,6 +77,8 @@ class SolveError(RuntimeError):
 
 class SteadyStateError(SolveError):
     """The steady state did not resolve, which happens before anything else runs."""
+
+    template = _CODE
 
 
 class DecompositionError(SolveError):
@@ -149,10 +152,10 @@ _FAILURES: dict[SolveStatus, tuple[type[SolveError], str]] = {
 def raise_solve_error(
     status: int,
     *,
-    states: tuple[str, ...] | None = None,
-    jumps: tuple[str, ...] | None = None,
-    mixed: tuple[str, ...] | None = None,
-    eig: NDC | None = None,
+    states: tuple[str, ...],
+    jumps: tuple[str, ...],
+    mixed: tuple[str, ...],
+    eig: NDC,
 ) -> None:
     """Raise the failure a nonzero solve status names.
 
@@ -168,23 +171,13 @@ def raise_solve_error(
 class BKStatus(IntEnum):
     """Blanchard-Kahn stability indicator."""
 
-    NO_STABLE_SOLUTION = -1
     DETERMINATE = 0
     INDETERMINATE = 1
-
-    # C sentinel value unreachable from Python. Has a member so real raises are not
-    # blocked by a missing member if the C code ever leaks out.
-    UNSET = 2
 
     @property
     def message(self) -> str:
         """Human-readable message for the stability indicator."""
         match self:
-            case BKStatus.NO_STABLE_SOLUTION:
-                return (
-                    "There are more unstable eigenvalues than forward-looking variables. "
-                    "This specification cannot yield a stable solution."
-                )
             case BKStatus.DETERMINATE:
                 return "The solution for this specification is unique and stable."
             case BKStatus.INDETERMINATE:
@@ -192,8 +185,6 @@ class BKStatus(IntEnum):
                     "There are more forward-looking variables than unstable eigenvalues. "
                     "This solution is one of multiple that exist for this specification."
                 )
-            case BKStatus.UNSET:
-                return "This is a C sentinel value. Please file a bug report if you reached this message."
 
 
 @dataclass(frozen=True, repr=False)
@@ -201,7 +192,7 @@ class BaseSolution:
     """Base class for attributes shared across all solution methods.
 
     :attr:`steady_state` is the Newton-resolved expansion point the solution is linearized at.
-    :attr:`stab` is the stability indicator: -1 = not enough stable eigenvalues, 0 = exactly right, 1 = too many stable eigenvalues.
+    :attr:`stab` is the stability indicator: `0` = determinate, `1` = indeterminate but stable.
     :attr:`eig` is the array of eigenvalues of the linearized system.
     :attr:`order` is the order of the solution: 1 = first-order, 2 = second-order, etc.
     """

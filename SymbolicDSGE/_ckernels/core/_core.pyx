@@ -998,9 +998,9 @@ def second_order(a, b, f_xx, gx, hx, bu, Q, int64_t n_state):
             Q_ptr, n, nx, ne, gxx_ptr, &hxxv[0, 0, 0], gxu_ptr, hxu_ptr,
             guu_ptr, huu_ptr, gss_ptr, &hssv[0], &arv[0], &iarv[0])
     if err == SDSGE_SECOND_ORDER_SINGULAR:
-        raise ValueError("solve_second_order: singular second-order system.")
+        raise ValueError("second_order: singular second-order system.")
     if err == SDSGE_SECOND_ORDER_RISK:
-        raise ValueError("solve_second_order: singular risk-correction system.")
+        raise ValueError("second_order: singular risk-correction system.")
     return gxx, hxx, gxu, hxu, guu, huu, gss, hss
 
 

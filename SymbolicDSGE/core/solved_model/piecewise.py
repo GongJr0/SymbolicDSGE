@@ -221,40 +221,6 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
         observables: bool = False,
     ) -> SimResult:
-        """Simulate the reference regime (a first-order solution) over T periods, ignoring constraints.
-
-        Parameters
-        ----------
-        T : int
-            Number of time periods to simulate.
-
-        shocks : Mapping[str | Sequence[str], Shock | ndarray] | Sequence[Shock | ShockPath], optional
-            The shock spec, in either shape. A mapping keys each entry from the
-            outside: a key naming one shock or several (drawn jointly), against
-            a :class:`Shock` to draw from or a raw ``(T,)``/``(T, k)`` path. A
-            sequence takes entries that name themselves, each a :class:`Shock`
-            bound by :meth:`~Shock.joint` or :meth:`~Shock.independent`, or a
-            :class:`ShockPath`. When ``None``, all shocks are zero.
-
-        shock_scale : float, optional
-            A scaling factor applied to all shocks.
-
-        x0 : dict[str, float] | list[float] | ndarray, optional
-            Initial state at ``t - 1``, in levels. A sequence covers every
-            compiled variable in declaration order, minted lags included; a
-            mapping names only the variables it sets. What it leaves out, and
-            everything when this is None, starts at the steady state.
-
-        observables : bool, optional
-            If True, compute and include observable variables in the output.
-
-        Returns
-        -------
-        SimResult
-            The simulated path in levels, with each variable's series available
-            by name.
-
-        """
         return FirstOrderSolvedModel(self.compiled, self.policy.ref).sim(
             T, shocks, shock_scale, x0=x0, observables=observables
         )
