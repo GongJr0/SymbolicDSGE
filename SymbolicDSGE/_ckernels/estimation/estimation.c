@@ -1,4 +1,5 @@
 #include "estimation.h"
+#include "../core/klein_postproc.h"
 #include "../core/klein_solve.h"
 #include "../kalman/kalman.h"
 #include "../optim/nelder_mead.h"
@@ -148,8 +149,11 @@ static inline int sdsge_classify(const i64 rc, const i64 stab) {
   case SDSGE_KLEIN_SOLVE_OK:
     return (stab != 0) ? SDSGE_SOLVE_BK : SDSGE_SOLVE_OK;
   case SDSGE_KLEIN_SOLVE_QZ:
-  case SDSGE_KLEIN_SOLVE_SINGULAR:
+  case SDSGE_KLEIN_SOLVE_SHOCK_SINGULAR:
   case SDSGE_KLEIN_SOLVE_NO_STATES:
+  case SDSGE_KLEIN_POSTPROC_RANK_FAIL:
+  case SDSGE_KLEIN_POSTPROC_INFINITE_ROOT:
+  case SDSGE_KLEIN_NO_STABLE_SOLUTION:
     return SDSGE_SOLVE_BK;
   default:
     return SDSGE_SOLVE_INFEASIBLE;

@@ -113,16 +113,6 @@ cdef inline int64_t _nspred(signed char[::1] incidence) noexcept:
     return out
 
 
-def pencil_dim(incidence, int64_t n_var):
-    """Size of the pencil an incidence implies, ``ndynamic + n_both``.
-
-    ``n_var`` does not bound it: a variable carrying both a lag and a lead needs
-    a companion row. Callers own the Schur and eigenvalue buffers, so they size
-    them from here."""
-    cdef signed char[::1] incv = np.ascontiguousarray(incidence, dtype=np.int8)
-    return int(sdsge_pencil_dim(&incv[0], n_var))
-
-
 cdef extern from "klein_preproc.h" nogil:
     ctypedef void (*sdsge_residual_fn)(
         c128 *fwd, c128 *cur, c128 *prev, c128 *eps, c128 *par, c128 *out)
@@ -140,8 +130,6 @@ cdef extern from "klein_postproc.h" nogil:
         c128 *f, c128 *p, int64_t *stab, c128 *eig, double *arena,
         int64_t *iarena)
     int SDSGE_KLEIN_STAB_UNSET
-    int SDSGE_KLEIN_POSTPROC_SINGULAR
-    int SDSGE_KLEIN_POSTPROC_INVALID
 
 
 cdef extern from "klein_qz.h" nogil:
@@ -242,16 +230,12 @@ cdef extern from "klein_solve.h" nogil:
     int64_t sdsge_klein_solve1(const klein_spec *spec, sdsge_solve1 *out,
                                double *arena, int64_t *iarena)
     int SDSGE_KLEIN_SOLVE_OK
-    int SDSGE_KLEIN_SOLVE_SS_SINGULAR
-    int SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE
     int SDSGE_KLEIN_SOLVE_QZ
-    int SDSGE_KLEIN_SOLVE_SINGULAR
+    int SDSGE_KLEIN_SOLVE_SHOCK_SINGULAR
     int SDSGE_KLEIN_SOLVE_NO_STATES
-    int SDSGE_KLEIN_SOLVE_SECOND_ORDER
-    int SDSGE_KLEIN_SOLVE_RISK
     int SDSGE_KLEIN_SOLVE_ABSENT_VAR
     int SDSGE_KLEIN_SOLVE_QR
-    int SDSGE_KLEIN_SOLVE_STATIC
+    int SDSGE_KLEIN_SOLVE_STATIC_SINGULAR
 
     arena_size sdsge_sgu_klein_solve2_arena_size(
         int64_t n_var, int64_t n_state, int64_t n_ctrl, int64_t n_par,
@@ -282,44 +266,6 @@ cdef extern from "second_order.h" nogil:
         double *gxx, double *hxx, double *gxu, double *hxu,
         double *guu, double *huu, double *gss, double *hss,
         double *arena, int64_t *iarena)
-
-
-cdef _raise_solve_error(int64_t err, str who):
-    """Map a fused-solve status onto the staged shims' messages, verbatim:
-    callers match on them.
-
-    Every nonzero status raises. An unrecognized one means the kernel grew a
-    code this table has not been told about; the fallback names it rather than
-    returning output the kernel never wrote.
-    """
-    if err == SDSGE_KLEIN_SOLVE_OK:
-        return
-    if err == SDSGE_KLEIN_SOLVE_SS_SINGULAR:
-        raise ValueError("steady_state_newton: singular Jacobian (a - b).")
-    if err == SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE:
-        raise ValueError(
-            "steady_state_newton: did not converge within max_iter "
-            "(or the residual went non-finite)."
-        )
-    if err == SDSGE_KLEIN_SOLVE_QZ:
-        raise RuntimeError("klein_qz: LAPACK zgges failed.")
-    if err == SDSGE_KLEIN_SOLVE_SINGULAR:
-        raise ValueError(
-            "klein_postprocess: singular z11/s11 (Blanchard-Kahn failure)."
-        )
-    if err == SDSGE_KLEIN_SOLVE_NO_STATES:
-        raise ValueError("klein_postprocess: model has no states.")
-    if err == SDSGE_KLEIN_SOLVE_SECOND_ORDER:
-        raise ValueError("solve_second_order: singular second-order system.")
-    if err == SDSGE_KLEIN_SOLVE_RISK:
-        raise ValueError("solve_second_order: singular risk-correction system.")
-    if err == SDSGE_KLEIN_SOLVE_ABSENT_VAR:
-        raise ValueError("pencil_partition: a variable occurs at no date.")
-    if err == SDSGE_KLEIN_SOLVE_QR:
-        raise RuntimeError("pencil_rotate_static: LAPACK dgeqrf/dormqr failed.")
-    if err == SDSGE_KLEIN_SOLVE_STATIC:
-        raise ValueError("klein_postprocess: singular static block.")
-    raise RuntimeError(f"{who}: unhandled solve status {err}.")
 
 
 def assemble_transition(p, f, n_state, n_control):
@@ -546,13 +492,7 @@ def klein_postprocess(s, t, z, int64_t n_states):
             <c128 *>&sv[0, 0], <c128 *>&tv[0, 0], <c128 *>&zv[0, 0], n_s, n_cs,
             <c128 *>&fv[0, 0] if n_cs > 0 else NULL,
             <c128 *>&pv[0, 0], &stab, <c128 *>&ev[0], &arv[0], &iarv[0])
-    if err == SDSGE_KLEIN_POSTPROC_SINGULAR:
-        raise ValueError(
-            "klein_postprocess: singular z11/s11 (Blanchard-Kahn failure)."
-        )
-    if err == SDSGE_KLEIN_POSTPROC_INVALID:
-        raise ValueError("klein_postprocess: model has no states.")
-    return f, p, int(stab), eig
+    return err, f, p, int(stab), eig
 
 
 def spike_drive(
@@ -819,8 +759,7 @@ def klein_solve1(
     with nogil:
         err = sdsge_klein_solve1(&spec, &out, &arv[0], &iarv[0])
 
-    _raise_solve_error(err, "klein_solve1")
-    return ss, f, p, int(out.stab), eig, A, B
+    return err, ss, f, p, int(out.stab), eig, A, B
 
 
 def sgu_klein_solve2(
@@ -976,8 +915,7 @@ def sgu_klein_solve2(
     with nogil:
         err = sdsge_sgu_klein_solve2(&spec, &out, &out2, &arv[0], &iarv[0])
 
-    _raise_solve_error(err, "sgu_klein_solve2")
-    return (ss, f, p, int(out.stab), eig,
+    return (err, ss, f, p, int(out.stab), eig,
             gxx, hxx, gxu, hxu, guu, huu, gss, hss, A, B)
 
 
@@ -1050,9 +988,9 @@ def second_order(a, b, f_xx, gx, hx, bu, Q, int64_t n_state):
             Q_ptr, n, nx, ne, gxx_ptr, &hxxv[0, 0, 0], gxu_ptr, hxu_ptr,
             guu_ptr, huu_ptr, gss_ptr, &hssv[0], &arv[0], &iarv[0])
     if err == SDSGE_SECOND_ORDER_SINGULAR:
-        raise ValueError("solve_second_order: singular second-order system.")
+        raise ValueError("second_order: singular second-order system.")
     if err == SDSGE_SECOND_ORDER_RISK:
-        raise ValueError("solve_second_order: singular risk-correction system.")
+        raise ValueError("second_order: singular risk-correction system.")
     return gxx, hxx, gxu, hxu, guu, huu, gss, hss
 
 

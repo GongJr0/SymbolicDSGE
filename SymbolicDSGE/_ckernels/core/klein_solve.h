@@ -131,18 +131,13 @@ arena_size sdsge_sgu_klein_solve2_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
 i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
                            sdsge_solve2 *out2, f64 *arena, i64 *iarena);
 
-/* ERROR CODES. -2 and -3 come straight off sdsge_steady_state_newton, so the
- * linearization half passes its status through unmapped. */
+/* ERROR CODES */
 #define SDSGE_KLEIN_SOLVE_OK 0
-#define SDSGE_KLEIN_SOLVE_SS_SINGULAR -501
-#define SDSGE_KLEIN_SOLVE_SS_NO_CONVERGE -502
 #define SDSGE_KLEIN_SOLVE_QZ -503
-#define SDSGE_KLEIN_SOLVE_SINGULAR -504     // singular z11/s11 (Blanchard-Kahn)
-#define SDSGE_KLEIN_SOLVE_NO_STATES -505    // stateless model
-#define SDSGE_KLEIN_SOLVE_SECOND_ORDER -506 // second-order system singular
-#define SDSGE_KLEIN_SOLVE_RISK -507         // risk-correction system singular
-#define SDSGE_KLEIN_SOLVE_ABSENT_VAR -508   // a variable occurs at no date
-#define SDSGE_KLEIN_SOLVE_QR -509           // static rotation failed
-#define SDSGE_KLEIN_SOLVE_STATIC -510       // static block singular
+#define SDSGE_KLEIN_SOLVE_SHOCK_SINGULAR -504 // shock loading system
+#define SDSGE_KLEIN_SOLVE_NO_STATES -505      // stateless model
+#define SDSGE_KLEIN_SOLVE_ABSENT_VAR -508     // a variable occurs at no date
+#define SDSGE_KLEIN_SOLVE_QR -509             // static rotation failed
+#define SDSGE_KLEIN_SOLVE_STATIC_SINGULAR -510
 
 #endif /* SDSGE_KLEIN_SOLVE_H */

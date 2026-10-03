@@ -68,7 +68,7 @@ def _staged(compiled, par, seed, Q):
     n_eq = len(compiled.var_names)
     n_state = compiled.n_state
 
-    ss, f, p, stab, eig, A, B = klein_solve1(
+    _, ss, f, p, stab, eig, A, B = klein_solve1(
         addr, seed, par, compiled._incidence, n_state, compiled.n_exog
     )
     # The second-order stage takes the pencil, which the fused solve keeps
@@ -91,7 +91,7 @@ def _assert_same(got, want):
 def test_matches_the_staged_shims_exactly(path):
     compiled, par, seed, Q = _model(path)
 
-    got = sgu_klein_solve2(
+    _, *got = sgu_klein_solve2(
         compiled.construct_objective_cfunc().address,
         compiled.construct_objective_cfunc_bicomplex().address,
         seed,
@@ -111,16 +111,7 @@ def test_python_wrapper_carries_the_native_outputs(path):
     from SymbolicDSGE.core.solver_backend import sgu_solve
 
     compiled, par, seed, Q = _model(path)
-    pert = sgu_solve(
-        compiled.construct_objective_cfunc(),
-        compiled.construct_objective_cfunc_bicomplex(),
-        par,
-        seed,
-        Q,
-        compiled._incidence,
-        compiled.n_state,
-        n_exog=compiled.n_exog,
-    )
+    pert = sgu_solve(compiled, par, seed)
 
     assert pert.order == 2
     got = (
@@ -148,7 +139,7 @@ def test_first_order_block_matches_the_first_order_solve(path):
     """The second-order solve must not perturb the first order it is built on."""
     compiled, par, seed, Q = _model(path)
 
-    ss1, f1, p1, stab1, eig1, A1, B1 = klein_solve1(
+    _, ss1, f1, p1, stab1, eig1, A1, B1 = klein_solve1(
         compiled.construct_objective_cfunc().address,
         seed,
         par,
@@ -166,7 +157,7 @@ def test_first_order_block_matches_the_first_order_solve(path):
         compiled.n_state,
         compiled.n_exog,
     )
-    ss2, f2, p2, stab2, eig2 = second[:5]
+    ss2, f2, p2, stab2, eig2 = second[1:6]
     A2, B2 = second[-2:]
 
     assert stab2 == stab1

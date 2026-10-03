@@ -196,39 +196,6 @@ def _approximate_system_numeric(eq_func, steady_state, params, n_exog):  # type:
     return a, b, c, d
 
 
-@njit(cache=True)
-def _klein_postprocess_numba(
-    s: NDC, t: NDC, z: NDC, n_states: int
-) -> tuple[NDC, NDC, int, NDC]:
-    N = s.shape[0]
-    n = n_states
-    z11 = np.ascontiguousarray(z[:n, :n])
-    z21 = np.ascontiguousarray(z[n:, :n])
-    s11 = np.ascontiguousarray(s[:n, :n])
-    t11 = np.ascontiguousarray(t[:n, :n])
-
-    z11i = np.linalg.inv(z11)
-
-    stab = 0
-    if np.abs(t[n - 1, n - 1]) > np.abs(s[n - 1, n - 1]):
-        stab = -1
-    if n < N:
-        if np.abs(t[n, n]) < np.abs(s[n, n]):
-            stab = 1
-
-    eig = np.empty(N, dtype=complex128)
-    for i in range(N):
-        if np.abs(s[i, i]) > 1e-12:
-            eig[i] = t[i, i] / s[i, i]
-        else:
-            eig[i] = complex128(np.inf)
-
-    dyn = np.linalg.solve(s11, t11)
-    f = z21 @ z11i
-    p = z11 @ dyn @ z11i
-    return f, p, stab, eig
-
-
 # --- core.second_order -------------------------------------------------------
 def _zx_zu(ghx: NDF, hx: NDF, bu: NDF, nx: int, ne: int) -> tuple[NDF, NDF]:
     """``dz/dx`` and ``dz/du`` over ``z = (lag, cur, lead, eps)``, the chain-rule

@@ -26,7 +26,7 @@ Piecewise-linear policy data returned by the OccBin solver. `PiecewiseSolution` 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | `steady_state` | `ndarray[float]`, shape `(n_var,)` | Expansion point of the relaxed reference regime. |
-| `stab` | `BKStatus` | `IntEnum` stability indicator for the reference regime: `-1` means too few stable eigenvalues (no stable solutions), `0` means the required number (determinate), and `1` means too many (indeterminate). |
+| `stab` | `BKStatus` | `IntEnum` stability indicator: `1` marks an indeterminate (too many stable eigenvalues) but stable solution. Errors that do not produce a usable state space `raise` directly. |
 | `eig` | `ndarray[complex]` | Eigenvalues of the relaxed reference regime. |
 | `order` | `int` | Always `1`, because each regime is linear. |
 | `a`, `b`, `c` | `ndarray[float]`, shape `(n_regime, n_var, n_var)` | Lead, current, and lag coefficients of each regime pencil. |

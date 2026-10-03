@@ -42,15 +42,13 @@ def test_policy_is_real(path):
     compiled, par, seed = _model(path)
     cfunc = compiled.construct_objective_cfunc()
 
-    _, f, p, _, _, _, _ = klein_solve1(
+    _, _, f, p, _, _, _, _ = klein_solve1(
         cfunc.address, seed, par, compiled._incidence, compiled.n_state, compiled.n_exog
     )
     assert f.dtype == np.float64
     assert p.dtype == np.float64
 
-    sol = klein_solve(
-        cfunc, par, seed, compiled._incidence, compiled.n_state, n_exog=compiled.n_exog
-    )
+    sol = klein_solve(compiled, par, seed)
     assert sol.f.dtype == np.float64
     assert sol.p.dtype == np.float64
     assert sol.eig.dtype == np.complex128
@@ -61,14 +59,7 @@ def test_the_transition_reads_only_the_state_columns(path):
     """A control at ``t`` is pinned by the state at ``t-1``, so its own column
     contributes nothing and ``A`` is the rule scattered rather than a product."""
     compiled, par, seed = _model(path)
-    sol = klein_solve(
-        compiled.construct_objective_cfunc(),
-        par,
-        seed,
-        compiled._incidence,
-        compiled.n_state,
-        n_exog=compiled.n_exog,
-    )
+    sol = klein_solve(compiled, par, seed)
     n_state = compiled.n_state
 
     assert np.abs(sol.A[:, n_state:]).max() == 0.0
@@ -87,7 +78,7 @@ def test_reports_stab_instead_of_raising():
         compiled._incidence,
         compiled.n_state,
         compiled.n_exog,
-    )[3]
+    )[4]
 
     assert stab == 0
 

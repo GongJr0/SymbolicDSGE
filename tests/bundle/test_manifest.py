@@ -112,21 +112,31 @@ def test_manifest_without_the_field_assumes_its_own_version_broke() -> None:
         Manifest.from_dict(payload)
 
 
-def test_manifest_reads_version_8_after_the_writer_break():
+def test_manifest_reads_a_bundle_at_the_read_floor() -> None:
+    # The floor is inclusive. A version below it is the rejection above.
     payload = Manifest().to_dict()
-    payload.update(sdsge_version=8, last_breaking_version=8)
+    payload.update(
+        sdsge_version=SDSGE_MIN_READABLE_VERSION,
+        last_breaking_version=SDSGE_MIN_READABLE_VERSION,
+    )
     restored = Manifest.from_dict(payload)
-    assert restored.sdsge_version == 8
-    assert restored.last_breaking_version == 8
+    assert restored.sdsge_version == SDSGE_MIN_READABLE_VERSION
+    assert restored.last_breaking_version == SDSGE_MIN_READABLE_VERSION
 
 
-def test_version_8_reader_rejects_current_manifest(monkeypatch):
+def test_an_older_reader_rejects_only_past_the_last_break(monkeypatch):
     import SymbolicDSGE.bundle.manifest as module
 
     payload = Manifest().to_dict()
-    assert payload["sdsge_version"] == 9
-    assert payload["last_breaking_version"] == 9
-    # The existing forward-compatibility check also runs in version 8 readers.
-    monkeypatch.setattr(module, "SDSGE_FORMAT_VERSION", 8)
+    assert payload["sdsge_version"] == SDSGE_FORMAT_VERSION
+    assert payload["last_breaking_version"] == SDSGE_LAST_BREAKING_VERSION
+
+    # Only the forward gate moves with the reader's format version; the floor
+    # stays this reader's own.
+    monkeypatch.setattr(module, "SDSGE_FORMAT_VERSION", SDSGE_LAST_BREAKING_VERSION)
+    restored = Manifest.from_dict(payload)
+    assert restored.last_breaking_version == SDSGE_LAST_BREAKING_VERSION
+
+    monkeypatch.setattr(module, "SDSGE_FORMAT_VERSION", SDSGE_LAST_BREAKING_VERSION - 1)
     with pytest.raises(ValueError, match="upgrade SymbolicDSGE"):
         Manifest.from_dict(payload)
