@@ -43,7 +43,7 @@ fred = [
 ]
 ui = [
     "fastapi>=0.140.13",
-    "uvicorn[standard]>=0.53.0",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [dependency-groups]
