@@ -6,12 +6,26 @@ from typing import Iterator
 import pytest
 
 TESTS_DIR = Path(__file__).resolve().parent
-TEST_MODEL_PATH = TESTS_DIR / "fixtures" / "models" / "test.yaml"
-POST82_TEST_MODEL_PATH = TESTS_DIR / "fixtures" / "models" / "POST82.yaml"
-DENSE_LKJ_TEST_MODEL_PATH = TESTS_DIR / "fixtures" / "models" / "LKJ_DENSE.yaml"
-RBC_SECOND_ORDER_TEST_MODEL_PATH = (
-    TESTS_DIR / "fixtures" / "models" / "rbc_second_order.yaml"
-)
+MODELS_DIR = TESTS_DIR / "fixtures" / "models"
+
+TEST_MODEL_PATH = MODELS_DIR / "test.yaml"
+POST82_TEST_MODEL_PATH = MODELS_DIR / "POST82.yaml"
+DENSE_LKJ_TEST_MODEL_PATH = MODELS_DIR / "LKJ_DENSE.yaml"
+RBC_SECOND_ORDER_TEST_MODEL_PATH = MODELS_DIR / "rbc_second_order.yaml"
+RBC_MULTISHOCK_TEST_MODEL_PATH = MODELS_DIR / "rbc_multishock_second_order.yaml"
+RBC_OCCBIN_TEST_MODEL_PATH = MODELS_DIR / "rbc_occbin.yaml"
+NK_ZLB_TEST_MODEL_PATH = MODELS_DIR / "nk_zlb_1_constraint.yaml"
+
+#: Names an indirect ``parametrize`` passes to the ``model_path`` fixture.
+MODEL_PATHS = {
+    "test": TEST_MODEL_PATH,
+    "post82": POST82_TEST_MODEL_PATH,
+    "dense_lkj": DENSE_LKJ_TEST_MODEL_PATH,
+    "rbc_second_order": RBC_SECOND_ORDER_TEST_MODEL_PATH,
+    "rbc_multishock": RBC_MULTISHOCK_TEST_MODEL_PATH,
+    "rbc_occbin": RBC_OCCBIN_TEST_MODEL_PATH,
+    "nk_zlb": NK_ZLB_TEST_MODEL_PATH,
+}
 
 
 #: More memory than any test plan sizes to.
@@ -51,6 +65,12 @@ def test_model_path() -> Path:
 
 
 @pytest.fixture(scope="session")
+def test_model_yaml() -> str:
+    """The text of the reference model, for the ``from_string`` entry points."""
+    return TEST_MODEL_PATH.read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="session")
 def post82_test_model_path() -> Path:
     return POST82_TEST_MODEL_PATH
 
@@ -63,6 +83,31 @@ def dense_lkj_test_model_path() -> Path:
 @pytest.fixture(scope="session")
 def rbc_second_order_test_model_path() -> Path:
     return RBC_SECOND_ORDER_TEST_MODEL_PATH
+
+
+@pytest.fixture(scope="session")
+def rbc_multishock_test_model_path() -> Path:
+    return RBC_MULTISHOCK_TEST_MODEL_PATH
+
+
+@pytest.fixture(scope="session")
+def rbc_occbin_test_model_path() -> Path:
+    return RBC_OCCBIN_TEST_MODEL_PATH
+
+
+@pytest.fixture(scope="session")
+def nk_zlb_test_model_path() -> Path:
+    return NK_ZLB_TEST_MODEL_PATH
+
+
+@pytest.fixture
+def model_path(request) -> Path:
+    """One model per case of an indirect ``parametrize`` over ``MODEL_PATHS``.
+
+    A decorator is evaluated at import time and cannot read a fixture, so the
+    cases carry a name and the lookup happens here.
+    """
+    return MODEL_PATHS[request.param]
 
 
 @pytest.fixture(scope="session")

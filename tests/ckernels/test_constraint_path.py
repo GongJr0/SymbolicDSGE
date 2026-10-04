@@ -31,8 +31,8 @@ OVER_ON, OVER_BOTH, OVER_OFF = -2.0, 0.0, 2.0
 
 
 @pytest.fixture(scope="module")
-def compiled():
-    model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+def compiled(post82_test_model_path):
+    model, kalman = ModelParser(post82_test_model_path).get_all()
     conf = copy.deepcopy(model)
     by_name = {v.__name__: v for v in conf.variables.variables}
     g, z = by_name["g"], by_name["z"]

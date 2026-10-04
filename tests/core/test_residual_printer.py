@@ -105,7 +105,7 @@ def test_ipow_complex_step_correct_for_negative_base(expr_factory, analytic):
     assert out[0].imag / h == pytest.approx(analytic(v0), rel=1e-10)
 
 
-def _compiled(path: str):
+def _compiled(path: Path):
     model, kalman = ModelParser(path).get_all()
     return DSGESolver(model, kalman).compile()
 
@@ -120,9 +120,9 @@ def _param_vector(compiled, dtype):
     )
 
 
-@pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
-def test_printer_matches_reference_residual_values(path):
-    compiled = _compiled(path)
+@pytest.mark.parametrize("model_path", ["test", "post82"], indirect=True)
+def test_printer_matches_reference_residual_values(model_path):
+    compiled = _compiled(model_path)
     layout = ResidualLayout.from_compiled(compiled)
     fn = residual_caller(compiled.objective_eqs, layout)
     par = _param_vector(compiled, C)
@@ -147,9 +147,9 @@ def test_printer_matches_reference_residual_values(path):
         np.testing.assert_allclose(got, want, rtol=1e-10, atol=1e-12)
 
 
-@pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
-def test_printer_linearization_matches_reference(path):
-    compiled = _compiled(path)
+@pytest.mark.parametrize("model_path", ["test", "post82"], indirect=True)
+def test_printer_linearization_matches_reference(model_path):
+    compiled = _compiled(model_path)
     layout = ResidualLayout.from_compiled(compiled)
     fn = residual_caller(compiled.objective_eqs, layout)
 
@@ -169,8 +169,8 @@ def test_printer_linearization_matches_reference(path):
     np.testing.assert_allclose(d_new, d_ref, rtol=1e-10, atol=1e-12)
 
 
-def test_build_cfunc_compiles_to_address():
-    compiled = _compiled("MODELS/test.yaml")
+def test_build_cfunc_compiles_to_address(test_model_path):
+    compiled = _compiled(test_model_path)
     layout = ResidualLayout.from_compiled(compiled)
     cf = build_cfunc(compiled.objective_eqs, layout)
     assert isinstance(cf.address, int) and cf.address != 0

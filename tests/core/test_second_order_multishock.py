@@ -21,16 +21,15 @@ from SymbolicDSGE._ckernels.core import second_order
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from _oracles import dynare_rbc_multishock_second_order as golden
 
-_MULTISHOCK = "tests/fixtures/models/rbc_multishock_second_order.yaml"
 _MS_STDS = ("sig_z", "sig_d", "sig_g")
 _MS_CORRS = {(0, 1): "corr_zd", (0, 2): "corr_zg", (1, 2): "corr_dg"}
 _MS_SHOCKS = ("e_z", "e_d", "e_g")
 _MS_AR_STATES = ("z", "d", "g")
 
 
-def _solved_multishock():
+def _solved_multishock(rbc_multishock_test_model_path):
     """The three-shock RBC solved to second order, as (solved, compiled)."""
-    model, kalman = ModelParser(_MULTISHOCK).get_all()
+    model, kalman = ModelParser(rbc_multishock_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
     return solver.solve(compiled, order=2), compiled
@@ -80,9 +79,9 @@ def _ms_axes(compiled) -> tuple[list[int], list[int], list[int]]:
     return ri, si, ei
 
 
-def test_multishock_first_order_matches_dynare():
+def test_multishock_first_order_matches_dynare(rbc_multishock_test_model_path):
     """ghx and ghu with three shocks."""
-    solved, compiled = _solved_multishock()
+    solved, compiled = _solved_multishock(rbc_multishock_test_model_path)
     pol = solved.policy
     ri, si, ei = _ms_axes(compiled)
 
@@ -93,14 +92,14 @@ def test_multishock_first_order_matches_dynare():
     np.testing.assert_allclose(ghu, golden.GHU, rtol=5e-6, atol=2e-7)
 
 
-def test_multishock_second_order_matches_dynare():
+def test_multishock_second_order_matches_dynare(rbc_multishock_test_model_path):
     """ghxx, ghxu and ghuu with three shocks, every DR row.
 
     ghxu and ghuu are the payload: with one shock they are a rescaling of ghxx
     and constrain nothing new, but here they carry the cross terms between
     distinct innovations, which no single-shock model has.
     """
-    solved, compiled = _solved_multishock()
+    solved, compiled = _solved_multishock(rbc_multishock_test_model_path)
     pol = solved.policy
     ri, si, ei = _ms_axes(compiled)
     ns, ne = len(si), len(ei)
@@ -121,30 +120,34 @@ def test_multishock_second_order_matches_dynare():
             )
 
 
-def test_multishock_risk_correction_matches_dynare():
+def test_multishock_risk_correction_matches_dynare(rbc_multishock_test_model_path):
     """ghs2 against a full covariance rather than one variance. This is the only
     assertion in the file that the shock correlations reach the solution at all,
     since the covariance enters nothing else."""
-    solved, compiled = _solved_multishock()
+    solved, compiled = _solved_multishock(rbc_multishock_test_model_path)
     ri, _, _ = _ms_axes(compiled)
     ours = _stack(solved.policy.hss, solved.policy.gss)[ri]
 
     np.testing.assert_allclose(ours, golden.GHS2, rtol=5e-6, atol=1e-8)
 
 
-def test_multishock_Q_reproduces_the_calibrated_covariance():
+def test_multishock_Q_reproduces_the_calibrated_covariance(
+    rbc_multishock_test_model_path,
+):
     """The stds scale it and the correlations fill it."""
-    _, compiled = _solved_multishock()
+    _, compiled = _solved_multishock(rbc_multishock_test_model_path)
     Q = _shock_covariance(compiled)
 
     assert Q.shape == (compiled.n_exog, compiled.n_exog)
     np.testing.assert_allclose(Q, _ms_covariance(compiled), rtol=1e-13, atol=0.0)
 
 
-def test_multishock_risk_correction_reads_the_off_diagonals():
+def test_multishock_risk_correction_reads_the_off_diagonals(
+    rbc_multishock_test_model_path,
+):
     """The correlations have to reach g_ss. Zeroing the off-diagonals moves it,
     so the covariance is not being read as a diagonal."""
-    solved, compiled = _solved_multishock()
+    solved, compiled = _solved_multishock(rbc_multishock_test_model_path)
     a, b, f_xx = _ms_preproc(solved, compiled)
     n_state = compiled.n_state
     pol = solved.policy
@@ -160,13 +163,13 @@ def test_multishock_risk_correction_reads_the_off_diagonals():
     assert not np.allclose(gss, gss_diag, rtol=1e-3, atol=1e-12)
 
 
-def test_multishock_second_order_structural_invariants():
+def test_multishock_second_order_structural_invariants(rbc_multishock_test_model_path):
     """The same layout facts the single-shock fixture pins, once per process.
 
     Every AR(1) is linear, so its second-order rows are flat and it takes no risk
     correction. The tensors are symmetric in the pair they weigh.
     """
-    solved, compiled = _solved_multishock()
+    solved, compiled = _solved_multishock(rbc_multishock_test_model_path)
     pol = solved.policy
 
     # Symmetry falls out of the chain rule rather than being imposed by a
@@ -245,11 +248,13 @@ def _golden_rows(block: np.ndarray, lead: int = 0) -> np.ndarray:
     return rows
 
 
-def test_multishock_second_order_deterministic_sim_matches_dynare():
+def test_multishock_second_order_deterministic_sim_matches_dynare(
+    rbc_multishock_test_model_path,
+):
     """No innovations, so this is hxx/gxx on a four-state model plus the
     correlated risk correction, which the pruned recursion applies every period
     whether or not a shock lands."""
-    solved, _ = _solved_multishock()
+    solved, _ = _solved_multishock(rbc_multishock_test_model_path)
 
     out = solved.sim(
         golden.DETERMINISTIC_SIM.shape[0] - 1,
@@ -264,11 +269,13 @@ def test_multishock_second_order_deterministic_sim_matches_dynare():
     )
 
 
-def test_multishock_second_order_stochastic_sim_matches_dynare():
+def test_multishock_second_order_stochastic_sim_matches_dynare(
+    rbc_multishock_test_model_path,
+):
     """Every period carries at least two nonzero innovations, so the ghuu
     off-diagonals contribute to every state update. Dynare's ex_ is in levels
     and our B is a plain selector, so the same innovations go into both sides."""
-    solved, _ = _solved_multishock()
+    solved, _ = _solved_multishock(rbc_multishock_test_model_path)
 
     # The generator hands Dynare a leading zero shock row, so the first period
     # it simulates is shock free. Ours has to be too, or every row is offset.
@@ -283,10 +290,10 @@ def test_multishock_second_order_stochastic_sim_matches_dynare():
     np.testing.assert_allclose(out[: len(expected)], expected, rtol=2e-6, atol=2e-6)
 
 
-def test_multishock_second_order_irf_matches_dynare():
+def test_multishock_second_order_irf_matches_dynare(rbc_multishock_test_model_path):
     """All three shocks impulsed together. A one-shock IRF would leave the ghuu
     off-diagonals at zero and reduce to the single-shock fixture."""
-    solved, _ = _solved_multishock()
+    solved, _ = _solved_multishock(rbc_multishock_test_model_path)
 
     # The generator impulses ex_(2), one period after its lead-in zero, while
     # irf() impulses the first period it simulates.

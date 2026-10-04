@@ -21,7 +21,7 @@ RTOL = 1e-10
 ATOL = 1e-12
 
 
-def _compiled(path: str):
+def _compiled(path: Path):
     model, kalman = ModelParser(path).get_all()
     return DSGESolver(model, kalman).compile()
 
@@ -36,9 +36,9 @@ def _params(compiled) -> np.ndarray:
     )
 
 
-@pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
-def test_klein_preproc_parity(path):
-    compiled = _compiled(path)
+@pytest.mark.parametrize("model_path", ["test", "post82"], indirect=True)
+def test_klein_preproc_parity(model_path):
+    compiled = _compiled(model_path)
     layout = ResidualLayout.from_compiled(compiled)
     eq_func = residual_caller(compiled.objective_eqs, layout)
 
@@ -62,8 +62,8 @@ def test_klein_preproc_parity(path):
     np.testing.assert_allclose(d, d_ref, rtol=RTOL, atol=ATOL)
 
 
-@pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
-def test_the_lag_and_shock_blocks_carry_the_model(path):
+@pytest.mark.parametrize("model_path", ["test", "post82"], indirect=True)
+def test_the_lag_and_shock_blocks_carry_the_model(model_path):
     """Both models lag something and are driven by shocks, so both blocks are live.
 
     A lag of one and a shock reach the printed residual as they were written, so
@@ -71,7 +71,7 @@ def test_the_lag_and_shock_blocks_carry_the_model(path):
     them on the way to the pencil, which the ``a``/``b`` goldens would not
     announce.
     """
-    compiled = _compiled(path)
+    compiled = _compiled(model_path)
     layout = ResidualLayout.from_compiled(compiled)
     cf = build_cfunc(compiled.objective_eqs, layout)
 

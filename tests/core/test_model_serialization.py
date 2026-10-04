@@ -21,16 +21,16 @@ def _model_signature(parser: ModelParser) -> dict[str, Any]:
     }
 
 
-def test_model_config_round_trips_without_kalman() -> None:
-    parser = ModelParser("MODELS/test.yaml")
+def test_model_config_round_trips_without_kalman(test_model_path) -> None:
+    parser = ModelParser(test_model_path)
     rebuilt = ModelParser.from_string(parser.to_yaml())
 
     assert _model_signature(rebuilt) == _model_signature(parser)
     assert rebuilt.get_all().kalman is None
 
 
-def test_kalman_config_round_trips_via_reparse() -> None:
-    parser = ModelParser("MODELS/POST82.yaml")
+def test_kalman_config_round_trips_via_reparse(post82_test_model_path) -> None:
+    parser = ModelParser(post82_test_model_path)
     rebuilt = ModelParser.from_string(parser.to_yaml())
 
     k0 = parser.get_all().kalman
@@ -46,8 +46,8 @@ def test_kalman_config_round_trips_via_reparse() -> None:
         np.testing.assert_allclose(np.asarray(k1.R), np.asarray(k0.R))
 
 
-def test_to_yaml_bakes_updated_calibration() -> None:
-    parser = ModelParser("MODELS/test.yaml")
+def test_to_yaml_bakes_updated_calibration(test_model_path) -> None:
+    parser = ModelParser(test_model_path)
     config = parser.get()
     target = next(iter(config.calibration.parameters))
     config.calibration.parameters[target] = np.float64(0.123)
@@ -59,10 +59,12 @@ def test_to_yaml_bakes_updated_calibration() -> None:
     assert rebuilt_calib[target.name] == pytest.approx(0.123)
 
 
-def test_to_yaml_emits_kalman_block_when_present() -> None:
-    parser = ModelParser("MODELS/POST82.yaml")
+def test_to_yaml_emits_kalman_block_when_present(
+    post82_test_model_path, test_model_path
+) -> None:
+    parser = ModelParser(post82_test_model_path)
     text = parser.to_yaml()
     assert "kalman:" in text
 
-    text_no_kalman = ModelParser("MODELS/test.yaml").to_yaml()
+    text_no_kalman = ModelParser(test_model_path).to_yaml()
     assert "kalman:" not in text_no_kalman

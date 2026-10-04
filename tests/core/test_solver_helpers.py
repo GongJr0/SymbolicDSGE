@@ -82,11 +82,11 @@ def rbc_compiled(rbc_second_order_test_model_path):
 
 
 @pytest.fixture
-def deep_compiled(tmp_path):
-    """MODELS/test.yaml with u lagged three deep, so the compiler mints a chain."""
+def deep_compiled(tmp_path, test_model_path):
+    """test.yaml with u lagged three deep, so the compiler mints a chain."""
     import yaml
 
-    data = yaml.safe_load(open("MODELS/test.yaml", encoding="utf-8"))
+    data = yaml.safe_load(test_model_path.read_text(encoding="utf-8"))
     data["equations"]["model"]["u_process"] = "u(t) = rho_u*u(t-3) + e_u"
     path = tmp_path / "deep_test.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")

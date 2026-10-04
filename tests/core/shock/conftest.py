@@ -6,7 +6,7 @@ from SymbolicDSGE import DSGESolver, ModelParser
 
 
 @pytest.fixture(scope="session")
-def solved_test_model():
-    model, kalman = ModelParser("MODELS/test.yaml").get_all()
+def solved_test_model(test_model_path):
+    model, kalman = ModelParser(test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     return solver.solve(solver.compile())

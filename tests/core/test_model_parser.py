@@ -27,9 +27,9 @@ def _after(text: str, anchor: str, *lines: str) -> str:
     return _edit(text, anchor, "\n".join((anchor, *lines)))
 
 
-def test_model_parser_get_and_get_all(parsed_test):
+def test_model_parser_get_and_get_all(parsed_test, test_model_path):
     model, kalman = parsed_test
-    parser = ModelParser("MODELS/test.yaml")
+    parser = ModelParser(test_model_path)
 
     assert parser.get() is parser.get_all().model
     assert model.name == "TEST"
@@ -560,8 +560,8 @@ def test_validate_ss_seed_errors_on_model_variable_reference(conf):
         ModelParser.validate_ss_seed(conf)
 
 
-def test_parser_rejects_undeclared_ss_seed_symbol(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_parser_rejects_undeclared_ss_seed_symbol(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["variables"] = {
         "u": {"ss_seed": "u_bar"},
         "v": {},
@@ -576,8 +576,8 @@ def test_parser_rejects_undeclared_ss_seed_symbol(tmp_path):
         ModelParser(bad)
 
 
-def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["calibration"]["parameters"].pop("beta")
     bad = _write_yaml(tmp_path / "missing_declared.yaml", data)
 
@@ -585,8 +585,10 @@ def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path):
         ModelParser(bad)
 
 
-def test_require_calibrated_params_rejects_unknown_referenced_parameter(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_require_calibrated_params_rejects_unknown_referenced_parameter(
+    tmp_path, test_model_yaml
+):
+    data = yaml.safe_load(test_model_yaml)
     data["calibration"]["shocks"]["std"]["e_u"] = "unknown_sigma"
     bad = _write_yaml(tmp_path / "unknown_ref.yaml", data)
 
@@ -595,9 +597,9 @@ def test_require_calibrated_params_rejects_unknown_referenced_parameter(tmp_path
 
 
 def test_require_calibrated_params_rejects_uncalibrated_referenced_parameter(
-    tmp_path,
+    tmp_path, test_model_yaml
 ):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+    data = yaml.safe_load(test_model_yaml)
     data["calibration"]["shocks"]["std"]["e_u"] = "sig_u"
     data["calibration"]["parameters"].pop("sig_u")
     bad = _write_yaml(tmp_path / "missing_ref.yaml", data)
@@ -606,8 +608,8 @@ def test_require_calibrated_params_rejects_uncalibrated_referenced_parameter(
         ModelParser(bad)
 
 
-def test_parser_rejects_model_equation_without_single_equals(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_parser_rejects_model_equation_without_single_equals(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["equations"]["model"][0] = "Pi(t) + x(t)"
     bad = _write_yaml(tmp_path / "bad_eq.yaml", data)
 
@@ -634,8 +636,8 @@ def test_legacy_variable_list_defaults_linearization_and_ss_seed(parsed_test):
     assert all(ss is None for ss in conf.variables.ss_seed.values())
 
 
-def test_parser_builds_variable_metadata_from_mapping(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_parser_builds_variable_metadata_from_mapping(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["variables"] = {
         "u": {"linearization": "taylor"},
         "v": {},
@@ -664,8 +666,8 @@ def test_parser_builds_variable_metadata_from_mapping(tmp_path):
     assert conf.variables.ss_seed["x"] is None
 
 
-def test_parser_rejects_retired_steady_state_key(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_parser_rejects_retired_steady_state_key(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["variables"] = {
         "u": {"steady_state": "ubar"},
         "v": {},
@@ -680,8 +682,8 @@ def test_parser_rejects_retired_steady_state_key(tmp_path):
         ModelParser(bad)
 
 
-def test_parser_rejects_unknown_variable_metadata_keys(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_parser_rejects_unknown_variable_metadata_keys(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["variables"] = {
         "u": {"linearization": "taylor", "foo": 1},
         "v": {},

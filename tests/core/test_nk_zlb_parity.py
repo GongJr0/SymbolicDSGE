@@ -34,8 +34,6 @@ import pytest
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from _oracles import dynare_nk_zlb_1_constraint as golden
 
-_MODEL = "tests/fixtures/models/nk_zlb_1_constraint.yaml"
-
 #: Our name for each of the oracle's ``COLUMNS``, in that order. The two models
 #: declare their variables in the same order, so this is a copy rather than a
 #: permutation, but the path is still read by name.
@@ -86,9 +84,9 @@ _TOL = 1e-11
 
 
 @pytest.fixture(scope="module")
-def solved():
+def solved(nk_zlb_test_model_path):
     """The model a user gets from ``solve``: the constraint makes it piecewise."""
-    model, kalman = ModelParser(_MODEL).get_all()
+    model, kalman = ModelParser(nk_zlb_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     return solver.solve(solver.compile())
 

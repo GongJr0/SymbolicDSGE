@@ -20,8 +20,6 @@ from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult
 from SymbolicDSGE.estimation.spec import EstimatorParams, EstimatorSpec
 
-_MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
-
 
 def _estimation_spec(y, *, names=("beta", "sigma")) -> EstimatorSpec:
     return EstimatorSpec(
@@ -42,7 +40,9 @@ def _estimation_spec(y, *, names=("beta", "sigma")) -> EstimatorSpec:
     )
 
 
-def test_full_bundle_round_trip(tmp_path: Path) -> None:
+def test_full_bundle_round_trip(
+    tmp_path: Path, test_model_yaml, test_model_path
+) -> None:
     rng = np.random.default_rng(0)
     observed = rng.standard_normal((20, 2))
     posterior = {
@@ -66,10 +66,10 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
         BundleBuilder(created_by="test-suite")
         .add_model(
             "reference",
-            _MODEL_YAML,
+            test_model_yaml,
             compile_kwargs={},
         )
-        .add_estimation(_estimator(observed), result=result)
+        .add_estimation(_estimator(observed, test_model_path), result=result)
         .add_mc(pipeline)
         .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
         .set_simulation(
@@ -122,7 +122,7 @@ def test_full_bundle_round_trip(tmp_path: Path) -> None:
     assert set(loaded.manifest.checksums) == {m.path for m in loaded.manifest.members}
 
 
-def test_add_estimation_accepts_live_mcmc_result() -> None:
+def test_add_estimation_accepts_live_mcmc_result(test_model_yaml) -> None:
     import json
 
     from SymbolicDSGE.estimation.results import MCMCResult
@@ -142,7 +142,7 @@ def test_add_estimation_accepts_live_mcmc_result() -> None:
 
     builder = (
         BundleBuilder()
-        .add_model("reference", _MODEL_YAML)
+        .add_model("reference", test_model_yaml)
         .add_estimation(_estimation_source(spec), result=mcmc)
     )
     _, files = builder.build()
@@ -186,20 +186,20 @@ def _estimation_source(spec: EstimatorSpec) -> Any:
 
 
 @cache
-def _compiled_reference() -> Any:
-    """The compiled ``MODELS/test.yaml`` a loaded reference model comes back as."""
-    model, kalman = ModelParser("MODELS/test.yaml").get_all()
+def _compiled_reference(test_model_path) -> Any:
+    """The compiled ``test.yaml`` a loaded reference model comes back as."""
+    model, kalman = ModelParser(test_model_path).get_all()
     return DSGESolver(model, kalman).compile()
 
 
-def _estimator(y: Any) -> Estimator:
+def _estimator(y: Any, test_model_path) -> Estimator:
     """A live estimator over the bundled model, in the shape a loader rebuilds.
 
-    ``MODELS/test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
+    ``test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
     explicitly; without one the estimator a bundle describes cannot be built.
     """
     return Estimator(
-        compiled=_compiled_reference(),
+        compiled=_compiled_reference(test_model_path),
         y=np.asarray(y, dtype=np.float64),
         observables=["Infl", "Rate"],
         estimated_params=["beta", "sigma"],

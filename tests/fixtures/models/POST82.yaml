@@ -2,16 +2,6 @@ name: "NK_LS_POST82"
 
 variables: [g, z, r, x, Pi]
 
-# Parameter naming:
-# beta: discount factor
-# kappa: NKPC slope
-# tau_inv: tau^{-1} in LS (maps to 1/sigma)
-# psi_pi, psi_x: Taylor rule loadings (psi1, psi2)
-# rho_r, rho_g, rho_z: AR(1) persistence
-# pi_star, r_star: steady-state inflation / real rate
-# sig_r, sig_g, sig_z: std devs of innovations
-# rho_gz: corr(e_g, e_z)
-
 shocks:
     - e_g
     - e_z
@@ -45,6 +35,8 @@ calibration:
     rho_g: 0.83
     rho_z: 0.85
     rho_gz: 0.36
+    rho_gr: 0.0
+    rho_zr: 0.0
     sig_r: 0.18
     sig_g: 0.18
     sig_z: 0.64
@@ -62,6 +54,8 @@ calibration:
       e_r: sig_r
     corr:
       e_g, e_z: rho_gz
+      e_g, e_r: rho_gr
+      e_z, e_r: rho_zr
 
 kalman:
 

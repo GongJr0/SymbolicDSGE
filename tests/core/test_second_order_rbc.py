@@ -71,16 +71,16 @@ def _shock_cov(compiled) -> np.ndarray:
     return np.array([[sig * sig]], dtype=np.float64)
 
 
-def _solved_rbc():
+def _solved_rbc(rbc_second_order_test_model_path):
     """The RBC model solved to second order, as (solved, compiled)."""
-    model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
+    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
     return solver.solve(compiled, order=2), compiled
 
 
-def _solve_rbc_second_order():
-    return _solved_rbc()[0]
+def _solve_rbc_second_order(rbc_second_order_test_model_path):
+    return _solved_rbc(rbc_second_order_test_model_path)[0]
 
 
 def _golden_columns(solved) -> list[int]:
@@ -124,11 +124,11 @@ def _golden_rows(block: np.ndarray, lead: int = 0) -> np.ndarray:
     return rows
 
 
-def test_rbc_second_order_matches_dynare():
+def test_rbc_second_order_matches_dynare(rbc_second_order_test_model_path):
     """The golden, off the kernel directly: every second-order block against the
     Dynare array that names it. The independent-solver check on the actual
     second-order math."""
-    model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
+    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
     compiled = DSGESolver(model, kalman).compile()
     # k and z occur at t-1, so they are the states and c is the only control.
     assert list(compiled.var_names) == ["k", "z", "c"]
@@ -170,14 +170,14 @@ def test_rbc_second_order_matches_dynare():
     np.testing.assert_allclose(_stack(hss, gss), golden.GHS2, rtol=5e-6, atol=1e-9)
 
 
-def test_rbc_second_order_structural_invariants():
+def test_rbc_second_order_structural_invariants(rbc_second_order_test_model_path):
     """What the model's own structure forces, independent of any golden.
 
     z is an AR(1), so every one of its second-order rows is flat, and its risk
     correction is zero. The tensors are symmetric in the pair they weigh, which
     the solve gets from the chain rule rather than by imposing it.
     """
-    solved, compiled = _solved_rbc()
+    solved, compiled = _solved_rbc(rbc_second_order_test_model_path)
     pol = solved.policy
     z = compiled.idx["z"]
 
@@ -194,11 +194,11 @@ def test_rbc_second_order_structural_invariants():
     )
 
 
-def test_solve_order2_wiring():
+def test_solve_order2_wiring(rbc_second_order_test_model_path):
     """The .solve(order=2) public path end to end: it resolves + cross-checks the
     nonlinear steady state and returns a SecondOrderSolution whose tensors match
     the Dynare goldens. order=1 is unchanged (no second-order fields)."""
-    model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
+    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
 
@@ -228,8 +228,10 @@ def test_solve_order2_wiring():
     assert not hasattr(first.policy, "gxx")
 
 
-def test_rbc_second_order_deterministic_sim_matches_dynare():
-    solved = _solve_rbc_second_order()
+def test_rbc_second_order_deterministic_sim_matches_dynare(
+    rbc_second_order_test_model_path,
+):
+    solved = _solve_rbc_second_order(rbc_second_order_test_model_path)
 
     out = solved.sim(
         golden.DETERMINISTIC_SIM.shape[0] - 1,
@@ -244,8 +246,10 @@ def test_rbc_second_order_deterministic_sim_matches_dynare():
     )
 
 
-def test_rbc_second_order_stochastic_sim_matches_dynare():
-    solved = _solve_rbc_second_order()
+def test_rbc_second_order_stochastic_sim_matches_dynare(
+    rbc_second_order_test_model_path,
+):
+    solved = _solve_rbc_second_order(rbc_second_order_test_model_path)
 
     # The generator hands Dynare a leading zero shock row, so the first period
     # it simulates is shock free. Ours has to be too, or every row is offset.
@@ -260,8 +264,8 @@ def test_rbc_second_order_stochastic_sim_matches_dynare():
     np.testing.assert_allclose(out[: len(expected)], expected, rtol=2e-6, atol=2e-6)
 
 
-def test_rbc_second_order_irf_matches_dynare():
-    solved = _solve_rbc_second_order()
+def test_rbc_second_order_irf_matches_dynare(rbc_second_order_test_model_path):
+    solved = _solve_rbc_second_order(rbc_second_order_test_model_path)
 
     # The generator impulses ex_(2), one period after its lead-in zero, while
     # irf() impulses the first period it simulates.

@@ -22,12 +22,9 @@ from SymbolicDSGE import (
 from SymbolicDSGE.bundle import LoadedBundle
 from SymbolicDSGE.core.solved_model import SolvedModel
 
-_MODEL_PATH = Path("MODELS/test.yaml")
-_MODEL_YAML = _MODEL_PATH.read_text(encoding="utf-8")
 
-
-def _solve_test_model() -> SolvedModel:
-    parser = ModelParser(_MODEL_PATH)
+def _solve_test_model(test_model_path) -> SolvedModel:
+    parser = ModelParser(test_model_path)
     model, kalman = parser.get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
@@ -39,21 +36,25 @@ def test_top_level_exports_are_importable() -> None:
     assert SymbolicDSGE.BundleBuilder is BundleBuilder
 
 
-def test_path_based_parser_retains_source_yaml() -> None:
-    parser = ModelParser(_MODEL_PATH)
-    assert parser.parsed.model.source_yaml == _MODEL_YAML
+def test_path_based_parser_retains_source_yaml(
+    test_model_path, test_model_yaml
+) -> None:
+    parser = ModelParser(test_model_path)
+    assert parser.parsed.model.source_yaml == test_model_yaml
 
 
-def test_from_string_preserves_source_text_exactly() -> None:
+def test_from_string_preserves_source_text_exactly(test_model_yaml) -> None:
     # Includes the temp-file round-trip — the source_yaml field must hold the
     # caller's exact input, not whatever the temp file ended up with.
-    weird_text = _MODEL_YAML + "\n# trailing comment\n"
+    weird_text = test_model_yaml + "\n# trailing comment\n"
     parser = ModelParser.from_string(weird_text)
     assert parser.parsed.model.source_yaml == weird_text
 
 
-def test_save_sdsge_round_trips_via_load_bundle(tmp_path: Path) -> None:
-    solved = _solve_test_model()
+def test_save_sdsge_round_trips_via_load_bundle(
+    tmp_path: Path, test_model_path
+) -> None:
+    solved = _solve_test_model(test_model_path)
     target = solved.save_sdsge(
         tmp_path / "model.sdsge",
         compile_kwargs={},
@@ -65,8 +66,10 @@ def test_save_sdsge_round_trips_via_load_bundle(tmp_path: Path) -> None:
     assert loaded.models["reference"].sim(5).X.shape[0] == 5
 
 
-def test_to_bundle_builder_returns_chainable_builder(tmp_path: Path) -> None:
-    solved = _solve_test_model()
+def test_to_bundle_builder_returns_chainable_builder(
+    tmp_path: Path, test_model_path
+) -> None:
+    solved = _solve_test_model(test_model_path)
     builder = solved.to_bundle_builder(compile_kwargs={}, created_by="api-test")
     assert isinstance(builder, BundleBuilder)
     target = builder.write(tmp_path / "chained.sdsge")
@@ -75,9 +78,11 @@ def test_to_bundle_builder_returns_chainable_builder(tmp_path: Path) -> None:
     assert loaded.models["reference"] is not None
 
 
-def test_save_sdsge_yaml_text_override_takes_precedence(tmp_path: Path) -> None:
-    solved = _solve_test_model()
-    override = _MODEL_YAML + "\n# explicit override marker\n"
+def test_save_sdsge_yaml_text_override_takes_precedence(
+    tmp_path: Path, test_model_yaml, test_model_path
+) -> None:
+    solved = _solve_test_model(test_model_path)
+    override = test_model_yaml + "\n# explicit override marker\n"
     target = solved.save_sdsge(
         tmp_path / "override.sdsge",
         yaml_text=override,
@@ -93,8 +98,8 @@ def test_save_sdsge_yaml_text_override_takes_precedence(tmp_path: Path) -> None:
     assert archive.read_text(member_path) == override
 
 
-def test_save_sdsge_raises_without_source_yaml(tmp_path: Path) -> None:
-    solved = _solve_test_model()
+def test_save_sdsge_raises_without_source_yaml(tmp_path: Path, test_model_path) -> None:
+    solved = _solve_test_model(test_model_path)
     # Simulate a programmatically constructed config (no parse history).
     solved.compiled.config.source_yaml = None
     with pytest.raises(ValueError, match="source YAML"):

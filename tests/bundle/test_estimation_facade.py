@@ -14,8 +14,6 @@ from SymbolicDSGE.bundle.parquet import collapse_columns, from_parquet_columns
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult, MAPResult
 
-_MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
-
 
 def _with_filter_prep(compiled: SimpleNamespace) -> SimpleNamespace:
     """Complete a stub with the surface Estimator's construction-time filter prep
@@ -101,10 +99,10 @@ def _optimization_result() -> MAPResult:
     )
 
 
-def test_facade_flattens_optimization_run() -> None:
+def test_facade_flattens_optimization_run(test_model_yaml) -> None:
     builder = (
         BundleBuilder()
-        .add_model("reference", _MODEL_YAML)
+        .add_model("reference", test_model_yaml)
         .add_estimation(_estimator(), result=_optimization_result())
     )
     _, files = builder.build()
@@ -127,7 +125,7 @@ def test_facade_flattens_optimization_run() -> None:
     assert "estimation/observed.parquet" in files
 
 
-def test_facade_flattens_mcmc_run_with_posterior() -> None:
+def test_facade_flattens_mcmc_run_with_posterior(test_model_yaml) -> None:
     rng = np.random.default_rng(0)
     mcmc = MCMCResult(
         param_names=["a"],
@@ -143,7 +141,7 @@ def test_facade_flattens_mcmc_run_with_posterior() -> None:
 
     builder = (
         BundleBuilder()
-        .add_model("reference", _MODEL_YAML)
+        .add_model("reference", test_model_yaml)
         .add_estimation(_estimator(), result=mcmc)
     )
     _, files = builder.build()

@@ -30,9 +30,6 @@ from SymbolicDSGE.estimation.spec import (
     EstimatorSpec,
 )
 
-_MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
-
-
 # -- pure helper round-trips ------------------------------------------------
 
 
@@ -81,11 +78,11 @@ def test_trace_to_csv_rejects_mismatched_lengths() -> None:
 # -- builder writes CSV members ---------------------------------------------
 
 
-def test_builder_writes_observed_with_semantic_headers() -> None:
+def test_builder_writes_observed_with_semantic_headers(test_model_yaml) -> None:
     matrix = np.array([[1.0, 2.0], [3.0, 4.0]])
     builder = (
         BundleBuilder()
-        .add_model("reference", _MODEL_YAML)
+        .add_model("reference", test_model_yaml)
         .add_estimation(
             _estimation_source(_estimation_spec(matrix, observables=("gdp", "infl"))),
             as_parquet=False,
@@ -102,7 +99,7 @@ def test_builder_writes_observed_with_semantic_headers() -> None:
     assert text.splitlines()[0] == "gdp,infl"
 
 
-def test_builder_writes_posterior_and_mc_traces_as_csv() -> None:
+def test_builder_writes_posterior_and_mc_traces_as_csv(test_model_yaml) -> None:
     result = MCMCResult(
         param_names=["beta", "sigma"],
         samples=np.array([[1.0, 2.0], [3.0, 4.0]]),
@@ -115,7 +112,7 @@ def test_builder_writes_posterior_and_mc_traces_as_csv() -> None:
     )
     builder = (
         BundleBuilder()
-        .add_model("reference", _MODEL_YAML)
+        .add_model("reference", test_model_yaml)
         .add_estimation(
             _estimation_source(_estimation_spec()), result=result, as_parquet=False
         )
@@ -140,7 +137,9 @@ def test_builder_observable_names_length_must_match_matrix() -> None:
 # -- format-agnostic loader -------------------------------------------------
 
 
-def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None:
+def test_csv_mode_round_trips_through_builder_and_loader(
+    tmp_path: Path, test_model_yaml, test_model_path
+) -> None:
     rng = np.random.default_rng(1)
     observed = rng.standard_normal((10, 2))
     posterior = {
@@ -161,9 +160,9 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
 
     target = (
         BundleBuilder(created_by="csv-test")
-        .add_model("reference", _MODEL_YAML, compile_kwargs={})
+        .add_model("reference", test_model_yaml, compile_kwargs={})
         .add_estimation(
-            _estimator(observed),
+            _estimator(test_model_path, observed),
             result=result,
             as_parquet=False,
         )
@@ -181,7 +180,9 @@ def test_csv_mode_round_trips_through_builder_and_loader(tmp_path: Path) -> None
     )
 
 
-def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
+def test_loader_reads_hand_built_csv_only_bundle(
+    tmp_path: Path, test_model_yaml, test_model_path
+) -> None:
     """A hand-zipped bundle with CSV members (no Parquet) is a valid archive."""
     observed_csv = b"Infl,Rate\n0.1,0.2\n0.3,0.4\n0.5,0.6\n"
     posterior_csv = trace_to_csv(
@@ -191,7 +192,7 @@ def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
         }
     )
 
-    spec = _estimator().to_spec()
+    spec = _estimator(test_model_path).to_spec()
     manifest = Manifest(
         created_by="hand-zipped",
         members=[
@@ -211,7 +212,7 @@ def test_loader_reads_hand_built_csv_only_bundle(tmp_path: Path) -> None:
         ],
     )
     files = {
-        "model/reference.yaml": _MODEL_YAML.encode("utf-8"),
+        "model/reference.yaml": test_model_yaml.encode("utf-8"),
         "estimation/spec.json": json.dumps(spec.params).encode("utf-8"),
         "estimation/observed.csv": observed_csv,
         "estimation/posterior.csv": posterior_csv,
@@ -285,18 +286,18 @@ def _estimation_source(spec: EstimatorSpec) -> Any:
 
 
 @cache
-def _compiled_reference() -> Any:
-    """The compiled ``MODELS/test.yaml`` a loaded reference model comes back as."""
-    model, kalman = ModelParser("MODELS/test.yaml").get_all()
+def _compiled_reference(test_model_path) -> Any:
+    """The compiled ``test.yaml`` a loaded reference model comes back as."""
+    model, kalman = ModelParser(test_model_path).get_all()
     return DSGESolver(model, kalman).compile()
 
 
 def _estimator(
-    y: Any = None, *, observables: tuple[str, ...] = ("Infl", "Rate")
+    test_model_path, y: Any = None, *, observables: tuple[str, ...] = ("Infl", "Rate")
 ) -> Estimator:
     """A live estimator over the bundled model, in the shape a loader rebuilds.
 
-    ``MODELS/test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
+    ``test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
     explicitly; without one the estimator a bundle describes cannot be built.
     """
     matrix = (
@@ -305,7 +306,7 @@ def _estimator(
         else np.asarray(y, dtype=np.float64)
     )
     return Estimator(
-        compiled=_compiled_reference(),
+        compiled=_compiled_reference(test_model_path),
         y=matrix,
         observables=list(observables),
         estimated_params=["beta", "sigma"],
