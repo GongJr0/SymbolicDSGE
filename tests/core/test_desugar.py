@@ -33,7 +33,6 @@ NATURAL_TIME_MODEL = {
     "name": "NATURAL",
     "variables": ["u", "v", "r", "Pi", "x", "r_star"],
     "shocks": ["e_u", "e_v"],
-    "observables": ["Infl", "Rate"],
     "equations": {
         "model": {
             "nkpc": "Pi(t) = beta*Pi(t+1) + kappa*x(t)",

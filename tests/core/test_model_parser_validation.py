@@ -22,7 +22,6 @@ variables:
   x: {ss_seed: null}
 shocks:
   - e
-observables: [x_obs]
 equations:
   model:
     x_process: "x(t+1) = rho * x(t) + e"
@@ -155,7 +154,6 @@ shocks:
   - e_x
   - e_y
   - e_z
-observables: [x_obs, y_obs, z_obs]
 equations:
   model:
     x_process: "x(t+1) = rho * x(t) + e_x"

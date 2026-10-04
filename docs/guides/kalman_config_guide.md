@@ -18,14 +18,14 @@ tags:
 
 ## Observables
 
-The model configuration's `observables` list defines the measurement equations available to the Kalman filter. `kalman.R` is built in that order. A filter call can select a subset through `SolvedModel.kalman(..., observables=...)`; the selected covariance block is sliced from the configured full `R`.
+The model configuration's `equations.observable` denote the measurement equations available to the Kalman filter. `kalman.R` inherits its ordering from the model's observable ordering. A filter call can select a subset through `SolvedModel.kalman(..., observables=...)`; the selected covariance block is sliced from the configured full `R`.
 
 ???+ info "Array Alignment"
     `DataFrame` inputs are aligned by column name. `ndarray` inputs are interpreted positionally against the selected observables.
 
 ## Measurement Covariance
 
-Measurement Covariance ($R$) is constructed through parameters defined in the model configuration. We use the parent `R:` and populate it as such:
+Measurement Covariance ($R$) is constructed through parameters defined in the model configuration.
 
 ```yaml
 kalman:
@@ -47,9 +47,9 @@ kalman:
             Infl, Rate: meas_rho_ir # (3)!
 ```
 
-1. Defined as a parameter and given calibration value in model config.
-2. Defined as a parameter and given calibration value in model config.
-3. Defined as a parameter and given calibration value in model config.
+1. Defined as a parameter and given a calibration value in model config.
+2. Defined as a parameter and given a calibration value in model config.
+3. Defined as a parameter and given a calibration value in model config.
 
 ???+ info "No Standard Deviation Defaults"
     `SymbolicDSGE` does not infer measurement standard deviations when constructing $R$. Each configured observable needs an explicit standard deviation parameter.

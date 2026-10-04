@@ -32,7 +32,6 @@ def _nonlinear_model_yaml() -> str:
             ss_seed: k_ss
         shocks:
           - e_a
-        observables: [AObs]
         equations:
           model:
             a_process: "a(t) = rho_a*a(t-1) + (1-rho_a)*a_ss + e_a"
@@ -71,7 +70,6 @@ def _mixed_methods_nonlinear_yaml() -> str:
         shocks:
           - e_a
           - e_z
-        observables: [ZObs]
         equations:
           model:
             a_process: "a(t) = rho_a*a(t-1) + (1-rho_a)*a_ss + gamma*z(t-1) + e_a"
@@ -113,7 +111,6 @@ def _mixed_methods_hand_linearized_yaml() -> str:
         shocks:
           - e_a
           - e_z
-        observables: [ZObs]
         equations:
           model:
             a_process: "a_ss*a(t) = rho_a*a_ss*a(t-1) + gamma*z(t-1) + e_a"

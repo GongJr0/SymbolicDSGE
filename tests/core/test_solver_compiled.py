@@ -31,7 +31,6 @@ def _nonlinear_compile_yaml() -> str:
         shocks:
           - e_a
           - e_z
-        observables: []
         equations:
           model:
             a_process: "a(t) = rho_a*a(t-1) + (1-rho_a)*a_ss + gamma*z(t-1) + e_a"

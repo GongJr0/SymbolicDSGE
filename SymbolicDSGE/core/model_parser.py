@@ -53,7 +53,6 @@ _ALLOWED_TOP_LEVEL_KEYS = (
         {
             "name",
             "variables",
-            "observables",
             "shocks",
             "equations",
             "calibration",
@@ -588,6 +587,8 @@ class ModelParser:
                 }
             )
 
+        # `observables` is deprecated, key kept here so old configs continue
+        # inlining the list.
         for key in ("variables", "observables"):
             if isinstance(data_out.get(key), list):
                 data_out[key] = InlineList(data_out[key])
