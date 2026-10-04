@@ -25,7 +25,6 @@ Estimator(
     estimated_params: Sequence[str] | None = None,
     priors: Mapping[str, Prior] | None = None, # (4)!
     ss_seed: np.ndarray | dict[str, float] | None = None,
-    x0: np.ndarray | None = None,
     jitter: float | None = None,
     symmetrize: bool = True,
     joseph_cov: bool = False,
@@ -42,7 +41,7 @@ Estimator(
 6. Optional initial state-covariance override. If omitted, the stationary state-space covariance is used. Supply a full `(n_var, n_var)` matrix in compiled variable order; for `unscented` mode its state block is embedded automatically.
 
 ???+ info "Filter Initial Conditions"
-    In linear and extended likelihoods, `x0` and `P0` are the prior mean and covariance for the first observation. In unscented likelihoods, they describe the state and covariance before the first observation.
+    In linear and extended likelihoods, `P0` is the prior covariance for the first observation. In unscented likelihoods, it covariance before the first observation.
 
 `joseph_cov=True` uses the Joseph covariance update for linear and extended likelihoods. `False` applies a simplw update, which is faster but less numerically robust.
 

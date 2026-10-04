@@ -75,9 +75,6 @@ class Estimator:
         When priors are specified, estimated_params must match the names of the priors or be omitted.
     ss_seed : Sequence[float] | NDF | Mapping[str, float] | None
         Initial guess for the Newton steady state solver.
-    x0 : NDF | None
-        Initial state vector for the Kalman filter. Array only; unlike ``ss_seed`` a
-        name-to-value mapping is not accepted here.
     jitter : float | float64 | None
         Jitter to add when a cholesky decomposition fails in the Kalman filter. If none, no jitter is added.
     symmetrize : bool
@@ -103,8 +100,6 @@ class Estimator:
         The configured priors.
     ss_seed : Sequence[float] | NDF | Mapping[str, float] | None
         The steady-state solver seed.
-    x0 : NDF | None
-        The filter's initial state vector.
     R : NDF | None
         The observation covariance override.
     P0 : NDF | None
@@ -137,7 +132,6 @@ class Estimator:
         estimated_params: Sequence[str] | None = None,
         priors: Mapping[str, Prior] | None = None,
         ss_seed: Sequence[float] | NDF | Mapping[str, float] | None = None,
-        x0: NDF | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool = True,
         joseph_cov: bool = False,
@@ -157,7 +151,6 @@ class Estimator:
         self.y = y
 
         self.ss_seed = ss_seed
-        self.x0 = x0
         self.R = R
         self.P0 = P0
 
@@ -752,7 +745,6 @@ class Estimator:
             estimated_params=self.estimated_params,
             priors=priors or None,
             ss_seed=_coerce_ss_seed(self.ss_seed),
-            x0=list(self.x0) if self.x0 is not None else None,
             jitter=self._prepared_filter.kf_jitter,
             symmetrize=self._prepared_filter.kf_sym,
             joseph_cov=self._prepared_filter.kf_joseph_cov,
@@ -793,12 +785,6 @@ class Estimator:
             if params["P0"] is not None
             else None
         )
-
-        x0 = (
-            np.asarray(params["x0"], dtype=float64)
-            if params["x0"] is not None
-            else None
-        )
         priors = {
             name: Prior.from_spec(prior_spec)
             for name, prior_spec in (params["priors"] or {}).items()
@@ -811,7 +797,6 @@ class Estimator:
             estimated_params=params["estimated_params"],
             priors=priors or None,
             ss_seed=params["ss_seed"],
-            x0=x0,
             jitter=params["jitter"],
             symmetrize=params["symmetrize"],
             joseph_cov=params["joseph_cov"],
@@ -1095,7 +1080,6 @@ class Estimator:
             param_transforms=self._param_transforms,
             priors=self.priors,
             ss_seed=self.ss_seed,
-            x0=self.x0,
             R_override=self.R,
         )
 
@@ -1105,7 +1089,7 @@ class Estimator:
         elif mode == "extended":
             ctx = build_extended_context(common)
         elif mode == "unscented":
-            ctx = build_unscented_context(common, compiled=self.compiled, x0=self.x0)
+            ctx = build_unscented_context(common, compiled=self.compiled)
         else:
             raise ValueError(f"Unknown filter_mode {mode!r}.")
         return ctx, mode

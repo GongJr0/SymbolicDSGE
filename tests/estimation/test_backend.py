@@ -506,9 +506,6 @@ def test_estimator_loglik_unscented_matches_model_kalman(rbc_ukf_bundle):
 def test_estimator_loglik_unscented_accepts_full_length_x0(rbc_ukf_bundle):
     """A full n_var x0 exercises the seam's z0 slicing branch (raw[:n_state])."""
     compiled = rbc_ukf_bundle["compiled"]
-    x0 = np.zeros(
-        (len(compiled.var_names),), dtype=np.float64
-    )  # length n_var > n_state
 
     est = Estimator(
         compiled=compiled,
@@ -516,7 +513,6 @@ def test_estimator_loglik_unscented_accepts_full_length_x0(rbc_ukf_bundle):
         observables=["c_obs"],
         filter_mode="unscented",
         estimated_params=["rho"],
-        x0=x0,
         symmetrize=True,
     )
     assert np.isfinite(float(est.loglik(est.theta0())))

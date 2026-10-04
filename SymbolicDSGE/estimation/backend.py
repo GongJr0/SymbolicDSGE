@@ -509,7 +509,6 @@ class PyObjCommon:
 
     y: NDF  # T*n_obs
     P0: NDF | None  # n_var*n_var; UKF 2*n_state square
-    x0: NDF | None  # n_var, or None
     jitter: float
     symmetrize: bool
     joseph_cov: bool
@@ -531,7 +530,6 @@ def build_obj_common(
     param_transforms: Mapping[str, Any],
     priors: Mapping[str, Prior] | None,
     ss_seed: Any,
-    x0: NDF | None,
     R_override: NDF | None,
 ) -> PyObjCommon:
     """Assemble the mode-independent objective inputs (``sdsge_obj_common``).
@@ -573,7 +571,6 @@ def build_obj_common(
         incidence=compiled._incidence,
         y=y,
         P0=prepared.P0,
-        x0=None if x0 is None else np.ascontiguousarray(x0, dtype=np.float64),
         jitter=float(prepared.kf_jitter),
         symmetrize=bool(prepared.kf_sym),
         joseph_cov=bool(prepared.kf_joseph_cov),
@@ -632,15 +629,11 @@ class PyExtendedContext:
 class PyUnscentedContext:
     """Mirror of ``sdsge_unscented_ctx``.
 
-    ``solve1``/``solve2`` are composer-allocated scratch. ``z0`` is the Python-
-    provided initial augmented state ``[x0_state; 0]`` of shape ``(2*n_state,)``
-    (the user's first-order ``x0``, given as ``n_state`` or full ``n_var`` and
-    sliced to the state block; the tail is zeroed). ``alpha``/``beta``/``kappa`` are
+    ``solve1``/``solve2`` are composer-allocated scratch.  ``alpha``/``beta``/``kappa`` are
     the UKF tuning scalars.
     """
 
     base: PyObjCommon
-    z0: NDF  # 2*n_state
     alpha: float
     beta: float
     kappa: float
@@ -663,51 +656,22 @@ def build_extended_context(base: PyObjCommon) -> PyExtendedContext:
     return PyExtendedContext(base=base)
 
 
-def _unscented_z0(compiled: CompiledModel, x0: NDF | None) -> NDF:
-    """Initial augmented state ``[x0_state; 0]`` of shape ``(2*n_state,)``, mirroring the Kalman resolvers' unscented ``z0``.
-
-    ``x0`` is accepted as the ``n_state`` block or the full ``n_var`` vector (sliced
-    to the state block); the tail is zeroed.
-    """
-    n_state = compiled.n_state
-    n_var = compiled.n_var
-    if x0 is None:
-        x0_state = np.zeros(n_state, dtype=np.float64)
-    else:
-        raw = np.asarray(x0, dtype=np.float64)
-        if raw.ndim != 1:
-            raise ValueError("x0 must be a 1D array.")
-        if raw.shape[0] == n_state:
-            x0_state = raw.copy()
-        elif raw.shape[0] == n_var:
-            x0_state = raw[:n_state].copy()
-        else:
-            raise ValueError(
-                f"x0 must have length {n_state} or {n_var}, got {raw.shape[0]}."
-            )
-    z0 = np.zeros(2 * n_state, dtype=np.float64)
-    z0[:n_state] = x0_state
-    return z0
-
-
 def build_unscented_context(
     base: PyObjCommon,
     *,
     compiled: CompiledModel,
-    x0: NDF | None,
     alpha: float = 1.0,
     beta: float = 2.0,
     kappa: float = 1.0,
 ) -> PyUnscentedContext:
     """Wrap the base inputs for the unscented filter.
 
-    ``solve1``/``solve2`` are composer-allocated scratch; ``z0`` is ``[x0_state;
-    0]`` (2*n_state) and ``alpha``/``beta``/``kappa`` are the UKF tuning scalars
+    ``solve1``/``solve2`` are composer-allocated scratch;
+    ``alpha``/``beta``/``kappa`` are the UKF tuning scalars
     (defaults match the Kalman resolvers, the only source of these today).
     """
     return PyUnscentedContext(
         base=base,
-        z0=_unscented_z0(compiled, x0),
         alpha=float(alpha),
         beta=float(beta),
         kappa=float(kappa),

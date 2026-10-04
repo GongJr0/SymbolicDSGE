@@ -80,8 +80,6 @@ class EstimatorParams(TypedDict):
         Mapping of parameter names to their prior specifications. If ``None``, no priors are used.
     ss_seed : Sequence[float] | Mapping[str, float] | None
         Steady-state seed values. Can be a sequence in declaration order or a mapping (with variable names as keys).
-    x0 : Sequence[float] | None
-        Kalman filter initial state vector. If ``None``, the steady-state is used.
     jitter : float
         Jitter to add to a matrix when cholesky decomposition fails. If zero, no jitter is added.
     symmetrize : bool
@@ -98,7 +96,6 @@ class EstimatorParams(TypedDict):
     estimated_params: Sequence[str] | None
     priors: Mapping[str, PriorSpec] | None
     ss_seed: Sequence[float] | Mapping[str, float] | None
-    x0: Sequence[float] | None
     jitter: float
     symmetrize: bool
     joseph_cov: bool
