@@ -428,15 +428,9 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
     _bp = np.ascontiguousarray(base.pmap.base_params, dtype=np.float64)
     nc.keep.append(_bp)
     cdef double[::1] bpv = _bp
-    # The linear kf dereferences x0 unconditionally (no NULL guard), so a missing
-    # x0 materializes as the zero initial state, matching obj_linear_base.
+
     cdef double[::1] x0v
-    if base.x0 is not None:
-        _x0 = np.ascontiguousarray(base.x0, dtype=np.float64)
-    else:
-        _x0 = np.zeros(n_var, dtype=np.float64)
-    nc.keep.append(_x0)
-    x0v = _x0
+    x0v = np.zeros(n_var)
 
     # Scratch the objective writes (allocated from dims, kept alive in nc.keep).
     params = np.empty(n_par, dtype=np.float64)
@@ -821,7 +815,7 @@ cdef _NativeCtx _build_native_ctx(object ctx_dto, str mode):
         huu = np.empty((n_state, n_exog, n_exog), dtype=np.float64)
         gss = np.empty(n_ctrl, dtype=np.float64)
         hss = np.empty(n_state, dtype=np.float64)
-        z0 = np.ascontiguousarray(ctx_dto.z0, dtype=np.float64)
+        z0 = np.zeros(2*n_state, dtype=np.float64)
         for _a in (f_xx, bx, gxx, hxx, gxu, hxu, guu, huu, gss, hss, z0):
             nc.keep.append(_a)
         fxxv = f_xx

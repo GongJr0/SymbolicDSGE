@@ -388,7 +388,6 @@ class UISession:
                         else None
                     ),
                     ss_seed=request["ss_seed"],
-                    x0=None,
                     jitter=0.0,
                     symmetrize=True,
                     joseph_cov=False,

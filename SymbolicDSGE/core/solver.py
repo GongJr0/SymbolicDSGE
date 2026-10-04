@@ -707,7 +707,6 @@ class DSGESolver:
                 if isinstance(ss_seed, list)
                 else ss_seed
             ),
-            x0=x0,
             P0=P0,
             jitter=jitter,
             symmetrize=symmetrize,
@@ -736,7 +735,6 @@ class DSGESolver:
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         ss_seed: list[float] | NDArray | dict[str, float] | None = None,
-        x0: NDArray | None = None,
         P0: NDArray | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool = True,
@@ -768,8 +766,6 @@ class DSGESolver:
         ss_seed : list[float] | NDArray | dict[str, float] | None
             Initial guess of the steady state Newton solver. List or array in declaration order or
             mapping of {name: guess} for the model's declared variables.
-        x0 : NDArray | None
-            Initial state vector for the Kalman filter. If None, the steady state is used.
         P0 : NDArray | None
             Initial state covariance matrix for the Kalman filter. If None, the stationary state covariance is used.
         jitter : float | float64 | None
@@ -798,7 +794,6 @@ class DSGESolver:
                 if isinstance(ss_seed, list)
                 else ss_seed
             ),
-            x0=x0,
             P0=P0,
             jitter=jitter,
             symmetrize=symmetrize,
@@ -829,7 +824,6 @@ class DSGESolver:
         estimated_params: list[str] | None = None,
         priors: Mapping[str, Any] | None = None,
         ss_seed: list[float] | NDArray | dict[str, float] | None = None,
-        x0: NDArray | None = None,
         P0: NDArray | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool = True,
@@ -866,8 +860,6 @@ class DSGESolver:
         ss_seed : list[float] | NDArray | dict[str, float] | None
             Initial guess of the steady state Newton solver. List or array in declaration order or
             mapping of {name: guess} for the model's declared variables.
-        x0 : NDArray | None
-            Initial state vector for the Kalman filter. If None, the steady state is used.
         P0 : NDArray | None
             Initial state covariance matrix for the Kalman filter. If None, the stationary state covariance is used.
         jitter : float | float64 | None
@@ -896,7 +888,6 @@ class DSGESolver:
             estimated_params=estimated_params,
             priors=priors,
             ss_seed=ss_seed,
-            x0=x0,
             P0=P0,
             jitter=jitter,
             symmetrize=symmetrize,
