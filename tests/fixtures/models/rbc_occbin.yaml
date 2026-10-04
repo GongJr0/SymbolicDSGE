@@ -40,8 +40,6 @@ variables:
 shocks:
     - eps
 
-observables: [log_c_obs]
-
 equations:
   model:
     # Euler, the .mod's relax='INEG' variant: no adjustment costs.

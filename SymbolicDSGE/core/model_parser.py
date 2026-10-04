@@ -44,7 +44,10 @@ _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
 #: The only fields permitted at the top level of a model config. Any other key
 #: is rejected at parse time (see ``_validate_schema``).
-_DEPRECATED_TOP_LEVEL_KEYS = frozenset({"parameters"})
+
+# "parameters": list of param names, re-declared in the calibration.parameters mapping
+# "observables": list of observable names, re-declared in the equations.observable mapping
+_DEPRECATED_TOP_LEVEL_KEYS = frozenset({"parameters", "observables"})
 _ALLOWED_TOP_LEVEL_KEYS = (
     frozenset(
         {
@@ -512,7 +515,6 @@ class ModelParser:
             params,
             observables,
             shocks,
-            shock_syms,
         ) = ns
 
         # Locals resolve before any field is parsed, so the helpers below can
@@ -526,11 +528,18 @@ class ModelParser:
         variables = _parse_variables(
             data, _LOCALS, ordered_var_names, variable_funcs, _get_expr
         )
+
         equations = _parse_equations(
-            data, _LOCALS, ordered_var_names, _get_eq, _get_relational, _get_expr
+            data,
+            _LOCALS,
+            observables,
+            ordered_var_names,
+            _get_eq,
+            _get_relational,
+            _get_expr,
         )
 
-        shock_std, shock_corr = _parse_shock_calibration(data, _LOCALS, shock_syms)
+        shock_std, shock_corr = _parse_shock_calibration(data, _LOCALS, shocks)
         calibration = Calib(
             parameters=parameters,
             shock_std=shock_std,
@@ -548,7 +557,7 @@ class ModelParser:
             symbolically_linearized=False,
         )
 
-        kalman_cfg = _parse_kalman_if_present(data, _LOCALS, parameters)
+        kalman_cfg = _parse_kalman_if_present(data, observables, parameters)
         return data, ParsedConfig(model=mdl_cfg, kalman=kalman_cfg)
 
     def to_yaml(
@@ -726,32 +735,35 @@ def _build_namespace(
     list[Symbol],
     list[Symbol],
     list[Symbol],
-    list[Symbol],
 ]:
     ordered_var_names, _ = _coerce_variable_data(data)
-    _raise_if_not_unique(ordered_var_names, "variables must be unique.")
-    _raise_if_not_unique(data["observables"], "observables must be unique.")
-    _raise_if_not_unique(data["shocks"], "shocks must be unique.")
 
     t = sp.symbols("t", integer=True)
 
+    _raise_if_not_unique(ordered_var_names, "variables must be unique.")
+    _raise_if_not_unique(data["shocks"], "shocks must be unique.")
+
+    def nested_keys(mapping: dict[str, Any], l1: str, l2: str) -> list[str]:
+        return list(mapping.get(l1, {}).get(l2, {}).keys())
+
+    # Params and observables come from mappings.
+    # The yaml loader is modified to reject duplicate keys already.
+    params: list[Symbol] = [
+        sp.Symbol(name) for name in nested_keys(data, "calibration", "parameters")
+    ]
+    observables: list[Symbol] = [
+        sp.Symbol(name) for name in nested_keys(data, "equations", "observables")
+    ]
     variables: list[Function] = list(
         map(Function, ordered_var_names)
     )  # pyright: ignore
-
-    params: list[Symbol] = list(
-        sp.symbols(list(data.get("calibration", {}).get("parameters", {}).keys()))
-    )
-    observables: list[Symbol] = list(sp.symbols(data["observables"]))
-
     shocks: list[Symbol] = [sp.Symbol(name) for name in data["shocks"]]
-    shock_syms: list[Symbol] = list(shocks)
 
     _LOCALS: dict[str, Any] = {
         "t": t,
         **{var.name: var for var in variables},  # pyright: ignore
         **{param.name: param for param in params},
-        **{shock.name: shock for shock in shock_syms},
+        **{shock.name: shock for shock in shocks},
         **{obs.name: obs for obs in observables},
     }
     return (
@@ -761,7 +773,6 @@ def _build_namespace(
         params,
         observables,
         shocks,
-        shock_syms,
     )
 
 
@@ -845,6 +856,7 @@ def _sympy_parsers(
 def _parse_equations(
     data: dict[str, Any],
     _LOCALS: dict[str, Any],
+    observables: list[Symbol],
     ordered_var_names: list[str],
     _get_eq: Callable[[str], Eq],
     _get_relational: Callable[[str], _REGIME_SHIFT_CONDITIONAL],
@@ -894,9 +906,7 @@ def _parse_equations(
 
     observables_raw = eq_data.get("observables", {}) or {}
     observables_eq: dict[Symbol, Expr] = {
-        _LOCALS[obs_name]: _get_expr(observables_raw[obs_name])
-        for obs_name in data["observables"]
-        if obs_name in observables_raw
+        obs: _get_expr(observables_raw[obs.name]) for obs in observables
     }
 
     is_affine = _derive_observable_structure(
@@ -1085,15 +1095,12 @@ def _parse_shock_calibration(
 
 def _parse_kalman_if_present(
     data: dict[str, Any],
-    _LOCALS: dict[str, Any],
+    observables: list[Symbol],
     parameters: SymbolGetterDict[float64],
 ) -> KalmanConfig | None:
     kalman_data = data.get("kalman")
     if not kalman_data:
         return None
-
-    y_order = [_LOCALS[o] for o in data["observables"]]
-    obs_names = [o.name for o in y_order]
 
     R: ndarray | None
     R_param_names: list[str] | None
@@ -1105,8 +1112,21 @@ def _parse_kalman_if_present(
         std_map = R_data.get("std", {}) or {}
         corr_map = R_data.get("corr", {}) or {}
 
+        obs_syms = {obs.name: obs for obs in observables}
+
+        def _obs(name: str, field: str) -> Symbol:
+            if (obs := obs_syms.get(name)) is None:
+                raise ValueError(
+                    f"kalman.R.{field} names '{name}', which is not an observable. "
+                    "Declare it under equations.observables or remove the entry."
+                )
+            return obs
+
         R_std_param_map = SymbolGetterDict(
-            {_LOCALS[obs_name]: param_name for obs_name, param_name in std_map.items()}
+            {
+                _obs(obs_name, "std"): param_name
+                for obs_name, param_name in std_map.items()
+            }
         )
 
         R_corr_param_map = PairGetterDict({})
@@ -1117,14 +1137,12 @@ def _parse_kalman_if_present(
                 raise ValueError(
                     f"Correlation pair must contain exactly two observables: {pair_str!r}"
                 )
-            a = _LOCALS[names[0]]
-            b = _LOCALS[names[1]]
+            a = _obs(names[0], "corr")
+            b = _obs(names[1], "corr")
             R_corr_param_map[frozenset((a, b))] = param_name
 
-        for i in range(len(obs_names)):
-            for j in range(i + 1, len(obs_names)):
-                pair = frozenset((obs_names[i], obs_names[j]))
-                R_corr_param_map.setdefault(pair, None)
+        for a, b in combinations(observables, 2):
+            R_corr_param_map.setdefault(frozenset((a, b)), None)
         _raise_if_not_unique(
             list(R_corr_param_map.values()), "kalman.R.corr values must be unique."
         )
@@ -1136,7 +1154,7 @@ def _parse_kalman_if_present(
             cross_vals, "kalman.R cannot share parameter names between std and corr."
         )
 
-        R = make_R(y_order, R_std_param_map, R_corr_param_map, parameters)
+        R = make_R(observables, R_std_param_map, R_corr_param_map, parameters)
 
         R_param_names = list(dict.fromkeys([*std_map.values(), *corr_map.values()]))
     else:

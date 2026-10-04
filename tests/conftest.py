@@ -6,6 +6,7 @@ from typing import Iterator
 import pytest
 
 TESTS_DIR = Path(__file__).resolve().parent
+TEST_MODEL_PATH = TESTS_DIR / "fixtures" / "models" / "test.yaml"
 POST82_TEST_MODEL_PATH = TESTS_DIR / "fixtures" / "models" / "POST82.yaml"
 DENSE_LKJ_TEST_MODEL_PATH = TESTS_DIR / "fixtures" / "models" / "LKJ_DENSE.yaml"
 RBC_SECOND_ORDER_TEST_MODEL_PATH = (
@@ -42,6 +43,11 @@ def abundant_memory() -> Iterator[None]:
     finally:
         memory.psutil.virtual_memory = virtual_memory
         memory.psutil.swap_memory = swap_memory
+
+
+@pytest.fixture(scope="session")
+def test_model_path() -> Path:
+    return TEST_MODEL_PATH
 
 
 @pytest.fixture(scope="session")

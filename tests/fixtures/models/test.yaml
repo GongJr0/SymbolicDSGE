@@ -6,8 +6,6 @@ shocks:
     - e_u
     - e_v
 
-observables: [Infl, Rate]
-
 equations:
     # Equations are written in natural time. Lags stay where they belong; the
     # compiler lifts each one into a state of its own. Shocks are dated t.

@@ -1,17 +1,25 @@
 # type: ignore
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.compiled_model import CompiledModel
+from SymbolicDSGE.core.config import ModelConfig
 from SymbolicDSGE.core.model_parser import ParsedConfig
 from SymbolicDSGE.core.solved_model import SolvedModel
 
 
 @pytest.fixture(scope="module")
-def parsed_test() -> ParsedConfig:
-    return ModelParser("MODELS/test.yaml").get_all()
+def parsed_test(test_model_path) -> ParsedConfig:
+    return ModelParser(test_model_path).get_all()
+
+
+@pytest.fixture
+def conf(parsed_test: ParsedConfig) -> ModelConfig:
+    return copy.deepcopy(parsed_test.model)
 
 
 @pytest.fixture(scope="module")
