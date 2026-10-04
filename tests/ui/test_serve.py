@@ -32,14 +32,11 @@ from SymbolicDSGE.ui.estimation import (
 )
 from SymbolicDSGE.ui.session import TabState, Workspace
 
-_MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
-
-
 # -- helpers ----------------------------------------------------------------
 
 
-def _solved_test_model() -> SolvedModel:
-    parser = ModelParser.from_string(_MODEL_YAML)
+def _solved_test_model(test_model_yaml) -> SolvedModel:
+    parser = ModelParser.from_string(test_model_yaml)
     model, kalman = parser.get_all()
     solver = DSGESolver(model, kalman)
     return solver.solve(solver.compile())
@@ -64,7 +61,7 @@ def _estimation_spec(y) -> EstimatorSpec:
     )
 
 
-def _hydrated_bundle(tmp_path: Path) -> Path:
+def _hydrated_bundle(tmp_path: Path, test_model_yaml, test_model_path) -> Path:
     """Build a bundle that hits every preload slot (estimation+mc+sim)."""
     rng = np.random.default_rng(0)
     observed = rng.standard_normal((10, 2))
@@ -86,8 +83,8 @@ def _hydrated_bundle(tmp_path: Path) -> Path:
     pipeline = MCPipeline([simulation_step("sim", target="reference", T=20)])
     return (
         BundleBuilder(created_by="serve-test")
-        .add_model("reference", _MODEL_YAML, compile_kwargs={})
-        .add_estimation(_estimator(observed), result=result)
+        .add_model("reference", test_model_yaml, compile_kwargs={})
+        .add_estimation(_estimator(observed, test_model_path), result=result)
         .add_mc(pipeline)
         .set_simulation(
             "reference",
@@ -325,8 +322,10 @@ def test_session_summary_drops_unset_workspace_slots() -> None:
 # -- build_workspace from a LoadedBundle -----------------------------------
 
 
-def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
-    loaded = load_bundle(_hydrated_bundle(tmp_path))
+def test_build_workspace_populates_all_slots(
+    tmp_path: Path, test_model_yaml, test_model_path
+) -> None:
+    loaded = load_bundle(_hydrated_bundle(tmp_path, test_model_yaml, test_model_path))
     ws = build_workspace(loaded)
 
     # The bundle's own two members, carried over untouched by the GUI shape.
@@ -367,14 +366,14 @@ def test_build_workspace_populates_all_slots(tmp_path: Path) -> None:
     assert ws.simulation["reference"].spec["shocks"][0]["seed"] == 42
 
 
-def test_prefill_restores_the_settings_a_run_was_made_with() -> None:
+def test_prefill_restores_the_settings_a_run_was_made_with(test_model_yaml) -> None:
     """A bundled experiment has to re-run as it ran, not at form defaults.
 
     Includes the options the form renders no control for: leaving those to
     default would silently substitute a different run behind an unchanged
     screen.
     """
-    parser = ModelParser.from_string(_MODEL_YAML)
+    parser = ModelParser.from_string(test_model_yaml)
     model, kalman = parser.get_all()
     compiled = DSGESolver(model, kalman).compile()
     result = MAPResult(
@@ -423,7 +422,7 @@ def test_prefill_restores_the_settings_a_run_was_made_with() -> None:
 
 
 def test_build_workspace_keeps_gui_shape_out_of_the_bundle_slot(
-    tmp_path: Path,
+    tmp_path: Path, test_model_yaml, test_model_path
 ) -> None:
     """``spec`` carries no field the form invented.
 
@@ -431,7 +430,9 @@ def test_build_workspace_keeps_gui_shape_out_of_the_bundle_slot(
     inferred ``method``, none of which an ``EstimatorSpec`` has. Keeping them
     out is what lets a bundle write take this slot as it stands.
     """
-    ws = build_workspace(load_bundle(_hydrated_bundle(tmp_path)))
+    ws = build_workspace(
+        load_bundle(_hydrated_bundle(tmp_path, test_model_yaml, test_model_path))
+    )
 
     assert ws.estimation["reference"].spec is not None
     assert set(ws.estimation["reference"].spec) == {"y", "params"}
@@ -439,26 +440,30 @@ def test_build_workspace_keeps_gui_shape_out_of_the_bundle_slot(
     assert "parameters" not in ws.estimation["reference"].spec["params"]
 
 
-def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None:
+def test_workspace_spec_slot_goes_straight_into_a_bundle(
+    tmp_path: Path, test_model_yaml, test_model_path
+) -> None:
     """The point of the split: no projection back out of the GUI shape.
 
     ``spec`` is already the constructor form a bundle stores, so writing one
     is reading the slot and handing it over. If the GUI shape had leaked in,
     this would need a reverse mapping to strip it.
     """
-    ws = build_workspace(load_bundle(_hydrated_bundle(tmp_path)))
+    ws = build_workspace(
+        load_bundle(_hydrated_bundle(tmp_path, test_model_yaml, test_model_path))
+    )
     assert ws.estimation["reference"].spec is not None
 
     written = (
         BundleBuilder(created_by="round-trip")
-        .add_model("reference", _MODEL_YAML, compile_kwargs={})
+        .add_model("reference", test_model_yaml, compile_kwargs={})
         .add_estimation(
             Estimator.from_spec(
                 EstimatorSpec(
                     y=ws.estimation["reference"].spec["y"],
                     params=ws.estimation["reference"].spec["params"],
                 ),
-                _compiled_reference(),
+                _compiled_reference(test_model_path),
             )
         )
         .write(tmp_path / "round-trip.sdsge")
@@ -473,14 +478,16 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(tmp_path: Path) -> None
 # -- bundled simulation replay ---------------------------------------------
 
 
-def test_bundled_simulation_replays_into_an_output(tmp_path: Path) -> None:
+def test_bundled_simulation_replays_into_an_output(
+    tmp_path: Path, test_model_yaml, test_model_path
+) -> None:
     """A stored spec becomes the output it stands for.
 
     A bundle keeps no simulation results, and the Outputs tab's only controls
     are spec fields, so without this there is nothing on screen to show a
     simulation is in the bundle at all.
     """
-    loaded = load_bundle(_hydrated_bundle(tmp_path))
+    loaded = load_bundle(_hydrated_bundle(tmp_path, test_model_yaml, test_model_path))
     app = create_app(
         models=loaded.models,
         workspace=build_workspace(loaded),
@@ -499,10 +506,10 @@ def test_bundled_simulation_replays_into_an_output(tmp_path: Path) -> None:
 
 
 def test_bundled_simulation_replay_reproduces_rather_than_redraws(
-    tmp_path: Path,
+    tmp_path: Path, test_model_yaml, test_model_path
 ) -> None:
     """The spec pins the seed, so two replays of it agree."""
-    loaded = load_bundle(_hydrated_bundle(tmp_path))
+    loaded = load_bundle(_hydrated_bundle(tmp_path, test_model_yaml, test_model_path))
 
     first = create_app(
         models={"reference": loaded.models["reference"]},
@@ -521,10 +528,10 @@ def test_bundled_simulation_replay_reproduces_rather_than_redraws(
 
 
 def test_a_simulation_that_cannot_replay_leaves_the_session_usable(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], test_model_yaml, test_model_path
 ) -> None:
     """One bad spec must not cost the tabs that had nothing to do with it."""
-    loaded = load_bundle(_hydrated_bundle(tmp_path))
+    loaded = load_bundle(_hydrated_bundle(tmp_path, test_model_yaml, test_model_path))
     workspace = build_workspace(loaded)
     assert workspace.simulation["reference"].spec is not None
     workspace.simulation["reference"].spec["shocks"] = [
@@ -553,14 +560,14 @@ def test_a_simulation_that_cannot_replay_leaves_the_session_usable(
 # -- workspace view updates ------------------------------------------------
 
 
-def test_workspace_view_round_trips_through_the_session() -> None:
+def test_workspace_view_round_trips_through_the_session(test_model_yaml) -> None:
     """What the client PUTs is what a reload reads back.
 
     This is the whole restore mechanism: the process outlives the refresh, so
     the view returns from server memory with nothing kept on the client.
     """
     app = create_app()
-    app.state.ui_session.load_yaml(model_name="reference", content=_MODEL_YAML)
+    app.state.ui_session.load_yaml(model_name="reference", content=test_model_yaml)
     client = TestClient(app)
     view = {"method": "mcmc", "nDraws": 4000, "dataVectors": {"Infl": "1 2"}}
 
@@ -584,10 +591,10 @@ def test_workspace_view_is_held_verbatim() -> None:
     assert client.get("/api/session").json()["workspace"]["mc"]["view"] == view
 
 
-def test_workspace_view_cannot_write_the_bundle_bound_slots() -> None:
+def test_workspace_view_cannot_write_the_bundle_bound_slots(test_model_yaml) -> None:
     """A client naming ``spec`` or ``result`` is rejected, not partly obeyed."""
     app = create_app()
-    app.state.ui_session.load_yaml(model_name="reference", content=_MODEL_YAML)
+    app.state.ui_session.load_yaml(model_name="reference", content=test_model_yaml)
     client = TestClient(app)
 
     refused = client.put(
@@ -603,9 +610,9 @@ def test_workspace_view_cannot_write_the_bundle_bound_slots() -> None:
     assert refused.status_code == 400
 
 
-def test_workspace_view_clears_when_set_to_null() -> None:
+def test_workspace_view_clears_when_set_to_null(test_model_yaml) -> None:
     app = create_app()
-    app.state.ui_session.load_yaml(model_name="reference", content=_MODEL_YAML)
+    app.state.ui_session.load_yaml(model_name="reference", content=test_model_yaml)
     client = TestClient(app)
     client.put(
         "/api/session/workspace",
@@ -639,7 +646,7 @@ def test_serve_from_none_calls_run_server_empty(
 
 
 def test_serve_from_solved_model_preloads_reference(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, test_model_yaml
 ) -> None:
     captured: dict[str, Any] = {}
 
@@ -647,7 +654,7 @@ def test_serve_from_solved_model_preloads_reference(
         captured.update(kwargs)
 
     monkeypatch.setattr("SymbolicDSGE.ui.cli.run_server", fake_run_server)
-    solved = _solved_test_model()
+    solved = _solved_test_model(test_model_yaml)
     serve_from(source=solved, open_browser=False)
     assert captured["models"]["reference"] is solved
     assert captured.get("workspace") is None
@@ -656,7 +663,7 @@ def test_serve_from_solved_model_preloads_reference(
 
 
 def test_serve_from_bundle_path_hydrates_workspace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, test_model_yaml, test_model_path
 ) -> None:
     captured: dict[str, Any] = {}
 
@@ -664,7 +671,7 @@ def test_serve_from_bundle_path_hydrates_workspace(
         captured.update(kwargs)
 
     monkeypatch.setattr("SymbolicDSGE.ui.cli.run_server", fake_run_server)
-    bundle = _hydrated_bundle(tmp_path)
+    bundle = _hydrated_bundle(tmp_path, test_model_yaml, test_model_path)
     serve_from(source=bundle, open_browser=False)
     assert isinstance(captured["models"]["reference"], SolvedModel)
     assert "dgp" not in captured["models"]
@@ -674,14 +681,16 @@ def test_serve_from_bundle_path_hydrates_workspace(
     assert captured["source"] == str(bundle)
 
 
-def test_preloaded_model_reports_its_source_and_yaml(tmp_path: Path) -> None:
+def test_preloaded_model_reports_its_source_and_yaml(
+    tmp_path: Path, test_model_yaml, test_model_path
+) -> None:
     """A bundle launch identifies the model by path and opens on its YAML.
 
     Both ride the summary the GUI already reads: ``source`` distinguishes one
     preloaded model from another, and ``raw_yaml`` is what the Builder tab
     seeds its editor from.
     """
-    bundle = _hydrated_bundle(tmp_path)
+    bundle = _hydrated_bundle(tmp_path, test_model_yaml, test_model_path)
     loaded = load_bundle(bundle)
     app = create_app(
         models=loaded.models,
@@ -696,9 +705,9 @@ def test_preloaded_model_reports_its_source_and_yaml(tmp_path: Path) -> None:
     assert reference["raw_yaml"].startswith('name: "TEST"')
 
 
-def test_in_process_model_leaves_source_unset(tmp_path: Path) -> None:
+def test_in_process_model_leaves_source_unset(tmp_path: Path, test_model_yaml) -> None:
     """``SolvedModel.serve()`` names no origin, so the GUI shows none."""
-    app = create_app(models={"reference": _solved_test_model()})
+    app = create_app(models={"reference": _solved_test_model(test_model_yaml)})
 
     reference = TestClient(app).get("/api/session").json()["models"]["reference"]
 
@@ -716,7 +725,7 @@ def test_serve_from_rejects_missing_bundle(tmp_path: Path) -> None:
 
 
 def test_cli_main_with_bundle_delegates_to_serve_from(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, test_model_yaml, test_model_path
 ) -> None:
     captured: dict[str, Any] = {}
 
@@ -724,7 +733,7 @@ def test_cli_main_with_bundle_delegates_to_serve_from(
         captured.update(kwargs)
 
     monkeypatch.setattr("SymbolicDSGE.ui.serve.serve_from", fake_serve_from)
-    bundle = _hydrated_bundle(tmp_path)
+    bundle = _hydrated_bundle(tmp_path, test_model_yaml, test_model_path)
     from SymbolicDSGE.ui.cli import main
 
     main([str(bundle), "--no-browser", "--port", "9999"])
@@ -756,20 +765,20 @@ def test_cli_main_rejects_missing_bundle_path(tmp_path: Path) -> None:
 
 
 @cache
-def _compiled_reference() -> Any:
-    """The compiled ``MODELS/test.yaml`` a loaded reference model comes back as."""
-    model, kalman = ModelParser("MODELS/test.yaml").get_all()
+def _compiled_reference(test_model_path) -> Any:
+    """The compiled ``test.yaml`` a loaded reference model comes back as."""
+    model, kalman = ModelParser(test_model_path).get_all()
     return DSGESolver(model, kalman).compile()
 
 
-def _estimator(y: Any) -> Estimator:
+def _estimator(y: Any, test_model_path) -> Estimator:
     """A live estimator over the bundled model, in the shape a loader rebuilds.
 
-    ``MODELS/test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
+    ``test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
     explicitly; without one the estimator a bundle describes cannot be built.
     """
     return Estimator(
-        compiled=_compiled_reference(),
+        compiled=_compiled_reference(test_model_path),
         y=np.asarray(y, dtype=np.float64),
         observables=["Infl", "Rate"],
         estimated_params=["beta", "sigma"],

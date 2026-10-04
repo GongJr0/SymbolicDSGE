@@ -38,8 +38,8 @@ ABUNDANT_BYTES = 1 << 50
 
 
 @pytest.fixture(scope="module")
-def solved() -> SolvedModel:
-    model, kalman = ModelParser("MODELS/test.yaml").get_all()
+def solved(test_model_path) -> SolvedModel:
+    model, kalman = ModelParser(test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     return solver.solve(solver.compile())
 

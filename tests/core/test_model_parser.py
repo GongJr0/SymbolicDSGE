@@ -1,7 +1,6 @@
 # type: ignore
 from __future__ import annotations
 
-import copy
 from pathlib import Path
 
 import numpy as np
@@ -19,9 +18,18 @@ def _write_yaml(path: Path, data: dict) -> Path:
     return path
 
 
-def test_model_parser_get_and_get_all(parsed_test):
+def _edit(text: str, old: str, new: str) -> str:
+    assert text.count(old) == 1, f"anchor is not unique: {old!r}"
+    return text.replace(old, new)
+
+
+def _after(text: str, anchor: str, *lines: str) -> str:
+    return _edit(text, anchor, "\n".join((anchor, *lines)))
+
+
+def test_model_parser_get_and_get_all(parsed_test, test_model_path):
     model, kalman = parsed_test
-    parser = ModelParser("MODELS/test.yaml")
+    parser = ModelParser(test_model_path)
 
     assert parser.get() is parser.get_all().model
     assert model.name == "TEST"
@@ -87,7 +95,6 @@ shocks:
   - e_x
   - e_y
   - e_z
-observables: [x_obs, y_obs, z_obs]
 equations:
   model:
     x_process: "x(t+1) = rho * x(t) + e_x"
@@ -148,8 +155,7 @@ def test_kalman_R_arithmetic_covers_offdiag_and_missing_corr():
     assert set(kalman.R_param_names) == {"sig_x", "sig_y", "sig_z", "rho_xy"}
 
 
-def test_validate_constraints_errors_on_unknown_symbols(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_constraints_errors_on_unknown_symbols(conf):
     t = sp.Symbol("t", integer=True)
     ghost = sp.Function("ghost")
     # Binding condition references an undeclared variable -> rejected.
@@ -161,8 +167,7 @@ def test_validate_constraints_errors_on_unknown_symbols(parsed_test):
         ModelParser.validate_constraints(conf)
 
 
-def test_validate_constraints_accepts_valid_conditions(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_constraints_accepts_valid_conditions(conf):
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
     # Declared variable on both conditions; the time symbol is excluded.
@@ -171,8 +176,7 @@ def test_validate_constraints_accepts_valid_conditions(parsed_test):
     ModelParser.validate_constraints(conf)
 
 
-def test_validate_constraints_accepts_boolean_conditions(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_constraints_accepts_boolean_conditions(conf):
     t = sp.Symbol("t", integer=True)
     a, b = conf.variables.variables[:2]
     conf.equations.constraint = {
@@ -182,8 +186,7 @@ def test_validate_constraints_accepts_boolean_conditions(parsed_test):
     ModelParser.validate_constraints(conf)
 
 
-def test_validate_constraints_accepts_nested_connectives(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_constraints_accepts_nested_connectives(conf):
     t = sp.Symbol("t", integer=True)
     a, b = conf.variables.variables[:2]
     cond = sp.Or(sp.And(a(t) < 0, b(t) < 0), sp.Not(a(t) > 5))
@@ -193,10 +196,9 @@ def test_validate_constraints_accepts_nested_connectives(parsed_test):
 
 
 @pytest.mark.parametrize("depth", ["root", "nested"])
-def test_validate_constraints_rejects_non_relational_leaves(parsed_test, depth):
+def test_validate_constraints_rejects_non_relational_leaves(conf, depth):
     # Symbol subclasses Boolean, so And(x < 0, param) builds fine and the root
     # type gate accepts it; only the leaf walk rejects the bare operand.
-    conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)
     a = conf.variables.variables[0]
     param = conf.parameters[0]
@@ -207,8 +209,7 @@ def test_validate_constraints_rejects_non_relational_leaves(parsed_test, depth):
         ModelParser.validate_constraints(conf)
 
 
-def test_validate_constraints_rejects_relation_compared_to_relation(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_constraints_rejects_relation_compared_to_relation(conf):
     t = sp.Symbol("t", integer=True)
     a, b = conf.variables.variables[:2]
     conf.equations.constraint = {
@@ -220,8 +221,7 @@ def test_validate_constraints_rejects_relation_compared_to_relation(parsed_test)
 
 
 @pytest.mark.parametrize("side", ["bind", "relax"])
-def test_validate_constraints_rejects_shocks(parsed_test, side):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_constraints_rejects_shocks(conf, side):
     t = sp.Symbol("t", integer=True)
     a = conf.variables.variables[0]
     shock = next(iter(conf.shocks))
@@ -265,14 +265,18 @@ def test_connective_parens_rejects_unparenthesized_relations(condition):
         _check_connective_parens(condition)
 
 
-def test_parser_rejects_unparenthesized_connective(parsed_test):
-    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
-    data["equations"]["constraint"] = {
-        "obc": {"bind": "x(t) < 0 & y(t) < 0", "relax": "x(t) >= 0"}
-    }
+def test_parser_rejects_unparenthesized_connective():
+    text = _edit(
+        _R_ARITHMETIC_MODEL,
+        "  constraint: {}",
+        "  constraint:\n"
+        "    obc:\n"
+        '      bind: "x(t) < 0 & y(t) < 0"\n'
+        '      relax: "x(t) >= 0"',
+    )
 
     with pytest.raises(ValueError, match="outside parentheses"):
-        ModelParser.from_string(yaml.safe_dump(data))
+        ModelParser.from_string(text)
 
 
 def test_validate_equations_accepts_variables_parameters_and_shocks(parsed_test):
@@ -281,99 +285,105 @@ def test_validate_equations_accepts_variables_parameters_and_shocks(parsed_test)
 
 
 def test_parser_rejects_unknown_symbol_in_model_equation():
-    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
-    data["equations"]["model"]["x_process"] = "x(t+1) = rho * x(t) + e_x + typo_symbol"
+    text = _edit(
+        _R_ARITHMETIC_MODEL,
+        '"x(t+1) = rho * x(t) + e_x"',
+        '"x(t+1) = rho * x(t) + e_x + typo_symbol"',
+    )
 
     with pytest.raises(ValueError, match=r"Equation 'x_process' references unknown"):
-        ModelParser.from_string(yaml.safe_dump(data))
+        ModelParser.from_string(text)
 
 
 def test_parser_rejects_undeclared_variable_in_model_equation():
-    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
-    data["equations"]["model"]["x_process"] = "x(t+1) = rho * x(t) + e_x + w(t)"
+    text = _edit(
+        _R_ARITHMETIC_MODEL,
+        '"x(t+1) = rho * x(t) + e_x"',
+        '"x(t+1) = rho * x(t) + e_x + w(t)"',
+    )
 
     with pytest.raises(ValueError, match=r"Equation 'x_process' references unknown"):
-        ModelParser.from_string(yaml.safe_dump(data))
+        ModelParser.from_string(text)
 
 
 def test_parser_rejects_unknown_symbol_in_observable():
-    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
-    data["equations"]["observables"]["x_obs"] = "x(t) + typo_symbol"
+    text = _edit(
+        _R_ARITHMETIC_MODEL, "    x_obs: x(t)", "    x_obs: x(t) + typo_symbol"
+    )
 
     with pytest.raises(ValueError, match=r"Observable 'x_obs' references unknown"):
-        ModelParser.from_string(yaml.safe_dump(data))
+        ModelParser.from_string(text)
 
 
 def test_parser_rejects_undeclared_variable_in_observable():
     # The measurement printer is where this used to land, several calls later.
-    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
-    data["equations"]["observables"]["x_obs"] = "x(t) + w(t)"
+    text = _edit(_R_ARITHMETIC_MODEL, "    x_obs: x(t)", "    x_obs: x(t) + w(t)")
 
     with pytest.raises(ValueError, match=r"Observable 'x_obs' references unknown"):
-        ModelParser.from_string(yaml.safe_dump(data))
+        ModelParser.from_string(text)
 
 
 def test_parser_rejects_shock_in_observable():
-    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
-    data["equations"]["observables"]["x_obs"] = "x(t) + e_x"
+    text = _edit(_R_ARITHMETIC_MODEL, "    x_obs: x(t)", "    x_obs: x(t) + e_x")
 
     with pytest.raises(ValueError, match=r"Observable 'x_obs' references shock\(s\)"):
-        ModelParser.from_string(yaml.safe_dump(data))
+        ModelParser.from_string(text)
 
 
 def test_parser_rejects_variable_with_no_model_equation():
-    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
-    data["variables"]["ghost"] = {"ss_seed": None}
+    text = _after(
+        _R_ARITHMETIC_MODEL, "  z: {ss_seed: null}", "  ghost: {ss_seed: null}"
+    )
 
     with pytest.raises(ValueError, match=r"\['ghost'\] occur in no model equation"):
-        ModelParser.from_string(yaml.safe_dump(data))
+        ModelParser.from_string(text)
 
 
 def test_parser_rejects_a_variable_defined_only_by_an_observable():
     # An observable gives the variable an incidence bit, so the kernel's own
     # absent-variable check never sees it.
-    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
-    data["variables"]["ghost"] = {"ss_seed": None}
-    data["observables"].append("ghost_obs")
-    data["equations"]["observables"]["ghost_obs"] = "ghost(t)"
-    data["kalman"]["R"]["std"]["ghost_obs"] = "sig_x"
+    text = _after(
+        _R_ARITHMETIC_MODEL, "  z: {ss_seed: null}", "  ghost: {ss_seed: null}"
+    )
+    text = _after(text, "    z_obs: z(t)", "    ghost_obs: ghost(t)")
+    text = _after(text, "      z_obs: sig_z", "      ghost_obs: sig_x")
 
     with pytest.raises(ValueError, match=r"\['ghost'\] occur in no model equation"):
-        ModelParser.from_string(yaml.safe_dump(data))
+        ModelParser.from_string(text)
 
 
 def test_parser_rejects_more_equations_than_variables():
-    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
-    data["equations"]["model"]["extra"] = "x(t) = rho * y(t)"
+    text = _after(
+        _R_ARITHMETIC_MODEL,
+        '    z_process: "z(t+1) = rho * z(t) + e_z"',
+        '    extra: "x(t) = rho * y(t)"',
+    )
 
     with pytest.raises(ValueError, match=r"4 equation\(s\) for 3 variable\(s\)"):
-        ModelParser.from_string(yaml.safe_dump(data))
+        ModelParser.from_string(text)
 
 
-@pytest.mark.parametrize(
-    "block, duplicate, preamble",
-    [
-        ("shocks", "e_x", "shocks must be unique."),
-        ("observables", "x_obs", "observables must be unique."),
-    ],
-)
-def test_parser_rejects_duplicate_declarations(block, duplicate, preamble):
-    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
-    data[block].append(duplicate)
+def test_parser_rejects_duplicate_shock_declarations():
+    # Shocks are the only declaration block still written as a list; a repeated
+    # observable or parameter is a repeated mapping key, which the loader takes.
+    text = _after(_R_ARITHMETIC_MODEL, "  - e_z", "  - e_x")
 
     with pytest.raises(
-        ValueError, match=rf"{preamble}\nDuplicate entries: \['{duplicate}'\]"
+        ValueError, match=r"shocks must be unique\.\nDuplicate entries: \['e_x'\]"
     ):
-        ModelParser.from_string(yaml.safe_dump(data))
+        ModelParser.from_string(text)
 
 
 def test_parser_rejects_a_variable_declared_twice():
     # The mapping form cannot express this; a list of names can.
-    data = yaml.safe_load(_R_ARITHMETIC_MODEL)
-    data["variables"] = ["x", "y", "z", "x"]
+    text = _edit(
+        _R_ARITHMETIC_MODEL,
+        "variables:\n  x: {ss_seed: null}\n  y: {ss_seed: null}\n  z: {ss_seed: null}",
+        "variables: [x, y, z, x]",
+    )
 
     with pytest.raises(ValueError, match=r"variables must be unique."):
-        ModelParser.from_string(yaml.safe_dump(data))
+        ModelParser.from_string(text)
 
 
 @pytest.mark.parametrize(
@@ -392,7 +402,7 @@ def test_parser_rejects_a_variable_declared_twice():
 def test_parser_rejects_a_repeated_mapping_key(line, repeat, key):
     # A repeat is legal YAML and resolves to the last value, so the loader has
     # to reject it before anything downstream can see one entry.
-    text = _R_ARITHMETIC_MODEL.replace(line, f"{line}\n{repeat}")
+    text = _after(_R_ARITHMETIC_MODEL, line, repeat)
 
     with pytest.raises(yaml.YAMLError, match=rf"found duplicate key\(s\): \['{key}'\]"):
         ModelParser.from_string(text)
@@ -433,8 +443,7 @@ def test_parser_reports_where_a_repeated_key_is():
     assert str(exc.value).count("line ") == 2
 
 
-def test_validate_constraints_rejects_more_than_two(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_constraints_rejects_more_than_two(conf):
     t = sp.Symbol("t", integer=True)
     conf.equations.constraint = {
         f"obc{i}": Constraint(bind=var(t) < 0, relax=var(t) >= 0)
@@ -445,8 +454,7 @@ def test_validate_constraints_rejects_more_than_two(parsed_test):
         ModelParser.validate_constraints(conf)
 
 
-def test_validate_regimes_requires_constraint_and_regime_together(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_regimes_requires_constraint_and_regime_together(conf):
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
     conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
@@ -456,8 +464,7 @@ def test_validate_regimes_requires_constraint_and_regime_together(parsed_test):
         ModelParser.validate_regimes(conf)
 
 
-def test_validate_regimes_requires_every_binding_combination(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_regimes_requires_every_binding_combination(conf):
     t = sp.Symbol("t", integer=True)
     a, b = conf.variables.variables[:2]
     first, second = list(conf.equations.model)[:2]
@@ -475,8 +482,7 @@ def test_validate_regimes_requires_every_binding_combination(parsed_test):
         ModelParser.validate_regimes(conf)
 
 
-def test_validate_regimes_rejects_unknown_replacement_target(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_regimes_rejects_unknown_replacement_target(conf):
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
     conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
@@ -486,10 +492,9 @@ def test_validate_regimes_rejects_unknown_replacement_target(parsed_test):
         ModelParser.validate_regimes(conf)
 
 
-def test_validate_regimes_accepts_shocks_in_replacements(parsed_test):
+def test_validate_regimes_accepts_shocks_in_replacements(conf):
     # A replacement is an ordinary model equation, so a shock is as legitimate
     # there as in the equation it replaces. Conditions still reject shocks.
-    conf = copy.deepcopy(parsed_test.model)
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
     shock = next(iter(conf.shocks))
@@ -500,8 +505,7 @@ def test_validate_regimes_accepts_shocks_in_replacements(parsed_test):
     ModelParser.validate_regimes(conf)
 
 
-def test_validate_regimes_rejects_unknown_symbols_in_replacements(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_regimes_rejects_unknown_symbols_in_replacements(conf):
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
     target = next(iter(conf.equations.model))
@@ -514,8 +518,7 @@ def test_validate_regimes_rejects_unknown_symbols_in_replacements(parsed_test):
         ModelParser.validate_regimes(conf)
 
 
-def test_validate_regimes_accepts_a_complete_two_constraint_grid(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_regimes_accepts_a_complete_two_constraint_grid(conf):
     t = sp.Symbol("t", integer=True)
     a, b = conf.variables.variables[:2]
     first, second = list(conf.equations.model)[:2]
@@ -532,8 +535,7 @@ def test_validate_regimes_accepts_a_complete_two_constraint_grid(parsed_test):
     ModelParser.validate_regimes(conf)
 
 
-def test_validate_ss_seed_accepts_scalars_and_parameter_expressions(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_ss_seed_accepts_scalars_and_parameter_expressions(conf):
     beta, rho_u = sp.Symbol("beta"), sp.Symbol("rho_u")
     var = conf.variables.variables[0]
     for expr in (sp.Float(0.8), sp.Integer(0), beta, beta / (1 - rho_u), None):
@@ -541,8 +543,7 @@ def test_validate_ss_seed_accepts_scalars_and_parameter_expressions(parsed_test)
         ModelParser.validate_ss_seed(conf)
 
 
-def test_validate_ss_seed_errors_on_undeclared_parameter(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_ss_seed_errors_on_undeclared_parameter(conf):
     var = conf.variables.variables[0]
     conf.variables.ss_seed[var] = sp.Symbol("not_a_param")
 
@@ -550,8 +551,7 @@ def test_validate_ss_seed_errors_on_undeclared_parameter(parsed_test):
         ModelParser.validate_ss_seed(conf)
 
 
-def test_validate_ss_seed_errors_on_model_variable_reference(parsed_test):
-    conf = copy.deepcopy(parsed_test.model)
+def test_validate_ss_seed_errors_on_model_variable_reference(conf):
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
     conf.variables.ss_seed[var] = var(t)
@@ -560,8 +560,8 @@ def test_validate_ss_seed_errors_on_model_variable_reference(parsed_test):
         ModelParser.validate_ss_seed(conf)
 
 
-def test_parser_rejects_undeclared_ss_seed_symbol(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_parser_rejects_undeclared_ss_seed_symbol(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["variables"] = {
         "u": {"ss_seed": "u_bar"},
         "v": {},
@@ -576,8 +576,8 @@ def test_parser_rejects_undeclared_ss_seed_symbol(tmp_path):
         ModelParser(bad)
 
 
-def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["calibration"]["parameters"].pop("beta")
     bad = _write_yaml(tmp_path / "missing_declared.yaml", data)
 
@@ -585,8 +585,10 @@ def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path):
         ModelParser(bad)
 
 
-def test_require_calibrated_params_rejects_unknown_referenced_parameter(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_require_calibrated_params_rejects_unknown_referenced_parameter(
+    tmp_path, test_model_yaml
+):
+    data = yaml.safe_load(test_model_yaml)
     data["calibration"]["shocks"]["std"]["e_u"] = "unknown_sigma"
     bad = _write_yaml(tmp_path / "unknown_ref.yaml", data)
 
@@ -595,9 +597,9 @@ def test_require_calibrated_params_rejects_unknown_referenced_parameter(tmp_path
 
 
 def test_require_calibrated_params_rejects_uncalibrated_referenced_parameter(
-    tmp_path,
+    tmp_path, test_model_yaml
 ):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+    data = yaml.safe_load(test_model_yaml)
     data["calibration"]["shocks"]["std"]["e_u"] = "sig_u"
     data["calibration"]["parameters"].pop("sig_u")
     bad = _write_yaml(tmp_path / "missing_ref.yaml", data)
@@ -606,8 +608,8 @@ def test_require_calibrated_params_rejects_uncalibrated_referenced_parameter(
         ModelParser(bad)
 
 
-def test_parser_rejects_model_equation_without_single_equals(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_parser_rejects_model_equation_without_single_equals(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["equations"]["model"][0] = "Pi(t) + x(t)"
     bad = _write_yaml(tmp_path / "bad_eq.yaml", data)
 
@@ -634,8 +636,8 @@ def test_legacy_variable_list_defaults_linearization_and_ss_seed(parsed_test):
     assert all(ss is None for ss in conf.variables.ss_seed.values())
 
 
-def test_parser_builds_variable_metadata_from_mapping(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_parser_builds_variable_metadata_from_mapping(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["variables"] = {
         "u": {"linearization": "taylor"},
         "v": {},
@@ -664,8 +666,8 @@ def test_parser_builds_variable_metadata_from_mapping(tmp_path):
     assert conf.variables.ss_seed["x"] is None
 
 
-def test_parser_rejects_retired_steady_state_key(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_parser_rejects_retired_steady_state_key(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["variables"] = {
         "u": {"steady_state": "ubar"},
         "v": {},
@@ -680,8 +682,8 @@ def test_parser_rejects_retired_steady_state_key(tmp_path):
         ModelParser(bad)
 
 
-def test_parser_rejects_unknown_variable_metadata_keys(tmp_path):
-    data = yaml.safe_load(Path("MODELS/test.yaml").read_text(encoding="utf-8"))
+def test_parser_rejects_unknown_variable_metadata_keys(tmp_path, test_model_yaml):
+    data = yaml.safe_load(test_model_yaml)
     data["variables"] = {
         "u": {"linearization": "taylor", "foo": 1},
         "v": {},

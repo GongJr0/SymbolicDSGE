@@ -291,7 +291,9 @@ def test_transform_factories_produce_a_bound_transform_step(
 # ---- persistence -----------------------------------------------------------
 
 
-def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
+def test_transform_pipeline_round_trips_through_bundle(
+    tmp_path, test_model_path
+) -> None:
     """Authoring a transform-containing pipeline and re-opening it from a
     bundle preserves every node and its bound params."""
     import pathlib
@@ -301,7 +303,7 @@ def test_transform_pipeline_round_trips_through_bundle(tmp_path) -> None:
     from SymbolicDSGE.ui.mc import build_pipeline as build_live_pipeline
     from tests._spec_helpers import as_posted
 
-    yaml_text = pathlib.Path("MODELS/test.yaml").read_text(encoding="utf-8")
+    yaml_text = test_model_path.read_text(encoding="utf-8")
     # Authored the way the GUI posts it, then lowered through the UI boundary,
     # which is what resolves op kinds, source legs and the wald target field.
     pipeline = as_posted(

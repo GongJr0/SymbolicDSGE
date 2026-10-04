@@ -16,8 +16,8 @@ EXPECTED_IDX = {name: i for i, name in enumerate(EXPECTED_CANONICAL_ORDER)}
 N_VAR = len(EXPECTED_CANONICAL_ORDER)
 
 
-def _write_misordered_test_model(tmp_path):
-    with open("MODELS/test.yaml", "r", encoding="utf-8") as f:
+def _write_misordered_test_model(tmp_path, test_model_path):
+    with open(test_model_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
     # Deliberately put controls and the unshocked variable first. The canonical
@@ -28,15 +28,17 @@ def _write_misordered_test_model(tmp_path):
     return path
 
 
-def _compile_misordered_test_model(tmp_path):
-    path = _write_misordered_test_model(tmp_path)
+def _compile_misordered_test_model(tmp_path, test_model_path):
+    path = _write_misordered_test_model(tmp_path, test_model_path)
     model, kalman = ModelParser(path).get_all()
     solver = DSGESolver(model, kalman)
     return solver.compile()
 
 
-def test_compile_default_layout_canonicalizes_misordered_yaml_variables(tmp_path):
-    compiled = _compile_misordered_test_model(tmp_path)
+def test_compile_default_layout_canonicalizes_misordered_yaml_variables(
+    tmp_path, test_model_path
+):
+    compiled = _compile_misordered_test_model(tmp_path, test_model_path)
 
     assert compiled.var_names == EXPECTED_CANONICAL_ORDER
     assert compiled.idx == EXPECTED_IDX
@@ -48,27 +50,29 @@ def test_compile_default_layout_canonicalizes_misordered_yaml_variables(tmp_path
     assert compiled.n_state == 3
 
 
-def test_a_single_depth_model_generates_no_variables(tmp_path):
+def test_a_single_depth_model_generates_no_variables(tmp_path, test_model_path):
     # Nothing here is displaced past one date, so the compiled set is the
     # declared set and the whole generated block is empty.
-    compiled = _compile_misordered_test_model(tmp_path)
+    compiled = _compile_misordered_test_model(tmp_path, test_model_path)
 
     assert compiled.layout.generated_names == ()
     assert compiled.layout.aux_origin == {}
     assert set(compiled.var_names) == set(compiled.layout.declared_names)
 
 
-def test_shock_columns_are_named_by_shock_in_declaration_order(tmp_path):
-    compiled = _compile_misordered_test_model(tmp_path)
+def test_shock_columns_are_named_by_shock_in_declaration_order(
+    tmp_path, test_model_path
+):
+    compiled = _compile_misordered_test_model(tmp_path, test_model_path)
 
     assert compiled.shock_names == ("e_u", "e_v")
     assert compiled.shock_idx == {"e_u": 0, "e_v": 1}
 
 
 def test_measurement_dispatchers_accept_canonical_state_order_after_yaml_reorder(
-    tmp_path,
+    tmp_path, test_model_path
 ):
-    compiled = _compile_misordered_test_model(tmp_path)
+    compiled = _compile_misordered_test_model(tmp_path, test_model_path)
     params = np.array(
         [compiled.config.calibration.parameters[p] for p in compiled.calib_params],
         dtype=np.float64,
@@ -97,8 +101,10 @@ def test_measurement_dispatchers_accept_canonical_state_order_after_yaml_reorder
     np.testing.assert_allclose(jacobian, expected_jacobian)
 
 
-def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(tmp_path):
-    compiled = _compile_misordered_test_model(tmp_path)
+def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(
+    tmp_path, test_model_path
+):
+    compiled = _compile_misordered_test_model(tmp_path, test_model_path)
 
     np.testing.assert_allclose(
         _shock_covariance(compiled),
@@ -106,8 +112,8 @@ def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(tmp_path)
     )
 
 
-def test_explicit_order_permutes_within_each_block(tmp_path):
-    path = _write_misordered_test_model(tmp_path)
+def test_explicit_order_permutes_within_each_block(tmp_path, test_model_path):
+    path = _write_misordered_test_model(tmp_path, test_model_path)
     model, kalman = ModelParser(path).get_all()
     compiled = DSGESolver(model, kalman).compile(
         variable_order=["r", "v", "u", "r_star", "x", "Pi"],
@@ -118,10 +124,12 @@ def test_explicit_order_permutes_within_each_block(tmp_path):
     assert compiled.var_names == ["r", "v", "u", "r_star", "x", "Pi"]
 
 
-def test_explicit_order_places_a_minted_lag_after_the_named_states(tmp_path):
+def test_explicit_order_places_a_minted_lag_after_the_named_states(
+    tmp_path, test_model_path
+):
     # u(t-2) mints u_lag1, which is a state the model never declared. The order
     # names what the model declares, and the minted lag closes the state block.
-    with open("MODELS/test.yaml", "r", encoding="utf-8") as f:
+    with open(test_model_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     data["equations"]["model"]["u_process"] = "u(t) = rho_u*u(t-2) + e_u"
     path = tmp_path / "deep_test.yaml"
@@ -144,8 +152,8 @@ def test_explicit_order_places_a_minted_lag_after_the_named_states(tmp_path):
     assert {*layout.declared_names, *layout.generated_names} == set(compiled.var_names)
 
 
-def test_explicit_order_rejects_a_control_in_the_state_block(tmp_path):
-    path = _write_misordered_test_model(tmp_path)
+def test_explicit_order_rejects_a_control_in_the_state_block(tmp_path, test_model_path):
+    path = _write_misordered_test_model(tmp_path, test_model_path)
     model, kalman = ModelParser(path).get_all()
     solver = DSGESolver(model, kalman)
 
@@ -153,8 +161,8 @@ def test_explicit_order_rejects_a_control_in_the_state_block(tmp_path):
         solver.compile(variable_order=["u", "v", "Pi", "r", "x", "r_star"])
 
 
-def test_compile_rejects_an_order_naming_a_generated_state(tmp_path):
-    path = _write_misordered_test_model(tmp_path)
+def test_compile_rejects_an_order_naming_a_generated_state(tmp_path, test_model_path):
+    path = _write_misordered_test_model(tmp_path, test_model_path)
     model, kalman = ModelParser(path).get_all()
     solver = DSGESolver(model, kalman)
 

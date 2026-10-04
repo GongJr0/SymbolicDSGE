@@ -51,11 +51,11 @@ def transform(u, Infl) -> ndarray:
 """
 
 
-def _solved_client() -> TestClient:
+def _solved_client(model_path) -> TestClient:
     client = TestClient(create_app())
     client.post(
         "/api/model/load-yaml",
-        json={"model_name": "reference", "path": "MODELS/test.yaml"},
+        json={"model_name": "reference", "path": str(model_path)},
     )
     client.post(
         "/api/model/solve", json={"model_name": "reference", "compile_kwargs": {}}
@@ -79,8 +79,8 @@ def _simulate(client: TestClient, *, observables: bool) -> dict:
     ).json()
 
 
-def test_submitted_transform_becomes_a_series() -> None:
-    client = _solved_client()
+def test_submitted_transform_becomes_a_series(test_model_path) -> None:
+    client = _solved_client(test_model_path)
     client.post(
         "/api/code/submit",
         json={"model_name": "reference", "code": _TRANSFORM, "kind": "array"},
@@ -92,13 +92,13 @@ def test_submitted_transform_becomes_a_series() -> None:
     assert sim["transform_errors"] == []
 
 
-def test_transform_missing_a_series_says_which_one() -> None:
+def test_transform_missing_a_series_says_which_one(test_model_path) -> None:
     """The default template takes every observable, and the toggle can be off.
 
     Producing nothing and saying nothing reads as the submit having failed,
     which is the one thing that did work.
     """
-    client = _solved_client()
+    client = _solved_client(test_model_path)
     client.post(
         "/api/code/submit",
         json={"model_name": "reference", "code": _TRANSFORM, "kind": "array"},
@@ -112,8 +112,8 @@ def test_transform_missing_a_series_says_which_one() -> None:
     ]
 
 
-def test_transform_that_raises_reports_its_own_message() -> None:
-    client = _solved_client()
+def test_transform_that_raises_reports_its_own_message(test_model_path) -> None:
+    client = _solved_client(test_model_path)
     client.post(
         "/api/code/submit",
         json={
@@ -128,9 +128,9 @@ def test_transform_that_raises_reports_its_own_message() -> None:
     assert sim["transform_errors"] == [{"name": "boom", "error": "kaboom"}]
 
 
-def test_transform_with_a_default_does_not_count_as_missing() -> None:
+def test_transform_with_a_default_does_not_count_as_missing(test_model_path) -> None:
     """A parameter the run cannot supply is only a problem without a default."""
-    client = _solved_client()
+    client = _solved_client(test_model_path)
     client.post(
         "/api/code/submit",
         json={
@@ -146,7 +146,7 @@ def test_transform_with_a_default_does_not_count_as_missing() -> None:
     assert sim["transform_errors"] == []
 
 
-def test_ui_backend_loads_solves_and_simulates_model() -> None:
+def test_ui_backend_loads_solves_and_simulates_model(test_model_path) -> None:
     client = TestClient(create_app())
 
     health = client.get("/api/health")
@@ -155,7 +155,7 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
 
     loaded = client.post(
         "/api/model/load-yaml",
-        json={"model_name": "reference", "path": "MODELS/test.yaml"},
+        json={"model_name": "reference", "path": str(test_model_path)},
     )
     assert loaded.status_code == 200
     loaded_body = loaded.json()
@@ -279,9 +279,11 @@ def test_ui_backend_loads_solves_and_simulates_model() -> None:
     assert generated_t.status_code == 200
 
 
-def test_ui_backend_loads_yaml_content_and_reports_user_errors() -> None:
+def test_ui_backend_loads_yaml_content_and_reports_user_errors(
+    test_model_path, test_model_yaml
+) -> None:
     client = TestClient(create_app())
-    content = Path("MODELS/test.yaml").read_text(encoding="utf-8")
+    content = test_model_yaml
 
     loaded = client.post(
         "/api/model/load-yaml",
@@ -312,7 +314,7 @@ def test_ui_backend_loads_yaml_content_and_reports_user_errors() -> None:
         "/api/model/load-yaml",
         json={
             "model_name": "reference",
-            "path": "MODELS/test.yaml",
+            "path": str(test_model_path),
             "content": content,
         },
     )
@@ -383,12 +385,14 @@ def test_ui_estimation_serializes_mcmc_traces_for_charts() -> None:
     assert payload["logpost_trace"] == [-3.0, -2.5]
 
 
-def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) -> None:
+def test_ui_backend_dispatches_estimation_and_estimate_and_solve(
+    monkeypatch, test_model_path
+) -> None:
     app = create_app()
     client = TestClient(app)
     loaded = client.post(
         "/api/model/load-yaml",
-        json={"model_name": "reference", "path": "MODELS/test.yaml"},
+        json={"model_name": "reference", "path": str(test_model_path)},
     )
     assert loaded.status_code == 200
     assert loaded.json()["parameter_values"]["beta"] == 0.99
@@ -505,12 +509,12 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(monkeypatch) ->
     assert app.state.ui_session.solved_model("reference") is solved_model
 
 
-def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
+def test_ui_backend_validates_and_runs_monte_carlo_pipeline(test_model_path) -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"model_name": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": str(test_model_path)},
         )
         assert loaded.status_code == 200
         solved = client.post(
@@ -575,11 +579,11 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline() -> None:
     assert workspace["result"]["n_rep"] == 3
 
 
-def _solve_reference(client: TestClient) -> None:
+def _solve_reference(client: TestClient, model_path) -> None:
     for role in ("reference", "dgp"):  # simulation datagen needs a solved dgp
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"model_name": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": str(model_path)},
         )
         assert loaded.status_code == 200
         solved = client.post(
@@ -630,9 +634,9 @@ _POSTPROC_PIPELINE = {
 }
 
 
-def test_ui_backend_run_payload_includes_postproc_artifacts() -> None:
+def test_ui_backend_run_payload_includes_postproc_artifacts(test_model_path) -> None:
     client = TestClient(create_app())
-    _solve_reference(client)
+    _solve_reference(client, test_model_path)
 
     run = client.post(
         "/api/run/mc",
@@ -680,12 +684,12 @@ def test_ui_backend_custom_validate_is_phase_aware() -> None:
     assert bad.status_code == 200 and bad.json()["valid"] is False
 
 
-def test_ui_backend_accepts_fanout() -> None:
+def test_ui_backend_accepts_fanout(test_model_path) -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"model_name": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": str(test_model_path)},
         )
         assert loaded.status_code == 200
         solved = client.post(
@@ -754,12 +758,12 @@ def test_ui_backend_accepts_fanout() -> None:
     assert set(run.json()["test_summaries"]) == {"a", "b"}
 
 
-def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
+def test_ui_backend_runs_jarque_bera_monte_carlo_step(test_model_path) -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"model_name": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": str(test_model_path)},
         )
         assert loaded.status_code == 200
         solved = client.post(
@@ -820,12 +824,12 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step() -> None:
     assert summary["n_retained"] == 2
 
 
-def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
+def test_ui_backend_runs_breusch_pagan_monte_carlo_step(test_model_path) -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"model_name": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": str(test_model_path)},
         )
         assert loaded.status_code == 200
         solved = client.post(
@@ -894,12 +898,12 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step() -> None:
     assert summary["n_retained"] == 2
 
 
-def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
+def test_ui_backend_runs_breusch_godfrey_monte_carlo_step(test_model_path) -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"model_name": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": str(test_model_path)},
         )
         assert loaded.status_code == 200
         solved = client.post(
@@ -968,12 +972,12 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step() -> None:
     assert summary["n_retained"] == 2
 
 
-def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
+def test_ui_backend_runs_cusum_monte_carlo_step(test_model_path) -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"model_name": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": str(test_model_path)},
         )
         assert loaded.status_code == 200
         solved = client.post(
@@ -1040,12 +1044,12 @@ def test_ui_backend_runs_cusum_monte_carlo_step() -> None:
     assert summary["n_retained"] == 2
 
 
-def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
+def test_ui_backend_runs_cusumsq_monte_carlo_step(test_model_path) -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"model_name": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": str(test_model_path)},
         )
         assert loaded.status_code == 200
         solved = client.post(
@@ -1112,12 +1116,12 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step() -> None:
     assert summary["n_retained"] == 2
 
 
-def test_ui_backend_runs_chow_monte_carlo_step() -> None:
+def test_ui_backend_runs_chow_monte_carlo_step(test_model_path) -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         loaded = client.post(
             "/api/model/load-yaml",
-            json={"model_name": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": str(test_model_path)},
         )
         assert loaded.status_code == 200
         solved = client.post(
@@ -1355,12 +1359,12 @@ def test_ui_backend_custom_op_template_and_validate() -> None:
     assert "deny list" in body["error"]
 
 
-def test_ui_backend_runs_custom_op_pipeline() -> None:
+def test_ui_backend_runs_custom_op_pipeline(test_model_path) -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         client.post(
             "/api/model/load-yaml",
-            json={"model_name": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": str(test_model_path)},
         )
         client.post(
             "/api/model/solve",
@@ -1430,12 +1434,12 @@ def test_ui_backend_runs_custom_op_pipeline() -> None:
     assert "jb" in body["test_summaries"]
 
 
-def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
+def test_ui_backend_rejects_invalid_custom_op_on_run(test_model_path) -> None:
     client = TestClient(create_app())
     for role in ("reference", "dgp"):
         client.post(
             "/api/model/load-yaml",
-            json={"model_name": role, "path": "MODELS/test.yaml"},
+            json={"model_name": role, "path": str(test_model_path)},
         )
         client.post(
             "/api/model/solve",
@@ -1482,7 +1486,9 @@ def test_ui_backend_rejects_invalid_custom_op_on_run() -> None:
 
 
 @pytest.mark.parametrize("routine", ["mle", "map"])
-def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, routine):
+def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
+    monkeypatch, routine, test_model_path
+):
     """The kwargs the form posts must bind to the method that receives them.
 
     ``DSGESolver.estimate`` declares ``**method_kwargs``, so a fake standing in
@@ -1499,7 +1505,7 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(monkeypatch, routi
     assert (
         client.post(
             "/api/model/load-yaml",
-            json={"model_name": "reference", "path": "MODELS/test.yaml"},
+            json={"model_name": "reference", "path": str(test_model_path)},
         ).status_code
         == 200
     )

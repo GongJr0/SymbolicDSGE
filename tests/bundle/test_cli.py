@@ -37,9 +37,6 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     raw_model_data_step,
 )
 
-_MODEL_YAML = Path("MODELS/test.yaml").read_text(encoding="utf-8")
-
-
 # -- helpers ----------------------------------------------------------------
 
 
@@ -55,7 +52,7 @@ def _pipeline() -> MCPipeline:
     )
 
 
-def _bundle(tmp_path: Path, *, with_result: bool = True) -> Path:
+def _bundle(tmp_path: Path, test_model_yaml, *, with_result: bool = True) -> Path:
     """A bundle carrying every member kind the CLI has to move."""
     pipe = _pipeline()
     result = (
@@ -67,7 +64,7 @@ def _bundle(tmp_path: Path, *, with_result: bool = True) -> Path:
     )
     return (
         BundleBuilder(created_by="cli-test")
-        .add_model("reference", _MODEL_YAML, compile_kwargs={"linearize": False})
+        .add_model("reference", test_model_yaml, compile_kwargs={"linearize": False})
         .add_mc(pipe, result=result)
         .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
         .set_simulation(
@@ -91,10 +88,12 @@ def _member_digests(path: Path) -> dict[str, str]:
 # -- round trip -------------------------------------------------------------
 
 
-def test_decompile_then_compile_returns_the_same_bytes(tmp_path: Path) -> None:
+def test_decompile_then_compile_returns_the_same_bytes(
+    tmp_path: Path, test_model_yaml
+) -> None:
     # Compile packs rather than rebuilds, so a round trip that re-encodes nothing
     # is byte-for-byte identical, member paths included.
-    bundle = _bundle(tmp_path)
+    bundle = _bundle(tmp_path, test_model_yaml)
     extracted = decompile_bundle(bundle, tmp_path / "flat")
 
     packed = compile_directory(extracted, tmp_path / "out.sdsge")
@@ -102,8 +101,8 @@ def test_decompile_then_compile_returns_the_same_bytes(tmp_path: Path) -> None:
     assert _member_digests(packed) == _member_digests(bundle)
 
 
-def test_round_tripped_bundle_still_loads(tmp_path: Path) -> None:
-    bundle = _bundle(tmp_path)
+def test_round_tripped_bundle_still_loads(tmp_path: Path, test_model_yaml) -> None:
+    bundle = _bundle(tmp_path, test_model_yaml)
     original = load_bundle(bundle)
 
     packed = compile_directory(
@@ -120,10 +119,12 @@ def test_round_tripped_bundle_still_loads(tmp_path: Path) -> None:
     )
 
 
-def test_csv_mode_round_trips_into_a_readable_bundle(tmp_path: Path) -> None:
+def test_csv_mode_round_trips_into_a_readable_bundle(
+    tmp_path: Path, test_model_yaml
+) -> None:
     # ``--csv`` is the only way to read a bulk member in an editor, and what it
     # produces is still a bundle: the loader takes either format.
-    bundle = _bundle(tmp_path)
+    bundle = _bundle(tmp_path, test_model_yaml)
     extracted = decompile_bundle(bundle, tmp_path / "flat", also_csv=True)
     assert not any(extracted.rglob("*.parquet"))
 
@@ -139,9 +140,11 @@ def test_csv_mode_round_trips_into_a_readable_bundle(tmp_path: Path) -> None:
     )
 
 
-def test_model_config_moves_to_the_root_and_back(tmp_path: Path) -> None:
+def test_model_config_moves_to_the_root_and_back(
+    tmp_path: Path, test_model_yaml
+) -> None:
     # The one path that differs between the two layouts, in both directions.
-    bundle = _bundle(tmp_path, with_result=False)
+    bundle = _bundle(tmp_path, test_model_yaml, with_result=False)
     extracted = decompile_bundle(bundle, tmp_path / "flat")
     assert (extracted / "reference.yaml").exists()
 
@@ -155,19 +158,19 @@ def test_model_config_moves_to_the_root_and_back(tmp_path: Path) -> None:
 # -- compile refuses what it cannot pack -------------------------------------
 
 
-def test_compile_requires_a_manifest(tmp_path: Path) -> None:
+def test_compile_requires_a_manifest(tmp_path: Path, test_model_yaml) -> None:
     bare = tmp_path / "bare"
     bare.mkdir()
-    (bare / "reference.yaml").write_text(_MODEL_YAML, encoding="utf-8")
+    (bare / "reference.yaml").write_text(test_model_yaml, encoding="utf-8")
 
     with pytest.raises(CompileError, match="manifest.json"):
         compile_directory(bare, tmp_path / "out.sdsge")
 
 
 def test_compile_reports_a_member_the_manifest_lists_but_the_directory_lacks(
-    tmp_path: Path,
+    tmp_path: Path, test_model_yaml
 ) -> None:
-    extracted = decompile_bundle(_bundle(tmp_path), tmp_path / "flat")
+    extracted = decompile_bundle(_bundle(tmp_path, test_model_yaml), tmp_path / "flat")
     (extracted / "reference.yaml").unlink()
 
     with pytest.raises(CompileError, match="reference.yaml"):
@@ -177,8 +180,10 @@ def test_compile_reports_a_member_the_manifest_lists_but_the_directory_lacks(
 # -- decompile output directory ---------------------------------------------
 
 
-def test_decompile_rejects_existing_dir_without_force(tmp_path: Path) -> None:
-    bundle = _bundle(tmp_path, with_result=False)
+def test_decompile_rejects_existing_dir_without_force(
+    tmp_path: Path, test_model_yaml
+) -> None:
+    bundle = _bundle(tmp_path, test_model_yaml, with_result=False)
     out_dir = tmp_path / "exists"
     out_dir.mkdir()
 
@@ -186,8 +191,8 @@ def test_decompile_rejects_existing_dir_without_force(tmp_path: Path) -> None:
         decompile_bundle(bundle, out_dir)
 
 
-def test_decompile_force_overwrites(tmp_path: Path) -> None:
-    bundle = _bundle(tmp_path, with_result=False)
+def test_decompile_force_overwrites(tmp_path: Path, test_model_yaml) -> None:
+    bundle = _bundle(tmp_path, test_model_yaml, with_result=False)
     out_dir = tmp_path / "occupied"
     out_dir.mkdir()
     (out_dir / "stale.txt").write_text("old")
@@ -202,9 +207,9 @@ def test_decompile_force_overwrites(tmp_path: Path) -> None:
 
 
 def test_main_decompile_extracts_members(
-    tmp_path: Path, capsys: pytest.CaptureFixture
+    tmp_path: Path, capsys: pytest.CaptureFixture, test_model_yaml
 ) -> None:
-    bundle = _bundle(tmp_path)
+    bundle = _bundle(tmp_path, test_model_yaml)
     out_dir = tmp_path / "extracted"
 
     assert main_decompile([str(bundle), "-o", str(out_dir)]) == 0
@@ -215,9 +220,9 @@ def test_main_decompile_extracts_members(
 
 
 def test_main_compile_emits_bundle(
-    tmp_path: Path, capsys: pytest.CaptureFixture
+    tmp_path: Path, capsys: pytest.CaptureFixture, test_model_yaml
 ) -> None:
-    extracted = decompile_bundle(_bundle(tmp_path), tmp_path / "flat")
+    extracted = decompile_bundle(_bundle(tmp_path, test_model_yaml), tmp_path / "flat")
     target = tmp_path / "out.sdsge"
 
     assert main_compile([str(extracted), "-o", str(target)]) == 0
@@ -226,16 +231,18 @@ def test_main_compile_emits_bundle(
     assert f"wrote {target}" in capsys.readouterr().out
 
 
-def test_main_compile_default_output_path(tmp_path: Path) -> None:
-    extracted = decompile_bundle(_bundle(tmp_path), tmp_path / "flat")
+def test_main_compile_default_output_path(tmp_path: Path, test_model_yaml) -> None:
+    extracted = decompile_bundle(_bundle(tmp_path, test_model_yaml), tmp_path / "flat")
 
     assert main_compile([str(extracted)]) == 0
 
     assert (extracted.parent / f"{extracted.name}.sdsge").is_file()
 
 
-def test_main_compile_carries_created_by_from_the_manifest(tmp_path: Path) -> None:
-    extracted = decompile_bundle(_bundle(tmp_path), tmp_path / "flat")
+def test_main_compile_carries_created_by_from_the_manifest(
+    tmp_path: Path, test_model_yaml
+) -> None:
+    extracted = decompile_bundle(_bundle(tmp_path, test_model_yaml), tmp_path / "flat")
 
     packed = compile_directory(extracted, tmp_path / "out.sdsge")
 
@@ -253,10 +260,12 @@ def test_main_compile_returns_nonzero_on_error(
     assert "sdsge-compile:" in capsys.readouterr().err
 
 
-def test_simulation_prefill_survives_the_round_trip(tmp_path: Path) -> None:
+def test_simulation_prefill_survives_the_round_trip(
+    tmp_path: Path, test_model_yaml
+) -> None:
     # The prefill is not a member: it rides inline in the manifest, so it is the
     # one thing compile picks up from the index rather than from a file.
-    extracted = decompile_bundle(_bundle(tmp_path), tmp_path / "flat")
+    extracted = decompile_bundle(_bundle(tmp_path, test_model_yaml), tmp_path / "flat")
     written = json.loads((extracted / "manifest.json").read_text(encoding="utf-8"))
     assert written["simulation"]["reference"]["T"] == 8
 

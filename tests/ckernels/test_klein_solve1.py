@@ -20,11 +20,7 @@ from SymbolicDSGE.core.solver_backend import klein_solve
 
 # One model with an empty control block, one with a nonempty one, and one whose
 # shock block is wider than a single column.
-MODELS = [
-    "tests/fixtures/models/rbc_second_order.yaml",
-    "MODELS/test.yaml",
-    "MODELS/POST82.yaml",
-]
+MODELS = ["rbc_second_order", "test", "post82"]
 
 
 def _model(path):
@@ -36,10 +32,10 @@ def _model(path):
     return compiled, par, seed
 
 
-@pytest.mark.parametrize("path", MODELS)
-def test_policy_is_real(path):
+@pytest.mark.parametrize("model_path", MODELS, indirect=True)
+def test_policy_is_real(model_path):
     """``f``/``p`` leave the solve projected, so no caller collapses them again."""
-    compiled, par, seed = _model(path)
+    compiled, par, seed = _model(model_path)
     cfunc = compiled.construct_objective_cfunc()
 
     _, _, f, p, _, _, _, _ = klein_solve1(
@@ -54,11 +50,11 @@ def test_policy_is_real(path):
     assert sol.eig.dtype == np.complex128
 
 
-@pytest.mark.parametrize("path", MODELS)
-def test_the_transition_reads_only_the_state_columns(path):
+@pytest.mark.parametrize("model_path", MODELS, indirect=True)
+def test_the_transition_reads_only_the_state_columns(model_path):
     """A control at ``t`` is pinned by the state at ``t-1``, so its own column
     contributes nothing and ``A`` is the rule scattered rather than a product."""
-    compiled, par, seed = _model(path)
+    compiled, par, seed = _model(model_path)
     sol = klein_solve(compiled, par, seed)
     n_state = compiled.n_state
 
@@ -67,9 +63,9 @@ def test_the_transition_reads_only_the_state_columns(path):
     np.testing.assert_array_equal(sol.A[n_state:, :n_state], sol.f)
 
 
-def test_reports_stab_instead_of_raising():
+def test_reports_stab_instead_of_raising(post82_test_model_path):
     """A stability verdict is data here; only the caller decides it is fatal."""
-    compiled, par, seed = _model("MODELS/POST82.yaml")
+    compiled, par, seed = _model(post82_test_model_path)
 
     stab = klein_solve1(
         compiled.construct_objective_cfunc().address,
@@ -90,8 +86,8 @@ def test_reports_stab_instead_of_raising():
         (lambda c: (len(c.var_names) + 1, 0), "exceeds the matrix dimension"),
     ],
 )
-def test_rejects_dimensions_the_solve_cannot_hold(dims, match):
-    compiled, par, seed = _model("MODELS/POST82.yaml")
+def test_rejects_dimensions_the_solve_cannot_hold(dims, match, post82_test_model_path):
+    compiled, par, seed = _model(post82_test_model_path)
     n_state, n_exog = dims(compiled)
 
     with pytest.raises(ValueError, match=match):

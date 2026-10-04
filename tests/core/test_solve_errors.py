@@ -33,7 +33,6 @@ def _no_fixed_point_yaml() -> str:
           x: {}
         shocks:
           - e
-        observables: []
         equations:
           model:
             drift: "x(t) = x(t-1) + 1 + e"
@@ -59,7 +58,6 @@ def _overflowing_residual_yaml() -> str:
           x: {ss_seed: x_seed}
         shocks:
           - e
-        observables: []
         equations:
           model:
             growth: "x(t) = exp(x(t-1)) + e"

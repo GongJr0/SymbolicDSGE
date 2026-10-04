@@ -25,8 +25,6 @@ from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import FirstOrderSolvedModel
 from SymbolicDSGE.estimation import Estimator
 
-_MODEL = "tests/fixtures/models/nk_zlb_1_constraint.yaml"
-
 #: The discount-factor shock the parity fixture is built around, at the size
 #: that drives the rate into the bound. Fixed here so the observations every
 #: test filters are the same ones.
@@ -40,8 +38,8 @@ _ESTIMATED = ["RHO"]
 
 
 @pytest.fixture(scope="module")
-def solved():
-    model, kalman = ModelParser(_MODEL).get_all()
+def solved(nk_zlb_test_model_path):
+    model, kalman = ModelParser(nk_zlb_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     return solver.solve(solver.compile())
 
@@ -88,7 +86,9 @@ def test_unscented_filtering_is_refused(solved, observations):
         solved.kalman(observations, filter_mode="unscented")
 
 
-def test_estimation_likelihood_runs_on_a_constrained_model(solved, observations):
+def test_estimation_likelihood_runs_on_a_constrained_model(
+    solved, observations, nk_zlb_test_model_path
+):
     # Estimation solves per draw rather than taking a solved model, so it
     # reaches the reference block by its own route. At the calibrated theta it
     # has to land on the one-shot filter's number exactly.
@@ -96,7 +96,7 @@ def test_estimation_likelihood_runs_on_a_constrained_model(solved, observations)
     # The two entry points do not carry the same filter defaults, so the run
     # settings are stated on both sides rather than inherited. An identity
     # between two configurations is not the claim being made here.
-    model, kalman = ModelParser(_MODEL).get_all()
+    model, kalman = ModelParser(nk_zlb_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
 

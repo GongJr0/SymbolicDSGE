@@ -27,13 +27,12 @@ from SymbolicDSGE.core.linearization import LinearizationMethod
 
 t = sp.Symbol("t", integer=True)
 
-# MODELS/test.yaml written the way the author would write it, with the lags left
+# test.yaml written the way the author would write it, with the lags left
 # in place instead of shifted forward. Every lag here is depth one.
 NATURAL_TIME_MODEL = {
     "name": "NATURAL",
     "variables": ["u", "v", "r", "Pi", "x", "r_star"],
     "shocks": ["e_u", "e_v"],
-    "observables": ["Infl", "Rate"],
     "equations": {
         "model": {
             "nkpc": "Pi(t) = beta*Pi(t+1) + kappa*x(t)",

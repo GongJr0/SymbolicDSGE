@@ -18,8 +18,8 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 
 
 @pytest.fixture(scope="module")
-def simulation_model() -> SolvedModel:
-    model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+def simulation_model(post82_test_model_path) -> SolvedModel:
+    model, kalman = ModelParser(post82_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     return solver.solve(solver.compile())
 

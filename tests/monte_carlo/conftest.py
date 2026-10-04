@@ -55,9 +55,9 @@ def mc_run():
 
 
 @pytest.fixture(scope="session")
-def solved_test_model() -> SolvedModel:
-    """A first-order solve of ``MODELS/test.yaml``, shared across the suite."""
-    model, kalman = ModelParser("MODELS/test.yaml").get_all()
+def solved_test_model(test_model_path) -> SolvedModel:
+    """A first-order solve of ``test.yaml``, shared across the suite."""
+    model, kalman = ModelParser(test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     return solver.solve(solver.compile())
 

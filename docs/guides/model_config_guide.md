@@ -58,47 +58,6 @@ variables: # as mapping
     - `x0` requires all variables, including auxiliaries in the order `[declared_variables; generated_auxiliaries]`.
     - `ss_seed` requires all declared variables (the `variables` field) in declaration order.
 
-## Parameters
-
-Parameters are "constants" that appear in the model equations in some capacity.
-Common examples of parameters are:
-
-- Shock persistence terms
-- Shock (co)variances
-- Steady state values
-- Model parameters such as the discount factor (often $\beta$)
-
-Parameters are declared by their entries under [`calibration.parameters`](#parameters_1).
-There is no separate `parameters` list; a name is a parameter if and only if it is calibrated.
-
-```yaml
-calibration:
-    parameters:
-        beta: 0.99
-        kappa: 0.58
-        tau_inv: 1.86
-```
-
-???+ info "Configuration Local Parameters"
-    While all parameter declarations are required to reduce to scalar values, it is possible to declare expressions as functions of other parameters.
-    This allows simplifying model defintions by assigning a name to lengthy parameter expressions.
-    For example:
-    
-    ```yaml
-    calibration:
-        parameters:
-            x: 1/3
-            y: 2*x + 1
-    ```
-    In the above example, `y` appearing in any part of the `equations` field will be substituted with `2 * x + 1`.
-    After a model is parsed, `y` will not be available as a parameter in the calibration field.
-    Consquently, `y` is not an estimable parameter.
-    Estimating `x` is the only way to determine the value of `y` in this example.
-
-???+ note "Calibration Values"
-    `SymbolicDSGE` currently expects each parameter to have known values.
-    These calibration values are used as defaults and as initial guesses for estimation workflows (`mle`, `map`, `mcmc`) when no explicit `theta0` is supplied.
-
 ## Shocks
 
 ???+ note "Wording Convention"
@@ -115,14 +74,6 @@ shocks:
 ```
 
 Shock realizations are only injected when the user selects them at simulation time. Therefore, declaring extra variables here and including them in the model equations can be used to test multiple shock configurations from a single model config.
-
-## Observables
-
-Observables map model units to real life variables via equations. For the `observables` field we only declare the names we desire to use as observable variables.
-
-```yaml
-observables: [OutGap, Infl, Rate]
-```
 
 ## Equations
 
@@ -250,7 +201,16 @@ calibration:
 
 ### Parameters
 
-This section declares the model parameters and their known values.
+Parameters are "constants" that appear in the model equations in some capacity.
+Common examples of parameters are:
+
+- Shock persistence terms
+- Shock (co)variances
+- Steady state values
+- Model parameters such as the discount factor (often $\beta$)
+
+This section declares them and their known (initial) values.
+A name is a parameter if and only if it is calibrated here; there is no separate `parameters` list.
 Any name referenced by the equations, shock calibration, or Kalman block must appear here.
 
 ```yaml
@@ -278,6 +238,26 @@ calibration:
     shocks: ...
 ```
 
+???+ info "Configuration Local Parameters"
+    While all parameter declarations are required to reduce to scalar values, it is possible to declare expressions as functions of other parameters.
+    This allows simplifying model defintions by assigning a name to lengthy parameter expressions.
+    For example:
+
+    ```yaml
+    calibration:
+        parameters:
+            x: 1/3
+            y: 2*x + 1
+    ```
+    In the above example, `y` appearing in any part of the `equations` field will be substituted with `2 * x + 1`.
+    After a model is parsed, `y` will not be available as a parameter in the calibration field.
+    Consquently, `y` is not an estimable parameter.
+    Estimating `x` is the only way to determine the value of `y` in this example.
+
+???+ note "Calibration Values"
+    `SymbolicDSGE` currently expects each parameter to have known values.
+    These calibration values are used as defaults and as initial guesses for estimation workflows (`mle`, `map`, `mcmc`) when no explicit `theta0` is supplied.
+
 ### Shocks
 
 The shocks section maps shock (co)variances to the corresponding terms in model equations. Shock terms that are defined but not included in this field will use default values.
@@ -286,10 +266,10 @@ The shocks section maps shock (co)variances to the corresponding terms in model 
 - Correlation between excluded pairs will assume `0.0`
 
 ???+ warning "Shock Parameter Convention"
-    To align with `SciPy` distributions' signatures, the standard deviations of stochastic terms are used instead of the variance.
+    Dependence and spread of shocks are specified through standard deviations and correlation coefficients rather than covariance matrices.
 
 ???+ info "Shock Selection at Simulations"
-    At simulation time, shocks are referred to by the name of the shock itself (e.g., `e_g`, `e_z` instead of `g`, `z`). 
+    At simulation time, shocks are referred to by the name of the shock itself instead of the variable they influence (e.g., `e_g`, `e_z` instead of `g`, `z`).
 
 ```yaml
 calibration:

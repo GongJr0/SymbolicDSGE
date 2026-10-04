@@ -46,8 +46,8 @@ N_REP = 2
 
 
 @pytest.fixture(scope="module")
-def solved() -> SolvedModel:
-    model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+def solved(post82_test_model_path) -> SolvedModel:
+    model, kalman = ModelParser(post82_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     return solver.solve(solver.compile())
 

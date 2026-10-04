@@ -53,16 +53,16 @@ def _drive(path):
     )
 
 
-@pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
-def test_first_order_foc_holds(path):
-    a, b, c, _f_xx, gx, hx, _bu, _Q, n_state = _drive(path)
+@pytest.mark.parametrize("model_path", ["test", "post82"], indirect=True)
+def test_first_order_foc_holds(model_path):
+    a, b, c, _f_xx, gx, hx, _bu, _Q, n_state = _drive(model_path)
     foc = first_order_residual(a, b, c, gx, hx, n_state)
     np.testing.assert_allclose(foc, 0.0, atol=1e-8)
 
 
-@pytest.mark.parametrize("path", ["MODELS/test.yaml", "MODELS/POST82.yaml"])
-def test_linear_model_has_zero_second_order(path):
-    a, b, _c, f_xx, gx, hx, bu, Q, n_state = _drive(path)
+@pytest.mark.parametrize("model_path", ["test", "post82"], indirect=True)
+def test_linear_model_has_zero_second_order(model_path):
+    a, b, _c, f_xx, gx, hx, bu, Q, n_state = _drive(model_path)
     gxx, hxx, gxu, hxu, guu, huu, gss, hss = second_order(
         a, b, f_xx, gx, hx, bu, Q, n_state
     )

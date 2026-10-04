@@ -33,8 +33,6 @@ shocks:
     - e_d
     - e_g
 
-observables: [c_obs, k_obs, g_obs]
-
 equations:
   model:
     euler: "c(t)**(-gamma) = beta * exp(d(t)) * c(t+1)**(-gamma) * (alpha * exp(z(t+1)) * k(t)**(alpha - 1) + 1 - delta)"

@@ -7,8 +7,6 @@ shocks:
     - e_z
     - e_r
 
-observables: [Infl, Rate, Out_HP]
-
 equations:
   model:
     nkpc: Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)
@@ -26,7 +24,7 @@ equations:
   constraint:
     ZLB:
       bind: r_shadow(t) < 0
-      relax: r_shadow(t) >= 0 # (1)!
+      relax: r_shadow(t) >= 0 
 
   regime:
     ZLB:
@@ -83,8 +81,8 @@ kalman:
     std:
       Infl: meas_infl
       Rate: meas_rate
-      Out_HP: meas_out
+      OutGap: meas_out
     corr:
       Infl, Rate: meas_rho_ir
-      Infl, Out_HP: meas_rho_io
-      Rate, Out_HP: meas_rho_or
+      Infl, OutGap: meas_rho_io
+      Rate, OutGap: meas_rho_or

@@ -56,15 +56,16 @@ def _drive(path):
 
 
 @pytest.mark.parametrize(
-    "path",
+    "model_path",
     [
-        "tests/fixtures/models/rbc_second_order.yaml",  # n=3, nx=2, ny=1
-        "MODELS/test.yaml",  # n=6, nx=3, ny=3
-        "MODELS/POST82.yaml",  # n=5, nx=3, ny=2
+        "rbc_second_order",  # n=3, nx=2, ny=1
+        "test",  # n=6, nx=3, ny=3
+        "post82",  # n=5, nx=3, ny=2
     ],
+    indirect=True,
 )
-def test_native_second_order_matches_numpy(path):
-    args = _drive(path)
+def test_native_second_order_matches_numpy(model_path):
+    args = _drive(model_path)
 
     for name, native, ref in zip(
         _BLOCKS, second_order(*args), _solve_second_order_numpy(*args)

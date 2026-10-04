@@ -43,8 +43,8 @@ _OPTIONAL = ("eps_hat", "_x1_pred", "_x2_pred", "_x1_filt", "_x2_filt")
 
 
 @pytest.fixture(scope="module")
-def linear() -> SolvedModel:
-    model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+def linear(post82_test_model_path) -> SolvedModel:
+    model, kalman = ModelParser(post82_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     return solver.solve(solver.compile())
 

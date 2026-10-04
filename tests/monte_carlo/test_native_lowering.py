@@ -371,11 +371,13 @@ def test_native_lowering_runs_all_diagnostic_kinds() -> None:
         )
 
 
-def test_native_lowering_runs_first_order_simulation_with_observables() -> None:
+def test_native_lowering_runs_first_order_simulation_with_observables(
+    rbc_second_order_test_model_path,
+) -> None:
     # A levels model, deliberately: with a zero steady state the native path
     # returning deviations and solved.sim returning levels agree by accident,
     # and the whole assertion goes blind to the steady state.
-    model, kalman = ModelParser("tests/fixtures/models/rbc_second_order.yaml").get_all()
+    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     solved = solver.solve(solver.compile(), order=1)
     assert np.any(solved.policy.steady_state != 0.0)
@@ -455,8 +457,10 @@ def test_native_lowering_runs_second_order_simulation(solved_rbc_second_order) -
     )
 
 
-def test_native_lowering_runs_linear_and_extended_filters() -> None:
-    model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+def test_native_lowering_runs_linear_and_extended_filters(
+    post82_test_model_path,
+) -> None:
+    model, kalman = ModelParser(post82_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     solved = solver.solve(solver.compile())
     T = 8
@@ -507,8 +511,10 @@ def test_native_lowering_runs_linear_and_extended_filters() -> None:
             )
 
 
-def test_native_lowering_reorders_linear_filter_inputs_and_overrides() -> None:
-    model, kalman = ModelParser("MODELS/POST82.yaml").get_all()
+def test_native_lowering_reorders_linear_filter_inputs_and_overrides(
+    post82_test_model_path,
+) -> None:
+    model, kalman = ModelParser(post82_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     solved = solver.solve(solver.compile())
     T = 8

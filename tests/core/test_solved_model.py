@@ -650,18 +650,17 @@ def test_resolvers_rebuild_symbolic_R_from_current_calibration(
 
 t = sp.Symbol("t", integer=True)
 
-TEST_MODEL_PATH = Path(__file__).resolve().parents[2] / "MODELS" / "test.yaml"
 
 #: A fixed draw for both shocks. Pinned so a residual is the solve's, not a seed's.
 EPS = np.random.default_rng(20260805).normal(0.0, 0.3, size=(24, 2))
 
 
 @pytest.fixture
-def variant(tmp_path):
-    """Solve ``MODELS/test.yaml`` with some of its equations replaced."""
+def variant(tmp_path, test_model_path):
+    """Solve ``test.yaml`` with some of its equations replaced."""
 
     def build(**equations: str):
-        data = yaml.safe_load(TEST_MODEL_PATH.read_text(encoding="utf-8"))
+        data = yaml.safe_load(test_model_path.read_text(encoding="utf-8"))
         data["equations"]["model"].update(equations)
         path = tmp_path / f"variant_{len(list(tmp_path.iterdir()))}.yaml"
         path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")

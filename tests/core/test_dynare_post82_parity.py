@@ -59,8 +59,6 @@ from SymbolicDSGE.kalman.filter import KalmanFilter
 
 from _oracles import dynare_post82_first_order as dyn
 
-YAML = "tests/fixtures/models/POST82.yaml"
-
 # Dynare solves to 1e-16 and these are transcribed doubles, so the only slack
 # needed is accumulated floating point.
 TOL = 1e-10
@@ -70,8 +68,8 @@ DYNARE_STATES = tuple(dyn.DECL_COLUMNS[i - 1] for i in dyn.STATE_VAR)
 
 
 @pytest.fixture(scope="module")
-def solved():
-    model, kalman = ModelParser(YAML).get_all()
+def solved(post82_test_model_path):
+    model, kalman = ModelParser(post82_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
     compiled = solver.compile()
     return compiled, solver.solve(compiled=compiled, order=1)
