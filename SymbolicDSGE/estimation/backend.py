@@ -666,8 +666,8 @@ def build_unscented_context(
 ) -> PyUnscentedContext:
     """Wrap the base inputs for the unscented filter.
 
-    ``solve1``/``solve2`` are composer-allocated scratch; ``z0`` is ``[x0_state;
-    0]`` (2*n_state) and ``alpha``/``beta``/``kappa`` are the UKF tuning scalars
+    ``solve1``/``solve2`` are composer-allocated scratch;
+    ``alpha``/``beta``/``kappa`` are the UKF tuning scalars
     (defaults match the Kalman resolvers, the only source of these today).
     """
     return PyUnscentedContext(
