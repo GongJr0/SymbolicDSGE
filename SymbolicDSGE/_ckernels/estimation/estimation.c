@@ -1,5 +1,5 @@
 #include "estimation.h"
-#include "../core/klein_postproc.h"
+#include "../core/klein_classify.h"
 #include "../core/klein_solve.h"
 #include "../kalman/kalman.h"
 #include "../optim/nelder_mead.h"
@@ -124,18 +124,21 @@ static inline const f64 *sdsge_build_cov(const sdsge_cov_spec *spec,
 }
 
 static inline klein_spec sdsge_spec_from(const sdsge_obj_common *b) {
-  const klein_spec spec = {.residual = b->residual,
-                           .zgges = b->zgges,
-                           .dgeqrf = b->dgeqrf,
-                           .dormqr = b->dormqr,
-                           .ss_seed = b->ss_seed,
-                           .params = b->params,
-                           .incidence = b->incidence,
-                           .n_var = b->dims.n_var,
-                           .n_state = b->dims.n_state,
-                           .n_ctrl = b->dims.n_ctrl,
-                           .n_exog = b->dims.n_exog,
-                           .n_par = b->dims.n_par};
+  const klein_spec spec = {
+      .residual = b->residual,
+      .zgges = b->zgges,
+      .dgeqrf = b->dgeqrf,
+      .dormqr = b->dormqr,
+      .ztgexc = NULL, /* INDETERMINATE solves are ll=-inf, no need to look for
+                         alternative orderings */
+      .ss_seed = b->ss_seed,
+      .params = b->params,
+      .incidence = b->incidence,
+      .n_var = b->dims.n_var,
+      .n_state = b->dims.n_state,
+      .n_ctrl = b->dims.n_ctrl,
+      .n_exog = b->dims.n_exog,
+      .n_par = b->dims.n_par};
   return spec;
 }
 
@@ -151,8 +154,8 @@ static inline int sdsge_classify(const i64 rc, const i64 stab) {
   case SDSGE_KLEIN_SOLVE_QZ:
   case SDSGE_KLEIN_SOLVE_SHOCK_SINGULAR:
   case SDSGE_KLEIN_SOLVE_NO_STATES:
-  case SDSGE_KLEIN_POSTPROC_RANK_FAIL:
-  case SDSGE_KLEIN_POSTPROC_INFINITE_ROOT:
+  case SDSGE_KLEIN_RANK_FAIL:
+  case SDSGE_KLEIN_INFINITE_ROOT:
   case SDSGE_KLEIN_NO_STABLE_SOLUTION:
     return SDSGE_SOLVE_BK;
   default:

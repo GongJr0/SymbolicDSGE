@@ -40,7 +40,7 @@ typedef double f64;
  * reads as its family, so `-5xx` is klein_solve and `-9xx` is steady_state. `rc
  * < 0` remains a valid failure test without any table.
  *
- *   1 sdsge_common      2 core     3 klein_postproc       4 klein_qz
+ *   1 sdsge_common      2 core     3 klein_classify       4 klein_qz
  *   5 klein_solve       6 pencil   7 [free]               8 second_order
  *   9 steady_state     10 diag     11 kalman             12 mc_runner
  *  13 mc_transforms    14 occbin   15 regression         16 mcmc

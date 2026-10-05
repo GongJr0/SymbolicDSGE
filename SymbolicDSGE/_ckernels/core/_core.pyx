@@ -123,15 +123,6 @@ cdef extern from "klein_preproc.h" nogil:
         int64_t n_var, int64_t n_par, int64_t n_exog, int64_t n_eq,
         double *a, double *b, double *c, double *d, double *arena)
 
-cdef extern from "klein_postproc.h" nogil:
-    arena_size klein_postproc_arena_size(int64_t n_s, int64_t n_cs)
-    int64_t klein_postproc(
-        const c128 *s, const c128 *t, const c128 *z, int64_t n_s, int64_t n_cs,
-        c128 *f, c128 *p, int64_t *stab, c128 *eig, double *arena,
-        int64_t *iarena)
-    int SDSGE_KLEIN_STAB_UNSET
-
-
 cdef extern from "klein_qz.h" nogil:
     # Opaque function-pointer alias; the real zgges signature lives in the
     # header. We only reinterpret the scipy cython_lapack ``zgges`` capsule
@@ -140,30 +131,9 @@ cdef extern from "klein_qz.h" nogil:
     arena_size klein_qz_arena_size(int64_t n)
     int64_t c_klein_qz "klein_qz" (
         klein_zgges_fn zgges_ptr, int64_t n, c128 *s, c128 *t, c128 *z,
-        double *arena, int64_t *iarena)
+        int64_t *sdim, double *arena, int64_t *iarena)
     int KLEIN_QZ_OK
     int KLEIN_QZ_LAPACK_FAIL
-
-
-# LAPACK ``zgges`` reached through its scipy ``cython_lapack`` capsule address
-# (no build-time LAPACK link), cast to the C routine's expected pointer type
-# once at import. This is the exact runtime-address mechanism the native
-# estimation objective (#327) uses.
-cdef object _zgges_capsule = _cython_lapack.__pyx_capi__["zgges"]
-cdef klein_zgges_fn _zgges = <klein_zgges_fn>PyCapsule_GetPointer(
-    _zgges_capsule, PyCapsule_GetName(_zgges_capsule)
-)
-
-# The static rotation's QR, reached the same way. `Q` is never formed: dgeqrf
-# leaves the reflectors in place and dormqr applies Q' straight to each block.
-cdef object _dgeqrf_capsule = _cython_lapack.__pyx_capi__["dgeqrf"]
-cdef sdsge_dgeqrf_fn _dgeqrf = <sdsge_dgeqrf_fn>PyCapsule_GetPointer(
-    _dgeqrf_capsule, PyCapsule_GetName(_dgeqrf_capsule)
-)
-cdef object _dormqr_capsule = _cython_lapack.__pyx_capi__["dormqr"]
-cdef sdsge_dormqr_fn _dormqr = <sdsge_dormqr_fn>PyCapsule_GetPointer(
-    _dormqr_capsule, PyCapsule_GetName(_dormqr_capsule)
-)
 
 
 cdef extern from "spike.h" nogil:
@@ -173,11 +143,14 @@ cdef extern from "spike.h" nogil:
         spike_residual_fn fn, c128 *a, c128 *b, c128 *out, int64_t n)
 
 cdef extern from "klein_solve.h" nogil:
+    int SDSGE_KLEIN_STAB_UNSET
+    ctypedef void (*sdsge_ztgexc_fn)()
     ctypedef struct klein_spec:
         sdsge_residual_fn residual
         klein_zgges_fn zgges
         sdsge_dgeqrf_fn dgeqrf
         sdsge_dormqr_fn dormqr
+        sdsge_ztgexc_fn ztgexc
         const double *ss_seed
         const double *params
         const signed char *incidence
@@ -266,6 +239,31 @@ cdef extern from "second_order.h" nogil:
         double *gxx, double *hxx, double *gxu, double *hxu,
         double *guu, double *huu, double *gss, double *hss,
         double *arena, int64_t *iarena)
+
+# LAPACK ``zgges`` reached through its scipy ``cython_lapack`` capsule address
+# (no build-time LAPACK link), cast to the C routine's expected pointer type
+# once at import. This is the exact runtime-address mechanism the native
+# estimation objective (#327) uses.
+cdef object _zgges_capsule = _cython_lapack.__pyx_capi__["zgges"]
+cdef klein_zgges_fn _zgges = <klein_zgges_fn>PyCapsule_GetPointer(
+    _zgges_capsule, PyCapsule_GetName(_zgges_capsule)
+)
+
+# The static rotation's QR, reached the same way. `Q` is never formed: dgeqrf
+# leaves the reflectors in place and dormqr applies Q' straight to each block.
+cdef object _dgeqrf_capsule = _cython_lapack.__pyx_capi__["dgeqrf"]
+cdef sdsge_dgeqrf_fn _dgeqrf = <sdsge_dgeqrf_fn>PyCapsule_GetPointer(
+    _dgeqrf_capsule, PyCapsule_GetName(_dgeqrf_capsule)
+)
+cdef object _dormqr_capsule = _cython_lapack.__pyx_capi__["dormqr"]
+cdef sdsge_dormqr_fn _dormqr = <sdsge_dormqr_fn>PyCapsule_GetPointer(
+    _dormqr_capsule, PyCapsule_GetName(_dormqr_capsule)
+)
+
+cdef object _ztgexc_capsule = _cython_lapack.__pyx_capi__["ztgexc"]
+cdef sdsge_ztgexc_fn _ztgexc = <sdsge_ztgexc_fn>PyCapsule_GetPointer(
+    _ztgexc_capsule, PyCapsule_GetName(_ztgexc_capsule)
+)
 
 
 def assemble_transition(p, f, n_state, n_control):
@@ -457,44 +455,6 @@ def simulate_second_order_pruned(
     return out
 
 
-def klein_postprocess(s, t, z, int64_t n_states):
-    """Klein Schur-to-solution post-proc. Returns ``(f, p, stab, eig)``.
-
-    ``s``, ``t``, ``z`` are the ordered generalized-Schur factors (complex128,
-    N x N). Mirrors the live path of ``_linearsolve._klein_postprocess``.
-    """
-    cdef double complex[:, ::1] sv = np.ascontiguousarray(s, dtype=np.complex128)
-    cdef double complex[:, ::1] tv = np.ascontiguousarray(t, dtype=np.complex128)
-    cdef double complex[:, ::1] zv = np.ascontiguousarray(z, dtype=np.complex128)
-    cdef int64_t N = sv.shape[0]
-    cdef int64_t n_s = n_states
-    cdef int64_t n_cs = N - n_s
-    if n_s <= 0:
-        raise ValueError("klein_postprocess requires n_states >= 1.")
-    if n_s > N:
-        raise ValueError("n_states exceeds the matrix dimension.")
-
-    f = np.empty((n_cs, n_s), dtype=np.complex128)
-    p = np.empty((n_s, n_s), dtype=np.complex128)
-    eig = np.empty(N, dtype=np.complex128)
-    cdef double complex[:, ::1] fv = f
-    cdef double complex[:, ::1] pv = p
-    cdef double complex[::1] ev = eig
-    cdef int64_t stab = SDSGE_KLEIN_STAB_UNSET
-    cdef int64_t err
-    cdef arena_size sz = klein_postproc_arena_size(n_s, n_cs)
-    arena = np.empty(sz.n_float, dtype=np.float64)
-    iarena = np.empty(sz.n_int, dtype=np.int64)
-    cdef double[::1] arv = arena
-    cdef int64_t[::1] iarv = iarena
-    with nogil:
-        err = klein_postproc(
-            <c128 *>&sv[0, 0], <c128 *>&tv[0, 0], <c128 *>&zv[0, 0], n_s, n_cs,
-            <c128 *>&fv[0, 0] if n_cs > 0 else NULL,
-            <c128 *>&pv[0, 0], &stab, <c128 *>&ev[0], &arv[0], &iarv[0])
-    return err, f, p, int(stab), eig
-
-
 def spike_drive(
     size_t fn_addr,
     double complex[::1] a,
@@ -559,7 +519,7 @@ def klein_qz(a, b):
     ``zgges`` (reached through the scipy ``cython_lapack`` capsule pointer, no
     build-time LAPACK link). Returns ``(s, t, z)`` == ``scipy.linalg.ordqz(a, b,
     sort="ouc", output="complex")`` indices ``[0, 1, 5]``: ordered Schur factors
-    ``S``/``T`` and right Schur vectors ``Z``, ready for ``klein_postprocess``.
+    ``S``/``T`` and right Schur vectors ``Z``.
 
     Thin buffer-marshalling shim: the workspace query, ``zgges`` calls, and the
     'ouc' selctg all live in the C routine ``klein_qz`` (``klein_qz.c``), shared
@@ -580,6 +540,7 @@ def klein_qz(a, b):
     cdef double complex[::1, :] bv = b_f
     cdef double complex[::1, :] zv = z
     cdef int64_t status
+    cdef int64_t sdim
     cdef arena_size sz = klein_qz_arena_size(n)
     arena = np.empty(sz.n_float, dtype=np.float64)
     iarena = np.empty(sz.n_int, dtype=np.int64)
@@ -589,7 +550,7 @@ def klein_qz(a, b):
         status = c_klein_qz(
             _zgges, n,
             <c128 *>&av[0, 0], <c128 *>&bv[0, 0], <c128 *>&zv[0, 0],
-            &arv[0], &iarv[0])
+            &sdim, &arv[0], &iarv[0])
     if status != KLEIN_QZ_OK:
         raise RuntimeError("klein_qz: LAPACK zgges failed.")
     return a_f, b_f, z
@@ -652,21 +613,19 @@ def klein_solve1(
     int64_t n_state,
     int64_t n_exog=0,
 ):
-    """One-shot first-order Klein solve, in a single GIL release.
+    """One-shot first-order Klein solve.
 
-    Fuses ``steady_state_newton`` -> ``klein_preprocess`` -> ``klein_qz`` ->
-    ``klein_postprocess`` -> ``assemble_state_space``, driving the same C
-    routine as the native estimation objective. Fusing removes the layout
-    round-trip the staged path pays: ``klein_qz`` emits column-major and
-    ``klein_postprocess`` reads row-major, so staging bridges them by copying
-    where the driver transposes in place.
+    Drives the same C routine as the native estimation objective. The exported
+    ``steady_state_newton``, ``klein_preprocess`` and ``klein_qz`` are parity
+    entries over single C routines, not stages this composes from: the static
+    rotation, the pencil assembly, the stable-subspace selection and the
+    decision-rule reordering are the solve's own and are exported nowhere.
 
-    Returns ``(ss, a, b, f, p, stab, eig, A, B)``. ``f``/``p`` are real: the
-    Schur form's imaginary parts are roundoff on a real pencil and the native
-    solve projects them once. ``a``/``b`` are the pencil the solve linearized at,
-    handed back so a second-order caller need not rebuild it. ``stab`` is
-    reported, never raised on: whether a Blanchard-Kahn stability/uniqueness
-    violation is fatal is the caller's decision.
+    Returns ``(err, ss, f, p, stab, eig, A, B)``. ``f``/``p`` are real: the Schur
+    form's imaginary parts are roundoff on a real pencil and the native solve
+    projects them once. ``stab`` is reported, never raised on: whether a
+    Blanchard-Kahn stability/uniqueness violation is fatal is the caller's
+    decision.
     """
     cdef double[::1] seedv = np.ascontiguousarray(seed, dtype=np.float64)
     cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
@@ -722,6 +681,7 @@ def klein_solve1(
     spec.zgges = _zgges
     spec.dgeqrf = _dgeqrf
     spec.dormqr = _dormqr
+    spec.ztgexc = _ztgexc
     spec.ss_seed = &seedv[0]
     spec.params = &parv[0] if n_par > 0 else NULL
     spec.incidence = &incv[0]
@@ -772,7 +732,7 @@ def sgu_klein_solve2(
     int64_t n_state,
     int64_t n_exog=0,
 ):
-    """One-shot second-order solve, in a single GIL release.
+    """One-shot second-order solve.
 
     Runs ``klein_solve1`` and then the second-order tail: the bicomplex residual
     Hessian at the resolved steady state, the policy tensors, and the sigma^2
@@ -864,6 +824,7 @@ def sgu_klein_solve2(
     spec.first.zgges = _zgges
     spec.first.dgeqrf = _dgeqrf
     spec.first.dormqr = _dormqr
+    spec.first.ztgexc = _ztgexc
     spec.first.ss_seed = &seedv[0]
     spec.first.params = &parv[0] if n_par > 0 else NULL
     spec.first.incidence = &incv[0]

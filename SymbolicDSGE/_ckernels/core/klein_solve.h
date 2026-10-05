@@ -4,6 +4,7 @@
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_complex.h"
 #include "bicomplex_hessian.h" /* bc_residual_fn */
+#include "klein_classify.h"    /* sdsge_ztgexc_fn */
 #include "klein_preproc.h"     /* sdsge_residual_fn */
 #include "klein_qz.h"          /* klein_zgges_fn */
 #include "pencil.h"            /* SDSGE_INC_*, sdsge_pencil_partition */
@@ -14,6 +15,7 @@ typedef struct {
   klein_zgges_fn zgges;
   sdsge_dgeqrf_fn dgeqrf;
   sdsge_dormqr_fn dormqr;
+  sdsge_ztgexc_fn ztgexc;
   const f64 *ss_seed;  /* n_var: Newton seed for the steady state */
   const f64 *params;   /* n_par: calib_params order */
   const i8 *incidence; /* n_var: SDSGE_INC_* bits, unioned over the regimes */
@@ -139,5 +141,11 @@ i64 sdsge_sgu_klein_solve2(const sgu_klein_spec *spec, sdsge_solve1 *out1,
 #define SDSGE_KLEIN_SOLVE_ABSENT_VAR -508     // a variable occurs at no date
 #define SDSGE_KLEIN_SOLVE_QR -509             // static rotation failed
 #define SDSGE_KLEIN_SOLVE_STATIC_SINGULAR -510
+#define SDSGE_KLEIN_NO_STABLE_SOLUTION -511
+
+/* Stamped into sdsge_solve1.stab on entry. 2 is not a status the solve returns,
+ * so an early return leaves an undetermined stab rather than a stale or
+ * uninitialized one. */
+#define SDSGE_KLEIN_STAB_UNSET 2
 
 #endif /* SDSGE_KLEIN_SOLVE_H */

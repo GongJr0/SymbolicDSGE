@@ -73,14 +73,6 @@ def simulate_second_order_pruned(
     ``steady_state`` denominates the returned rows in levels.
     """
 
-def klein_postprocess(
-    s: _C128,
-    t: _C128,
-    z: _C128,
-    n_states: int,
-) -> tuple[int, _C128, _C128, int, _C128]:
-    """(err, f, p, stab, eig) from the ordered Schur factors."""
-
 def spike_drive(fn_addr: int, a: _C128, b: _C128, out: _C128) -> None:
     """Stage-0 (#248): call a numba @cfunc (by ``.address``) from native C, nogil."""
 
@@ -127,10 +119,10 @@ def klein_solve1(
 ) -> tuple[int, _F64, _F64, _F64, int, _C128, _F64, _F64]:
     """(rc, ss, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
 
-    Fuses steady_state_newton, klein_preprocess, klein_qz, klein_postprocess and
-    assemble_transition into one GIL release. ``f``/``p`` are real; the Schur
-    form's imaginary parts are roundoff on a real pencil. ``stab`` is reported,
-    not raised on.
+    The other exported kernels are parity entries over single C routines, not
+    stages that compose into this. ``f``/``p`` are real; the Schur form's
+    imaginary parts are roundoff on a real pencil. ``stab`` is reported, not
+    raised on.
     """
 
 def sgu_klein_solve2(
@@ -163,10 +155,9 @@ def sgu_klein_solve2(
     """(rc, ss, f, p, stab, eig, gxx, hxx, gxu, hxu, guu, huu, gss, hss, A, B) <-
     one-shot second-order solve.
 
-    klein_solve1 plus bicomplex_hessian and second_order in one GIL release. The
-    pencil and the residual Hessian stay native. ``Q`` is the (n_exog, n_exog)
-    shock covariance, which the risk correction integrates against. ``stab`` is
-    reported, not raised on.
+    klein_solve1 and then the second-order tail. The pencil and the residual
+    Hessian stay native. ``Q`` is the (n_exog, n_exog) shock covariance, which
+    the risk correction integrates against. ``stab`` is reported, not raised on.
     """
 
 def second_order(

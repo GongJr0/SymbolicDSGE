@@ -1,12 +1,14 @@
 #include "klein_solve.h"
-#include "../_common/sdsge_linalg.h" /* sdsge_matmul */
-#include "bicomplex_hessian.h"       /* sdsge_bicomplex_hessian */
-#include "core.h"                    /* sdsge_assemble_transition */
-#include "klein_postproc.h"          /* klein_postproc */
-#include "klein_preproc.h"           /* klein_preproc */
-#include "klein_qz.h"                /* klein_qz */
-#include "second_order.h"            /* sdsge_second_order */
-#include "steady_state.h"            /* sdsge_steady_state_newton */
+#include "../_common/sdsge_complex.h" /* c128_* */
+#include "../_common/sdsge_linalg.h"  /* sdsge_matmul */
+#include "bicomplex_hessian.h"        /* sdsge_bicomplex_hessian */
+#include "core.h"                     /* sdsge_assemble_transition */
+#include "klein_classify.h"           /* klein_z11_pair, klein_reorder_argmax */
+#include "klein_preproc.h"            /* klein_preproc */
+#include "klein_qz.h"                 /* klein_qz */
+#include "second_order.h"             /* sdsge_second_order */
+#include "steady_state.h"             /* sdsge_steady_state_newton */
+#include <string.h>                   /* memcpy */
 
 /* Newton steady-state config, matching the Python solver defaults. */
 #define SDSGE_SS_MAX_ITER 50
@@ -57,26 +59,39 @@ static inline i64 sdsge_solve1_fp_reserve(const i64 n_state, const i64 n_ctrl) {
   return 2 * (n_ctrl * n_state + n_state * n_state);
 }
 
+/* Scratch for klein_rule_from_schur (z21, s11, t11, dyn) plus the pivots it
+ * shares with the classify half. Declared rather than left to fit under the
+ * classify entry, which is the larger of the two only by coincidence. */
+static inline arena_size sdsge_rule_arena_size(const i64 n_s, const i64 n_cs) {
+  return make_sizer(2 * (n_cs * n_s + 3 * n_s * n_s), n_s /* LU pivots */);
+}
+
 /* Stage max only. The reserve is added once by the public sizers, so it is
  * never folded into a max and then compared against a later stage. */
-static inline arena_size
-sdsge_pencil_stage_arena(const i64 n_var, const i64 n_exog, const i64 nd) {
-  /* nspred and nsfwrd are each at most nd, so the partition's own counts buy
-   * nothing here. Held flat rather than maxed: the rotated blocks and the
-   * recovered rules coexist across the stage, and these are tens of doubles. */
+static inline arena_size sdsge_pencil_stage_arena(const i64 n_var,
+                                                  const i64 n_state,
+                                                  const i64 n_exog,
+                                                  const i64 nd) {
+  /* n_state is nspred, which the frontend checks against the incidence before a
+   * solve runs. nsfwrd has no such twin among these counts, so the terms it
+   * scales stay bounded by nd. Held flat rather than maxed: the rotated blocks
+   * and the recovered rules coexist across the stage. */
   const i64 own = 3 * n_var * n_var /* a_rot, b_rot, c_rot */
                   + n_var * n_exog  /* d_rot */
                   + 2 * nd * nd     /* E, D */
-                  + 4 * nd * nd     /* complex gx, hx */
-                  + 2 * nd * nd     /* real gx, hx */
-                  + n_var * nd      /* ghx */
-                  + n_var * n_var   /* amat */
-                  + n_var * nd      /* C@gx, then the static rhs */
-                  + n_var * n_exog; /* ghu */
+                  + 2 * (nd * n_state + n_state * n_state) /* complex gx, hx */
+                  + nd * n_state + n_state * n_state       /* real gx, hx */
+                  + 4 * n_state * n_state /* complex z11, z11i */
+                  + 4 * n_state * n_state /* complex tmp, eye */
+                  + n_var * n_state       /* ghx */
+                  + n_var * n_var         /* amat */
+                  + n_var * n_state       /* C@gx, then the static rhs */
+                  + n_var * n_exog;       /* ghu */
   const arena_size rot = sdsge_pencil_rotate_arena_size(
       n_var, n_var, n_var > n_exog ? n_var : n_exog);
   arena_size tail = sdsge_max_arena(rot, klein_qz_arena_size(nd));
-  tail = sdsge_max_arena(tail, klein_postproc_arena_size(nd, nd));
+  tail = sdsge_max_arena(tail, klein_classify_arena_size(nd, n_state));
+  tail = sdsge_max_arena(tail, sdsge_rule_arena_size(n_state, nd));
   return make_sizer(own + tail.n_float, tail.n_int + n_var + nd);
 }
 
@@ -91,7 +106,8 @@ arena_size sdsge_klein_solve1_arena_size(const i64 n_var, const i64 n_state,
                                          const i64 n_ctrl, const i64 n_par,
                                          const i64 n_exog, const i64 nd) {
   arena_size size = sdsge_solve1_stage_arena(n_var, n_par, n_exog);
-  size = sdsge_max_arena(size, sdsge_pencil_stage_arena(n_var, n_exog, nd));
+  size = sdsge_max_arena(size,
+                         sdsge_pencil_stage_arena(n_var, n_state, n_exog, nd));
   size.n_float += sdsge_solve1_fp_reserve(n_state, n_ctrl);
   return size;
 }
@@ -100,7 +116,8 @@ arena_size sdsge_sgu_klein_solve2_arena_size(const i64 n_var, const i64 n_state,
                                              const i64 n_ctrl, const i64 n_par,
                                              const i64 n_exog, const i64 nd) {
   arena_size size = sdsge_solve1_stage_arena(n_var, n_par, n_exog);
-  size = sdsge_max_arena(size, sdsge_pencil_stage_arena(n_var, n_exog, nd));
+  size = sdsge_max_arena(size,
+                         sdsge_pencil_stage_arena(n_var, n_state, n_exog, nd));
   size = sdsge_max_arena(
       size, sdsge_bicomplex_hessian_arena_size(n_var, n_par, n_exog, n_var));
   size = sdsge_max_arena(size,
@@ -139,6 +156,46 @@ i64 sdsge_klein_linearize(const klein_spec *spec, sdsge_solve1 *out, f64 *arena,
   return SDSGE_KLEIN_SOLVE_OK;
 }
 
+/* f and p from the chosen Schur form and its z11 pair, row-major throughout.
+ * No return code: every way this can fail is already decided upstream. s11 is
+ * the leading block of an upper triangular S, so partial pivoting picks its own
+ * diagonal, and klein_root_finite has already rejected a near-zero one; the LU
+ * cannot report singular. Takes n_cs*n_s + 3*n_s*n_s c128 off `arena`. */
+static void klein_rule_from_schur(
+    const c128 *SDSGE_RESTRICT s, const c128 *SDSGE_RESTRICT t,
+    const c128 *SDSGE_RESTRICT z, const i64 n_s, const i64 n_cs,
+    const c128 *SDSGE_RESTRICT z11, const c128 *SDSGE_RESTRICT z11i,
+    c128 *SDSGE_RESTRICT f, c128 *SDSGE_RESTRICT p, i64 *SDSGE_RESTRICT piv,
+    f64 *SDSGE_RESTRICT arena) {
+  const i64 N = n_s + n_cs;
+  const i64 ssq = n_s * n_s;
+  c128 *z21 = (c128 *)arena;
+  c128 *s11 = z21 + n_cs * n_s;
+  c128 *t11 = s11 + ssq;
+  c128 *dyn = t11 + ssq;
+
+  for (i64 i = 0; i < n_s; ++i) {
+    for (i64 j = 0; j < n_s; ++j) {
+      s11[i * n_s + j] = s[i * N + j];
+      t11[i * n_s + j] = t[i * N + j];
+    }
+  }
+  for (i64 i = 0; i < n_cs; ++i) {
+    for (i64 j = 0; j < n_s; ++j) {
+      z21[i * n_s + j] = z[(n_s + i) * N + j];
+    }
+  }
+
+  c128_lu_factor_inplace(s11, piv, n_s);
+  c128_lu_solve(s11, piv, t11, dyn, n_s, n_s);
+
+  c128_matmul(z21, z11i, n_cs, n_s, n_s, f);
+  /* s11 is dead past the solve, so it carries z11 @ dyn into the second half.
+   */
+  c128_matmul(z11, dyn, n_s, n_s, n_s, s11);
+  c128_matmul(s11, z11i, n_s, n_s, n_s, p);
+}
+
 /* Scratch for the pencil half, past the f/p reserve. Held flat rather than
  * maxed: the rotated blocks and the recovered rules coexist across the whole
  * stage, and at these sizes the slack is a few kilobytes. */
@@ -155,8 +212,12 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
   const i64 nd = npred + nboth + nfwd + nboth;
   const i64 *ord = out->order;
 
+  /* Stamped up front so every early return leaves a non-zero (undetermined)
+   * stab. Estimation reads it in the same expression as the return code, so an
+   * unwritten one is an uninitialized read even where the value goes unused. */
+  out->stab = SDSGE_KLEIN_STAB_UNSET;
+
   if (nspred <= 0) {
-    out->stab = SDSGE_KLEIN_STAB_UNSET;
     return SDSGE_KLEIN_SOLVE_NO_STATES;
   }
 
@@ -171,20 +232,21 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
   c128 *hx_c = gx_c + nsfwrd * nspred;
   f64 *gx = (f64 *)(hx_c + nspred * nspred);
   f64 *hx = gx + nsfwrd * nspred;
-  f64 *ghx = hx + nspred * nspred;
+  c128 *z11 = (c128 *)(hx + nspred * nspred);
+  c128 *z11i = z11 + nspred * nspred;
+  c128 *tmp = z11i + nspred * nspred; /* the z11 LU runs on a copy */
+  c128 *eye = tmp + nspred * nspred;
+  f64 *ghx = (f64 *)(eye + nspred * nspred);
   f64 *amat = ghx + n * nspred;
   f64 *work = amat + n * n; /* n by nspred: C@gx, then the static RHS */
   f64 *ghu = work + n * nspred;
   f64 *stage = ghu + n * ne;
+  i64 *piv = iarena; /* shared by the z11 pair and the rule's s11 */
 
-  for (i64 k = 0; k < n * n; ++k) {
-    a_rot[k] = out->a_real[k];
-    b_rot[k] = out->b_real[k];
-    c_rot[k] = out->c_real[k];
-  }
-  for (i64 k = 0; k < n * ne; ++k) {
-    d_rot[k] = out->d_real[k];
-  }
+  memcpy(a_rot, out->a_real, n * n * sizeof(f64));
+  memcpy(b_rot, out->b_real, n * n * sizeof(f64));
+  memcpy(c_rot, out->c_real, n * n * sizeof(f64));
+  memcpy(d_rot, out->d_real, n * ne * sizeof(f64));
 
   /* Rotate the static equations to the top. Every block turns with the same Q
    * so they stay one system; `b` supplies the static columns being cleared. */
@@ -201,21 +263,53 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
 
   sdsge_to_complex_colmajor(dmat, out->s, nd);
   sdsge_to_complex_colmajor(emat, out->t, nd);
-  if (klein_qz(spec->zgges, nd, out->s, out->t, out->z, stage, iarena) !=
+  i64 sdim = 0;
+  if (klein_qz(spec->zgges, nd, out->s, out->t, out->z, &sdim, stage, iarena) !=
       KLEIN_QZ_OK) {
     return SDSGE_KLEIN_SOLVE_QZ;
   }
 
-  /* klein_qz emits column-major, klein_postproc reads row-major. */
+  /* Too few stable roots: the leading block carries unstable ones, so its z11
+   * pair means nothing and no rule is reachable. Returned before the
+   * factorization rather than after it. */
+  if (sdim < nspred) {
+    klein_fill_eig(out->s, out->t, out->eig, nd);
+    sdsge_transpose_sq(out->s, nd);
+    sdsge_transpose_sq(out->t, nd);
+    sdsge_transpose_sq(out->z, nd);
+    return SDSGE_KLEIN_NO_STABLE_SOLUTION;
+  }
+
+  /* More stable roots than states leaves the QZ's leading block one arbitrary
+   * choice among several, so take the best-conditioned one it can reach by a
+   * single swap. Estimation leaves ztgexc NULL and keeps the QZ's own: an
+   * indeterminate draw is rejected either way. */
+  klein_fill_eye(eye, nspred);
+  f64 rcond = 0.0;
+  i64 rc;
+  if (sdim > nspred && spec->ztgexc != NULL) {
+    rc = klein_reorder_argmax(spec->ztgexc, out->s, out->t, out->z, nd, nspred,
+                              sdim, z11, z11i, tmp, eye, piv, stage);
+  } else {
+    rc = klein_z11_pair(out->s, out->z, nd, nspred, z11, z11i, tmp, eye, piv,
+                        &rcond);
+  }
+
+  /* After any reorder, so eig[i] still names the root in slot i. */
+  klein_fill_eig(out->s, out->t, out->eig, nd);
+
+  /* klein_qz emits column-major, the rule step reads row-major. */
   sdsge_transpose_sq(out->s, nd);
   sdsge_transpose_sq(out->t, nd);
   sdsge_transpose_sq(out->z, nd);
 
-  i64 rc = klein_postproc(out->s, out->t, out->z, nspred, nsfwrd, gx_c, hx_c,
-                          &out->stab, out->eig, stage, iarena);
-  if (rc != SDSGE_KLEIN_POSTPROC_SUCCESS) {
+  if (rc != SDSGE_KLEIN_OK) {
     return rc;
   }
+  out->stab = (sdim > nspred);
+
+  klein_rule_from_schur(out->s, out->t, out->z, nspred, nsfwrd, z11, z11i, gx_c,
+                        hx_c, piv, stage);
   sdsge_real_part(gx_c, gx, nsfwrd * nspred);
   sdsge_real_part(hx_c, hx, nspred * nspred);
 
