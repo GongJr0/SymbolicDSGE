@@ -76,6 +76,20 @@ def simulate_second_order_pruned(
 def spike_drive(fn_addr: int, a: _C128, b: _C128, out: _C128) -> None:
     """Stage-0 (#248): call a numba @cfunc (by ``.address``) from native C, nogil."""
 
+def steady_state_newton(
+    residual_addr: int,
+    seed: _F64,
+    params: _F64,
+    n_exog: int,
+    max_iter: int = ...,
+    tol: float = ...,
+) -> tuple[_F64, int]:
+    """Newton solve of F(ss, ss, ss) = 0 at a zero innovation from a residual @cfunc address.
+
+    returns (ss, iters). Jacobian a - b - c via klein_preproc,
+    step via f64 LU.
+    """
+
 def klein_preprocess(
     residual_addr: int,
     steady_state: _F64,
@@ -95,18 +109,21 @@ def klein_qz(a: _F64 | _C128, b: _F64 | _C128) -> tuple[_C128, _C128, _C128]:
     Returns (s, t, z) == scipy.linalg.ordqz(a, b, sort='ouc', output='complex')[0, 1, 5].
     """
 
-def steady_state_newton(
-    residual_addr: int,
-    seed: _F64,
-    params: _F64,
-    n_exog: int,
-    max_iter: int = ...,
-    tol: float = ...,
-) -> tuple[_F64, int]:
-    """Newton solve of F(ss, ss, ss) = 0 at a zero innovation from a residual @cfunc address.
+def klein_reorder(
+    s: _C128, t: _C128, z: _C128, nspred: int, sdim: int
+) -> tuple[int, _C128, _C128, _C128]:
+    """klein_reorder_argmax test driver.
 
-    returns (ss, iters). Jacobian a - b - c via klein_preproc,
-    step via f64 LU.
+    Takes pre-formed (s, t, z) and (re)orders them to find the best conditioning of z11.
+    Path taken in native for INDETERMINATE solutions. Returns (rc, s, t, z).
+    """
+
+def klein_z11(s: _C128, z: _C128, nspred: int) -> tuple[int, _C128, _C128, float]:
+    """klein_z11_pair test driver.
+
+    Scores one selection: the leading ``nspred`` block of a column-major Schur
+    ``(s, z)``, which ``klein_reorder`` ranks candidates by. Returns
+    ``(rc, z11, z11i, rcond)``, with ``rcond`` zero on a nonzero ``rc``.
     """
 
 def klein_solve1(

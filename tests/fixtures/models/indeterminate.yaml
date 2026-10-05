@@ -1,0 +1,22 @@
+name: Indeterminate
+variables: [g, r, pi, x]
+shocks: [e_g]
+
+equations:
+  model:
+    nkpc: "pi(t) = beta*pi(t+1) + kappa*x(t)"
+    euler: "x(t) = x(t+1) - tau_inv*(r(t) - pi(t+1)) + g(t)"
+    taylor: "r(t) = psi_pi*pi(t) + psi_x*x(t)"
+    demand_s: "g(t) = 0.8*g(t-1) + e_g"
+
+calibration:
+  parameters:
+    beta: 0.99
+    kappa: 0.1
+    tau_inv: 1.0
+    psi_pi: 0.8
+    psi_x: 0.01
+    sig_g: 0.1
+  shocks:
+    std:
+      e_g: sig_g

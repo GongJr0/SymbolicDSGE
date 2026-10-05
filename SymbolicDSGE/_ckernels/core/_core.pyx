@@ -77,6 +77,12 @@ cdef extern from "../_common/sdsge_common.h" nogil:
         int64_t n_float
         int64_t n_int
 
+cdef extern from "spike.h" nogil:
+    ctypedef void (*spike_residual_fn)(
+        c128 *a, c128 *b, c128 *out, int64_t n)
+    void spike_call(
+        spike_residual_fn fn, c128 *a, c128 *b, c128 *out, int64_t n)
+
 cdef extern from "bicomplex_hessian.h" nogil:
     ctypedef void (*bc_residual_fn)(
         const bc256 *fwd, const bc256 *cur, const bc256 *prev, const bc256 *eps,
@@ -135,16 +141,21 @@ cdef extern from "klein_qz.h" nogil:
     int KLEIN_QZ_OK
     int KLEIN_QZ_LAPACK_FAIL
 
-
-cdef extern from "spike.h" nogil:
-    ctypedef void (*spike_residual_fn)(
-        c128 *a, c128 *b, c128 *out, int64_t n)
-    void spike_call(
-        spike_residual_fn fn, c128 *a, c128 *b, c128 *out, int64_t n)
+cdef extern from "klein_classify.h" nogil:
+    ctypedef void (*sdsge_ztgexc_fn)()
+    arena_size klein_classify_arena_size(int64_t nd, int64_t n_s)
+    int64_t klein_reorder_argmax(
+            sdsge_ztgexc_fn ztgexc, c128 *s, c128 *t, c128 *z,
+            int64_t nd, int64_t n_s, int64_t sdim,
+            c128 *z11, c128 *z11i, c128 *tmp, const c128 *eye,
+            int64_t *piv, double *arena)
+    int64_t klein_z11_pair(
+            const c128 *s, const c128 *z, int64_t nd, int64_t n_s,
+            c128 *z11, c128 *z11i, c128 *tmp, const c128 *eye,
+            int64_t *piv, double *rcond)
 
 cdef extern from "klein_solve.h" nogil:
     int SDSGE_KLEIN_STAB_UNSET
-    ctypedef void (*sdsge_ztgexc_fn)()
     ctypedef struct klein_spec:
         sdsge_residual_fn residual
         klein_zgges_fn zgges
@@ -471,6 +482,55 @@ def spike_drive(
         spike_call(fn, <c128 *>&a[0], <c128 *>&b[0], <c128 *>&out[0], n)
 
 
+def steady_state_newton(
+    size_t residual_addr,
+    seed,
+    params,
+    int64_t n_exog,
+    int64_t max_iter=50,
+    double tol=1e-12,
+):
+    """Newton solve of ``F(ss, ss, ss) = 0`` at a zero innovation, from ``seed``,
+    driving a numba residual @cfunc (``build_cfunc``) by its ``.address``. The
+    Jacobian ``a - b - c`` comes from ``klein_preproc`` each step; the update is
+    an in-place LU. Returns ``(ss, iters)``; raises on singular Jacobian or
+    non-convergence.
+    """
+    cdef int64_t n_var = seed.shape[0]
+    cdef int64_t n_par = params.shape[0]
+
+    cdef double[::1] seedv = np.ascontiguousarray(seed, dtype=np.float64)
+    cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
+
+    cdef const double *seed_ptr = &seedv[0] if n_var > 0 else NULL
+    cdef const double *par_ptr = &parv[0] if n_par > 0 else NULL
+
+    ss = np.empty(n_var, dtype=np.float64)
+    cdef double[::1] ssv = ss
+
+    cdef double *ss_ptr = &ssv[0] if n_var > 0 else NULL
+    cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
+    cdef int64_t iters = 0
+    cdef int64_t err
+    cdef arena_size sz = sdsge_newton_arena_size(n_var, n_par, n_exog)
+    arena = np.empty(sz.n_float, dtype=np.float64)
+    iarena = np.empty(sz.n_int, dtype=np.int64)
+    cdef double[::1] arv = arena
+    cdef int64_t[::1] iarv = iarena
+    with nogil:
+        err = sdsge_steady_state_newton(
+            resid, seed_ptr, par_ptr, n_var, n_par, n_exog, max_iter, tol,
+            ss_ptr, &iters, &arv[0], &iarv[0])
+    if err == SDSGE_NEWTON_SINGULAR:
+        raise ValueError("steady_state_newton: singular Jacobian (a - b - c).")
+    if err == SDSGE_NEWTON_NO_CONVERGE:
+        raise ValueError(
+            "steady_state_newton: did not converge within max_iter "
+            "(or the residual went non-finite)."
+        )
+    return ss, int(iters)
+
+
 def klein_preprocess(
     size_t residual_addr,
     steady_state,
@@ -556,53 +616,76 @@ def klein_qz(a, b):
     return a_f, b_f, z
 
 
-def steady_state_newton(
-    size_t residual_addr,
-    seed,
-    params,
-    int64_t n_exog,
-    int64_t max_iter=50,
-    double tol=1e-12,
-):
-    """Newton solve of ``F(ss, ss, ss) = 0`` at a zero innovation, from ``seed``,
-    driving a numba residual @cfunc (``build_cfunc``) by its ``.address``. The
-    Jacobian ``a - b - c`` comes from ``klein_preproc`` each step; the update is
-    an in-place LU. Returns ``(ss, iters)``; raises on singular Jacobian or
-    non-convergence.
-    """
-    cdef int64_t n_var = seed.shape[0]
-    cdef int64_t n_par = params.shape[0]
-
-    cdef double[::1] seedv = np.ascontiguousarray(seed, dtype=np.float64)
-    cdef double[::1] parv = np.ascontiguousarray(params, dtype=np.float64)
-
-    cdef const double *seed_ptr = &seedv[0] if n_var > 0 else NULL
-    cdef const double *par_ptr = &parv[0] if n_par > 0 else NULL
-
-    ss = np.empty(n_var, dtype=np.float64)
-    cdef double[::1] ssv = ss
-
-    cdef double *ss_ptr = &ssv[0] if n_var > 0 else NULL
-    cdef sdsge_residual_fn resid = <sdsge_residual_fn><void*>residual_addr
-    cdef int64_t iters = 0
-    cdef int64_t err
-    cdef arena_size sz = sdsge_newton_arena_size(n_var, n_par, n_exog)
-    arena = np.empty(sz.n_float, dtype=np.float64)
-    iarena = np.empty(sz.n_int, dtype=np.int64)
-    cdef double[::1] arv = arena
-    cdef int64_t[::1] iarv = iarena
-    with nogil:
-        err = sdsge_steady_state_newton(
-            resid, seed_ptr, par_ptr, n_var, n_par, n_exog, max_iter, tol,
-            ss_ptr, &iters, &arv[0], &iarv[0])
-    if err == SDSGE_NEWTON_SINGULAR:
-        raise ValueError("steady_state_newton: singular Jacobian (a - b - c).")
-    if err == SDSGE_NEWTON_NO_CONVERGE:
+def klein_reorder(s, t, z, int64_t nspred, int64_t sdim):
+    sf = np.array(s, dtype=np.complex128, order="F")
+    tf = np.array(t, dtype=np.complex128, order="F")
+    zf = np.array(z, dtype=np.complex128, order="F")
+    cdef int64_t nd = sf.shape[0]
+    if (sf.shape[1] != nd or tf.shape[0] != nd
+       or tf.shape[1] != nd or zf.shape[0] != nd or zf.shape[1] != nd):
+        raise ValueError("klein_reorder requires square, identically shaped s, t, z.")
+    if not (0 < nspred < sdim <= nd):
         raise ValueError(
-            "steady_state_newton: did not converge within max_iter "
-            "(or the residual went non-finite)."
+            "klein_reorder requires 0 < nspred < sdim <= nd, "
+            f"got {nspred}, {sdim}, {nd}."
         )
-    return ss, int(iters)
+    # row-major C order for non LAPACK inputs
+    cdef double complex[:, ::1] z11 = np.empty((nspred, nspred), dtype=np.complex128)
+    cdef double complex[:, ::1] z11i = np.empty((nspred, nspred), dtype=np.complex128)
+    cdef double complex[:, ::1] tmp = np.empty((nspred, nspred), dtype=np.complex128)
+    cdef double complex[:, ::1] eye = np.eye(nspred, dtype=np.complex128)
+    cdef int64_t[::1] piv = np.empty(nspred, dtype=np.int64)
+
+    cdef arena_size sz = klein_classify_arena_size(nd, nspred)
+    arena = np.empty(sz.n_float, dtype=np.float64)
+    cdef double[::1] arv = arena
+
+    cdef double complex[::1, :] sv = sf
+    cdef double complex[::1, :] tv = tf
+    cdef double complex[::1, :] zv = zf
+    cdef int64_t rc
+
+    with nogil:
+        rc = klein_reorder_argmax(
+            _ztgexc, <c128 *>&sv[0, 0], <c128 *>&tv[0, 0], <c128 *>&zv[0, 0],
+            nd, nspred, sdim,
+            <c128 *>&z11[0, 0], <c128 *>&z11i[0, 0],
+            <c128 *>&tmp[0, 0], <c128 *>&eye[0, 0],
+            &piv[0], &arv[0])
+
+    return rc, sf, tf, zf
+
+
+def klein_z11(s, z, int64_t nspred):
+    sf = np.array(s, dtype=np.complex128, order="F")
+    zf = np.array(z, dtype=np.complex128, order="F")
+    cdef int64_t nd = sf.shape[0]
+    if sf.shape[1] != nd or zf.shape[0] != nd or zf.shape[1] != nd:
+        raise ValueError("klein_z11 requires square, identically shaped s, z.")
+    if not (0 < nspred <= nd):
+        raise ValueError(f"klein_z11 requires 0 < nspred <= nd, got {nspred}, {nd}.")
+    z11 = np.empty((nspred, nspred), dtype=np.complex128)
+    z11i = np.empty((nspred, nspred), dtype=np.complex128)
+    # row-major C order for non LAPACK inputs
+    cdef double complex[:, ::1] z11v = z11
+    cdef double complex[:, ::1] z11iv = z11i
+    cdef double complex[:, ::1] tmp = np.empty((nspred, nspred), dtype=np.complex128)
+    cdef double complex[:, ::1] eye = np.eye(nspred, dtype=np.complex128)
+    cdef int64_t[::1] piv = np.empty(nspred, dtype=np.int64)
+
+    cdef double complex[::1, :] sv = sf
+    cdef double complex[::1, :] zv = zf
+    cdef int64_t rc
+    # C leaves rcond untouched on a failure, so the returned value is this one.
+    cdef double rcond = 0.0
+
+    with nogil:
+        rc = klein_z11_pair(
+            <c128 *>&sv[0, 0], <c128 *>&zv[0, 0], nd, nspred,
+            <c128 *>&z11v[0, 0], <c128 *>&z11iv[0, 0], <c128 *>&tmp[0, 0],
+            <c128 *>&eye[0, 0], &piv[0], &rcond)
+
+    return rc, z11, z11i, rcond
 
 
 def klein_solve1(
