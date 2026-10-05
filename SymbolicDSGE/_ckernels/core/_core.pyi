@@ -73,16 +73,22 @@ def simulate_second_order_pruned(
     ``steady_state`` denominates the returned rows in levels.
     """
 
-def klein_postprocess(
-    s: _C128,
-    t: _C128,
-    z: _C128,
-    n_states: int,
-) -> tuple[int, _C128, _C128, int, _C128]:
-    """(err, f, p, stab, eig) from the ordered Schur factors."""
-
 def spike_drive(fn_addr: int, a: _C128, b: _C128, out: _C128) -> None:
     """Stage-0 (#248): call a numba @cfunc (by ``.address``) from native C, nogil."""
+
+def steady_state_newton(
+    residual_addr: int,
+    seed: _F64,
+    params: _F64,
+    n_exog: int,
+    max_iter: int = ...,
+    tol: float = ...,
+) -> tuple[_F64, int]:
+    """Newton solve of F(ss, ss, ss) = 0 at a zero innovation from a residual @cfunc address.
+
+    returns (ss, iters). Jacobian a - b - c via klein_preproc,
+    step via f64 LU.
+    """
 
 def klein_preprocess(
     residual_addr: int,
@@ -103,18 +109,21 @@ def klein_qz(a: _F64 | _C128, b: _F64 | _C128) -> tuple[_C128, _C128, _C128]:
     Returns (s, t, z) == scipy.linalg.ordqz(a, b, sort='ouc', output='complex')[0, 1, 5].
     """
 
-def steady_state_newton(
-    residual_addr: int,
-    seed: _F64,
-    params: _F64,
-    n_exog: int,
-    max_iter: int = ...,
-    tol: float = ...,
-) -> tuple[_F64, int]:
-    """Newton solve of F(ss, ss, ss) = 0 at a zero innovation from a residual @cfunc address.
+def klein_reorder(
+    s: _C128, t: _C128, z: _C128, nspred: int, sdim: int
+) -> tuple[int, _C128, _C128, _C128]:
+    """klein_reorder_argmax test driver.
 
-    returns (ss, iters). Jacobian a - b - c via klein_preproc,
-    step via f64 LU.
+    Takes pre-formed (s, t, z) and (re)orders them to find the best conditioning of z11.
+    Path taken in native for INDETERMINATE solutions. Returns (rc, s, t, z).
+    """
+
+def klein_z11(s: _C128, z: _C128, nspred: int) -> tuple[int, _C128, _C128, float]:
+    """klein_z11_pair test driver.
+
+    Scores one selection: the leading ``nspred`` block of a column-major Schur
+    ``(s, z)``, which ``klein_reorder`` ranks candidates by. Returns
+    ``(rc, z11, z11i, rcond)``, with ``rcond`` zero on a nonzero ``rc``.
     """
 
 def klein_solve1(
@@ -127,10 +136,10 @@ def klein_solve1(
 ) -> tuple[int, _F64, _F64, _F64, int, _C128, _F64, _F64]:
     """(rc, ss, f, p, stab, eig, A, B) <- one-shot first-order Klein solve.
 
-    Fuses steady_state_newton, klein_preprocess, klein_qz, klein_postprocess and
-    assemble_transition into one GIL release. ``f``/``p`` are real; the Schur
-    form's imaginary parts are roundoff on a real pencil. ``stab`` is reported,
-    not raised on.
+    The other exported kernels are parity entries over single C routines, not
+    stages that compose into this. ``f``/``p`` are real; the Schur form's
+    imaginary parts are roundoff on a real pencil. ``stab`` is reported, not
+    raised on.
     """
 
 def sgu_klein_solve2(
@@ -163,10 +172,9 @@ def sgu_klein_solve2(
     """(rc, ss, f, p, stab, eig, gxx, hxx, gxu, hxu, guu, huu, gss, hss, A, B) <-
     one-shot second-order solve.
 
-    klein_solve1 plus bicomplex_hessian and second_order in one GIL release. The
-    pencil and the residual Hessian stay native. ``Q`` is the (n_exog, n_exog)
-    shock covariance, which the risk correction integrates against. ``stab`` is
-    reported, not raised on.
+    klein_solve1 and then the second-order tail. The pencil and the residual
+    Hessian stay native. ``Q`` is the (n_exog, n_exog) shock covariance, which
+    the risk correction integrates against. ``stab`` is reported, not raised on.
     """
 
 def second_order(

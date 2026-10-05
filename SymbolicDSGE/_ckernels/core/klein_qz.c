@@ -20,8 +20,10 @@ arena_size klein_qz_arena_size(const i64 n) {
 
 i64 klein_qz(klein_zgges_fn zgges, i64 n, c128 *SDSGE_RESTRICT s,
              c128 *SDSGE_RESTRICT t, c128 *SDSGE_RESTRICT z,
-             f64 *SDSGE_RESTRICT arena, i64 *SDSGE_RESTRICT iarena) {
+             i64 *SDSGE_RESTRICT sdim, f64 *SDSGE_RESTRICT arena,
+             i64 *SDSGE_RESTRICT iarena) {
   if (n == 0) {
+    *sdim = 0;
     return KLEIN_QZ_OK;
   }
 
@@ -33,7 +35,6 @@ i64 klein_qz(klein_zgges_fn zgges, i64 n, c128 *SDSGE_RESTRICT s,
   const char jobvsl = 'N';
   const char jobvsr = 'V';
   const char sort = 'S';
-  int sdim = 0;
   int info = 0;
   int ldvsl = 1;
   c128 vsl_dummy = c128_make(0.0, 0.0); /* not referenced when jobvsl = 'N' */
@@ -46,12 +47,12 @@ i64 klein_qz(klein_zgges_fn zgges, i64 n, c128 *SDSGE_RESTRICT s,
   f64 *rwork = (f64 *)cp;
   c128 *work = (c128 *)(rwork + 8 * n);
   int *bwork = (int *)iarena;
-
+  int sdim32 = 0;
   const int lwork = (int)(KLEIN_QZ_LWORK_PER_N * n);
 
-  zgges(&jobvsl, &jobvsr, &sort, &klein_ouc, &n32, s, &n32, t, &n32, &sdim,
+  zgges(&jobvsl, &jobvsr, &sort, &klein_ouc, &n32, s, &n32, t, &n32, &sdim32,
         alpha, beta, &vsl_dummy, &ldvsl, z, &n32, work, &lwork, rwork, bwork,
         &info);
-
+  *sdim = (i64)sdim32;
   return (info != 0) ? KLEIN_QZ_LAPACK_FAIL : KLEIN_QZ_OK;
 }

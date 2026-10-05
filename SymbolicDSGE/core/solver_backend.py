@@ -333,9 +333,8 @@ def klein_solve(
 
     ``ss_seed`` seeds a Newton solve of ``F(ss, ss) = 0``; the solve linearizes at
     the resolved steady state, which the returned solution carries in
-    ``steady_state``. One native call runs the whole solve under a single GIL
-    release. A nonzero ``stab`` returns normally and the caller decides whether
-    indeterminacy is fatal; anything the kernel rejects raises here.
+    ``steady_state``. A nonzero ``stab`` returns normally and the caller decides
+    whether indeterminacy is fatal; anything the kernel rejects raises here.
     """
     err, ss, f, p, stab, eig, A, B = klein_solve1(
         compiled.construct_objective_cfunc().address,

@@ -44,11 +44,13 @@ cdef extern from "../core/pencil.h" nogil:
 
 
 cdef extern from "../core/klein_solve.h" nogil:
+    ctypedef void (*sdsge_ztgexc_fn)()
     ctypedef struct klein_spec:
         sdsge_residual_fn residual
         klein_zgges_fn zgges
         sdsge_dgeqrf_fn dgeqrf
         sdsge_dormqr_fn dormqr
+        sdsge_ztgexc_fn ztgexc
         const double *ss_seed
         const double *params
         const signed char *incidence
@@ -78,7 +80,7 @@ cdef extern from "../core/klein_solve.h" nogil:
         int64_t n_both
         int64_t n_fwd
 
-cdef extern from "../core/klein_postproc.h" nogil:
+cdef extern from "../core/klein_solve.h" nogil:
     int SDSGE_KLEIN_STAB_UNSET
 
 # LAPACK ``zgges`` reached through its scipy ``cython_lapack`` capsule address,
@@ -100,6 +102,10 @@ cdef sdsge_dormqr_fn _dormqr = <sdsge_dormqr_fn>PyCapsule_GetPointer(
     _dormqr_capsule, PyCapsule_GetName(_dormqr_capsule)
 )
 
+cdef object _ztgexc_capsule = _cython_lapack.__pyx_capi__["ztgexc"]
+cdef sdsge_ztgexc_fn _ztgexc = <sdsge_ztgexc_fn>PyCapsule_GetPointer(
+    _ztgexc_capsule, PyCapsule_GetName(_ztgexc_capsule)
+)
 
 # regime_pencil.h first: occbin.h includes it for the solve's pencil cfuncs.
 cdef extern from "regime_pencil.h" nogil:
@@ -903,7 +909,7 @@ cdef _sim_error(int64_t status, occbin_diag *diag, int64_t max_iter):
 def occbin_solve1(size_t residual_addr, seed, params, incidence,
                   int64_t n_state, pencil_addrs, rows, int64_t n_constraint,
                   int64_t n_exog=0):
-    """Reference solve and every regime's pencil, in a single GIL release.
+    """Reference solve and every regime's pencil.
 
     ``pencil_addrs`` and ``rows`` are indexed by binding bitmask and dense over
     ``0..2 ** n_constraint - 1``. Pass address 0 and an empty rows array for
@@ -1024,6 +1030,7 @@ def occbin_solve1(size_t residual_addr, seed, params, incidence,
     spec.first.zgges = _zgges
     spec.first.dgeqrf = _dgeqrf
     spec.first.dormqr = _dormqr
+    spec.first.ztgexc = _ztgexc
     spec.first.ss_seed = &seedv[0]
     spec.first.params = &parv[0] if n_par > 0 else NULL
     spec.first.incidence = &incv[0]

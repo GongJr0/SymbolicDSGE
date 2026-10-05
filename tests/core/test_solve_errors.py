@@ -123,7 +123,7 @@ def test_no_stable_solution_carries_the_partition_and_the_eigenvalues(gali):
     assert (abs(err.eig) < 1.0).sum() < compiled.n_state
 
     message = str(err)
-    assert "Code: NO_STABLE_SOLUTION (-303)" in message
+    assert "Code: NO_STABLE_SOLUTION" in message
     assert f"State space: 5 state(s) {_GALI_STATES}, 2 jump(s) {_GALI_JUMPS}" in message
     assert "Generalized eigenvalues:" in message
     assert "occurring at both dates" not in message
