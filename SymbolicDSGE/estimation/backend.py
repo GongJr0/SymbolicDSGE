@@ -26,6 +26,7 @@ from ..bayesian.priors import Prior
 from .prior_program import (
     _pack_transform,
     build_packed_logprior,
+    N_TRANSFORM_PARAMS,
     PyPriorTables,
 )
 from ..core.compiled_model import (
@@ -65,7 +66,7 @@ class MatrixPriorBlock(NamedTuple):
 
 
 @dataclass(frozen=True)
-class PreparedFilterRun:
+class FilterDTO:
     """Composed filter run inputs, ready for native evaluation.
 
     Attributes
@@ -97,9 +98,14 @@ class PreparedFilterRun:
     meas_addr: int
     jac_addr: int
     P0: NDF | None
-    kf_jitter: float64
-    kf_sym: bool
-    kf_joseph_cov: bool
+    jitter: float64
+    sym: bool
+    joseph_cov: bool
+    alpha: float | None
+    beta: float | None
+    kappa: float | None
+    T: int  # Allocation dimension for filters
+    n_obs: int
 
 
 # ---------------------------------------------------------------------------
@@ -131,33 +137,6 @@ class PreparedFilterRun:
 
 
 @dataclass(frozen=True, slots=True)
-class PyDims:
-    """Mirror of ``sdsge_dims``: model and data dimensions (all i64)."""
-
-    n_theta: int  # estimated params
-    n_var: int  # nx + ny (pencil / filter dim)
-    n_state: int  # nx
-    n_ctrl: int  # ny
-    n_exog: int  # k
-    n_obs: int  # m
-    n_par: int  # calib params
-    T: int  # observations
-
-
-def get_dims(compiled: CompiledModel, estimated_params: list[str], y: NDF) -> PyDims:
-    return PyDims(
-        n_theta=len(estimated_params),
-        n_var=compiled.n_var,
-        n_state=compiled.n_state,
-        n_ctrl=compiled.n_ctrl,
-        n_exog=compiled.n_exog,
-        n_obs=y.shape[1],
-        n_par=compiled.n_par,
-        T=y.shape[0],
-    )
-
-
-@dataclass(frozen=True, slots=True)
 class PyScalarScatter:
     """Mirror of ``sdsge_scalar_scatter``: one estimated scalar's theta->params scatter.
 
@@ -171,14 +150,14 @@ class PyScalarScatter:
     transform_params: NDF
 
 
-def build_scalar_scatter(
+def build_param_components(
     *,
     param_names: Sequence[str],
     param_index: Mapping[str, int],
     matrix_member_names: set[str],
     param_transforms: Mapping[str, Any],
     calib_index: Mapping[str, int],
-) -> list[PyScalarScatter]:
+) -> tuple[NDI, NDI, NDI, NDF]:
     """Flatten the estimated *scalar* params into ``PyScalarScatter`` rows.
 
     Walks ``param_names`` in theta order, skipping CPC block members (their
@@ -194,7 +173,10 @@ def build_scalar_scatter(
     fallback: every estimated scalar is a calibrated parameter (so its slot
     exists), and its transform packs to a native code (never ``None``).
     """
-    scatter: list[PyScalarScatter] = []
+    theta_idx = []
+    param_slot = []
+    transform_code = []
+    transform_params = []
     for name in param_names:
         if name in matrix_member_names:
             continue
@@ -204,21 +186,24 @@ def build_scalar_scatter(
                 f"in the native parameter vector cannot be resolved."
             )
         transform = param_transforms[name]
-        code, transform_params = _pack_transform(transform)
+        code, params = _pack_transform(transform)
         if code is None:
             raise ValueError(
                 f"Transform {type(transform).__name__!r} on estimated scalar '{name}' "
                 f"has no native transform code."
             )
-        scatter.append(
-            PyScalarScatter(
-                theta_idx=int(param_index[name]),
-                param_slot=int(calib_index[name]),
-                transform_code=int(code),
-                transform_params=np.asarray(transform_params, dtype=np.float64),
-            )
-        )
-    return scatter
+
+        theta_idx.append(int(param_index[name]))
+        param_slot.append(int(calib_index[name]))
+        transform_code.append(int(code))
+        transform_params.append(params)
+
+    return (
+        np.asarray(theta_idx, dtype=np.int64),
+        np.asarray(param_slot, dtype=np.int64),
+        np.asarray(transform_code, dtype=np.int64),
+        np.asarray(transform_params, dtype=np.float64).reshape(-1, N_TRANSFORM_PARAMS),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,7 +218,10 @@ class PyParamMap:
     """
 
     base_params: NDF  # n_par, calib_params order
-    scalars: list[PyScalarScatter]  # n_scalars
+    theta_idx: NDI  # n_scalars, theta -> params scatter
+    param_slot: NDI  # n_scalars, theta -> params scatter
+    transform_code: NDI  # n_scalars, theta -> params scatter
+    transform_params: NDF  # n_scalars x SDSGE_N_TRANSFORM_PARAMS,
 
 
 def build_calib_index(compiled: CompiledModel) -> dict[str, int]:
@@ -269,14 +257,25 @@ def build_param_map(
     base_params = np.empty(len(calib_index), dtype=float64)
     for name, slot in calib_index.items():
         base_params[slot] = base_dict[name]
-    scalars = build_scalar_scatter(
+    (
+        theta_idx,
+        param_slot,
+        transform_code,
+        transform_params,
+    ) = build_param_components(
         param_names=param_names,
         param_index=param_index,
         matrix_member_names=matrix_member_names,
         param_transforms=param_transforms,
         calib_index=calib_index,
     )
-    return PyParamMap(base_params=base_params, scalars=scalars)
+    return PyParamMap(
+        base_params=base_params,
+        theta_idx=theta_idx,
+        param_slot=param_slot,
+        transform_code=transform_code,
+        transform_params=transform_params,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,8 +485,19 @@ def _build_r_spec(
         raise ValueError("A override for R or a KalmanConfig specifying R is required.")
 
 
-@dataclass(frozen=True, slots=True)
-class PyObjCommon:
+class SolveDTO(NamedTuple):
+    residual_addr: int
+    bc_residual_addr: int
+    ss_seed: NDF
+    incidence: NDArray[np.int8]
+    n_var: int
+    n_state: int
+    n_ctrl: int
+    n_exog: int
+    n_par: int
+
+
+class EstimDTO(NamedTuple):
     """Mirror of ``sdsge_obj_common``: the mode-independent objective inputs.
 
     Runtime addresses arrive as ``int`` (cfunc ``.address`` / capsule pointer);
@@ -497,32 +507,19 @@ class PyObjCommon:
     ``bk_violations`` output are composer-owned and omitted here.
     """
 
-    dims: PyDims
-
-    residual_addr: int
-    bc_residual_addr: int  # bicomplex-Hessian residual; 0 when unused (linear)
-    meas_addr: int
-    jac_addr: int
-
-    ss_seed: NDF  # n_var: Newton seed for the steady state
-    incidence: NDArray[np.int8]  # n_var: SDSGE_INC_* bits per variable
-
-    y: NDF  # T*n_obs
-    P0: NDF | None  # n_var*n_var; UKF 2*n_state square
-    jitter: float
-    symmetrize: bool
-    joseph_cov: bool
-
+    solve_ctx: SolveDTO
+    filter_ctx: FilterDTO
     pmap: PyParamMap
     q_spec: PyCovSpec
     r_spec: PyCovSpec
     prior: PyPriorTables
+    n_theta: int
 
 
-def build_obj_common(
+def build_dto(
     *,
     compiled: CompiledModel,
-    prepared: PreparedFilterRun,
+    prepared: FilterDTO,
     param_names: Sequence[str],
     param_index: Mapping[str, int],
     matrix_member_names: set[str],
@@ -531,7 +528,7 @@ def build_obj_common(
     priors: Mapping[str, Prior] | None,
     ss_seed: Any,
     R_override: NDF | None,
-) -> PyObjCommon:
+) -> EstimDTO:
     """Assemble the mode-independent objective inputs (``sdsge_obj_common``).
 
     The single orchestration point for the input tables: it builds one
@@ -544,7 +541,6 @@ def build_obj_common(
     variable order by the solver's authority. Scratch buffers and the
     ``bk_violations`` output are the composer's job, not here.
     """
-    y = prepared.y_reordered
     calib_index = build_calib_index(compiled)
     base_dict = extract_base_params(compiled)
 
@@ -561,19 +557,21 @@ def build_obj_common(
         matrix_member_names=matrix_member_names,
     )
 
-    return PyObjCommon(
-        dims=get_dims(compiled, list(param_names), y),
+    solve = SolveDTO(
         residual_addr=int(compiled.construct_objective_cfunc().address),
         bc_residual_addr=int(bc_residual_addr),
-        meas_addr=int(prepared.meas_addr),
-        jac_addr=int(prepared.jac_addr),
-        ss_seed=np.ascontiguousarray(ss_seed_vec, dtype=np.float64),
+        ss_seed=ss_seed_vec,
         incidence=compiled._incidence,
-        y=y,
-        P0=prepared.P0,
-        jitter=float(prepared.kf_jitter),
-        symmetrize=bool(prepared.kf_sym),
-        joseph_cov=bool(prepared.kf_joseph_cov),
+        n_var=compiled.n_var,
+        n_state=compiled.n_state,
+        n_ctrl=compiled.n_ctrl,
+        n_exog=compiled.n_exog,
+        n_par=compiled.n_par,
+    )
+
+    return EstimDTO(
+        solve_ctx=solve,
+        filter_ctx=prepared,
         pmap=build_param_map(
             compiled=compiled,
             param_names=param_names,
@@ -599,82 +597,7 @@ def build_obj_common(
             R_override=R_override,
         ),
         prior=prior_tables if prior_tables is not None else PyPriorTables.empty(),
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class PyLinearContext:
-    """Mirror of ``sdsge_linear_ctx``.
-
-    The ``solve1`` buffers and the ``C``/``d`` measurement-linearization outputs are
-    composer-allocated scratch, so this wrapper adds no Python-provided fields
-    beyond ``base``.
-    """
-
-    base: PyObjCommon
-
-
-@dataclass(frozen=True, slots=True)
-class PyExtendedContext:
-    """Mirror of ``sdsge_extended_ctx``.
-
-    ``solve1`` is composer-allocated scratch; no Python-provided fields beyond
-    ``base``.
-    """
-
-    base: PyObjCommon
-
-
-@dataclass(frozen=True, slots=True)
-class PyUnscentedContext:
-    """Mirror of ``sdsge_unscented_ctx``.
-
-    ``solve1``/``solve2`` are composer-allocated scratch.  ``alpha``/``beta``/``kappa`` are
-    the UKF tuning scalars.
-    """
-
-    base: PyObjCommon
-    alpha: float
-    beta: float
-    kappa: float
-
-
-def build_linear_context(base: PyObjCommon) -> PyLinearContext:
-    """Wrap the base inputs for the linear filter.
-
-    The ``solve1`` buffers and the ``C``/``d`` measurement linearization are
-    composer-allocated scratch, so there is nothing to add beyond ``base``.
-    """
-    return PyLinearContext(base=base)
-
-
-def build_extended_context(base: PyObjCommon) -> PyExtendedContext:
-    """Wrap the base inputs for the extended (EKF) filter.
-
-    ``solve1`` is composer-allocated scratch; nothing to add beyond ``base``.
-    """
-    return PyExtendedContext(base=base)
-
-
-def build_unscented_context(
-    base: PyObjCommon,
-    *,
-    compiled: CompiledModel,
-    alpha: float = 1.0,
-    beta: float = 2.0,
-    kappa: float = 1.0,
-) -> PyUnscentedContext:
-    """Wrap the base inputs for the unscented filter.
-
-    ``solve1``/``solve2`` are composer-allocated scratch;
-    ``alpha``/``beta``/``kappa`` are the UKF tuning scalars
-    (defaults match the Kalman resolvers, the only source of these today).
-    """
-    return PyUnscentedContext(
-        base=base,
-        alpha=float(alpha),
-        beta=float(beta),
-        kappa=float(kappa),
+        n_theta=len(param_names),
     )
 
 
@@ -795,21 +718,26 @@ def prepare_filter_run(
     symmetrize: bool,
     joseph_cov: bool = False,
     P0: NDF | None = None,
-) -> PreparedFilterRun:
+) -> FilterDTO:
     obs, y_reordered = reorder_observables(compiled, observables, y)
     mode = filter_mode
 
     kf_jitter, kf_sym = resolve_filter_options(jitter, symmetrize)
-    return PreparedFilterRun(
+    return FilterDTO(
         observables=obs,
         y_reordered=y_reordered,
         mode=mode,
         meas_addr=compiled.construct_measurement_cfunc(obs).address,
         jac_addr=compiled.construct_measurement_jacobian_cfunc(obs).address,
         P0=_resolve_P0(FilterMode(mode), compiled.n_state, compiled.n_var, P0),
-        kf_jitter=kf_jitter,
-        kf_sym=kf_sym,
-        kf_joseph_cov=bool(joseph_cov),
+        jitter=kf_jitter,
+        sym=kf_sym,
+        joseph_cov=bool(joseph_cov),
+        alpha=1.0,
+        beta=2.0,
+        kappa=1.0,
+        T=y_reordered.shape[0],
+        n_obs=y_reordered.shape[1],
     )
 
 

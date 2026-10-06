@@ -35,16 +35,11 @@ from .spec import EstimatorSpec, EstimatorParams, _coerce_ss_seed
 
 from . import backend
 from .backend import (
+    EstimDTO,
     MatrixName,
     MatrixPriorKey,
     MatrixPriorBlock,
-    PyExtendedContext,
-    PyLinearContext,
-    PyUnscentedContext,
-    build_linear_context,
-    build_extended_context,
-    build_unscented_context,
-    build_obj_common,
+    build_dto,
 )
 
 NDF = NDArray[np.float64]
@@ -745,9 +740,9 @@ class Estimator:
             estimated_params=self.estimated_params,
             priors=priors or None,
             ss_seed=_coerce_ss_seed(self.ss_seed),
-            jitter=self._prepared_filter.kf_jitter,
-            symmetrize=self._prepared_filter.kf_sym,
-            joseph_cov=self._prepared_filter.kf_joseph_cov,
+            jitter=self._prepared_filter.jitter,
+            symmetrize=self._prepared_filter.sym,
+            joseph_cov=self._prepared_filter.joseph_cov,
         )
 
         if isinstance(self.y, pd.DataFrame):
@@ -962,8 +957,8 @@ class Estimator:
             Log-likelihood value of the data given the model and parameters.
 
         """
-        ctx, mode = self._build_native_context()
-        return loglik(ctx, mode, theta)
+        ctx = self._build_native_context()
+        return loglik(ctx, theta)
 
     def logprior(self, theta: NDF, include_logjac: bool = False) -> float64:
         """Log-prior of the parameters given the specified priors.
@@ -983,7 +978,7 @@ class Estimator:
             Log-prior value of the parameters given the specified priors, optionally including the log-Jacobian term.
 
         """
-        ctx, _ = self._build_native_context()
+        ctx = self._build_native_context()
         return logprior(ctx, theta, include_logjac)
 
     def logpost(self, theta: NDF, include_logjac: bool = False) -> float64:
@@ -1004,8 +999,8 @@ class Estimator:
             Log-posterior value of the parameters given the data, model, and priors, optionally including the log-Jacobian term.
 
         """
-        ctx, mode = self._build_native_context()
-        return logpost(ctx, mode, theta, include_logjac)
+        ctx = self._build_native_context()
+        return logpost(ctx, theta, include_logjac)
 
     def _report_search_warning_count(self, kind: str, n_err: int) -> None:
         print(
@@ -1062,7 +1057,7 @@ class Estimator:
 
     def _build_native_context(
         self,
-    ) -> tuple[PyLinearContext | PyExtendedContext | PyUnscentedContext, str]:
+    ) -> EstimDTO:
         """Build the native objective context DTO for the current filter mode.
 
         Method-agnostic: it depends only on ``self`` (model, data, priors, Q/R
@@ -1070,7 +1065,7 @@ class Estimator:
         and the MCMC mainloop. The driver decides how to drive it (minimized
         ``-logpost`` vs ``+logpost``); the ctx is identical.
         """
-        common = build_obj_common(
+        return build_dto(
             compiled=self.compiled,
             prepared=self._prepared_filter,
             param_names=self.param_names,
@@ -1082,17 +1077,6 @@ class Estimator:
             ss_seed=self.ss_seed,
             R_override=self.R,
         )
-
-        ctx: PyLinearContext | PyExtendedContext | PyUnscentedContext
-        if (mode := self._prepared_filter.mode) == "linear":
-            ctx = build_linear_context(common)
-        elif mode == "extended":
-            ctx = build_extended_context(common)
-        elif mode == "unscented":
-            ctx = build_unscented_context(common, compiled=self.compiled)
-        else:
-            raise ValueError(f"Unknown filter_mode {mode!r}.")
-        return ctx, mode
 
     def _point_estimate(
         self,
@@ -1119,11 +1103,10 @@ class Estimator:
         init = self.resolve_theta0(theta0)
         self._validate_theta0(init)
 
-        ctx, mode = self._build_native_context()
+        ctx = self._build_native_context()
 
         res = run_estimation(
             ctx,
-            mode,
             method,
             include_logjac=jacobian,
             theta0=init,
@@ -1419,7 +1402,7 @@ class Estimator:
         if current.shape[0] == 0:
             raise ValueError("No estimated parameters were provided.")
 
-        ctx, mode = self._build_native_context()
+        ctx = self._build_native_context()
 
         # The chain runs entirely in native nogil code; ``rng`` (numpy's own
         # PCG64) is borrowed for the run and must outlive it, which the local
@@ -1427,7 +1410,6 @@ class Estimator:
         t0 = perf_counter()
         out = run_mcmc(
             ctx,
-            mode,
             current,
             rng,
             n_draws=n_draws,

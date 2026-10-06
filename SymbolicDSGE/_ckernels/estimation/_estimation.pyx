@@ -139,24 +139,25 @@ cdef void _fill_prior(sdsge_prior_tables *pr, object pt, list hold) except *:
     pr.n_blocks = _rows(pt.matrix_offsets)
 
 
-cdef void _fill_klein_spec(klein_spec *sp, object base, object dims,
+cdef void _fill_klein_spec(klein_spec *sp, object sol_dto,
                            list hold, const double *params,
                            const signed char *incidence) except *:
-    sp.residual = <sdsge_residual_fn><void*><size_t>base.residual_addr
+
+    sp.residual = <sdsge_residual_fn><void*><size_t>sol_dto.residual_addr
     sp.zgges = _zgges
     sp.dgeqrf = _dgeqrf
     sp.dormqr = _dormqr
     # Reordering doesn't change determinancy status;
     # estimation rejects either ordering.
     sp.ztgexc = NULL
-    sp.ss_seed = _f64p(base.ss_seed, hold)
+    sp.ss_seed = _f64p(sol_dto.ss_seed, hold)
     sp.params = params
     sp.incidence = incidence
-    sp.n_var = <int64_t>dims.n_var
-    sp.n_state = <int64_t>dims.n_state
-    sp.n_ctrl = <int64_t>dims.n_ctrl
-    sp.n_exog = <int64_t>dims.n_exog
-    sp.n_par = <int64_t>dims.n_par
+    sp.n_var = <int64_t>sol_dto.n_var
+    sp.n_state = <int64_t>sol_dto.n_state
+    sp.n_ctrl = <int64_t>sol_dto.n_ctrl
+    sp.n_exog = <int64_t>sol_dto.n_exog
+    sp.n_par = <int64_t>sol_dto.n_par
 
 
 cdef inline const double *_cov_ptr(sdsge_cov_build *cb):
@@ -170,11 +171,10 @@ cdef inline const double *_cov_ptr(sdsge_cov_build *cb):
 # are rooted in `hold`, a list the CALLER owns, which is what lets the allocation
 # live in a helper while the pointer outlives it.
 
-cdef object _alloc_base(sdsge_obj_common *b, object dims, arena_size asz,
-                        list hold):
-    cdef int64_t n_par = dims.n_par
-    cdef int64_t n_exog = dims.n_exog
-    cdef int64_t n_obs = dims.n_obs
+cdef object _alloc_base(sdsge_obj_common *b, object sol_dto, int64_t n_obs,
+                        arena_size asz, list hold):
+    cdef int64_t n_par = sol_dto.n_par
+    cdef int64_t n_exog = sol_dto.n_exog
 
     params = _held(np.empty(n_par, np.float64), hold)
     cdef double[::1] pv = params
@@ -203,11 +203,11 @@ cdef object _alloc_base(sdsge_obj_common *b, object dims, arena_size asz,
     return params
 
 
-cdef void _alloc_solve1(sdsge_solve1 *o, object dims, int64_t nd, list hold):
-    cdef int64_t n_var = dims.n_var
-    cdef int64_t n_state = dims.n_state
-    cdef int64_t n_ctrl = dims.n_ctrl
-    cdef int64_t n_exog = dims.n_exog
+cdef void _alloc_solve1(sdsge_solve1 *o, object sol_dto, int64_t nd, list hold):
+    cdef int64_t n_var = sol_dto.n_var
+    cdef int64_t n_state = sol_dto.n_state
+    cdef int64_t n_ctrl = sol_dto.n_ctrl
+    cdef int64_t n_exog = sol_dto.n_exog
 
     cdef double[::1] ss = _held(np.empty(n_var, np.float64), hold)
     cdef double[:, ::1] ar = _held(np.empty((n_var, n_var), np.float64), hold)
@@ -243,11 +243,11 @@ cdef void _alloc_solve1(sdsge_solve1 *o, object dims, int64_t nd, list hold):
     o.order = &od[0]
 
 
-cdef void _alloc_solve2(sdsge_solve2 *o, object dims, list hold):
-    cdef int64_t n_var = dims.n_var
-    cdef int64_t n_state = dims.n_state
-    cdef int64_t n_ctrl = dims.n_ctrl
-    cdef int64_t n_exog = dims.n_exog
+cdef void _alloc_solve2(sdsge_solve2 *o, object sol_dto, list hold):
+    cdef int64_t n_var = sol_dto.n_var
+    cdef int64_t n_state = sol_dto.n_state
+    cdef int64_t n_ctrl = sol_dto.n_ctrl
+    cdef int64_t n_exog = sol_dto.n_exog
     cdef int64_t n2 = 3 * n_var + n_exog
 
     cdef double[:, :, ::1] fxx = _held(
@@ -280,15 +280,15 @@ cdef void _alloc_solve2(sdsge_solve2 *o, object dims, list hold):
     o.hss = &hss[0]
 
 
-cdef const double *_alloc_P0(sdsge_obj_common *b, object base, int64_t fdim,
+cdef const double *_alloc_P0(sdsge_obj_common *b, object kf_dto, int64_t fdim,
                              list hold) except NULL:
     cdef double[:, ::1] own
-    if base.P0 is None:
+    if kf_dto.P0 is None:
         own = _held(np.zeros((fdim, fdim), np.float64), hold)
         b.derive_P0 = 1
         return &own[0, 0]
     b.derive_P0 = 0
-    return _f64p2(base.P0, hold)
+    return _f64p2(kf_dto.P0, hold)
 
 
 # --- filter input fills -----------------------------------------------------
@@ -303,14 +303,14 @@ cdef const double *_alloc_P0(sdsge_obj_common *b, object base, int64_t fdim,
 #
 # `y` and a supplied `P0` are the only DTO-rooted pointers in these structs.
 
-cdef void _alloc_fill_kf(sdsge_linear_ctx *c, object base, object dims,
+cdef void _alloc_fill_kf(sdsge_linear_ctx *c, object kf_dto, object sol_dto,
                          list hold) except *:
     cdef sdsge_obj_common *b = &c.base
-    cdef int64_t n_var = dims.n_var
-    cdef int64_t n_obs = dims.n_obs
+    cdef int64_t n_var = sol_dto.n_var
+    cdef int64_t n_obs = kf_dto.n_obs
 
-    c.meas = <meas_fn><void*><size_t>base.meas_addr
-    c.jac = <meas_fn><void*><size_t>base.jac_addr
+    c.meas = <meas_fn><void*><size_t>kf_dto.meas_addr
+    c.jac = <meas_fn><void*><size_t>kf_dto.jac_addr
 
     cdef double[:, ::1] C = _held(np.empty((n_obs, n_var), np.float64), hold)
     cdef double[::1] d = _held(np.empty(n_obs, np.float64), hold)
@@ -318,8 +318,8 @@ cdef void _alloc_fill_kf(sdsge_linear_ctx *c, object base, object dims,
 
     c.kf_ctx.n = n_var
     c.kf_ctx.m = n_obs
-    c.kf_ctx.k = <int64_t>dims.n_exog
-    c.kf_ctx.T = <int64_t>dims.T
+    c.kf_ctx.k = <int64_t>sol_dto.n_exog
+    c.kf_ctx.T = <int64_t>kf_dto.T
     c.kf_ctx.A = c.solve_out.A
     c.kf_ctx.B = c.solve_out.B
     c.kf_ctx.C = &C[0, 0]
@@ -327,58 +327,58 @@ cdef void _alloc_fill_kf(sdsge_linear_ctx *c, object base, object dims,
     c.kf_ctx.Q = _cov_ptr(&b.q)
     c.kf_ctx.R = _cov_ptr(&b.r)
     c.kf_ctx.steady_state = c.solve_out.ss
-    c.kf_ctx.y = _f64p2(base.y, hold)
+    c.kf_ctx.y = _f64p2(kf_dto.y_reordered, hold)
     c.kf_ctx.x0 = &x0[0]
-    c.kf_ctx.P0 = _alloc_P0(b, base, n_var, hold)
-    c.kf_ctx.symmetrize = <int>bool(base.symmetrize)
-    c.kf_ctx.joseph_cov = <int>bool(base.joseph_cov)
-    c.kf_ctx.jitter = <double>base.jitter
+    c.kf_ctx.P0 = _alloc_P0(b, kf_dto, n_var, hold)
+    c.kf_ctx.symmetrize = <int>bool(kf_dto.sym)
+    c.kf_ctx.joseph_cov = <int>bool(kf_dto.joseph_cov)
+    c.kf_ctx.jitter = <double>kf_dto.jitter
     c.kf_ctx.return_shocks = 0
     c.kf_ctx.store_history = 0
 
 
-cdef void _alloc_fill_ekf(sdsge_extended_ctx *c, object base, object dims,
+cdef void _alloc_fill_ekf(sdsge_extended_ctx *c, object kf_dto, object sol_dto,
                           list hold) except *:
     cdef sdsge_obj_common *b = &c.base
-    cdef int64_t n_var = dims.n_var
+    cdef int64_t n_var = sol_dto.n_var
 
     cdef double[::1] x0 = _held(np.zeros(n_var, np.float64), hold)
 
-    c.ekf_ctx.meas = <meas_fn><void*><size_t>base.meas_addr
-    c.ekf_ctx.jac = <meas_fn><void*><size_t>base.jac_addr
+    c.ekf_ctx.meas = <meas_fn><void*><size_t>kf_dto.meas_addr
+    c.ekf_ctx.jac = <meas_fn><void*><size_t>kf_dto.jac_addr
     c.ekf_ctx.A = c.solve_out.A
     c.ekf_ctx.B = c.solve_out.B
     c.ekf_ctx.calib_params = b.params
     c.ekf_ctx.Q = _cov_ptr(&b.q)
     c.ekf_ctx.R = _cov_ptr(&b.r)
     c.ekf_ctx.steady_state = c.solve_out.ss
-    c.ekf_ctx.y = _f64p2(base.y, hold)
+    c.ekf_ctx.y = _f64p2(kf_dto.y_reordered, hold)
     c.ekf_ctx.x0 = &x0[0]
-    c.ekf_ctx.P0 = _alloc_P0(b, base, n_var, hold)
-    c.ekf_ctx.T = <int64_t>dims.T
+    c.ekf_ctx.P0 = _alloc_P0(b, kf_dto, n_var, hold)
+    c.ekf_ctx.T = <int64_t>kf_dto.T
     c.ekf_ctx.n = n_var
-    c.ekf_ctx.m = <int64_t>dims.n_obs
-    c.ekf_ctx.k = <int64_t>dims.n_exog
-    c.ekf_ctx.n_par = <int64_t>dims.n_par
-    c.ekf_ctx.jitter = <double>base.jitter
-    c.ekf_ctx.symmetrize = <int>bool(base.symmetrize)
-    c.ekf_ctx.joseph_cov = <int>bool(base.joseph_cov)
+    c.ekf_ctx.m = <int64_t>kf_dto.n_obs
+    c.ekf_ctx.k = <int64_t>sol_dto.n_exog
+    c.ekf_ctx.n_par = <int64_t>sol_dto.n_par
+    c.ekf_ctx.jitter = <double>kf_dto.jitter
+    c.ekf_ctx.symmetrize = <int>bool(kf_dto.sym)
+    c.ekf_ctx.joseph_cov = <int>bool(kf_dto.joseph_cov)
     c.ekf_ctx.compute_y_filt = 0
     c.ekf_ctx.return_shocks = 0
     c.ekf_ctx.store_history = 0
 
 
-cdef void _alloc_fill_ukf(sdsge_unscented_ctx *c, object dto, object base,
-                          object dims, list hold) except *:
+cdef void _alloc_fill_ukf(sdsge_unscented_ctx *c, object kf_dto,
+                          object sol_dto, list hold) except *:
     cdef sdsge_obj_common *b = &c.base
-    cdef int64_t n_state = dims.n_state
+    cdef int64_t n_state = sol_dto.n_state
 
-    c.solve_ctx.bc_residual = <bc_residual_fn><void*><size_t>base.bc_residual_addr
+    c.solve_ctx.bc_residual = <bc_residual_fn><void*><size_t>sol_dto.bc_residual_addr
     c.solve_ctx.Q = _cov_ptr(&b.q)
 
     cdef double[::1] z0 = _held(np.zeros(2 * n_state, np.float64), hold)
 
-    c.ukf_ctx.meas = <meas_fn><void*><size_t>base.meas_addr
+    c.ukf_ctx.meas = <meas_fn><void*><size_t>kf_dto.meas_addr
     c.ukf_ctx.hx = c.solve1_out.p
     c.ukf_ctx.gx = c.solve1_out.f
     c.ukf_ctx.bu = c.solve1_out.B
@@ -394,20 +394,20 @@ cdef void _alloc_fill_ukf(sdsge_unscented_ctx *c, object dto, object base,
     c.ukf_ctx.params = b.params
     c.ukf_ctx.Q = _cov_ptr(&b.q)
     c.ukf_ctx.R = _cov_ptr(&b.r)
-    c.ukf_ctx.obs = _f64p2(base.y, hold)
+    c.ukf_ctx.obs = _f64p2(kf_dto.y_reordered, hold)
     c.ukf_ctx.z0 = &z0[0]
-    c.ukf_ctx.P0 = _alloc_P0(b, base, 2 * n_state, hold)
-    c.ukf_ctx.T = <int64_t>dims.T
+    c.ukf_ctx.P0 = _alloc_P0(b, kf_dto, 2 * n_state, hold)
+    c.ukf_ctx.T = <int64_t>kf_dto.T
     c.ukf_ctx.n_state = n_state
-    c.ukf_ctx.n_ctrl = <int64_t>dims.n_ctrl
-    c.ukf_ctx.n_exog = <int64_t>dims.n_exog
-    c.ukf_ctx.n_obs = <int64_t>dims.n_obs
-    c.ukf_ctx.n_params = <int64_t>dims.n_par
-    c.ukf_ctx.alpha = <double>dto.alpha
-    c.ukf_ctx.beta = <double>dto.beta
-    c.ukf_ctx.kappa = <double>dto.kappa
-    c.ukf_ctx.jitter = <double>base.jitter
-    c.ukf_ctx.symmetrize = <int>bool(base.symmetrize)
+    c.ukf_ctx.n_ctrl = <int64_t>sol_dto.n_ctrl
+    c.ukf_ctx.n_exog = <int64_t>sol_dto.n_exog
+    c.ukf_ctx.n_obs = <int64_t>kf_dto.n_obs
+    c.ukf_ctx.n_params = <int64_t>sol_dto.n_par
+    c.ukf_ctx.alpha = <double>kf_dto.alpha
+    c.ukf_ctx.beta = <double>kf_dto.beta
+    c.ukf_ctx.kappa = <double>kf_dto.kappa
+    c.ukf_ctx.jitter = <double>kf_dto.jitter
+    c.ukf_ctx.symmetrize = <int>bool(kf_dto.sym)
     c.ukf_ctx.store_history = 0
 
 
@@ -432,7 +432,7 @@ cdef bitgen_t *_bitgen_ptr(object rng) except NULL:
 
 
 cdef void _check_theta(object ctx_dto, object theta) except *:
-    if np.shape(theta)[0] != ctx_dto.base.dims.n_theta:
+    if np.shape(theta)[0] != ctx_dto.n_theta:
         raise ValueError(
             "theta length does not match the estimated parameter count."
         )
@@ -684,80 +684,80 @@ cdef dict _run(void *ctxp, sdsge_obj_common *b, int filter_mode, int action,
 # diagnostic.
 
 cdef dict _build_and_run_kf(object ctx_dto, int action, dict opts):
-    cdef object base = ctx_dto.base
-    cdef object dims = base.dims
+    cdef object sol = ctx_dto.solve_ctx
+    cdef object kf = ctx_dto.filter_ctx
     cdef list hold = []
     cdef sdsge_linear_ctx c
     cdef sdsge_obj_common *b = &c.base
 
-    cdef const signed char *inc = _i8p(base.incidence, hold)
-    cdef int64_t nd = sdsge_pencil_dim(inc, <int64_t>dims.n_var)
+    cdef const signed char *inc = _i8p(sol.incidence, hold)
+    cdef int64_t nd = sdsge_pencil_dim(inc, <int64_t>sol.n_var)
     cdef arena_size asz = sdsge_linear_obj_arena_size(
-        dims.n_var, dims.n_state, dims.n_ctrl, dims.n_par, dims.n_exog,
-        dims.n_obs, nd)
+        sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
+        kf.n_obs, nd)
 
-    params = _alloc_base(b, dims, asz, hold)
-    _fill_param_map(&b.pmap, base.pmap, hold)
-    _fill_cov_build(&b.q, base.q_spec, hold)
-    _fill_cov_build(&b.r, base.r_spec, hold)
-    _fill_prior(&b.prior, base.prior, hold)
-    _fill_klein_spec(&c.solve_ctx, base, dims, hold, b.params, inc)
-    _alloc_solve1(&c.solve_out, dims, nd, hold)
-    _alloc_fill_kf(&c, base, dims, hold)
-    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>dims.n_par)
+    params = _alloc_base(b, sol, kf.n_obs, asz, hold)
+    _fill_param_map(&b.pmap, ctx_dto.pmap, hold)
+    _fill_cov_build(&b.q, ctx_dto.q_spec, hold)
+    _fill_cov_build(&b.r, ctx_dto.r_spec, hold)
+    _fill_prior(&b.prior, ctx_dto.prior, hold)
+    _fill_klein_spec(&c.solve_ctx, sol, hold, b.params, inc)
+    _alloc_solve1(&c.solve_out, sol, nd, hold)
+    _alloc_fill_kf(&c, kf, sol, hold)
+    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>sol.n_par)
 
     return _run(<void*>&c, b, 0, action, opts, params)
 
 
 cdef dict _build_and_run_ekf(object ctx_dto, int action, dict opts):
-    cdef object base = ctx_dto.base
-    cdef object dims = base.dims
+    cdef object sol = ctx_dto.solve_ctx
+    cdef object kf = ctx_dto.filter_ctx
     cdef list hold = []
     cdef sdsge_extended_ctx c
     cdef sdsge_obj_common *b = &c.base
 
-    cdef const signed char *inc = _i8p(base.incidence, hold)
-    cdef int64_t nd = sdsge_pencil_dim(inc, <int64_t>dims.n_var)
+    cdef const signed char *inc = _i8p(sol.incidence, hold)
+    cdef int64_t nd = sdsge_pencil_dim(inc, <int64_t>sol.n_var)
     cdef arena_size asz = sdsge_extended_obj_arena_size(
-        dims.n_var, dims.n_state, dims.n_ctrl, dims.n_par, dims.n_exog,
-        dims.n_obs, nd)
+        sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
+        kf.n_obs, nd)
 
-    params = _alloc_base(b, dims, asz, hold)
-    _fill_param_map(&b.pmap, base.pmap, hold)
-    _fill_cov_build(&b.q, base.q_spec, hold)
-    _fill_cov_build(&b.r, base.r_spec, hold)
-    _fill_prior(&b.prior, base.prior, hold)
-    _fill_klein_spec(&c.solve_ctx, base, dims, hold, b.params, inc)
-    _alloc_solve1(&c.solve_out, dims, nd, hold)
-    _alloc_fill_ekf(&c, base, dims, hold)
-    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>dims.n_par)
+    params = _alloc_base(b, sol, kf.n_obs, asz, hold)
+    _fill_param_map(&b.pmap, ctx_dto.pmap, hold)
+    _fill_cov_build(&b.q, ctx_dto.q_spec, hold)
+    _fill_cov_build(&b.r, ctx_dto.r_spec, hold)
+    _fill_prior(&b.prior, ctx_dto.prior, hold)
+    _fill_klein_spec(&c.solve_ctx, sol, hold, b.params, inc)
+    _alloc_solve1(&c.solve_out, sol, nd, hold)
+    _alloc_fill_ekf(&c, kf, sol, hold)
+    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>sol.n_par)
 
     return _run(<void*>&c, b, 1, action, opts, params)
 
 
 cdef dict _build_and_run_ukf(object ctx_dto, int action, dict opts):
-    cdef object base = ctx_dto.base
-    cdef object dims = base.dims
+    cdef object sol = ctx_dto.solve_ctx
+    cdef object kf = ctx_dto.filter_ctx
     cdef list hold = []
     cdef sdsge_unscented_ctx c
     cdef sdsge_obj_common *b = &c.base
 
-    cdef const signed char *inc = _i8p(base.incidence, hold)
-    cdef int64_t nd = sdsge_pencil_dim(inc, <int64_t>dims.n_var)
+    cdef const signed char *inc = _i8p(sol.incidence, hold)
+    cdef int64_t nd = sdsge_pencil_dim(inc, <int64_t>sol.n_var)
     cdef arena_size asz = sdsge_unscented_obj_arena_size(
-        dims.n_var, dims.n_state, dims.n_ctrl, dims.n_par, dims.n_exog,
-        dims.n_obs, nd)
+        sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
+        kf.n_obs, nd)
 
-    params = _alloc_base(b, dims, asz, hold)
-    _fill_param_map(&b.pmap, base.pmap, hold)
-    _fill_cov_build(&b.q, base.q_spec, hold)
-    _fill_cov_build(&b.r, base.r_spec, hold)
-    _fill_prior(&b.prior, base.prior, hold)
-    _fill_klein_spec(&c.solve_ctx.first, base, dims, hold, b.params, inc)
-    _alloc_solve1(&c.solve1_out, dims, nd, hold)
-    _alloc_solve2(&c.solve2_out, dims, hold)
-    _alloc_fill_ukf(&c, ctx_dto, base, dims, hold)
-    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>dims.n_par)
+    params = _alloc_base(b, sol, kf.n_obs, asz, hold)
+    _fill_param_map(&b.pmap, ctx_dto.pmap, hold)
+    _fill_cov_build(&b.q, ctx_dto.q_spec, hold)
+    _fill_cov_build(&b.r, ctx_dto.r_spec, hold)
+    _fill_prior(&b.prior, ctx_dto.prior, hold)
+    _fill_klein_spec(&c.solve_ctx.first, sol, hold, b.params, inc)
+    _alloc_solve1(&c.solve1_out, sol, nd, hold)
+    _alloc_solve2(&c.solve2_out, sol, hold)
+    _alloc_fill_ukf(&c, kf, sol, hold)
+    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>sol.n_par)
 
     return _run(<void*>&c, b, 2, action, opts, params)
 
@@ -775,7 +775,6 @@ cdef dict _dispatch(object ctx_dto, str mode, int action, dict opts):
 
 def run_estimation(
     object ctx_dto,
-    str mode,
     str method,
     double[::1] theta0,
     bounds=None,
@@ -807,6 +806,7 @@ def run_estimation(
     covariance of theta, the vector minimized here. A Hessian that is not
     positive definite there leaves NaN throughout and reports it on
     ``cov_status``; the estimate itself is unaffected."""
+    cdef str mode = ctx_dto.filter_ctx.mode
     return _dispatch(ctx_dto, mode, _ACT_ESTIMATE, {
         "theta0": theta0,
         "bounds": bounds,
@@ -830,7 +830,6 @@ def run_estimation(
 
 def run_mcmc(
     object ctx_dto,
-    str mode,
     double[::1] theta0,
     object rng,
     int64_t n_draws,
@@ -897,6 +896,7 @@ def run_mcmc(
     else:
         proposal_cov = np.zeros((d, d), dtype=np.float64)
 
+    cdef str mode = ctx_dto.filter_ctx.mode
     return _dispatch(ctx_dto, mode, _ACT_MCMC, {
         "theta0": theta0,
         "rng": rng,
@@ -929,10 +929,11 @@ def run_mcmc(
 # rebuild costs.
 
 
-def loglik(object ctx_dto, str mode, theta not None):
+def loglik(object ctx_dto, theta not None):
     """Log-likelihood at ``theta`` (the unconstrained vector). The prior is not
     evaluated, so this is the same quantity the MLE objective maximizes."""
     _check_theta(ctx_dto, theta)
+    cdef str mode = ctx_dto.filter_ctx.mode
     return _dispatch(ctx_dto, mode, _ACT_EVAL, {
         "theta": theta,
         "has_prior": False,
@@ -940,15 +941,16 @@ def loglik(object ctx_dto, str mode, theta not None):
     })["value"]
 
 
-def logpost(object ctx_dto, str mode, theta not None, bint jacobian=False):
+def logpost(object ctx_dto, theta not None, bint jacobian=False):
     """Log-posterior at ``theta``. ``jacobian`` picks the density: with it, the
     density over theta the sampler walks; without, the prior over the parameters
     read at ``theta``. Equals the log-likelihood when the run carries no
     prior."""
     _check_theta(ctx_dto, theta)
+    cdef str mode = ctx_dto.filter_ctx.mode
     return _dispatch(ctx_dto, mode, _ACT_EVAL, {
         "theta": theta,
-        "has_prior": bool(ctx_dto.base.prior.has_prior),
+        "has_prior": bool(ctx_dto.prior.has_prior),
         "jacobian": jacobian,
     })["value"]
 
@@ -963,15 +965,14 @@ def logprior(object ctx_dto, theta not None, bint jacobian=False):
     No solve, no filter and no mode: this wires the base alone, which is all
     ``sdsge_logprior_at`` reads."""
     _check_theta(ctx_dto, theta)
-    cdef object base = ctx_dto.base
-    cdef int64_t n_par = base.dims.n_par
+    cdef int64_t n_par = ctx_dto.solve_ctx.n_par
     cdef list hold = []
     cdef sdsge_obj_common b
 
     cdef double[::1] paramsv = np.empty(n_par, dtype=np.float64)
     b.params = &paramsv[0]
-    _fill_param_map(&b.pmap, base.pmap, hold)
-    _fill_prior(&b.prior, base.prior, hold)
+    _fill_param_map(&b.pmap, ctx_dto.pmap, hold)
+    _fill_prior(&b.prior, ctx_dto.prior, hold)
     b.prior.include_logjac = <int>bool(jacobian)
     sdsge_init_params(b.params, b.pmap.base_params, n_par)
 
