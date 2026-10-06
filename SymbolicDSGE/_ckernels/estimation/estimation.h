@@ -58,6 +58,7 @@ typedef struct {
   i64 n_pairs;
 } sdsge_cov_spec;
 
+typedef struct {
   sdsge_cov_spec spec;
   f64 *out;  /* K*K built covariance */
   f64 *corr; /* K*K scratch */
