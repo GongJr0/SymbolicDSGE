@@ -14,6 +14,8 @@
                                         sdsge_matmul_abt */
 #include "prior_program.h"           /* sdsge_transform_inverse_and_logjac,
                               sdsge_corr_entries_from_unconstrained */
+#include "../_common/sdsge_common.h" /* arena_size, sdsge_max_arena, max_i64,
+                                        max_f64 */
 
 /* sdsge_classify outcomes. */
 #define SDSGE_SOLVE_OK 0
@@ -53,15 +55,6 @@ void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
   sdsge_fill_params(base, theta);
 }
 
-static inline void sdsge_z0_from_x0(const f64 *SDSGE_RESTRICT x0,
-                                    const i64 n_state, f64 *SDSGE_RESTRICT z0) {
-  /* z0 = [x0; 0] */
-  for (i64 i = 0; i < n_state; ++i) {
-    z0[i] = x0[i];
-    z0[n_state + i] = 0.0;
-  }
-}
-
 /* corr(K*K) := I, then off-diagonal pairs corr[i,j]=corr[j,i]=params[slot]. */
 static inline void sdsge_assemble_corr(const i64 *SDSGE_RESTRICT pair_i,
                                        const i64 *SDSGE_RESTRICT pair_j,
@@ -97,49 +90,27 @@ static inline void sdsge_cov_from_std_corr(const i64 *SDSGE_RESTRICT std_slots,
   }
 }
 
-/* Build one covariance (Q or R); returns the matrix the filter should read.
- * `out`/`corr_scratch` are K*K, `std_scratch` is K. */
-static inline const f64 *sdsge_build_cov(const sdsge_cov_spec *spec,
-                                         const f64 *SDSGE_RESTRICT theta,
-                                         const f64 *SDSGE_RESTRICT params,
-                                         f64 *SDSGE_RESTRICT std_scratch,
-                                         f64 *SDSGE_RESTRICT corr_scratch,
-                                         f64 *SDSGE_RESTRICT out) {
+/* Build one covariance (Q or R) into the `out` slot on the build context.
+ * std scratch is K, corr is K * K */
+static inline void sdsge_build_cov(const sdsge_cov_build *cb,
+                                   const f64 *SDSGE_RESTRICT theta,
+                                   const f64 *SDSGE_RESTRICT params) {
+  const sdsge_cov_spec *spec = &cb->spec;
   if (spec->is_constant) {
-    return spec->constant;
+    return;
   }
   const i64 K = spec->K;
   if (spec->corr_from_block) {
     for (i64 k = 0; k < K; ++k) {
-      std_scratch[k] = params[spec->std_slots[k]];
+      cb->std[k] = params[spec->std_slots[k]];
     }
-    sdsge_cov_from_unconstrained(theta + spec->block_theta_off, std_scratch, K,
-                                 corr_scratch, out);
+    sdsge_cov_from_unconstrained(theta + spec->block_theta_off, cb->std, K,
+                                 cb->corr, cb->out);
   } else {
     sdsge_assemble_corr(spec->pair_i, spec->pair_j, spec->pair_slot,
-                        spec->n_pairs, params, K, corr_scratch);
-    sdsge_cov_from_std_corr(spec->std_slots, params, corr_scratch, K, out);
+                        spec->n_pairs, params, K, cb->corr);
+    sdsge_cov_from_std_corr(spec->std_slots, params, cb->corr, K, cb->out);
   }
-  return out;
-}
-
-static inline klein_spec sdsge_spec_from(const sdsge_obj_common *b) {
-  const klein_spec spec = {
-      .residual = b->residual,
-      .zgges = b->zgges,
-      .dgeqrf = b->dgeqrf,
-      .dormqr = b->dormqr,
-      .ztgexc = NULL, /* INDETERMINATE solves are ll=-inf, no need to look for
-                         alternative orderings */
-      .ss_seed = b->ss_seed,
-      .params = b->params,
-      .incidence = b->incidence,
-      .n_var = b->dims.n_var,
-      .n_state = b->dims.n_state,
-      .n_ctrl = b->dims.n_ctrl,
-      .n_exog = b->dims.n_exog,
-      .n_par = b->dims.n_par};
-  return spec;
 }
 
 /* Estimation's reading of a core solve verdict: every way the pencil half can
@@ -163,20 +134,17 @@ static inline int sdsge_classify(const i64 rc, const i64 stab) {
   }
 }
 
-static inline int sdsge_solve1_run(sdsge_obj_common *b, sdsge_solve1 *s) {
-  const klein_spec spec = sdsge_spec_from(b);
-  const i64 rc = sdsge_klein_solve1(&spec, s, b->solve_arena, b->solve_iarena);
-  return sdsge_classify(rc, s->stab);
+static inline int sdsge_solve1_run(klein_spec *sp, sdsge_solve1 *out,
+                                   f64 *arena, i64 *iarena) {
+  const i64 rc = sdsge_klein_solve1(sp, out, arena, iarena);
+  return sdsge_classify(rc, out->stab);
 }
 
-static inline int sdsge_solve2_run(sdsge_obj_common *b, sdsge_solve1 *s,
-                                   sdsge_solve2 *s2,
-                                   const f64 *SDSGE_RESTRICT Q) {
-  const sgu_klein_spec spec = {
-      .first = sdsge_spec_from(b), .bc_residual = b->bc_residual, .Q = Q};
-  const i64 rc =
-      sdsge_sgu_klein_solve2(&spec, s, s2, b->solve_arena, b->solve_iarena);
-  return sdsge_classify(rc, s->stab);
+static inline int sdsge_solve2_run(sgu_klein_spec *sp, sdsge_solve1 *out1,
+                                   sdsge_solve2 *out2, f64 *arena,
+                                   i64 *iarena) {
+  const i64 rc = sdsge_sgu_klein_solve2(sp, out1, out2, arena, iarena);
+  return sdsge_classify(rc, out1->stab);
 }
 
 /* Fold the log-prior into a computed loglik. Non-finite loglik or logprior ->
@@ -221,40 +189,64 @@ f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
       (f64 *)pr->matrix_log_constants, pr->n_blocks, pr->include_logjac);
 }
 
-/* Linear measurement (C, d) from the meas / jac cfuncs at the linearization
+/* Per-mode objective arena: the solve, the filter, and the P0 derivation run in
+ * sequence off one buffer, so the need is their componentwise max. */
+arena_size sdsge_linear_obj_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+                                       i64 n_par, i64 n_exog, i64 n_obs,
+                                       i64 nd) {
+  return sdsge_max_arena(
+      sdsge_max_arena(sdsge_klein_solve1_arena_size(n_var, n_state, n_ctrl,
+                                                    n_par, n_exog, nd),
+                      kf_arena_size(n_var, n_obs, n_exog)),
+      kf_stationary_covariance_arena_size(n_var, n_exog));
+}
+
+arena_size sdsge_extended_obj_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+                                         i64 n_par, i64 n_exog, i64 n_obs,
+                                         i64 nd) {
+  return sdsge_max_arena(
+      sdsge_max_arena(sdsge_klein_solve1_arena_size(n_var, n_state, n_ctrl,
+                                                    n_par, n_exog, nd),
+                      ekf_arena_size(n_var, n_obs, n_exog)),
+      kf_stationary_covariance_arena_size(n_var, n_exog));
+}
+
+/* The unscented filter runs on the augmented state, so its P0 derivation is
+ * n_state square, not n_var: see sdsge_obj_unscented's own call. */
+arena_size sdsge_unscented_obj_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+                                          i64 n_par, i64 n_exog, i64 n_obs,
+                                          i64 nd) {
+  return sdsge_max_arena(
+      sdsge_max_arena(sdsge_sgu_klein_solve2_arena_size(n_var, n_state, n_ctrl,
+                                                        n_par, n_exog, nd),
+                      ukf_arena_size(n_state, n_ctrl, n_exog, n_obs)),
+      kf_stationary_covariance_arena_size(n_state, n_exog));
+}
+
+/* Linear measurement (C, d) from the meas/jac cfuncs at the linearization
  * point. C is n_obs*n_var, d is n_obs. */
 static inline void sdsge_build_measurement(sdsge_linear_ctx *ctx) {
   const sdsge_obj_common *b = &ctx->base;
-  const sdsge_solve1 *s = &ctx->solve;
+  sdsge_solve1 *s = &ctx->solve_out;
+  kf_inputs *kfin = &ctx->kf_ctx;
 
-  b->meas(s->ss, b->params, ctx->d);
-  b->jac(s->ss, b->params, ctx->C);
-}
-
-static inline i64 sdsge_resolve_stationary_p0(sdsge_obj_common *b,
-                                              const f64 *SDSGE_RESTRICT A,
-                                              const f64 *SDSGE_RESTRICT B,
-                                              const f64 *SDSGE_RESTRICT Q,
-                                              const i64 n, const i64 ld_out) {
-  if (!b->derive_P0) {
-    return KF_OK;
-  }
-  return kf_stationary_covariance(A, B, Q, 1e-12, 64, b->filter_arena, b->P0, n,
-                                  b->dims.n_exog, ld_out);
+  ctx->meas(s->ss, b->params, (f64 *)kfin->d);
+  ctx->jac(s->ss, b->params, (f64 *)kfin->C);
 }
 
 f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                      int has_priors) {
   sdsge_obj_common *b = &ctx->base;
-  sdsge_solve1 *s = &ctx->solve;
+  sdsge_solve1 *out = &ctx->solve_out;
+  klein_spec *s = &ctx->solve_ctx;
+  kf_inputs *kfin = &ctx->kf_ctx;
 
   sdsge_fill_params(b, theta);
-  const f64 *Q =
-      sdsge_build_cov(&b->q_spec, theta, b->params, b->std_q, b->corr_q, b->Q);
-  const f64 *R =
-      sdsge_build_cov(&b->r_spec, theta, b->params, b->std_r, b->corr_r, b->R);
+  sdsge_build_cov(&b->q, theta, b->params);
+  sdsge_build_cov(&b->r, theta, b->params);
 
-  const int solve_rc = sdsge_solve1_run(b, s);
+  const int solve_rc =
+      sdsge_solve1_run(&ctx->solve_ctx, out, b->arena, b->iarena);
   if (solve_rc == SDSGE_SOLVE_BK) {
     b->bk_violations++;
     return -INFINITY;
@@ -264,34 +256,17 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
   }
   sdsge_build_measurement(ctx);
 
-  i64 p0_rc = sdsge_resolve_stationary_p0(b, s->A, s->B, Q, b->dims.n_var,
-                                          b->dims.n_var);
-  if (p0_rc != KF_OK) {
-    return -INFINITY;
+  if (b->derive_P0) {
+    if (kf_stationary_covariance(out->A, out->B, kfin->Q, 1e-12, 64, b->arena,
+                                 (f64 *)kfin->P0, s->n_var, s->n_exog,
+                                 s->n_var) != KF_OK) {
+      return -INFINITY;
+    }
   }
 
   f64 ll = 0.0;
-  kf_inputs in = {.n = b->dims.n_var,
-                  .m = b->dims.n_obs,
-                  .k = b->dims.n_exog,
-                  .T = b->dims.T,
-                  .A = s->A,
-                  .B = s->B,
-                  .C = ctx->C,
-                  .d = ctx->d,
-                  .Q = Q,
-                  .R = R,
-                  .steady_state = s->ss,
-                  .y = b->y,
-                  .x0 = b->x0,
-                  .P0 = b->P0,
-                  .symmetrize = b->symmetrize,
-                  .joseph_cov = b->joseph_cov,
-                  .jitter = b->jitter,
-                  .return_shocks = 0,
-                  .store_history = 0};
-  kf_outputs out = {.loglik = &ll};
-  if (kf_hot_loop(&in, b->filter_arena, &out) != KF_OK) {
+  kf_outputs llout = {.loglik = &ll};
+  if (kf_hot_loop(kfin, b->arena, &llout) != KF_OK) {
     return -INFINITY;
   }
   return sdsge_add_lp(b, theta, ll, has_priors);
@@ -300,15 +275,16 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
 f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
                        int has_priors) {
   sdsge_obj_common *b = &ctx->base;
-  sdsge_solve1 *s = &ctx->solve;
+  sdsge_solve1 *out = &ctx->solve_out;
+  klein_spec *s = &ctx->solve_ctx;
+  ekf_inputs *ekfin = &ctx->ekf_ctx;
 
   sdsge_fill_params(b, theta);
-  const f64 *Q =
-      sdsge_build_cov(&b->q_spec, theta, b->params, b->std_q, b->corr_q, b->Q);
-  const f64 *R =
-      sdsge_build_cov(&b->r_spec, theta, b->params, b->std_r, b->corr_r, b->R);
+  sdsge_build_cov(&b->q, theta, b->params);
+  sdsge_build_cov(&b->r, theta, b->params);
 
-  const int solve_rc = sdsge_solve1_run(b, s);
+  const int solve_rc =
+      sdsge_solve1_run(&ctx->solve_ctx, out, b->arena, b->iarena);
   if (solve_rc == SDSGE_SOLVE_BK) {
     b->bk_violations++;
     return -INFINITY;
@@ -317,39 +293,17 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
     return -INFINITY;
   }
 
-  i64 p0_rc = sdsge_resolve_stationary_p0(b, s->A, s->B, Q, b->dims.n_var,
-                                          b->dims.n_var);
-
-  if (p0_rc != KF_OK) {
-    return -INFINITY;
+  if (b->derive_P0) {
+    if (kf_stationary_covariance(out->A, out->B, ekfin->Q, 1e-12, 64, b->arena,
+                                 (f64 *)ekfin->P0, s->n_var, s->n_exog,
+                                 s->n_var) != KF_OK) {
+      return -INFINITY;
+    }
   }
-  /* No precomputed (C, d): the EKF relinearizes each step via the meas / jac
-   * cfuncs at the running state estimate. */
+
   f64 ll = 0.0;
-  ekf_inputs in = {.meas = b->meas,
-                   .jac = b->jac,
-                   .A = s->A,
-                   .B = s->B,
-                   .calib_params = b->params,
-                   .Q = Q,
-                   .R = R,
-                   .steady_state = s->ss,
-                   .y = b->y,
-                   .x0 = b->x0,
-                   .P0 = b->P0,
-                   .T = b->dims.T,
-                   .n = b->dims.n_var,
-                   .m = b->dims.n_obs,
-                   .k = b->dims.n_exog,
-                   .n_par = b->dims.n_par,
-                   .jitter = b->jitter,
-                   .symmetrize = b->symmetrize,
-                   .joseph_cov = b->joseph_cov,
-                   .compute_y_filt = 0,
-                   .return_shocks = 0,
-                   .store_history = 0};
-  ekf_outputs out = {.loglik = &ll};
-  if (ekf_hot_loop(&in, b->filter_arena, &out) != KF_OK) {
+  ekf_outputs llout = {.loglik = &ll};
+  if (ekf_hot_loop(ekfin, b->arena, &llout) != KF_OK) {
     return -INFINITY;
   }
   return sdsge_add_lp(b, theta, ll, has_priors);
@@ -358,17 +312,16 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
 f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
                         const f64 *SDSGE_RESTRICT theta, int has_priors) {
   sdsge_obj_common *b = &ctx->base;
-  sdsge_solve1 *s = &ctx->solve;
-  sdsge_solve2 *s2 = &ctx->solve2;
+  sdsge_solve1 *out1 = &ctx->solve1_out;
+  sdsge_solve2 *out2 = &ctx->solve2_out;
+  sgu_klein_spec *s = &ctx->solve_ctx;
+  ukf_inputs *ukfin = &ctx->ukf_ctx;
 
   sdsge_fill_params(b, theta);
+  sdsge_build_cov(&b->q, theta, b->params);
+  sdsge_build_cov(&b->r, theta, b->params);
 
-  const f64 *Q =
-      sdsge_build_cov(&b->q_spec, theta, b->params, b->std_q, b->corr_q, b->Q);
-  const f64 *R =
-      sdsge_build_cov(&b->r_spec, theta, b->params, b->std_r, b->corr_r, b->R);
-
-  const int rc = sdsge_solve2_run(b, s, s2, Q);
+  const int rc = sdsge_solve2_run(s, out1, out2, b->arena, b->iarena);
 
   if (rc == SDSGE_SOLVE_BK) {
     b->bk_violations++;
@@ -377,55 +330,25 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
   if (rc != SDSGE_SOLVE_OK) {
     return -INFINITY;
   }
-  i64 p0_rc = sdsge_resolve_stationary_p0(b, s->p, s->B, Q, b->dims.n_state,
-                                          2 * b->dims.n_state);
-  if (p0_rc != KF_OK) {
-    return -INFINITY;
+
+  if (b->derive_P0) {
+    if (kf_stationary_covariance(
+            out1->p, out1->B, ukfin->Q, 1e-12, 64, b->arena, (f64 *)ukfin->P0,
+            s->first.n_state, s->first.n_exog, 2 * s->first.n_state) != KF_OK) {
+      return -INFINITY;
+    }
   }
 
   f64 ll = 0.0;
-  ukf_inputs in = {.meas = b->meas,
-                   .hx = s->p,
-                   .gx = s->f,
-                   .bu = s->B,
-                   .hxx = s2->hxx,
-                   .gxx = s2->gxx,
-                   .hxu = s2->hxu,
-                   .gxu = s2->gxu,
-                   .huu = s2->huu,
-                   .guu = s2->guu,
-                   .hss = s2->hss,
-                   .gss = s2->gss,
-                   .steady_state = s->ss,
-                   .params = b->params,
-                   .Q = Q,
-                   .R = R,
-                   .obs = b->y,
-                   .z0 = ctx->z0,
-                   .P0 = b->P0,
-                   .T = b->dims.T,
-                   .n_state = b->dims.n_state,
-                   .n_ctrl = b->dims.n_ctrl,
-                   .n_exog = b->dims.n_exog,
-                   .n_obs = b->dims.n_obs,
-                   .n_params = b->dims.n_par,
-                   .alpha = ctx->alpha,
-                   .beta = ctx->beta,
-                   .kappa = ctx->kappa,
-                   .jitter = b->jitter,
-                   .symmetrize = b->symmetrize,
-                   .store_history = 0};
-
-  ukf_outputs out = {.loglik = &ll};
-  if (ukf_hot_loop(&in, b->filter_arena, &out) != KF_OK) {
+  ukf_outputs ukfout = {.loglik = &ll};
+  if (ukf_hot_loop(ukfin, b->arena, &ukfout) != KF_OK) {
 
     return -INFINITY;
   }
   return sdsge_add_lp(b, theta, ll, has_priors);
 }
 
-/* ---- Driver-facing closures (see estimation.h for the sign convention) ----
- */
+/* --- Driver-facing closures (see estimation.h for the sign convention) --- */
 
 f64 sdsge_min_linear_ll(const f64 *SDSGE_RESTRICT x, void *ctx) {
   return -sdsge_obj_linear((sdsge_linear_ctx *)ctx, x, 0);
@@ -486,7 +409,7 @@ static const sdsge_objective_fn pos_table[2][3] = {
     {sdsge_pos_linear_ll, sdsge_pos_extended_ll, sdsge_pos_unscented_ll},
     {sdsge_post_linear, sdsge_post_extended, sdsge_post_unscented}};
 
-/* The tables as one lookup. `negate` picks the minimized form a driver wants
+/* The tables as one lookup. `negate` pick the minimized form a driver wants
  * over the +value form a reported density wants. Callers outside this file go
  * through here rather than re-spelling which symbol belongs to which mode, and
  * it is what reaches the likelihood row, whose entries are file-static. */
@@ -500,12 +423,12 @@ sdsge_objective_fn sdsge_select_objective(int negate, int has_priors,
  * driver that wants it: the optimizer takes it as the asymptotic covariance of
  * the point it just found, and the sampler takes it as the proposal it starts
  * from, at a mode either found here or supplied. The objective returns
- * +logpost, so every finite-difference expression below is written directly
- * for H = -d^2 logpost.
+ * +logpost, so every finite-difference expression below is written directly for
+ * H = -d^2 logpost.
  *
  * The off-diagonal stencil matches Dynare's hessian.m: it reuses the two
- * coordinate-direction evaluations and needs only the (++), (--) pair for
- * each i < j. After H = L L^T, solving L^T X = I gives X X^T = H^-1. */
+ * coordinate-direction evaluations and needs only the (++), (--) pair for each
+ * i < j. After H = L L^T, solving L^T X = I gives X X^T = H^-1. */
 i64 sdsge_estimation_cov_factor(sdsge_objective_fn logpost, void *obj_ctx,
                                 const f64 *SDSGE_RESTRICT theta, i64 d,
                                 f64 fd_step_scale, f64 fd_absolute_floor,
@@ -605,7 +528,9 @@ static void sdsge_fill_cov(void *ctx, i64 d, const f64 *SDSGE_RESTRICT theta,
     return;
   }
 
-  /* The factor, then sdsge_estimation_cov_factor's documented scratch. */
+  /* The factor, then
+   * sdsge_estimation_cov_factor's documented
+   * scratch. */
   f64 *scratch = (f64 *)malloc((3 * nm + 4 * (size_t)d) * sizeof(f64));
   if (scratch == NULL) {
     out->cov_status = SDSGE_ESTIMATION_EALLOC;
@@ -631,12 +556,12 @@ static void sdsge_fill_cov(void *ctx, i64 d, const f64 *SDSGE_RESTRICT theta,
 /* Standard errors in the caller's parameter space, from the theta-space
  * covariance. The jacobian of theta -> parameters is block diagonal: a scalar
  * depends on its own theta entry alone and a CPC block on its own run, so no
- * d*d jacobian is ever formed and V's cross terms never reach a diagonal
- * entry. A scalar's row is |dx/dz|, which the transform's own log-jacobian
- * already carries, exact and free; only a block is differenced, over the
- * entries kernel. Filled with NaN first, and a covariance that failed is NaN
- * already, so both it and a negative variance report themselves in place with
- * no status to consult. */
+ * d*d jacobian is ever formed and V's cross terms never reach a diagonal entry.
+ * A scalar's row is |dx/dz|, which the transform's own log-jacobian already
+ * carries, exact and free; only a block is differenced, over the entries
+ * kernel. Filled with NaN first, and a covariance that failed is NaN already,
+ * so both it and a negative variance report themselves in place with no status
+ * to consult. */
 static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
                           const f64 *SDSGE_RESTRICT theta,
                           const f64 *SDSGE_RESTRICT vcov,
@@ -657,7 +582,7 @@ static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
     }
   }
 
-  const sdsge_cov_spec *specs[2] = {&b->q_spec, &b->r_spec};
+  const sdsge_cov_spec *specs[2] = {&b->q.spec, &b->r.spec};
   i64 lmax = 0;
   i64 kmax = 0;
   for (int sp = 0; sp < 2; ++sp) {
@@ -677,16 +602,17 @@ static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
   if (scratch == NULL) {
     return;
   }
-  f64 *jac = scratch;            /* L*L: d(corr entries) / dz */
+  f64 *jac = scratch;            /* L*L: d(corr entries)/dz */
   f64 *jv = jac + lmax * lmax;   /* L*L: jac * V_block */
   f64 *probe = jv + lmax * lmax; /* L: the perturbed z */
   f64 *plus = probe + lmax;      /* L */
   f64 *minus = plus + lmax;      /* L */
-  f64 *chol = minus + lmax;      /* K*K: the entries kernel's factor */
+  f64 *chol = minus + lmax;      /* K*K: the entries
+                                    kernel's factor */
 
   /* Central difference of a closed-form algebraic map, so the step is the
-   * first-derivative optimum and not opt->cov_fd_step_scale, which is tuned
-   * for a second derivative of the filter. */
+   * first-derivative optimum and not opt->cov_fd_step_scale, which is tuned for
+   * a second derivative of the filter. */
   const f64 step = cbrt(DBL_EPSILON);
 
   for (int sp = 0; sp < 2; ++sp) {

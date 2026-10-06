@@ -58,6 +58,12 @@ typedef struct {
   i64 n_pairs;
 } sdsge_cov_spec;
 
+  sdsge_cov_spec spec;
+  f64 *out;  /* K*K built covariance */
+  f64 *corr; /* K*K scratch */
+  f64 *std;  /* K scratch */
+} sdsge_cov_build;
+
 /* A spec whose correlation is a live CPC block: the only shape that owns a run
  * of theta, and so the only one a theta -> parameters map has work to do on. */
 static inline int sdsge_spec_has_block(const sdsge_cov_spec *sp) {
@@ -93,18 +99,6 @@ typedef struct {
   int include_logjac;
 } sdsge_prior_tables;
 
-/* Model and data dimensions. */
-typedef struct {
-  i64 n_theta; /* estimated params */
-  i64 n_var;   /* nx + ny (pencil / filter dim) */
-  i64 n_state; /* nx */
-  i64 n_ctrl;  /* ny */
-  i64 n_exog;  /* k */
-  i64 n_obs;   /* m */
-  i64 n_par;   /* calib params */
-  i64 T;       /* observations */
-} sdsge_dims;
-
 /* theta -> params resolution tables. base_params and every slot index
  * (scalars' param_slot, cov std_slots/pair_slot) are in calib_params order, so
  * params doubles as the residual/measurement argument vector: no gather. */
@@ -116,79 +110,60 @@ typedef struct {
 
 /* Mode-independent objective context. */
 typedef struct {
-  sdsge_dims dims;
-
-  sdsge_residual_fn residual;
-  bc_residual_fn bc_residual;
-
-  klein_zgges_fn zgges;
-  sdsge_dgeqrf_fn dgeqrf;
-  sdsge_dormqr_fn dormqr;
-  meas_fn meas;
-  meas_fn jac;
-
-  const f64 *ss_seed;  /* n_var: Newton seed for the steady state */
-  const i8 *incidence; /* n_var: SDSGE_INC_* bits, unioned over the regimes */
-  const f64 *y;        /* T*n_obs */
-  f64 *P0;       /* explicit n_var*n_var prior; NULL derives it after solve */
-  const f64 *x0; /* n_var, or NULL */
-  f64 jitter;
-  int symmetrize;
-  int joseph_cov;
-  int derive_P0; /* if P0 is NULL, derive it from the stationary covariance */
 
   sdsge_param_map pmap;
-  sdsge_cov_spec q_spec;
-  sdsge_cov_spec r_spec;
+  sdsge_cov_build q, r;
   sdsge_prior_tables prior;
-
-  f64 *params; /* n_par; calib_params order, residual/meas argument vector */
-  f64 *Q;      /* n_exog*n_exog */
-  f64 *chol;   /* n_exog*n_exog: chol(Q), refactored only when Q moves */
-  f64 *R;      /* n_obs*n_obs */
-  f64 *corr_q; /* n_exog*n_exog */
-  f64 *corr_r; /* n_obs*n_obs */
-  f64 *std_q;  /* n_exog */
-  f64 *std_r;  /* n_obs */
-
-  f64 *filter_arena; /* scratch for the filter sizeof(f64)*<filter>_arena_size()
-                        reused for the P0 == NULL case, which occurs before the
-                        filter.
-                      */
-
-  /* Scratch for the per-draw solve, sized by sdsge_klein_solve1_arena_size or
-   * sdsge_sgu_klein_solve2_arena_size. Held for the run so no draw allocates.
-   */
-  f64 *solve_arena;
-  i64 *solve_iarena;
-
+  int derive_P0; /* compute the stationary covariance for the initial state */
+  f64 *params;   /* n_par; calib_params order, residual/meas argument vector */
+  f64 *arena;
+  i64 *iarena;
   i64 bk_violations;
 } sdsge_obj_common;
 
 /* Linear-filter objective context. */
 typedef struct {
   sdsge_obj_common base;
-  sdsge_solve1 solve;
-  f64 *C; /* n_obs*n_var */
-  f64 *d; /* n_obs */
+  klein_spec solve_ctx;
+  kf_inputs kf_ctx;
+  meas_fn meas, jac;
+  sdsge_solve1 solve_out;
 } sdsge_linear_ctx;
 
 /* Extended-filter objective context. */
 typedef struct {
   sdsge_obj_common base;
-  sdsge_solve1 solve;
+  klein_spec solve_ctx;
+  ekf_inputs ekf_ctx;
+  sdsge_solve1 solve_out;
 } sdsge_extended_ctx;
 
 /* Unscented-filter objective context. */
 typedef struct {
   sdsge_obj_common base;
-  sdsge_solve1 solve;
-  sdsge_solve2 solve2;
-  f64 *z0; /* 2*n_state */
-  f64 alpha;
-  f64 beta;
-  f64 kappa;
+  sgu_klein_spec solve_ctx;
+  ukf_inputs ukf_ctx;
+  sdsge_solve1 solve1_out;
+  sdsge_solve2 solve2_out;
 } sdsge_unscented_ctx;
+
+/* Scratch for one whole objective evaluation. The solve, the filter, and the
+ * stationary-covariance P0 derivation run one after another off the same
+ * buffer, each reading its inputs from explicitly stored outputs rather than
+ * the arena, so the requirement is the componentwise max of the three. Only the
+ * solve half needs the integer arena; every filter sizes it at zero.
+ *
+ * One sizer per mode rather than one taking an sdsge_filter_mode: the contexts
+ * are concretely typed per mode, so the caller is already in that branch. */
+arena_size sdsge_linear_obj_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+                                       i64 n_par, i64 n_exog, i64 n_obs,
+                                       i64 nd);
+arena_size sdsge_extended_obj_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+                                         i64 n_par, i64 n_exog, i64 n_obs,
+                                         i64 nd);
+arena_size sdsge_unscented_obj_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
+                                          i64 n_par, i64 n_exog, i64 n_obs,
+                                          i64 nd);
 
 /* One-time construction seeds (called once, from the ctx composer). */
 void sdsge_init_params(f64 *SDSGE_RESTRICT params,
