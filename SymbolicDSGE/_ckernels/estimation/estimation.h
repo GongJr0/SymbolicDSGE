@@ -71,14 +71,6 @@ static inline int sdsge_spec_has_block(const sdsge_cov_spec *sp) {
   return !sp->is_constant && sp->corr_from_block;
 }
 
-/* One estimated scalar's theta -> params scatter. */
-typedef struct {
-  i64 theta_idx;
-  i64 param_slot;
-  i64 transform_code;
-  f64 transform_params[SDSGE_N_TRANSFORM_PARAMS];
-} sdsge_scalar_scatter;
-
 /* Packed log-prior program arguments. */
 typedef struct {
   int has_prior;
@@ -104,8 +96,11 @@ typedef struct {
  * (scalars' param_slot, cov std_slots/pair_slot) are in calib_params order, so
  * params doubles as the residual/measurement argument vector: no gather. */
 typedef struct {
-  const f64 *base_params;              /* n_par */
-  const sdsge_scalar_scatter *scalars; /* n_scalars */
+  const f64 *base_params;      /* n_par */
+  const i64 *theta_idx;        /* n_scalars */
+  const i64 *param_slot;       /* n_scalars */
+  const i64 *transform_code;   /* n_scalars */
+  const f64 *transform_params; /* n_scalars*3 */
   i64 n_scalars;
 } sdsge_param_map;
 

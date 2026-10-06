@@ -38,13 +38,14 @@ void sdsge_init_params(f64 *SDSGE_RESTRICT params,
 
 static inline void sdsge_fill_params(sdsge_obj_common *base,
                                      const f64 *SDSGE_RESTRICT theta) {
+  sdsge_param_map *pmap = &base->pmap;
   f64 x, logjac;
-  for (i64 s = 0; s < base->pmap.n_scalars; ++s) {
-    const sdsge_scalar_scatter *sc = &base->pmap.scalars[s];
-    sdsge_transform_inverse_and_logjac(sc->transform_code,
-                                       (f64 *)sc->transform_params,
-                                       theta[sc->theta_idx], &x, &logjac);
-    base->params[sc->param_slot] = x;
+  for (i64 i = 0; i < pmap->n_scalars; ++i) {
+    i64 idx = pmap->theta_idx[i];
+    sdsge_transform_inverse_and_logjac(pmap->transform_code[i],
+                                       &pmap->transform_params[i * 3],
+                                       theta[idx], &x, &logjac);
+    base->params[pmap->param_slot[i]] = x;
   }
 }
 
@@ -570,11 +571,12 @@ static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
     out_se[i] = NAN;
   }
 
+  const sdsge_param_map *pmap = &b->pmap;
   f64 x, logjac;
-  for (i64 s = 0; s < b->pmap.n_scalars; ++s) {
-    const sdsge_scalar_scatter *sc = &b->pmap.scalars[s];
-    const i64 idx = sc->theta_idx;
-    sdsge_transform_inverse_and_logjac(sc->transform_code, sc->transform_params,
+  for (i64 i = 0; i < pmap->n_scalars; ++i) {
+    const i64 idx = pmap->theta_idx[i];
+    sdsge_transform_inverse_and_logjac(pmap->transform_code[i],
+                                       pmap->transform_params + i * 3,
                                        theta[idx], &x, &logjac);
     const f64 v = vcov[idx * d + idx];
     if (v >= 0.0) {
