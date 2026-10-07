@@ -7,7 +7,6 @@ from typing import (
     NamedTuple,
     Literal,
     Any,
-    Callable,
     Mapping,
     Sequence,
 )
@@ -26,6 +25,7 @@ from ..bayesian.priors import Prior
 from .prior_program import (
     _pack_transform,
     build_packed_logprior,
+    N_TRANSFORM_PARAMS,
     PyPriorTables,
 )
 from ..core.compiled_model import (
@@ -65,7 +65,7 @@ class MatrixPriorBlock(NamedTuple):
 
 
 @dataclass(frozen=True)
-class PreparedFilterRun:
+class FilterDTO:
     """Composed filter run inputs, ready for native evaluation.
 
     Attributes
@@ -82,12 +82,22 @@ class PreparedFilterRun:
         Pointer to the measurement jacobian evaluation callable (``numba.cfunc`` address).
     P0 : NDArray[float64] | None
         State covariance initialization matrix, or None if not provided.
-    kf_jitter : float64
+    jitter : float64
         Jitter to add to covariance matrices when cholesky decomposition fails.
-    kf_sym : bool
+    sym : bool
         Whether to symmetrize covariance matrices in the Kalman kernels.
-    kf_joseph_cov : bool
+    joseph_cov : bool
         Whether to use the Joseph form for covariance updates in the Kalman filter.
+    alpha : float | None
+        Alpha parameter for the unscented Kalman filter, or None if not applicable.
+    beta : float | None
+        Beta parameter for the unscented Kalman filter, or None if not applicable.
+    kappa : float | None
+        Kappa parameter for the unscented Kalman filter, or None if not applicable.
+    T : int
+        Number of time steps in the observation data.
+    n_obs : int
+        Number of observables (columns) in the observation data.
 
     """
 
@@ -97,9 +107,15 @@ class PreparedFilterRun:
     meas_addr: int
     jac_addr: int
     P0: NDF | None
-    kf_jitter: float64
-    kf_sym: bool
-    kf_joseph_cov: bool
+    jitter: float64
+    sym: bool
+    joseph_cov: bool
+    alpha: float | None
+    beta: float | None
+    kappa: float | None
+    # Allocation dimensions for filters
+    T: int
+    n_obs: int
 
 
 # ---------------------------------------------------------------------------
@@ -130,56 +146,15 @@ class PreparedFilterRun:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True)
-class PyDims:
-    """Mirror of ``sdsge_dims``: model and data dimensions (all i64)."""
-
-    n_theta: int  # estimated params
-    n_var: int  # nx + ny (pencil / filter dim)
-    n_state: int  # nx
-    n_ctrl: int  # ny
-    n_exog: int  # k
-    n_obs: int  # m
-    n_par: int  # calib params
-    T: int  # observations
-
-
-def get_dims(compiled: CompiledModel, estimated_params: list[str], y: NDF) -> PyDims:
-    return PyDims(
-        n_theta=len(estimated_params),
-        n_var=compiled.n_var,
-        n_state=compiled.n_state,
-        n_ctrl=compiled.n_ctrl,
-        n_exog=compiled.n_exog,
-        n_obs=y.shape[1],
-        n_par=compiled.n_par,
-        T=y.shape[0],
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class PyScalarScatter:
-    """Mirror of ``sdsge_scalar_scatter``: one estimated scalar's theta->params scatter.
-
-    ``transform_params`` is a ``np.float64`` array of length
-    ``SDSGE_N_TRANSFORM_PARAMS``.
-    """
-
-    theta_idx: int
-    param_slot: int
-    transform_code: int
-    transform_params: NDF
-
-
-def build_scalar_scatter(
+def build_param_components(
     *,
     param_names: Sequence[str],
     param_index: Mapping[str, int],
     matrix_member_names: set[str],
     param_transforms: Mapping[str, Any],
     calib_index: Mapping[str, int],
-) -> list[PyScalarScatter]:
-    """Flatten the estimated *scalar* params into ``PyScalarScatter`` rows.
+) -> tuple[NDI, NDI, NDI, NDF]:
+    """Flatten the estimated *scalar* params into indexed lookup tables.
 
     Walks ``param_names`` in theta order, skipping CPC block members (their
     correlation is built by the cov-spec ``corr_from_block`` regime, not the
@@ -194,7 +169,10 @@ def build_scalar_scatter(
     fallback: every estimated scalar is a calibrated parameter (so its slot
     exists), and its transform packs to a native code (never ``None``).
     """
-    scatter: list[PyScalarScatter] = []
+    theta_idx = []
+    param_slot = []
+    transform_code = []
+    transform_params = []
     for name in param_names:
         if name in matrix_member_names:
             continue
@@ -204,21 +182,24 @@ def build_scalar_scatter(
                 f"in the native parameter vector cannot be resolved."
             )
         transform = param_transforms[name]
-        code, transform_params = _pack_transform(transform)
+        code, params = _pack_transform(transform)
         if code is None:
             raise ValueError(
                 f"Transform {type(transform).__name__!r} on estimated scalar '{name}' "
                 f"has no native transform code."
             )
-        scatter.append(
-            PyScalarScatter(
-                theta_idx=int(param_index[name]),
-                param_slot=int(calib_index[name]),
-                transform_code=int(code),
-                transform_params=np.asarray(transform_params, dtype=np.float64),
-            )
-        )
-    return scatter
+
+        theta_idx.append(int(param_index[name]))
+        param_slot.append(int(calib_index[name]))
+        transform_code.append(int(code))
+        transform_params.append(params)
+
+    return (
+        np.asarray(theta_idx, dtype=np.int64),
+        np.asarray(param_slot, dtype=np.int64),
+        np.asarray(transform_code, dtype=np.int64),
+        np.asarray(transform_params, dtype=np.float64).reshape(-1, N_TRANSFORM_PARAMS),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,7 +214,10 @@ class PyParamMap:
     """
 
     base_params: NDF  # n_par, calib_params order
-    scalars: list[PyScalarScatter]  # n_scalars
+    theta_idx: NDI  # n_scalars, theta -> params scatter
+    param_slot: NDI  # n_scalars, theta -> params scatter
+    transform_code: NDI  # n_scalars, theta -> params scatter
+    transform_params: NDF  # n_scalars x SDSGE_N_TRANSFORM_PARAMS,
 
 
 def build_calib_index(compiled: CompiledModel) -> dict[str, int]:
@@ -269,18 +253,28 @@ def build_param_map(
     base_params = np.empty(len(calib_index), dtype=float64)
     for name, slot in calib_index.items():
         base_params[slot] = base_dict[name]
-    scalars = build_scalar_scatter(
+    (
+        theta_idx,
+        param_slot,
+        transform_code,
+        transform_params,
+    ) = build_param_components(
         param_names=param_names,
         param_index=param_index,
         matrix_member_names=matrix_member_names,
         param_transforms=param_transforms,
         calib_index=calib_index,
     )
-    return PyParamMap(base_params=base_params, scalars=scalars)
+    return PyParamMap(
+        base_params=base_params,
+        theta_idx=theta_idx,
+        param_slot=param_slot,
+        transform_code=transform_code,
+        transform_params=transform_params,
+    )
 
 
-@dataclass(frozen=True, slots=True)
-class PyCovSpec:
+class PyCovSpec(NamedTuple):
     """Mirror of ``sdsge_cov_spec``: a Q or R covariance build spec.
 
     ``is_constant`` picks a loop-invariant ``constant`` (K*K, resolved once in
@@ -291,9 +285,9 @@ class PyCovSpec:
     (``n_pairs`` = ``len(pair_i)``).
     """
 
+    K: int  # n_exog (Q) or n_obs (R)
     is_constant: bool
     constant: NDF | None  # K*K, or None
-    K: int  # n_exog (Q) or n_obs (R)
     std_slots: NDI  # K
     corr_from_block: bool
     block_theta_off: int
@@ -301,74 +295,6 @@ class PyCovSpec:
     pair_i: NDI  # n_pairs
     pair_j: NDI  # n_pairs
     pair_slot: NDI  # n_pairs
-
-
-def _assemble_cov_spec(
-    *,
-    K: int,
-    std_names: Sequence[str],
-    corr_pairs: Sequence[tuple[int, int, str]],
-    block: MatrixPriorBlock | None,
-    calib_index: Mapping[str, int],
-    param_index: Mapping[str, int],
-    constant_fn: Callable[[], NDF],
-) -> PyCovSpec:
-    """Pick the regime for one covariance and fill ``PyCovSpec``.
-
-    Constant when nothing feeding the matrix is estimated (no CPC block, no
-    estimated std or pairwise-corr param): the matrix is loop-invariant, so
-    ``constant_fn`` materializes it once at base calibration. Otherwise rebuilt
-    per eval: ``corr_from_block`` reads the CPC block's theta slice; else the
-    correlation is assembled from the ``pair_*`` triples. ``std_slots`` and
-    ``pair_slot`` index the calib-order ``params`` via ``calib_index``.
-    """
-    empty_i = np.empty(0, dtype=np.int64)
-
-    std_estimated = any(name in param_index for name in std_names)
-    corr_estimated = any(pname in param_index for _, _, pname in corr_pairs)
-    if not (block or std_estimated or corr_estimated):
-        return PyCovSpec(
-            is_constant=True,
-            constant=np.ascontiguousarray(constant_fn(), dtype=np.float64),
-            K=int(K),
-            std_slots=empty_i,
-            corr_from_block=False,
-            block_theta_off=0,
-            block_theta_len=0,
-            pair_i=empty_i,
-            pair_j=empty_i,
-            pair_slot=empty_i,
-        )
-    std_slots = np.asarray([calib_index[name] for name in std_names], dtype=np.int64)
-    if block:
-        sl = block.theta_slice
-        return PyCovSpec(
-            is_constant=False,
-            constant=None,
-            K=int(K),
-            std_slots=std_slots,
-            corr_from_block=True,
-            block_theta_off=int(sl.start),
-            block_theta_len=int(sl.stop - sl.start),
-            pair_i=empty_i,
-            pair_j=empty_i,
-            pair_slot=empty_i,
-        )
-    pair_i = np.asarray([i for i, _, _ in corr_pairs], dtype=np.int64)
-    pair_j = np.asarray([j for _, j, _ in corr_pairs], dtype=np.int64)
-    pair_slot = np.asarray([calib_index[pn] for _, _, pn in corr_pairs], dtype=np.int64)
-    return PyCovSpec(
-        is_constant=False,
-        constant=None,
-        K=int(K),
-        std_slots=std_slots,
-        corr_from_block=False,
-        block_theta_off=0,
-        block_theta_len=0,
-        pair_i=pair_i,
-        pair_j=pair_j,
-        pair_slot=pair_slot,
-    )
 
 
 def _build_q_spec(
@@ -398,14 +324,29 @@ def _build_q_spec(
         i, j = (compiled.shock_idx[s.name] for s in pair)
         corr_pairs.append((i, j, pname))
 
-    return _assemble_cov_spec(
+    block = matrix_blocks.get("Q_corr")
+    is_constant = not (
+        block is not None
+        or any(name in param_index for name in std_names)
+        or any(pname in param_index for _, _, pname in corr_pairs)
+    )
+    theta_slice = block.theta_slice if block is not None else slice(0, 0)
+
+    return PyCovSpec(
         K=compiled.n_exog,
-        std_names=std_names,
-        corr_pairs=corr_pairs,
-        block=matrix_blocks.get("Q_corr"),
-        calib_index=calib_index,
-        param_index=param_index,
-        constant_fn=lambda: _shock_covariance(compiled, params=base_dict),
+        is_constant=is_constant,
+        constant=(
+            _shock_covariance(compiled, params=base_dict) if is_constant else None
+        ),
+        std_slots=np.asarray([calib_index[n] for n in std_names], dtype=np.int64),
+        corr_from_block=block is not None,
+        block_theta_off=int(theta_slice.start),
+        block_theta_len=int(theta_slice.stop - theta_slice.start),
+        pair_i=np.asarray([i for i, _, _ in corr_pairs], dtype=np.int64),
+        pair_j=np.asarray([j for _, j, _ in corr_pairs], dtype=np.int64),
+        pair_slot=np.asarray(
+            [calib_index[pn] for _, _, pn in corr_pairs], dtype=np.int64
+        ),
     )
 
 
@@ -421,73 +362,75 @@ def _build_r_spec(
 ) -> PyCovSpec:
     """Covariance spec for R (measurement covariance), mirroring :func:`_build_R`.
 
-    A user ``R_override`` or a directly-configured constant ``kalman.R`` (no named
-    std map) is loop-invariant, so it is materialized once. Otherwise members are
-    the active ``observables``; each std is ``R_std_param_map[obs]`` and each
-    off-diagonal correlation is the ``R_corr_param_map`` name for that observable
-    pair. An ``R_corr`` CPC block takes the ``corr_from_block`` regime.
+    Members are the active ``observables``; each std is ``R_std_param_map[obs]``
+    and each off-diagonal correlation is the ``R_corr_param_map`` name for that
+    observable pair. An ``R_corr`` CPC block takes the ``corr_from_block``
+    regime. An ``R_override`` outranks both: it forces the constant regime
+    whatever the config names, which is the precedence the branch order used to
+    carry. A config with no named std map has nothing to estimate, so it reaches
+    the constant regime on the same test, and ``_build_R`` resolves all three
+    constant sources (override, named map at base calibration, fixed
+    ``kalman.R``) behind one call.
     """
     n_obs = len(observables)
     obs_list = list(observables)
-    if R_override is not None:
-        constant = _build_R(compiled, obs_list, base_dict, R_override=R_override)
-        empty_i = np.empty(0, dtype=np.int64)
-        return PyCovSpec(
-            is_constant=True,
-            constant=np.ascontiguousarray(constant, dtype=np.float64),
-            K=n_obs,
-            std_slots=empty_i,
-            corr_from_block=False,
-            block_theta_off=0,
-            block_theta_len=0,
-            pair_i=empty_i,
-            pair_j=empty_i,
-            pair_slot=empty_i,
-        )
 
     kalman = compiled.kalman
-    if kalman is not None:
-        if kalman.R_std_param_map is None:
-            # Forced-constant: an override, or a fixed R with no named std map.
-            constant = _build_R(compiled, obs_list, base_dict, R_override=R_override)
-            empty_i = np.empty(0, dtype=np.int64)
-            return PyCovSpec(
-                is_constant=True,
-                constant=np.ascontiguousarray(constant, dtype=np.float64),
-                K=n_obs,
-                std_slots=empty_i,
-                corr_from_block=False,
-                block_theta_off=0,
-                block_theta_len=0,
-                pair_i=empty_i,
-                pair_j=empty_i,
-                pair_slot=empty_i,
-            )
-        else:
-            std_map = kalman.R_std_param_map
-            corr_map: Mapping[Any, str | None] = kalman.R_corr_param_map or {}
-            std_names = [std_map[obs] for obs in obs_list]
-            corr_pairs: list[tuple[int, int, str]] = []
-            for i in range(n_obs):
-                for j in range(i + 1, n_obs):
-                    pname = corr_map[obs_list[i], obs_list[j]]
-                    if pname is not None:
-                        corr_pairs.append((i, j, pname))
-            return _assemble_cov_spec(
-                K=n_obs,
-                std_names=std_names,
-                corr_pairs=corr_pairs,
-                block=matrix_blocks.get("R_corr"),
-                calib_index=calib_index,
-                param_index=param_index,
-                constant_fn=lambda: _build_R(compiled, obs_list, base_dict),
-            )
-    else:
-        raise ValueError("A override for R or a KalmanConfig specifying R is required.")
+    std_map = None if kalman is None else kalman.R_std_param_map
+    corr_map: Mapping[Any, str | None] | None = (
+        None if kalman is None else kalman.R_corr_param_map
+    )
+
+    std_names: list[str] = [] if std_map is None else [std_map[o] for o in obs_list]
+    corr_pairs: list[tuple[int, int, str]] = []
+    if std_map is not None and corr_map is not None:
+        for i in range(n_obs):
+            for j in range(i + 1, n_obs):
+                pname = corr_map[obs_list[i], obs_list[j]]
+                if pname is not None:
+                    corr_pairs.append((i, j, pname))
+
+    block = matrix_blocks.get("R_corr")
+    is_constant = R_override is not None or not (
+        block is not None
+        or any(name in param_index for name in std_names)
+        or any(pname in param_index for _, _, pname in corr_pairs)
+    )
+    theta_slice = block.theta_slice if block is not None else slice(0, 0)
+
+    return PyCovSpec(
+        K=n_obs,
+        is_constant=is_constant,
+        constant=(
+            _build_R(compiled, obs_list, base_dict, R_override=R_override)
+            if is_constant
+            else None
+        ),
+        std_slots=np.asarray([calib_index[n] for n in std_names], dtype=np.int64),
+        corr_from_block=block is not None,
+        block_theta_off=int(theta_slice.start),
+        block_theta_len=int(theta_slice.stop - theta_slice.start),
+        pair_i=np.asarray([i for i, _, _ in corr_pairs], dtype=np.int64),
+        pair_j=np.asarray([j for _, j, _ in corr_pairs], dtype=np.int64),
+        pair_slot=np.asarray(
+            [calib_index[pn] for _, _, pn in corr_pairs], dtype=np.int64
+        ),
+    )
 
 
-@dataclass(frozen=True, slots=True)
-class PyObjCommon:
+class SolveDTO(NamedTuple):
+    residual_addr: int
+    bc_residual_addr: int
+    ss_seed: NDF
+    incidence: NDArray[np.int8]
+    n_var: int
+    n_state: int
+    n_ctrl: int
+    n_exog: int
+    n_par: int
+
+
+class EstimDTO(NamedTuple):
     """Mirror of ``sdsge_obj_common``: the mode-independent objective inputs.
 
     Runtime addresses arrive as ``int`` (cfunc ``.address`` / capsule pointer);
@@ -497,32 +440,19 @@ class PyObjCommon:
     ``bk_violations`` output are composer-owned and omitted here.
     """
 
-    dims: PyDims
-
-    residual_addr: int
-    bc_residual_addr: int  # bicomplex-Hessian residual; 0 when unused (linear)
-    meas_addr: int
-    jac_addr: int
-
-    ss_seed: NDF  # n_var: Newton seed for the steady state
-    incidence: NDArray[np.int8]  # n_var: SDSGE_INC_* bits per variable
-
-    y: NDF  # T*n_obs
-    P0: NDF | None  # n_var*n_var; UKF 2*n_state square
-    jitter: float
-    symmetrize: bool
-    joseph_cov: bool
-
+    solve_ctx: SolveDTO
+    filter_ctx: FilterDTO
     pmap: PyParamMap
     q_spec: PyCovSpec
     r_spec: PyCovSpec
     prior: PyPriorTables
+    n_theta: int
 
 
-def build_obj_common(
+def build_dto(
     *,
     compiled: CompiledModel,
-    prepared: PreparedFilterRun,
+    prepared: FilterDTO,
     param_names: Sequence[str],
     param_index: Mapping[str, int],
     matrix_member_names: set[str],
@@ -531,7 +461,7 @@ def build_obj_common(
     priors: Mapping[str, Prior] | None,
     ss_seed: Any,
     R_override: NDF | None,
-) -> PyObjCommon:
+) -> EstimDTO:
     """Assemble the mode-independent objective inputs (``sdsge_obj_common``).
 
     The single orchestration point for the input tables: it builds one
@@ -544,7 +474,6 @@ def build_obj_common(
     variable order by the solver's authority. Scratch buffers and the
     ``bk_violations`` output are the composer's job, not here.
     """
-    y = prepared.y_reordered
     calib_index = build_calib_index(compiled)
     base_dict = extract_base_params(compiled)
 
@@ -561,19 +490,21 @@ def build_obj_common(
         matrix_member_names=matrix_member_names,
     )
 
-    return PyObjCommon(
-        dims=get_dims(compiled, list(param_names), y),
+    solve = SolveDTO(
         residual_addr=int(compiled.construct_objective_cfunc().address),
         bc_residual_addr=int(bc_residual_addr),
-        meas_addr=int(prepared.meas_addr),
-        jac_addr=int(prepared.jac_addr),
-        ss_seed=np.ascontiguousarray(ss_seed_vec, dtype=np.float64),
+        ss_seed=ss_seed_vec,
         incidence=compiled._incidence,
-        y=y,
-        P0=prepared.P0,
-        jitter=float(prepared.kf_jitter),
-        symmetrize=bool(prepared.kf_sym),
-        joseph_cov=bool(prepared.kf_joseph_cov),
+        n_var=compiled.n_var,
+        n_state=compiled.n_state,
+        n_ctrl=compiled.n_ctrl,
+        n_exog=compiled.n_exog,
+        n_par=compiled.n_par,
+    )
+
+    return EstimDTO(
+        solve_ctx=solve,
+        filter_ctx=prepared,
         pmap=build_param_map(
             compiled=compiled,
             param_names=param_names,
@@ -599,82 +530,7 @@ def build_obj_common(
             R_override=R_override,
         ),
         prior=prior_tables if prior_tables is not None else PyPriorTables.empty(),
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class PyLinearContext:
-    """Mirror of ``sdsge_linear_ctx``.
-
-    The ``solve1`` buffers and the ``C``/``d`` measurement-linearization outputs are
-    composer-allocated scratch, so this wrapper adds no Python-provided fields
-    beyond ``base``.
-    """
-
-    base: PyObjCommon
-
-
-@dataclass(frozen=True, slots=True)
-class PyExtendedContext:
-    """Mirror of ``sdsge_extended_ctx``.
-
-    ``solve1`` is composer-allocated scratch; no Python-provided fields beyond
-    ``base``.
-    """
-
-    base: PyObjCommon
-
-
-@dataclass(frozen=True, slots=True)
-class PyUnscentedContext:
-    """Mirror of ``sdsge_unscented_ctx``.
-
-    ``solve1``/``solve2`` are composer-allocated scratch.  ``alpha``/``beta``/``kappa`` are
-    the UKF tuning scalars.
-    """
-
-    base: PyObjCommon
-    alpha: float
-    beta: float
-    kappa: float
-
-
-def build_linear_context(base: PyObjCommon) -> PyLinearContext:
-    """Wrap the base inputs for the linear filter.
-
-    The ``solve1`` buffers and the ``C``/``d`` measurement linearization are
-    composer-allocated scratch, so there is nothing to add beyond ``base``.
-    """
-    return PyLinearContext(base=base)
-
-
-def build_extended_context(base: PyObjCommon) -> PyExtendedContext:
-    """Wrap the base inputs for the extended (EKF) filter.
-
-    ``solve1`` is composer-allocated scratch; nothing to add beyond ``base``.
-    """
-    return PyExtendedContext(base=base)
-
-
-def build_unscented_context(
-    base: PyObjCommon,
-    *,
-    compiled: CompiledModel,
-    alpha: float = 1.0,
-    beta: float = 2.0,
-    kappa: float = 1.0,
-) -> PyUnscentedContext:
-    """Wrap the base inputs for the unscented filter.
-
-    ``solve1``/``solve2`` are composer-allocated scratch;
-    ``alpha``/``beta``/``kappa`` are the UKF tuning scalars
-    (defaults match the Kalman resolvers, the only source of these today).
-    """
-    return PyUnscentedContext(
-        base=base,
-        alpha=float(alpha),
-        beta=float(beta),
-        kappa=float(kappa),
+        n_theta=len(param_names),
     )
 
 
@@ -795,21 +651,26 @@ def prepare_filter_run(
     symmetrize: bool,
     joseph_cov: bool = False,
     P0: NDF | None = None,
-) -> PreparedFilterRun:
+) -> FilterDTO:
     obs, y_reordered = reorder_observables(compiled, observables, y)
     mode = filter_mode
 
     kf_jitter, kf_sym = resolve_filter_options(jitter, symmetrize)
-    return PreparedFilterRun(
+    return FilterDTO(
         observables=obs,
         y_reordered=y_reordered,
         mode=mode,
         meas_addr=compiled.construct_measurement_cfunc(obs).address,
         jac_addr=compiled.construct_measurement_jacobian_cfunc(obs).address,
         P0=_resolve_P0(FilterMode(mode), compiled.n_state, compiled.n_var, P0),
-        kf_jitter=kf_jitter,
-        kf_sym=kf_sym,
-        kf_joseph_cov=bool(joseph_cov),
+        jitter=kf_jitter,
+        sym=kf_sym,
+        joseph_cov=bool(joseph_cov),
+        alpha=1.0,
+        beta=2.0,
+        kappa=1.0,
+        T=y_reordered.shape[0],
+        n_obs=y_reordered.shape[1],
     )
 
 

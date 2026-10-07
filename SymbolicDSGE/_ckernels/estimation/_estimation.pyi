@@ -17,7 +17,6 @@ _F64 = NDArray[float64]
 
 def run_estimation(
     ctx_dto: Any,
-    mode: str,
     method: str,
     theta0: _F64,
     bounds: Sequence[tuple[float | None, float | None]] | None = None,
@@ -38,7 +37,6 @@ def run_estimation(
 ) -> dict[str, Any]: ...
 def run_mcmc(
     ctx_dto: Any,
-    mode: str,
     theta0: _F64,
     rng: np.random.Generator,
     n_draws: int,
@@ -54,8 +52,6 @@ def run_mcmc(
     compute_map: bool = True,
     map_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]: ...
-def loglik(ctx_dto: Any, filter_mode: str, theta: _F64) -> float64: ...
+def loglik(ctx_dto: Any, theta: _F64) -> float64: ...
 def logprior(ctx_dto: Any, theta: _F64, jacobian: bool = False) -> float64: ...
-def logpost(
-    ctx_dto: Any, filter_mode: str, theta: _F64, jacobian: bool = False
-) -> float64: ...
+def logpost(ctx_dto: Any, theta: _F64, jacobian: bool = False) -> float64: ...

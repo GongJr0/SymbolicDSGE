@@ -97,14 +97,16 @@ static inline f64 sdsge_unconstrained_to_params(const sdsge_obj_common *b,
                                                 f64 *SDSGE_RESTRICT Lblk,
                                                 f64 *SDSGE_RESTRICT out) {
   const sdsge_prior_tables *pr = &b->prior;
+  const sdsge_param_map *pmap = &b->pmap;
+
   f64 lj = 0.0;
   f64 x, logjac;
-
-  for (i64 i = 0; i < b->pmap.n_scalars; ++i) {
-    const sdsge_scalar_scatter *sc = &b->pmap.scalars[i];
-    sdsge_transform_inverse_and_logjac(sc->transform_code, sc->transform_params,
-                                       theta[sc->theta_idx], &x, &logjac);
-    out[sc->theta_idx] = x;
+  for (i64 i = 0; i < pmap->n_scalars; ++i) {
+    i64 idx = pmap->theta_idx[i];
+    sdsge_transform_inverse_and_logjac(pmap->transform_code[i],
+                                       pmap->transform_params + i * 3,
+                                       theta[idx], &x, &logjac);
+    out[idx] = x;
   }
 
   for (i64 i = 0; i < pr->n_scalar; ++i) {
@@ -115,7 +117,7 @@ static inline f64 sdsge_unconstrained_to_params(const sdsge_obj_common *b,
     lj += logjac;
   }
 
-  const sdsge_cov_spec *specs[2] = {&b->q_spec, &b->r_spec};
+  const sdsge_cov_spec *specs[2] = {&b->q.spec, &b->r.spec};
   for (i64 s = 0; s < 2; ++s) {
     const sdsge_cov_spec *sp = specs[s];
     if (!sdsge_spec_has_block(sp)) {
@@ -154,8 +156,8 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   /* Widest CPC block the keep-time inversion has to factor. */
   const sdsge_obj_common *cb = (const sdsge_obj_common *)obj_ctx;
   const i64 kblk =
-      max_i64(sdsge_spec_has_block(&cb->q_spec) ? cb->q_spec.K : 0,
-              sdsge_spec_has_block(&cb->r_spec) ? cb->r_spec.K : 0);
+      max_i64(sdsge_spec_has_block(&cb->q.spec) ? cb->q.spec.K : 0,
+              sdsge_spec_has_block(&cb->r.spec) ? cb->r.spec.K : 0);
 
   /* One workspace allocation up front, freed on return.
    * 5 vectors of d and 3 matrices of d*d. The last matrix is the refactor
