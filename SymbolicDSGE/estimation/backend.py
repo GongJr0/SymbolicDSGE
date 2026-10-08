@@ -39,9 +39,6 @@ from ..kalman.resolvers import FilterMode, _resolve_P0
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
 
-MatrixName = Literal["R", "Q"]
-MatrixPriorKey = Literal["R_corr", "Q_corr"]
-
 
 class MatrixPriorBlock(NamedTuple):
     """Minimal per-matrix LKJ metadata.
@@ -56,7 +53,7 @@ class MatrixPriorBlock(NamedTuple):
     ``_matrix_blocks``, so it is not repeated on the block itself.
     """
 
-    dim: int
+    K: int
     labels: list[str]
     member_names: list[str]
     positions: NDArray[np.int64]

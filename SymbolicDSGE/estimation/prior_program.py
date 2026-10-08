@@ -46,6 +46,7 @@ class DistCode(IntEnum):
     directly inside the cached njit hot loop.
     """
 
+    NO_DENSITY = 0
     NORMAL = 1
     LOG_NORMAL = 2
     HALF_NORMAL = 3
@@ -63,16 +64,16 @@ class TransformCode(IntEnum):
     Mirrors ``SdsgeTransformCode`` in ``prior_program.h``; see :class:`DistCode`.
     """
 
-    IDENTITY = 1
-    LOG = 2
-    SOFTPLUS = 3
-    LOGIT = 4
-    PROBIT = 5
-    AFFINE_LOGIT = 6
-    AFFINE_PROBIT = 7
-    LOWER_BOUNDED = 8
-    UPPER_BOUNDED = 9
-    TANH = 10
+    IDENTITY = 0
+    LOG = 1
+    SOFTPLUS = 2
+    LOGIT = 3
+    PROBIT = 4
+    AFFINE_LOGIT = 5
+    AFFINE_PROBIT = 6
+    LOWER_BOUNDED = 7
+    UPPER_BOUNDED = 8
+    TANH = 9
 
 
 #: Packed-row strides (mirror ``SDSGE_N_DIST_PARAMS`` / ``SDSGE_N_TRANSFORM_PARAMS``
@@ -170,14 +171,14 @@ def build_packed_logprior(
                     f"CholeskyCorrTransform; got {type(prior.dist).__name__} "
                     f"and {type(prior.transform).__name__}."
                 )
-            dim = int(block.dim)
+            K = int(block.K)
             sl = block.theta_slice
             matrix_offsets.append(int(sl.start))
-            matrix_dims.append(dim)
+            matrix_dims.append(K)
             matrix_lengths.append(int(sl.stop - sl.start))
             eta = float(getattr(prior.dist, "_eta"))
             matrix_etas.append(eta)
-            matrix_log_constants.append(float(_log_lkj_normalizer_C(dim, eta)))
+            matrix_log_constants.append(float(_log_lkj_normalizer_C(K, eta)))
             continue
 
         if name in matrix_member_names:

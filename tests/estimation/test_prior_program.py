@@ -230,7 +230,7 @@ def test_packed_lkj_block_unit_matches_python_golden():
     )
     theta = np.asarray([0.25, -0.15, 0.45], dtype=np.float64)
     block = SimpleNamespace(
-        dim=3,
+        K=3,
         theta_slice=slice(0, 3),
     )
     expected = 0.5643752975616161
@@ -273,7 +273,7 @@ def test_packed_logprior_rejects_unsupported_specs():
     )
     assert packed is not None
 
-    block = SimpleNamespace(dim=2, theta_slice=slice(0, 1))
+    block = SimpleNamespace(K=2, theta_slice=slice(0, 1))
     with pytest.raises(TypeError, match="must be an LKJChol"):
         build_packed_logprior(
             priors={"corr": object()},

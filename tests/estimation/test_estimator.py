@@ -1065,7 +1065,7 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
     present = {(int(r), int(c)) for r, c in block.positions}
     missing = [
         (block.labels[row], block.labels[col])
-        for row in range(1, block.dim)
+        for row in range(1, block.K)
         for col in range(row)
         if (row, col) not in present
     ]
@@ -1081,7 +1081,7 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
     est_base._requested_reserved_keys = ("R_corr",)
 
     res_dim1 = MatrixPriorBlock(
-        dim=1,
+        K=1,
         labels=["A"],
         member_names=[],
         positions=np.empty((0, 2), dtype=np.int64),
@@ -1101,7 +1101,7 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         est_base._build_matrix_prior_blocks()
 
     res_short = MatrixPriorBlock(
-        dim=3,
+        K=3,
         labels=["A", "B", "C"],
         member_names=["rho_ba", "rho_ca"],
         positions=np.array([[1, 0], [2, 0]], dtype=np.int64),
@@ -1148,7 +1148,7 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         corr_param_map=PairGetterDict({frozenset(("B", "A")): "meas_rho_ab"}),
     )
     q_resolution = MatrixPriorBlock(
-        dim=2,
+        K=2,
         labels=["u", "v"],
         member_names=["meas_rho_ab"],
         positions=np.array([[1, 0]], dtype=np.int64),
