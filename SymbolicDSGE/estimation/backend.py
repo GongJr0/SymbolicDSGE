@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import (
     NamedTuple,
-    Literal,
     Any,
     Mapping,
     Sequence,
@@ -23,9 +22,7 @@ from .._ckernels.estimation import (
 )
 from ..bayesian.priors import Prior
 from .prior_program import (
-    _pack_transform,
     build_prior_tables,
-    N_TRANSFORM_PARAMS,
     PyPriorTables,
 )
 from ..core.compiled_model import (
@@ -59,6 +56,36 @@ class MatrixPriorBlock(NamedTuple):
     positions: NDArray[np.int64]
     theta_slice: slice
     prior: Prior | None
+
+
+class PyParamMap(NamedTuple):
+    """Gather of base model parameters and theta->param order resolution."""
+
+    base_params: NDF  # n_par, calib_params order
+    param_slot: NDI  # n_scalars, theta -> params scatter
+
+
+class PyCovSpec(NamedTuple):
+    """Mirror of ``sdsge_cov_spec``: a Q or R covariance build spec.
+
+    ``is_constant`` picks a loop-invariant ``constant`` (K*K, resolved once in
+    prep) over the per-eval rebuild. When rebuilt, ``std_slots`` gives the K
+    diagonal param slots; the correlation comes either from a CPC block
+    (``corr_from_block`` with ``block_theta_off``/``block_theta_len`` into theta)
+    or from the ``pair_i``/``pair_j``/``pair_slot`` triples
+    (``n_pairs`` = ``len(pair_i)``).
+    """
+
+    K: int  # n_exog (Q) or n_obs (R)
+    is_constant: bool
+    constant: NDF | None  # K*K, or None
+    std_slots: NDI  # K
+    corr_from_block: bool
+    block_theta_off: int
+    block_theta_len: int
+    pair_i: NDI  # n_pairs
+    pair_j: NDI  # n_pairs
+    pair_slot: NDI  # n_pairs
 
 
 @dataclass(frozen=True)
@@ -115,6 +142,37 @@ class FilterDTO:
     n_obs: int
 
 
+class SolveDTO(NamedTuple):
+    residual_addr: int
+    bc_residual_addr: int
+    ss_seed: NDF
+    incidence: NDArray[np.int8]
+    n_var: int
+    n_state: int
+    n_ctrl: int
+    n_exog: int
+    n_par: int
+
+
+class EstimDTO(NamedTuple):
+    """Mirror of ``sdsge_obj_common``: the mode-independent objective inputs.
+
+    Runtime addresses arrive as ``int`` (cfunc ``.address`` / capsule pointer);
+    ``zgges`` is absent because the composer pulls it from the scipy cython_lapack
+    capsule, not from Python. The scratch fields on the C struct (``params``,
+    ``Q``, ``R``, ``corr_q``, ``corr_r``, ``std_q``, ``std_r``) and the
+    ``bk_violations`` output are composer-owned and omitted here.
+    """
+
+    solve_ctx: SolveDTO
+    filter_ctx: FilterDTO
+    pmap: PyParamMap
+    q_spec: PyCovSpec
+    r_spec: PyCovSpec
+    prior: PyPriorTables
+    n_theta: int
+
+
 # ---------------------------------------------------------------------------
 # Native estimation context DTOs (issue #330).
 #
@@ -143,80 +201,6 @@ class FilterDTO:
 # ---------------------------------------------------------------------------
 
 
-def build_param_components(
-    *,
-    param_names: Sequence[str],
-    param_index: Mapping[str, int],
-    matrix_member_names: set[str],
-    param_transforms: Mapping[str, Any],
-    calib_index: Mapping[str, int],
-) -> tuple[NDI, NDI, NDI, NDF]:
-    """Flatten the estimated *scalar* params into indexed lookup tables.
-
-    Walks ``param_names`` in theta order, skipping CPC block members (their
-    correlation is built by the cov-spec ``corr_from_block`` regime, not the
-    scalar scatter). Each scalar's transform is the role-resolved object already
-    on ``param_transforms`` (Log for a std, Tanh for a standalone corr, the
-    prior's transform or Identity for a plain param); ``_pack_transform`` maps it
-    to the native ``(code, params)``. ``param_slot`` comes from ``calib_index``
-    (name -> slot in ``calib_params`` order), built once by the caller and shared
-    with ``base_params`` so the ordering has a single origin.
-
-    Two boundary invariants are asserted here because the native path has no
-    fallback: every estimated scalar is a calibrated parameter (so its slot
-    exists), and its transform packs to a native code (never ``None``).
-    """
-    theta_idx = []
-    param_slot = []
-    transform_code = []
-    transform_params = []
-    for name in param_names:
-        if name in matrix_member_names:
-            continue
-        if name not in calib_index:
-            raise ValueError(
-                f"Estimated scalar '{name}' is not a calibrated parameter; its slot "
-                f"in the native parameter vector cannot be resolved."
-            )
-        transform = param_transforms[name]
-        code, params = _pack_transform(transform)
-        if code is None:
-            raise ValueError(
-                f"Transform {type(transform).__name__!r} on estimated scalar '{name}' "
-                f"has no native transform code."
-            )
-
-        theta_idx.append(int(param_index[name]))
-        param_slot.append(int(calib_index[name]))
-        transform_code.append(int(code))
-        transform_params.append(params)
-
-    return (
-        np.asarray(theta_idx, dtype=np.int64),
-        np.asarray(param_slot, dtype=np.int64),
-        np.asarray(transform_code, dtype=np.int64),
-        np.asarray(transform_params, dtype=np.float64).reshape(-1, N_TRANSFORM_PARAMS),
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class PyParamMap:
-    """Mirror of ``sdsge_param_map``: theta->params resolution tables.
-
-    ``scalars`` is the array-of-structs the C ``scalars`` pointer addresses
-    (``n_scalars`` = ``len(scalars)``). ``base_params`` and every slot index
-    (``scalars`` ``param_slot``, and the cov specs' ``std_slots``/``pair_slot``)
-    are in ``calib_params`` order, so ``params`` doubles as the residual argument
-    vector with no gather step.
-    """
-
-    base_params: NDF  # n_par, calib_params order
-    theta_idx: NDI  # n_scalars, theta -> params scatter
-    param_slot: NDI  # n_scalars, theta -> params scatter
-    transform_code: NDI  # n_scalars, theta -> params scatter
-    transform_params: NDF  # n_scalars x SDSGE_N_TRANSFORM_PARAMS,
-
-
 def build_calib_index(compiled: CompiledModel) -> dict[str, int]:
     """Name -> slot in ``calib_params`` order.
 
@@ -231,9 +215,6 @@ def build_param_map(
     *,
     compiled: CompiledModel,
     param_names: Sequence[str],
-    param_index: Mapping[str, int],
-    matrix_member_names: set[str],
-    param_transforms: Mapping[str, Any],
     calib_index: Mapping[str, int] | None = None,
 ) -> PyParamMap:
     """Assemble the theta->params resolution tables (``sdsge_param_map``).
@@ -246,52 +227,18 @@ def build_param_map(
     """
     if calib_index is None:
         calib_index = build_calib_index(compiled)
-    base_dict = extract_base_params(compiled)
+
     base_params = np.empty(len(calib_index), dtype=float64)
-    for name, slot in calib_index.items():
-        base_params[slot] = base_dict[name]
-    (
-        theta_idx,
-        param_slot,
-        transform_code,
-        transform_params,
-    ) = build_param_components(
-        param_names=param_names,
-        param_index=param_index,
-        matrix_member_names=matrix_member_names,
-        param_transforms=param_transforms,
-        calib_index=calib_index,
-    )
+    base_dict = extract_base_params(compiled)
+    for name, idx in calib_index.items():
+        base_params[idx] = base_dict[name]
+
     return PyParamMap(
         base_params=base_params,
-        theta_idx=theta_idx,
-        param_slot=param_slot,
-        transform_code=transform_code,
-        transform_params=transform_params,
+        param_slot=np.asarray(
+            [calib_index[name] for name in param_names], dtype=np.int64
+        ),
     )
-
-
-class PyCovSpec(NamedTuple):
-    """Mirror of ``sdsge_cov_spec``: a Q or R covariance build spec.
-
-    ``is_constant`` picks a loop-invariant ``constant`` (K*K, resolved once in
-    prep) over the per-eval rebuild. When rebuilt, ``std_slots`` gives the K
-    diagonal param slots; the correlation comes either from a CPC block
-    (``corr_from_block`` with ``block_theta_off``/``block_theta_len`` into theta)
-    or from the ``pair_i``/``pair_j``/``pair_slot`` triples
-    (``n_pairs`` = ``len(pair_i)``).
-    """
-
-    K: int  # n_exog (Q) or n_obs (R)
-    is_constant: bool
-    constant: NDF | None  # K*K, or None
-    std_slots: NDI  # K
-    corr_from_block: bool
-    block_theta_off: int
-    block_theta_len: int
-    pair_i: NDI  # n_pairs
-    pair_j: NDI  # n_pairs
-    pair_slot: NDI  # n_pairs
 
 
 def _build_q_spec(
@@ -415,46 +362,13 @@ def _build_r_spec(
     )
 
 
-class SolveDTO(NamedTuple):
-    residual_addr: int
-    bc_residual_addr: int
-    ss_seed: NDF
-    incidence: NDArray[np.int8]
-    n_var: int
-    n_state: int
-    n_ctrl: int
-    n_exog: int
-    n_par: int
-
-
-class EstimDTO(NamedTuple):
-    """Mirror of ``sdsge_obj_common``: the mode-independent objective inputs.
-
-    Runtime addresses arrive as ``int`` (cfunc ``.address`` / capsule pointer);
-    ``zgges`` is absent because the composer pulls it from the scipy cython_lapack
-    capsule, not from Python. The scratch fields on the C struct (``params``,
-    ``Q``, ``R``, ``corr_q``, ``corr_r``, ``std_q``, ``std_r``) and the
-    ``bk_violations`` output are composer-owned and omitted here.
-    """
-
-    solve_ctx: SolveDTO
-    filter_ctx: FilterDTO
-    pmap: PyParamMap
-    q_spec: PyCovSpec
-    r_spec: PyCovSpec
-    prior: PyPriorTables
-    n_theta: int
-
-
 def build_dto(
     *,
     compiled: CompiledModel,
     prepared: FilterDTO,
     param_names: Sequence[str],
     param_index: Mapping[str, int],
-    matrix_member_names: set[str],
     matrix_blocks: Mapping[str, MatrixPriorBlock],
-    param_transforms: Mapping[str, Any],
     priors: Mapping[str, Prior] | None,
     ss_seed: Any,
     R_override: NDF | None,
@@ -507,9 +421,6 @@ def build_dto(
         pmap=build_param_map(
             compiled=compiled,
             param_names=param_names,
-            param_index=param_index,
-            matrix_member_names=matrix_member_names,
-            param_transforms=param_transforms,
             calib_index=calib_index,
         ),
         q_spec=_build_q_spec(

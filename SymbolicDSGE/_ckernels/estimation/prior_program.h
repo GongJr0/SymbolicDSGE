@@ -18,25 +18,53 @@ typedef enum {
   SDSGE_DIST_BETA = 6,
   SDSGE_DIST_GAMMA = 7,
   SDSGE_DIST_INV_GAMMA = 8,
-  SDSGE_DIST_UNIFORM = 9
+  SDSGE_DIST_UNIFORM = 9,
+  SDSGE_DIST_LKJ = 10
 } SdsgeDistCode;
 
 typedef enum {
-  SDSGE_TRANSFORM_IDENTITY = 1,
-  SDSGE_TRANSFORM_LOG = 2,
-  SDSGE_TRANSFORM_SOFTPLUS = 3,
-  SDSGE_TRANSFORM_LOGIT = 4,
-  SDSGE_TRANSFORM_PROBIT = 5,
-  SDSGE_TRANSFORM_AFFINE_LOGIT = 6,
-  SDSGE_TRANSFORM_AFFINE_PROBIT = 7,
-  SDSGE_TRANSFORM_LOWER_BOUNDED = 8,
-  SDSGE_TRANSFORM_UPPER_BOUNDED = 9,
-  SDSGE_TRANSFORM_TANH = 10
+  SDSGE_TRANSFORM_IDENTITY = 0,
+  SDSGE_TRANSFORM_LOG = 1,
+  SDSGE_TRANSFORM_SOFTPLUS = 2,
+  SDSGE_TRANSFORM_LOGIT = 3,
+  SDSGE_TRANSFORM_PROBIT = 4,
+  SDSGE_TRANSFORM_AFFINE_LOGIT = 5,
+  SDSGE_TRANSFORM_AFFINE_PROBIT = 6,
+  SDSGE_TRANSFORM_LOWER_BOUNDED = 7,
+  SDSGE_TRANSFORM_UPPER_BOUNDED = 8,
+  SDSGE_TRANSFORM_TANH = 9,
+  SDSGE_TRANSFORM_CHOLESKY_CORR = 10
 } SdsgeTransformCode;
 
 /* Packed-row strides (mirror N_DIST_PARAMS / N_TRANSFORM_PARAMS). */
 #define SDSGE_N_DIST_PARAMS 5
 #define SDSGE_N_TRANSFORM_PARAMS 3
+
+typedef struct {
+  int has_prior;
+  const i64 *dist_codes;       /* n_theta */
+  const i64 *transform_codes;  /* n_theta */
+  const f64 *dist_params;      /* n_theta*5 */
+  const f64 *transform_params; /* n_theta*3 */
+  i64 n_theta;
+  /* Which density the prior evaluates to; see sdsge_logprior_program. Set per
+   * entry point: the sampler walks theta and takes it, a maximizer reporting a
+   * parameter value does not, because the jacobian moves the mode. */
+  int include_logjac;
+} sdsge_prior_tables;
+
+/* Length of the CPC run a block slot heads, or 0 when the slot is a scalar.
+ * Every reader walking n_theta must branch on this and advance past a run it
+ * enters: the run's row repeats across all of its slots, and the CPC map is not
+ * element-wise, so the scalar leaf has no case for it. The transform half marks
+ * the run on both legs; the dist half only behind has_prior. */
+static inline i64 sdsge_block_run_len(const sdsge_prior_tables *pr, i64 i) {
+  if (pr->transform_codes[i] != SDSGE_TRANSFORM_CHOLESKY_CORR) {
+    return 0;
+  }
+  const i64 K = (i64)pr->transform_params[i * SDSGE_N_TRANSFORM_PARAMS];
+  return K * (K - 1) / 2;
+}
 
 /* Scalar helpers (exposed so the parity tests can hit them directly). */
 f64 sdsge_softplus_scalar(f64 x);
@@ -75,15 +103,8 @@ void sdsge_lkj_chol_logpdf_from_z(f64 *SDSGE_RESTRICT z, i64 dim, i64 len,
  * theta that maps to them. The two have different modes: a maximizer reporting
  * a parameter value wants the second, a sampler drawing theta wants the first.
  */
-f64 sdsge_logprior_program(
-    f64 *SDSGE_RESTRICT theta, i64 *SDSGE_RESTRICT scalar_indices,
-    i64 *SDSGE_RESTRICT scalar_dist_codes,
-    i64 *SDSGE_RESTRICT scalar_transform_codes,
-    f64 *SDSGE_RESTRICT scalar_dist_params,
-    f64 *SDSGE_RESTRICT scalar_transform_params, i64 n_scalar,
-    i64 *SDSGE_RESTRICT matrix_offsets, i64 *SDSGE_RESTRICT matrix_dims,
-    i64 *SDSGE_RESTRICT matrix_lengths, f64 *SDSGE_RESTRICT matrix_etas,
-    f64 *SDSGE_RESTRICT matrix_log_constants, i64 n_blocks, int include_logjac);
+f64 sdsge_logprior_program(f64 *SDSGE_RESTRICT theta,
+                           const sdsge_prior_tables *pr);
 
 /* Unconstrained (z, std) -> full covariance via the correlation Cholesky
  * factor. scratch_M is K*K workspace for L; out receives the K*K covariance

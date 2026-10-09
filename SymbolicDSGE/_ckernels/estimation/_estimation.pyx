@@ -93,11 +93,8 @@ cdef inline int64_t _rows(object a):
 
 cdef void _fill_param_map(sdsge_param_map *pm, object pmap, list hold) except *:
     pm.base_params = _f64p(pmap.base_params, hold)
-    pm.theta_idx = _i64p(pmap.theta_idx, hold)
     pm.param_slot = _i64p(pmap.param_slot, hold)
-    pm.transform_code = _i64p(pmap.transform_code, hold)
-    pm.transform_params = _f64p2(pmap.transform_params, hold)
-    pm.n_scalars = _rows(pmap.theta_idx)
+    pm.n_theta = _rows(pmap.param_slot)
 
 
 cdef void _fill_cov_build(sdsge_cov_build *cb, object sp, list hold) except *:
@@ -125,18 +122,11 @@ cdef void _fill_cov_build(sdsge_cov_build *cb, object sp, list hold) except *:
 cdef void _fill_prior(sdsge_prior_tables *pr, object pt, list hold) except *:
     pr.has_prior = <int>bool(pt.has_prior)
     pr.include_logjac = 0
-    pr.scalar_indices = _i64p(pt.scalar_indices, hold)
-    pr.scalar_dist_codes = _i64p(pt.scalar_dist_codes, hold)
-    pr.scalar_transform_codes = _i64p(pt.scalar_transform_codes, hold)
-    pr.scalar_dist_params = _f64p2(pt.scalar_dist_params, hold)
-    pr.scalar_transform_params = _f64p2(pt.scalar_transform_params, hold)
-    pr.n_scalar = _rows(pt.scalar_indices)
-    pr.matrix_offsets = _i64p(pt.matrix_offsets, hold)
-    pr.matrix_dims = _i64p(pt.matrix_dims, hold)
-    pr.matrix_lengths = _i64p(pt.matrix_lengths, hold)
-    pr.matrix_etas = _f64p(pt.matrix_etas, hold)
-    pr.matrix_log_constants = _f64p(pt.matrix_log_constants, hold)
-    pr.n_blocks = _rows(pt.matrix_offsets)
+    pr.dist_codes = _i64p(pt.dist_codes, hold)
+    pr.transform_codes = _i64p(pt.transform_codes, hold)
+    pr.dist_params = _f64p2(pt.dist_params, hold)
+    pr.transform_params = _f64p2(pt.transform_params, hold)
+    pr.n_theta = _rows(pt.dist_codes)
 
 
 cdef void _fill_klein_spec(klein_spec *sp, object sol_dto,

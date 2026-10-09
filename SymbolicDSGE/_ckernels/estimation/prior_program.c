@@ -234,52 +234,45 @@ void sdsge_lkj_chol_logpdf_from_z(f64 *SDSGE_RESTRICT z, i64 dim, i64 len,
  * z occupies a contiguous run theta[offset .. offset+length), so the block is
  * read straight off theta by base-pointer offset (no gather, no scratch). */
 f64 sdsge_logprior_program(f64 *SDSGE_RESTRICT theta,
-                           i64 *SDSGE_RESTRICT scalar_indices,
-                           i64 *SDSGE_RESTRICT scalar_dist_codes,
-                           i64 *SDSGE_RESTRICT scalar_transform_codes,
-                           f64 *SDSGE_RESTRICT scalar_dist_params,
-                           f64 *SDSGE_RESTRICT scalar_transform_params,
-                           i64 n_scalar, i64 *SDSGE_RESTRICT matrix_offsets,
-                           i64 *SDSGE_RESTRICT matrix_dims,
-                           i64 *SDSGE_RESTRICT matrix_lengths,
-                           f64 *SDSGE_RESTRICT matrix_etas,
-                           f64 *SDSGE_RESTRICT matrix_log_constants,
-                           i64 n_blocks, int include_logjac) {
+                           const sdsge_prior_tables *pr) {
   f64 lp = 0.0;
+  f64 z, x, logp, logjac;
 
-  for (i64 i = 0; i < n_scalar; ++i) {
-    f64 z = theta[scalar_indices[i]];
-    f64 x, logjac;
+  for (i64 i = 0; i < pr->n_theta; ++i) {
+
+    /* A run's density is evaluated once, at the slot its row starts on. */
+    const i64 len = sdsge_block_run_len(pr, i);
+    if (len) {
+      const f64 *row = pr->dist_params + i * SDSGE_N_DIST_PARAMS;
+      const i64 K = (i64)row[0];
+      const f64 eta = row[1];
+      const f64 log_const = row[2];
+      sdsge_lkj_chol_logpdf_from_z(theta + i, K, len, eta, log_const, &logp);
+      if (isnan(logp)) {
+        return NAN;
+      }
+      lp += pr->include_logjac
+                ? logp
+                : logp - sdsge_lkj_chol_logjac_return(theta + i, K, len);
+
+      i += len - 1;
+      continue;
+    }
+
+    z = theta[i];
     sdsge_transform_inverse_and_logjac(
-        scalar_transform_codes[i],
-        scalar_transform_params + i * SDSGE_N_TRANSFORM_PARAMS, z, &x, &logjac);
+        pr->transform_codes[i],
+        pr->transform_params + i * SDSGE_N_TRANSFORM_PARAMS, z, &x, &logjac);
     if (isnan(x) || isnan(logjac)) {
       return NAN;
     }
-    f64 logp;
-    sdsge_dist_logpdf(scalar_dist_codes[i],
-                      scalar_dist_params + i * SDSGE_N_DIST_PARAMS, x, &logp);
+    sdsge_dist_logpdf(pr->dist_codes[i],
+                      (f64 *)pr->dist_params + i * SDSGE_N_DIST_PARAMS, x,
+                      &logp);
     if (isnan(logp)) {
       return NAN;
     }
-    lp += include_logjac ? logp + logjac : logp;
-  }
-
-  for (i64 b = 0; b < n_blocks; ++b) {
-    f64 block_lp;
-    sdsge_lkj_chol_logpdf_from_z(theta + matrix_offsets[b], matrix_dims[b],
-                                 matrix_lengths[b], matrix_etas[b],
-                                 matrix_log_constants[b], &block_lp);
-    if (isnan(block_lp)) {
-      return NAN;
-    }
-    /* The block logpdf folds its own jacobian in; take it back out rather than
-     * duplicate the density kernel for the two cases. */
-    if (!include_logjac) {
-      block_lp -= sdsge_lkj_chol_logjac_return(
-          theta + matrix_offsets[b], matrix_dims[b], matrix_lengths[b]);
-    }
-    lp += block_lp;
+    lp += pr->include_logjac ? logp + logjac : logp;
   }
 
   return lp;

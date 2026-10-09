@@ -643,7 +643,6 @@ class Estimator:
             prepared=self._prepared_filter,
             param_names=self.param_names,
             param_index=self._param_index,
-            matrix_member_names=self._matrix_member_names,
             matrix_blocks=self._matrix_blocks,
             param_transforms=self._param_transforms,  # type: ignore
             priors=self.priors,

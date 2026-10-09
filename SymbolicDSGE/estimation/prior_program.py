@@ -289,8 +289,8 @@ def _pack_distribution(dist: Any) -> tuple[int | None, list[float]]:
         params[2] = float(getattr(dist, "_width"))
         return DistCode.UNIFORM, params
     if isinstance(dist, LKJChol):
-        params[0] = float(getattr(dist, "_eta"))
-        params[1] = float(getattr(dist, "_K"))
+        params[0] = float(getattr(dist, "_K"))
+        params[1] = float(getattr(dist, "_eta"))
         params[2] = float(getattr(dist, "_log_norm"))
         return DistCode.LKJ_CHOL, params
     return None, params

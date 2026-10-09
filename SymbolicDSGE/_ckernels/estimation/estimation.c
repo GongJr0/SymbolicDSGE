@@ -38,13 +38,20 @@ void sdsge_init_params(f64 *SDSGE_RESTRICT params,
 
 static inline void sdsge_fill_params(sdsge_obj_common *base,
                                      const f64 *SDSGE_RESTRICT theta) {
+  sdsge_prior_tables *pr = &base->prior;
   sdsge_param_map *pmap = &base->pmap;
   f64 x, logjac;
-  for (i64 i = 0; i < pmap->n_scalars; ++i) {
-    i64 idx = pmap->theta_idx[i];
-    sdsge_transform_inverse_and_logjac(pmap->transform_code[i],
-                                       &pmap->transform_params[i * 3],
-                                       theta[idx], &x, &logjac);
+  i64 len;
+  for (i64 i = 0; i < pr->n_theta; ++i) {
+    len = sdsge_block_run_len(pr, i);
+    if (len) {
+      i += len - 1; // skip the block fill
+      continue;
+    }
+    sdsge_transform_inverse_and_logjac(
+        pr->transform_codes[i],
+        &pr->transform_params[i * SDSGE_N_TRANSFORM_PARAMS], theta[i], &x,
+        &logjac);
     base->params[pmap->param_slot[i]] = x;
   }
 }
@@ -160,13 +167,7 @@ static inline f64 sdsge_add_lp(const sdsge_obj_common *b,
     return ll;
   }
   const sdsge_prior_tables *pr = &b->prior;
-  const f64 lp = sdsge_logprior_program(
-      (f64 *)theta, (i64 *)pr->scalar_indices, (i64 *)pr->scalar_dist_codes,
-      (i64 *)pr->scalar_transform_codes, (f64 *)pr->scalar_dist_params,
-      (f64 *)pr->scalar_transform_params, pr->n_scalar,
-      (i64 *)pr->matrix_offsets, (i64 *)pr->matrix_dims,
-      (i64 *)pr->matrix_lengths, (f64 *)pr->matrix_etas,
-      (f64 *)pr->matrix_log_constants, pr->n_blocks, pr->include_logjac);
+  const f64 lp = sdsge_logprior_program((f64 *)theta, pr);
   if (!isfinite(lp)) {
     return -INFINITY;
   }
@@ -181,13 +182,7 @@ f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
   if (!pr->has_prior) {
     return 0.0;
   }
-  return sdsge_logprior_program(
-      (f64 *)theta, (i64 *)pr->scalar_indices, (i64 *)pr->scalar_dist_codes,
-      (i64 *)pr->scalar_transform_codes, (f64 *)pr->scalar_dist_params,
-      (f64 *)pr->scalar_transform_params, pr->n_scalar,
-      (i64 *)pr->matrix_offsets, (i64 *)pr->matrix_dims,
-      (i64 *)pr->matrix_lengths, (f64 *)pr->matrix_etas,
-      (f64 *)pr->matrix_log_constants, pr->n_blocks, pr->include_logjac);
+  return sdsge_logprior_program((f64 *)theta, pr);
 }
 
 /* Per-mode objective arena: the solve, the filter, and the P0 derivation run in
@@ -572,15 +567,22 @@ static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
   }
 
   const sdsge_param_map *pmap = &b->pmap;
+  const sdsge_prior_tables *pr = &b->prior;
   f64 x, logjac;
-  for (i64 i = 0; i < pmap->n_scalars; ++i) {
-    const i64 idx = pmap->theta_idx[i];
-    sdsge_transform_inverse_and_logjac(pmap->transform_code[i],
-                                       pmap->transform_params + i * 3,
-                                       theta[idx], &x, &logjac);
-    const f64 v = vcov[idx * d + idx];
+  i64 len;
+  for (i64 i = 0; i < pr->n_theta; ++i) {
+    len = sdsge_block_run_len(pr, i);
+    if (len) {
+      i += len - 1; // skip the block fill
+      continue;
+    }
+    sdsge_transform_inverse_and_logjac(pr->transform_codes[i],
+                                       pr->transform_params +
+                                           i * SDSGE_N_TRANSFORM_PARAMS,
+                                       theta[i], &x, &logjac);
+    const f64 v = vcov[i * d + i];
     if (v >= 0.0) {
-      out_se[idx] = exp(logjac) * sqrt(v);
+      out_se[i] = exp(logjac) * sqrt(v);
     }
   }
 
