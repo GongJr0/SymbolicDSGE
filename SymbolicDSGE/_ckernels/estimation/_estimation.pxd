@@ -301,7 +301,6 @@ cdef extern from "estimation.h":
 
     void sdsge_init_params(double *params, const double *base_params,
                            int64_t n_par) nogil
-    void sdsge_scatter_params(sdsge_obj_common *base, const double *theta) nogil
     double sdsge_logprior_at(const sdsge_obj_common *base,
                              const double *theta) nogil
     double sdsge_obj_linear(sdsge_linear_ctx *ctx, const double *theta,

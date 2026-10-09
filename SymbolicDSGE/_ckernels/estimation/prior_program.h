@@ -10,6 +10,7 @@
  * arrays with. */
 
 typedef enum {
+  SDSGE_DIST_NO_DENSITY = 0,
   SDSGE_DIST_NORMAL = 1,
   SDSGE_DIST_LOG_NORMAL = 2,
   SDSGE_DIST_HALF_NORMAL = 3,

@@ -56,11 +56,25 @@ static inline void sdsge_fill_params(sdsge_obj_common *base,
   }
 }
 
-/* Public wrapper: scatter a theta into base->params (e.g. resolve x_best after
- * the optimizer returns). params then holds the named parameter vector. */
-void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
-                          const f64 *SDSGE_RESTRICT theta) {
-  sdsge_fill_params(base, theta);
+static inline void sdsge_scatter_block_corr(sdsge_obj_common *base,
+                                            const sdsge_cov_build *cb) {
+  const sdsge_cov_spec *spec = &cb->spec;
+  if (!sdsge_spec_has_block(spec)) {
+    return;
+  }
+  const i64 K = spec->K;
+  const i64 *slot = base->pmap.param_slot + spec->block_theta_off;
+
+  i64 m = 0;
+  for (i64 i = 0; i < K; ++i) {
+    for (i64 j = 0; j < i; ++j) {
+      f64 s = 0.0;
+      for (i64 c = 0; c <= j; ++c) {
+        s += cb->corr[i * K + c] * cb->corr[j * K + c];
+      }
+      base->params[slot[m++]] = s;
+    }
+  }
 }
 
 /* corr(K*K) := I, then off-diagonal pairs corr[i,j]=corr[j,i]=params[slot]. */
@@ -119,6 +133,15 @@ static inline void sdsge_build_cov(const sdsge_cov_build *cb,
                         spec->n_pairs, params, K, cb->corr);
     sdsge_cov_from_std_corr(spec->std_slots, params, cb->corr, K, cb->out);
   }
+}
+
+static inline void sdsge_fill_at_theta(sdsge_obj_common *base,
+                                       const f64 *SDSGE_RESTRICT theta) {
+  sdsge_fill_params(base, theta);
+  sdsge_build_cov(&base->q, theta, base->params);
+  sdsge_build_cov(&base->r, theta, base->params);
+  sdsge_scatter_block_corr(base, &base->q);
+  sdsge_scatter_block_corr(base, &base->r);
 }
 
 /* Estimation's reading of a core solve verdict: every way the pencil half can
@@ -237,10 +260,7 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
   klein_spec *s = &ctx->solve_ctx;
   kf_inputs *kfin = &ctx->kf_ctx;
 
-  sdsge_fill_params(b, theta);
-  sdsge_build_cov(&b->q, theta, b->params);
-  sdsge_build_cov(&b->r, theta, b->params);
-
+  sdsge_fill_at_theta(b, theta);
   const int solve_rc =
       sdsge_solve1_run(&ctx->solve_ctx, out, b->arena, b->iarena);
   if (solve_rc == SDSGE_SOLVE_BK) {
@@ -275,10 +295,7 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
   klein_spec *s = &ctx->solve_ctx;
   ekf_inputs *ekfin = &ctx->ekf_ctx;
 
-  sdsge_fill_params(b, theta);
-  sdsge_build_cov(&b->q, theta, b->params);
-  sdsge_build_cov(&b->r, theta, b->params);
-
+  sdsge_fill_at_theta(b, theta);
   const int solve_rc =
       sdsge_solve1_run(&ctx->solve_ctx, out, b->arena, b->iarena);
   if (solve_rc == SDSGE_SOLVE_BK) {
@@ -313,10 +330,7 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
   sgu_klein_spec *s = &ctx->solve_ctx;
   ukf_inputs *ukfin = &ctx->ukf_ctx;
 
-  sdsge_fill_params(b, theta);
-  sdsge_build_cov(&b->q, theta, b->params);
-  sdsge_build_cov(&b->r, theta, b->params);
-
+  sdsge_fill_at_theta(b, theta);
   const int rc = sdsge_solve2_run(s, out1, out2, b->arena, b->iarena);
 
   if (rc == SDSGE_SOLVE_BK) {
@@ -566,7 +580,6 @@ static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
     out_se[i] = NAN;
   }
 
-  const sdsge_param_map *pmap = &b->pmap;
   const sdsge_prior_tables *pr = &b->prior;
   f64 x, logjac;
   i64 len;
@@ -703,5 +716,5 @@ void sdsge_run_estimation(void *ctx, i64 n_theta, f64 *SDSGE_RESTRICT theta,
 
   /* Last, not before the covariance: its probes scatter perturbed params, and
    * callers read the ctx expecting it to sit at the returned theta. */
-  sdsge_scatter_params((sdsge_obj_common *)ctx, theta);
+  sdsge_fill_at_theta((sdsge_obj_common *)ctx, theta);
 }
