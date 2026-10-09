@@ -1,6 +1,10 @@
-from typing import Sequence, Mapping
+from __future__ import annotations
+
+from itertools import combinations
+from typing import Any, Sequence, Mapping
 
 import numpy as np
+from numpy._core.numeric import float64
 from numpy.typing import NDArray
 
 from . import backend as b
@@ -8,18 +12,19 @@ from . import backend as b
 from ..core.compiled_model import CompiledModel
 from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
-from ..bayesian.transforms.cholesky_corr import CholeskyCorrTransform
+from ..bayesian.support import Support
+from ..bayesian.transforms import CholeskyCorrTransform
 from ..kalman.config import KalmanConfig
 from ..core.config import PairGetterDict
 
 NDF = NDArray[np.float64]
+NDI = NDArray[np.int64]
 
 _RESERVED_MATRIX_KEYS = ("R_corr", "Q_corr")
 _RESERVED_TO_NAME = {
     "R_corr": "R",
     "Q_corr": "Q",
 }
-
 
 # --- Name and Membership Validation ---
 
@@ -337,3 +342,60 @@ def _resolve_Q(compiled: CompiledModel) -> b.MatrixPriorBlock:
         labels=labels,
         corr_param_map=shock_corr,
     )
+
+
+# --- Prior Collection ---
+
+
+def active_Q(
+    requested: Sequence[str],
+    compiled: CompiledModel,
+) -> tuple[set[str], set[str]]:
+    """Estimated Q parameters split by role, as ``(stds, correlations)``.
+
+    Labels are ``shock_names``, the order the Q covariance spec is built over.
+    """
+    calib = compiled.config.calibration
+    present = set(requested)
+    shocks = compiled.shock_names
+
+    corr_map: Mapping[Any, str | None] = calib.shock_corr
+
+    std = {calib.shock_std[s] for s in shocks} & present
+    corr = {
+        name
+        for pair in combinations(shocks, 2)
+        if (name := corr_map.get(pair)) is not None and name in present
+    }
+    return std, corr
+
+
+def active_R(
+    requested: Sequence[str],
+    kalman: KalmanConfig | None,
+    observables: Sequence[str],
+) -> tuple[set[str], set[str]]:
+    """Estimated R parameters split by role, as ``(stds, correlations)``.
+
+    Labels are the active observables, the order the R covariance spec is built
+    over; a name reaching only an inactive observable is not estimated.
+    """
+    if kalman is None:
+        return set(), set()
+
+    present = set(requested)
+    std_map = kalman.R_std_param_map
+    corr_map: Mapping[Any, str | None] | None = kalman.R_corr_param_map
+
+    std: set[str] = set()
+    if std_map is not None:
+        std = {std_map[obs] for obs in observables} & present
+
+    corr: set[str] = set()
+    if corr_map is not None:
+        corr = {
+            name
+            for pair in combinations(observables, 2)
+            if (name := corr_map.get(pair)) is not None and name in present
+        }
+    return std, corr

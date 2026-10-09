@@ -24,7 +24,7 @@ from .._ckernels.estimation import (
 from ..bayesian.priors import Prior
 from .prior_program import (
     _pack_transform,
-    build_packed_logprior,
+    build_prior_tables,
     N_TRANSFORM_PARAMS,
     PyPriorTables,
 )
@@ -480,11 +480,13 @@ def build_dto(
         else 0
     )
     ss_seed_vec = DSGESolver._resolve_ss_seed(ss_seed, compiled)
-    prior_tables = build_packed_logprior(
-        priors=priors,
+    prior_tables = build_prior_tables(
         param_index=param_index,
+        priors=priors,
         matrix_blocks=matrix_blocks,
-        matrix_member_names=matrix_member_names,
+        compiled=compiled,
+        kalman=compiled.kalman,
+        observables=prepared.observables,
     )
 
     solve = SolveDTO(
@@ -526,7 +528,7 @@ def build_dto(
             base_dict=base_dict,
             R_override=R_override,
         ),
-        prior=prior_tables if prior_tables is not None else PyPriorTables.empty(),
+        prior=prior_tables,
         n_theta=len(param_names),
     )
 

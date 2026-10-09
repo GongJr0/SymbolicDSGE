@@ -4,37 +4,53 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
+import warnings
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from ..bayesian.distributions.beta import Beta
-from ..bayesian.distributions.gamma import Gamma
-from ..bayesian.distributions.half_cauchy import HalfCauchy
-from ..bayesian.distributions.half_norm import HalfNormal
-from ..bayesian.distributions.inv_gamma import InvGamma
-from ..bayesian.distributions.lkj_chol import LKJChol, _log_lkj_normalizer_C
-from ..bayesian.distributions.log_norm import LogNormal
-from ..bayesian.distributions.norm import Normal
-from ..bayesian.distributions.trunc_norm import TruncNormal
-from ..bayesian.distributions.uniform import Uniform
+from ..bayesian.distributions import (
+    Beta,
+    Gamma,
+    HalfCauchy,
+    HalfNormal,
+    InvGamma,
+    LKJChol,
+    LogNormal,
+    Normal,
+    TruncNormal,
+    Uniform,
+)
+from ..bayesian.transforms import (
+    AffineLogitTransform,
+    AffineProbitTransform,
+    CholeskyCorrTransform,
+    Identity,
+    LogTransform,
+    LogitTransform,
+    LowerBoundedTransform,
+    ProbitTransform,
+    SoftplusTransform,
+    TanhTransform,
+    UpperBoundedTransform,
+)
 from ..bayesian.priors import Prior
-from ..bayesian.transforms.affine_logit import AffineLogitTransform
-from ..bayesian.transforms.affine_probit import AffineProbitTransform
-from ..bayesian.transforms.cholesky_corr import CholeskyCorrTransform
-from ..bayesian.transforms.identity import Identity
-from ..bayesian.transforms.log import LogTransform
-from ..bayesian.transforms.logit import LogitTransform
-from ..bayesian.transforms.lower_bounded import LowerBoundedTransform
-from ..bayesian.transforms.probit import ProbitTransform
-from ..bayesian.transforms.softplus import SoftplusTransform
-from ..bayesian.transforms.tanh import TanhTransform
-from ..bayesian.transforms.upper_bounded import UpperBoundedTransform
+from ..bayesian.support import Support
+from ..core.compiled_model import CompiledModel
+from ..kalman.config import KalmanConfig
+from .resolvers import active_Q, active_R
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
+
+_STD_SCALAR_SUPPORT = Support(
+    low=float64(0.0), high=float64(np.inf), low_inclusive=True, high_inclusive=False
+)
+_CORR_SCALAR_SUPPORT = Support(
+    low=float64(-1.0), high=float64(1.0), low_inclusive=True, high_inclusive=True
+)
 
 
 class DistCode(IntEnum):
@@ -56,6 +72,7 @@ class DistCode(IntEnum):
     GAMMA = 7
     INV_GAMMA = 8
     UNIFORM = 9
+    LKJ_CHOL = 10
 
 
 class TransformCode(IntEnum):
@@ -74,6 +91,7 @@ class TransformCode(IntEnum):
     LOWER_BOUNDED = 7
     UPPER_BOUNDED = 8
     TANH = 9
+    CHOLESKY_CORR = 10
 
 
 #: Packed-row strides (mirror ``SDSGE_N_DIST_PARAMS`` / ``SDSGE_N_TRANSFORM_PARAMS``
@@ -84,154 +102,139 @@ N_TRANSFORM_PARAMS = 3
 
 @dataclass(frozen=True, slots=True)
 class PyPriorTables:
-    """Mirror of ``sdsge_prior_tables``: packed log-prior program arguments.
+    """Mirror of ``sdsge_prior_tables``: the packed per-theta prior program.
 
-    ``has_prior`` gates the whole block. Scalar columns run to ``n_scalar`` =
-    ``len(scalar_indices)``; ``scalar_dist_params`` is n_scalar*5 and
-    ``scalar_transform_params`` n_scalar*3, both read row-major flat by C.
-    Matrix (CPC/LKJ) block columns run to ``n_blocks`` =
-    ``len(matrix_offsets)``.
+    Every column runs to ``n_theta``, so column ``i`` describes theta slot
+    ``i`` and the kernel reads it by the loop counter with no gather.
+    ``dist_params`` is n_theta*5 and ``transform_params`` n_theta*3, both read
+    row-major flat by C. ``has_prior`` gates the density half only; the
+    transform half is populated on every leg, since the z -> x map runs whether
+    or not a density does. A CPC block's row repeats across its whole run, so
+    a reader that enters the run must advance past it by ``K(K-1)/2``.
     """
 
     has_prior: bool
-    scalar_indices: NDI  # n_scalar
-    scalar_dist_codes: NDI  # n_scalar
-    scalar_transform_codes: NDI  # n_scalar
-    scalar_dist_params: NDF  # n_scalar*5
-    scalar_transform_params: NDF  # n_scalar*3
-    matrix_offsets: NDI  # n_blocks
-    matrix_dims: NDI  # n_blocks
-    matrix_lengths: NDI  # n_blocks
-    matrix_etas: NDF  # n_blocks
-    matrix_log_constants: NDF  # n_blocks
-
-    @classmethod
-    def empty(cls) -> "PyPriorTables":
-        """The disabled table: no priors, or a prior the packer could not represent.
-
-        Every column is length zero, so the kernel sums nothing.
-        """
-        empty_i = np.empty(0, dtype=np.int64)
-        return cls(
-            has_prior=False,
-            scalar_indices=empty_i,
-            scalar_dist_codes=empty_i,
-            scalar_transform_codes=empty_i,
-            scalar_dist_params=np.empty((0, N_DIST_PARAMS), dtype=float64),
-            scalar_transform_params=np.empty((0, N_TRANSFORM_PARAMS), dtype=float64),
-            matrix_offsets=empty_i,
-            matrix_dims=empty_i,
-            matrix_lengths=empty_i,
-            matrix_etas=np.empty(0, dtype=float64),
-            matrix_log_constants=np.empty(0, dtype=float64),
-        )
+    dist_codes: NDI  # n_theta
+    transform_codes: NDI  # n_theta
+    dist_params: NDF  # n_theta*5
+    transform_params: NDF  # n_theta*3
 
 
-def build_packed_logprior(
+def build_prior_tables(
     *,
-    priors: Mapping[str, Any] | None,
     param_index: Mapping[str, int],
+    priors: Mapping[str, Any] | None,
     matrix_blocks: Mapping[str, Any],
-    matrix_member_names: set[str],
-) -> PyPriorTables | None:
-    if priors is None:
-        return None
+    compiled: CompiledModel,
+    kalman: KalmanConfig | None,
+    observables: Sequence[str],
+) -> PyPriorTables:
+    """Pack the transform and density columns for one theta layout.
 
-    scalar_indices: list[int] = []
-    scalar_dist_codes: list[int] = []
-    scalar_transform_codes: list[int] = []
-    scalar_dist_params: list[list[float]] = []
-    scalar_transform_params: list[list[float]] = []
+    A block's run carries ``CHOLESKY_CORR`` and its ``K`` on every slot,
+    whatever the leg, since the z -> x map runs without a density; its LKJ row
+    lands only when priored. Elsewhere ``priors`` covers every slot or none of
+    them: with priors each slot takes its own density and transform, without
+    them the zero fill stands and the region is left to the bounds at the call.
+    """
+    n_theta = len(param_index)
+    dist_codes = np.zeros(n_theta, dtype=np.int64)
+    transform_codes = np.zeros(n_theta, dtype=np.int64)
+    dist_params = np.zeros((n_theta, N_DIST_PARAMS), dtype=float64)
+    transform_params = np.zeros((n_theta, N_TRANSFORM_PARAMS), dtype=float64)
 
-    matrix_offsets: list[int] = []
-    matrix_dims: list[int] = []
-    matrix_lengths: list[int] = []
-    matrix_etas: list[float] = []
-    matrix_log_constants: list[float] = []
+    blocked = np.zeros(n_theta, dtype=bool)
+    has_prior = priors is not None
 
-    for name, prior in priors.items():
-        if name in matrix_blocks:
-            block = matrix_blocks[name]
-            # A matrix key may be given as a bare LKJChol; the block carries the
-            # coerced Prior, so read that and fall back to the raw entry.
-            block_prior = getattr(block, "prior", None)
-            if block_prior is not None:
-                prior = block_prior
-            if not isinstance(prior, Prior):
-                raise TypeError(
-                    f"Prior on matrix key '{name}' must be an LKJChol "
-                    f"distribution or a Prior wrapping one; got "
-                    f"{type(prior).__name__}."
-                )
-            if not isinstance(prior.dist, LKJChol) or not isinstance(
-                prior.transform, CholeskyCorrTransform
-            ):
-                raise TypeError(
-                    f"Prior on matrix key '{name}' must pair LKJChol with "
-                    f"CholeskyCorrTransform; got {type(prior.dist).__name__} "
-                    f"and {type(prior.transform).__name__}."
-                )
-            K = int(block.K)
-            sl = block.theta_slice
-            matrix_offsets.append(int(sl.start))
-            matrix_dims.append(K)
-            matrix_lengths.append(int(sl.stop - sl.start))
-            eta = float(getattr(prior.dist, "_eta"))
-            matrix_etas.append(eta)
-            matrix_log_constants.append(float(_log_lkj_normalizer_C(K, eta)))
+    for key, block in matrix_blocks.items():
+        run = block.theta_slice
+        blocked[run] = True
+        transform_codes[run] = TransformCode.CHOLESKY_CORR
+        transform_params[run, 0] = float(block.K)
+        if priors is None:
             continue
-
-        if name in matrix_member_names:
-            continue
-        if name not in param_index:
-            raise ValueError(f"Prior on '{name}', which is not an estimated parameter.")
-        if not isinstance(prior, Prior):
-            raise TypeError(
-                f"Prior on '{name}' must be a Prior; got {type(prior).__name__}."
-            )
-
-        dist_code, dist_params = _pack_distribution(prior.dist)
-        transform_code, transform_params = _pack_transform(prior.transform)
+        dist_code, dist_row = _pack_distribution(priors[key].dist)
         if dist_code is None:
             raise TypeError(
-                f"Prior on '{name}' uses distribution "
-                f"{type(prior.dist).__name__}, which the native prior program "
+                f"Matrix block '{key}' uses distribution "
+                f"{type(priors[key].dist).__name__!r}, which the native prior program "
                 f"has no code for."
             )
-        if transform_code is None:
-            raise TypeError(
-                f"Prior on '{name}' uses transform "
-                f"{type(prior.transform).__name__}, which the native prior "
-                f"program has no code for."
-            )
+        dist_codes[run] = dist_code
+        dist_params[run] = dist_row
 
-        scalar_indices.append(int(param_index[name]))
-        scalar_dist_codes.append(dist_code)
-        scalar_transform_codes.append(transform_code)
-        scalar_dist_params.append(dist_params)
-        scalar_transform_params.append(transform_params)
+    if priors is None:
+        return PyPriorTables(
+            has_prior=has_prior,
+            dist_codes=dist_codes,
+            transform_codes=transform_codes,
+            dist_params=dist_params,
+            transform_params=transform_params,
+        )
+    else:
+        names = list(param_index)
+        stdQ, corrQ = active_Q(names, compiled)
+        stdR, corrR = active_R(names, kalman, observables)
+        std = stdQ | stdR
+        corr = corrQ | corrR
 
-    n_scalar = len(scalar_indices)
+        warn_std = []
+        warn_corr = []
 
-    return PyPriorTables(
-        has_prior=True,
-        scalar_indices=np.asarray(scalar_indices, dtype=np.int64),
-        scalar_dist_codes=np.asarray(scalar_dist_codes, dtype=np.int64),
-        scalar_transform_codes=np.asarray(scalar_transform_codes, dtype=np.int64),
-        scalar_dist_params=np.asarray(
-            scalar_dist_params if n_scalar else np.empty((0, N_DIST_PARAMS)),
-            dtype=float64,
-        ).reshape(n_scalar, N_DIST_PARAMS),
-        scalar_transform_params=np.asarray(
-            scalar_transform_params if n_scalar else np.empty((0, N_TRANSFORM_PARAMS)),
-            dtype=float64,
-        ).reshape(n_scalar, N_TRANSFORM_PARAMS),
-        matrix_offsets=np.asarray(matrix_offsets, dtype=np.int64),
-        matrix_dims=np.asarray(matrix_dims, dtype=np.int64),
-        matrix_lengths=np.asarray(matrix_lengths, dtype=np.int64),
-        matrix_etas=np.asarray(matrix_etas, dtype=float64),
-        matrix_log_constants=np.asarray(matrix_log_constants, dtype=float64),
-    )
+        for name, i in param_index.items():
+            if blocked[i]:
+                continue
+            prior = priors[name]
+            if not isinstance(prior, Prior):
+                raise TypeError(
+                    f"Prior on '{name}' must be a Prior; got {type(prior).__name__}."
+                )
+            transform = prior.transform
+            if name in std and not (_STD_SCALAR_SUPPORT << transform.support):
+                warn_std.append((name, type(transform).__name__))
+                transform = LogTransform()
+            elif name in corr and not (_CORR_SCALAR_SUPPORT << transform.support):
+                warn_corr.append((name, type(transform).__name__))
+                transform = TanhTransform()
+
+            transform_code, transform_row = _pack_transform(transform)
+            if transform_code is None:
+                raise TypeError(
+                    f"Prior on '{name}' uses transform "
+                    f"{type(prior.transform).__name__!r}, which the native prior "
+                    f"program has no code for."
+                )
+
+            dist_code, dist_row = _pack_distribution(prior.dist)
+            if dist_code is None:
+                raise TypeError(
+                    f"Prior on '{name}' uses distribution "
+                    f"{type(prior.dist).__name__!r}, which the native prior program "
+                    f"has no code for."
+                )
+            if (
+                dist_code == DistCode.LKJ_CHOL
+                or transform_code == TransformCode.CHOLESKY_CORR
+            ):
+                raise ValueError(
+                    f"Prior on '{name}' packs a block correlation code "
+                    f"(dist={DistCode(dist_code).name}, "
+                    f"transform={TransformCode(transform_code).name}), which only a "
+                    f"reserved matrix key ('R_corr' or 'Q_corr') can carry."
+                )
+            dist_codes[i] = dist_code
+            dist_params[i] = dist_row
+            transform_codes[i] = transform_code
+            transform_params[i] = transform_row
+
+        _warn_std_corr_support(warn_std, warn_corr)
+        return PyPriorTables(
+            has_prior=has_prior,
+            dist_codes=dist_codes,
+            transform_codes=transform_codes,
+            dist_params=dist_params,
+            transform_params=transform_params,
+        )
 
 
 def _blank_dist_params() -> list[float]:
@@ -285,6 +288,11 @@ def _pack_distribution(dist: Any) -> tuple[int | None, list[float]]:
         params[1] = float(getattr(dist, "_high"))
         params[2] = float(getattr(dist, "_width"))
         return DistCode.UNIFORM, params
+    if isinstance(dist, LKJChol):
+        params[0] = float(getattr(dist, "_eta"))
+        params[1] = float(getattr(dist, "_K"))
+        params[2] = float(getattr(dist, "_log_norm"))
+        return DistCode.LKJ_CHOL, params
     return None, params
 
 
@@ -318,4 +326,26 @@ def _pack_transform(transform: Any) -> tuple[int | None, list[float]]:
     if isinstance(transform, UpperBoundedTransform):
         params[0] = float(transform.high)
         return TransformCode.UPPER_BOUNDED, params
+    if isinstance(transform, CholeskyCorrTransform):
+        params[0] = float(transform.K)
+        return TransformCode.CHOLESKY_CORR, params
     return None, params
+
+
+def _warn_std_corr_support(
+    warn_std: list[tuple[str, str]], warn_corr: list[tuple[str, str]]
+) -> None:
+    if warn_std:
+        warnings.warn(
+            f"Standard deviation parameters [{', '.join(f'{name} ({transform})' for name, transform in warn_std)}] "
+            "have transforms that can map draws outside of the valid support for standard deviations [0, inf). "
+            "Transforms of each of these parameters have been replaced with `LogTransform` to ensure valid draws.",
+            UserWarning,
+        )
+    if warn_corr:
+        warnings.warn(
+            f"Correlation parameters [{', '.join(f'{name} ({transform})' for name, transform in warn_corr)}] "
+            "have transforms that can map draws outside of the valid support for correlations [-1, 1]. "
+            "Transforms of each of these parameters have been replaced with `TanhTransform` to ensure valid draws.",
+            UserWarning,
+        )
