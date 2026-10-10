@@ -28,7 +28,7 @@ from .spec import EstimatorSpec, EstimatorParams, _coerce_ss_seed
 from . import backend as b
 from . import resolvers as r
 from .backend import (
-    EstimDTO,
+    EstimCall,
     MatrixPriorBlock,
     build_dto,
 )
@@ -530,7 +530,7 @@ class Estimator:
             Log-likelihood value of the data given the model and parameters.
 
         """
-        ctx = self._build_native_context()
+        ctx = self._build_native_context(priored=self.priors is not None).dto
         return loglik(ctx, theta)
 
     def logprior(self, theta: NDF, include_logjac: bool = False) -> float64:
@@ -551,7 +551,7 @@ class Estimator:
             Log-prior value of the parameters given the specified priors, optionally including the log-Jacobian term.
 
         """
-        ctx = self._build_native_context()
+        ctx = self._build_native_context(priored=self.priors is not None).dto
         return logprior(ctx, theta, include_logjac)
 
     def logpost(self, theta: NDF, include_logjac: bool = False) -> float64:
@@ -572,7 +572,7 @@ class Estimator:
             Log-posterior value of the parameters given the data, model, and priors, optionally including the log-Jacobian term.
 
         """
-        ctx = self._build_native_context()
+        ctx = self._build_native_context(priored=self.priors is not None).dto
         return logpost(ctx, theta, include_logjac)
 
     def _report_search_warning_count(self, kind: str, n_err: int) -> None:
@@ -582,13 +582,38 @@ class Estimator:
 
     @staticmethod
     def _serialize_bounds(
-        bounds: Sequence[tuple[float | None, float | None]] | None,
-    ) -> list[list[float | None]] | None:
+        bounds: Mapping[str, tuple[float | None, float | None]] | None,
+    ) -> dict[str, list[float | None]] | None:
         if bounds is None:
             return None
+        return {
+            name: [
+                None if lo is None else float(lo),
+                None if hi is None else float(hi),
+            ]
+            for name, (lo, hi) in bounds.items()
+        }
+
+    @staticmethod
+    def _bounds_pairs(
+        lo: NDF, hi: NDF
+    ) -> list[tuple[float | None, float | None]] | None:
+        """The theta box as the per-slot pairs the native entry point parses.
+
+        That parser reads a present side as a bound, which here is a finite one;
+        an all-infinite box restricts nothing and passes as ``None``, so neither
+        driver enters its bounded path over a box that would never bind.
+        """
+        low = np.isfinite(lo)
+        high = np.isfinite(hi)
+        if not (low.any() or high.any()):
+            return None
         return [
-            [None if lo is None else float(lo), None if hi is None else float(hi)]
-            for lo, hi in bounds
+            (
+                float(lo[i]) if low[i] else None,
+                float(hi[i]) if high[i] else None,
+            )
+            for i in range(lo.shape[0])
         ]
 
     def _pack_opt_result(
@@ -630,13 +655,18 @@ class Estimator:
 
     def _build_native_context(
         self,
-    ) -> EstimDTO:
-        """Build the native objective context DTO for the current filter mode.
+        *,
+        priored: bool,
+        theta0: NDF | Mapping[str, float] | None = None,
+        bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
+    ) -> EstimCall:
+        """Build one call's native inputs for the current filter mode.
 
-        Method-agnostic: it depends only on ``self`` (model, data, priors, Q/R
-        specs, transforms), so the same ctx serves the MLE/MAP optimizer driver
-        and the MCMC mainloop. The driver decides how to drive it (minimized
-        ``-logpost`` vs ``+logpost``); the ctx is identical.
+        ``priored`` is the method's answer rather than ``self``'s: MLE ignores
+        the priors it was given, their transforms included, so it builds the
+        transform-free leg and takes the generated box with it. What the driver
+        does with the ctx (minimized ``-logpost`` vs ``+logpost``) is still the
+        driver's own business.
         """
         return build_dto(
             compiled=self.compiled,
@@ -644,10 +674,11 @@ class Estimator:
             param_names=self.param_names,
             param_index=self._param_index,
             matrix_blocks=self._matrix_blocks,
-            param_transforms=self._param_transforms,  # type: ignore
-            priors=self.priors,
+            priors=self.priors if priored else None,
             ss_seed=self.ss_seed,
             R_override=self.R,
+            theta0=theta0,
+            bounds=bounds,
         )
 
     def _point_estimate(
@@ -656,7 +687,7 @@ class Estimator:
         has_priors: bool,
         jacobian: bool = False,
         theta0: NDF | Mapping[str, float] | None = None,
-        bounds: Sequence[tuple[float | None, float | None]] | None = None,
+        bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
         method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
         m: int = 10,
         maxiter: int = 15000,
@@ -672,17 +703,16 @@ class Estimator:
         cov_fd_absolute_floor: float = 0.1,
     ) -> OptimizationResult:
 
-        init = self.resolve_theta0(theta0)
-        self._validate_theta0(init)
-
-        ctx = self._build_native_context()
+        call = self._build_native_context(
+            priored=has_priors, theta0=theta0, bounds=bounds
+        )
 
         res = run_estimation(
-            ctx,
+            call.dto,
             method,
             include_logjac=jacobian,
-            theta0=init,
-            bounds=bounds,
+            theta0=call.theta,
+            bounds=self._bounds_pairs(call.lo, call.hi),
             has_priors=has_priors,
             m=m,
             maxiter=maxiter,
@@ -727,7 +757,7 @@ class Estimator:
         self,
         *,
         theta0: NDF | Mapping[str, float] | None = None,
-        bounds: Sequence[tuple[float | None, float | None]] | None = None,
+        bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
         method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
         m: int = 10,
         maxiter: int = 15000,
@@ -748,8 +778,8 @@ class Estimator:
         ----------
         theta0 : NDF | Mapping[str, float] | None
             Initial guess for the parameter vector. If None, uses the model calibration.
-        bounds : Sequence[tuple[float | None, float | None]] | None
-            Bounds to restrict the parameter search space. Each tuple corresponds to a parameter in the order of ``self.param_names``.
+        bounds : Mapping[str, tuple[float | None, float | None]] | None
+            Bounds to restrict the parameter search space, keyed by estimated parameter name, as ``(lower, upper)`` with ``None`` for an open side. Bounds are read in parameter space and mapped through the parameter's transform, so a bound tighter than the transform's own region is the only one that binds. A member of an estimated correlation block cannot be bounded.
         method : Literal["L-BFGS-B", "Nelder-Mead"]
             Optimization method to use for the estimation. "L-BFGS-B" is a quasi-Newton method suitable for large problems, while "Nelder-Mead" is a derivative-free method.
         m : int
@@ -817,7 +847,7 @@ class Estimator:
         self,
         *,
         theta0: NDF | Mapping[str, float] | None = None,
-        bounds: Sequence[tuple[float | None, float | None]] | None = None,
+        bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
         method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
         jacobian: bool = False,
         m: int = 10,
@@ -839,8 +869,8 @@ class Estimator:
         ----------
         theta0 : NDF | Mapping[str, float] | None
             Initial guess for the parameter vector. If None, uses the model calibration.
-        bounds : Sequence[tuple[float | None, float | None]] | None
-            Bounds to restrict the parameter search space. Each tuple corresponds to a parameter in the order of ``self.param_names``.
+        bounds : Mapping[str, tuple[float | None, float | None]] | None
+            Bounds to restrict the parameter search space, keyed by estimated parameter name, as ``(lower, upper)`` with ``None`` for an open side. Bounds are read in parameter space and mapped through the parameter's transform, so a bound tighter than the transform's own region is the only one that binds. A member of an estimated correlation block cannot be bounded.
         method : Literal["L-BFGS-B", "Nelder-Mead"]
             Optimization method to use for the estimation. "L-BFGS-B" is a quasi-Newton method suitable for large problems, while "Nelder-Mead" is a derivative-free method.
         jacobian : bool
@@ -967,19 +997,26 @@ class Estimator:
 
         rng = np.random.default_rng(random_state)
 
-        current = self.resolve_theta0(theta0)
-        self._validate_theta0(current)
+        map_bounds = None if map_options is None else map_options.get("bounds")
+        call = self._build_native_context(
+            priored=True, theta0=theta0, bounds=map_bounds
+        )
+        current = call.theta
         if current.shape[0] == 0:
             raise ValueError("No estimated parameters were provided.")
 
-        ctx = self._build_native_context()
+        # The MAP seed is the only leg of the chain that takes a box, so the
+        # call's box is its box.
+        native_map_options = dict(map_options or {})
+        if map_bounds is not None:
+            native_map_options["bounds"] = self._bounds_pairs(call.lo, call.hi)
 
         # The chain runs entirely in native nogil code; ``rng`` (numpy's own
         # PCG64) is borrowed for the run and must outlive it, which the local
         # reference here guarantees. Timing wraps only the native call.
         t0 = perf_counter()
         out = run_mcmc(
-            ctx,
+            call.dto,
             current,
             rng,
             n_draws=n_draws,
@@ -993,7 +1030,7 @@ class Estimator:
             cov_fd_absolute_floor=cov_fd_absolute_floor,
             adapt_epsilon=adapt_epsilon,
             compute_map=compute_map,
-            map_options=map_options,
+            map_options=native_map_options,
         )
         elapsed = max(perf_counter() - t0, np.finfo(float).eps)
 

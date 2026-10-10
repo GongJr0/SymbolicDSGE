@@ -37,6 +37,7 @@ from ..bayesian.transforms import (
     UpperBoundedTransform,
 )
 from ..bayesian.priors import Prior
+from ..bayesian.transforms import Transform
 from ..bayesian.support import Support
 from ..core.compiled_model import CompiledModel
 from ..kalman.config import KalmanConfig
@@ -128,7 +129,7 @@ def build_prior_tables(
     compiled: CompiledModel,
     kalman: KalmanConfig | None,
     observables: Sequence[str],
-) -> PyPriorTables:
+) -> tuple[PyPriorTables, list[Transform]]:
     """Pack the transform and density columns for one theta layout.
 
     A block's run carries ``CHOLESKY_CORR`` and its ``K`` on every slot,
@@ -145,6 +146,8 @@ def build_prior_tables(
 
     blocked = np.zeros(n_theta, dtype=bool)
     has_prior = priors is not None
+
+    transforms: list[Transform] = [Identity()] * n_theta
 
     for key, block in matrix_blocks.items():
         run = block.theta_slice
@@ -164,12 +167,15 @@ def build_prior_tables(
         dist_params[run] = dist_row
 
     if priors is None:
-        return PyPriorTables(
-            has_prior=has_prior,
-            dist_codes=dist_codes,
-            transform_codes=transform_codes,
-            dist_params=dist_params,
-            transform_params=transform_params,
+        return (
+            PyPriorTables(
+                has_prior=has_prior,
+                dist_codes=dist_codes,
+                transform_codes=transform_codes,
+                dist_params=dist_params,
+                transform_params=transform_params,
+            ),
+            transforms,
         )
     else:
         names = list(param_index)
@@ -227,13 +233,18 @@ def build_prior_tables(
             transform_codes[i] = transform_code
             transform_params[i] = transform_row
 
+            transforms[i] = transform
+
         _warn_std_corr_support(warn_std, warn_corr)
-        return PyPriorTables(
-            has_prior=has_prior,
-            dist_codes=dist_codes,
-            transform_codes=transform_codes,
-            dist_params=dist_params,
-            transform_params=transform_params,
+        return (
+            PyPriorTables(
+                has_prior=has_prior,
+                dist_codes=dist_codes,
+                transform_codes=transform_codes,
+                dist_params=dist_params,
+                transform_params=transform_params,
+            ),
+            transforms,
         )
 
 

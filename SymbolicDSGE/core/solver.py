@@ -800,15 +800,13 @@ class DSGESolver:
             R=R,
         )
 
-        init = est.resolve_theta0(theta0)
-
         routine_norm = routine.lower()
         if routine_norm == "mle":
-            return est.mle(theta0=init, **method_kwargs)
+            return est.mle(theta0=theta0, **method_kwargs)
         if routine_norm == "map":
-            return est.map(theta0=init, **method_kwargs)
+            return est.map(theta0=theta0, **method_kwargs)
         if routine_norm == "mcmc":
-            return est.mcmc(theta0=init, **method_kwargs)
+            return est.mcmc(theta0=theta0, **method_kwargs)
         raise ValueError("routine must be one of {'mle', 'map', 'mcmc'}.")
 
     def estimate_and_solve(
@@ -894,18 +892,16 @@ class DSGESolver:
             R=R,
         )
 
-        init = est.resolve_theta0(theta0)
-
         routine_norm = routine.lower()
         result: Any
         if routine_norm == "mle":
-            result = est.mle(theta0=init, **method_kwargs)
+            result = est.mle(theta0=theta0, **method_kwargs)
             solve_params = result.theta
         elif routine_norm == "map":
-            result = est.map(theta0=init, **method_kwargs)
+            result = est.map(theta0=theta0, **method_kwargs)
             solve_params = result.theta
         elif routine_norm == "mcmc":
-            result = est.mcmc(theta0=init, **method_kwargs)
+            result = est.mcmc(theta0=theta0, **method_kwargs)
             if posterior_point == "mean":
                 theta_star = asarray(result.samples.mean(axis=0), dtype=float64)
             elif posterior_point == "last":

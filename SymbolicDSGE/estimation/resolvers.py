@@ -4,7 +4,6 @@ from itertools import combinations
 from typing import Any, Sequence, Mapping
 
 import numpy as np
-from numpy._core.numeric import float64
 from numpy.typing import NDArray
 
 from . import backend as b
@@ -12,8 +11,8 @@ from . import backend as b
 from ..core.compiled_model import CompiledModel
 from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
-from ..bayesian.support import Support
-from ..bayesian.transforms import CholeskyCorrTransform
+from ..bayesian.support import OutOfSupportError
+from ..bayesian.transforms import CholeskyCorrTransform, Transform
 from ..kalman.config import KalmanConfig
 from ..core.config import PairGetterDict
 
@@ -399,3 +398,167 @@ def active_R(
             if (name := corr_map.get(pair)) is not None and name in present
         }
     return std, corr
+
+
+# --- Theta Construction and Bounds ---
+
+#: Interior of the role box the transform-free leg is optimized over. Both sit
+#: strictly inside the role's own region, which an optimizer projecting onto a
+#: closed box would otherwise be free to sit on.
+_STD_FLOOR = 1e-8
+_CORR_LIMIT = 1.0 - 1e-6
+
+
+def _blocked(
+    n_theta: int, matrix_blocks: Mapping[str, b.MatrixPriorBlock]
+) -> NDArray[np.bool_]:
+    mask = np.zeros(n_theta, dtype=bool)
+    for block in matrix_blocks.values():
+        mask[block.theta_slice] = True
+    return mask
+
+
+def corr_from_members(block: b.MatrixPriorBlock, values: NDF) -> NDF:
+    """A block's member values as the full correlation matrix."""
+    corr = np.eye(block.K, dtype=np.float64)
+    rows = block.positions[:, 0]
+    cols = block.positions[:, 1]
+    vals = np.asarray(values, dtype=np.float64)
+    corr[rows, cols] = vals
+    corr[cols, rows] = vals
+    return corr
+
+
+def theta_from_params(
+    values: NDF,
+    param_names: Sequence[str],
+    matrix_blocks: Mapping[str, b.MatrixPriorBlock],
+    transforms: Sequence[Transform],
+) -> NDF:
+    """Forward-map a parameter-space vector in theta order to theta.
+
+    Both passes run over one buffer: a block's run is overwritten with the CPC
+    coordinates of the correlation its members describe, and the scalar pass
+    then reads what the block pass wrote, so the ``Identity`` standing on a
+    block slot carries it through instead of restoring the member value.
+    """
+    z = np.array(values, dtype=np.float64, copy=True)
+    if z.ndim != 1 or z.shape[0] != len(param_names):
+        raise ValueError(
+            f"Parameter vector of length {z.size} does not match the "
+            f"{len(param_names)} estimated parameters."
+        )
+
+    for key, block in matrix_blocks.items():
+        corr = corr_from_members(block, z[block.theta_slice])
+        try:
+            z[block.theta_slice] = b._unconstrained_from_corr(corr)
+        except ValueError as exc:
+            raise ValueError(
+                f"Correlations of '{key}' do not form a positive-definite "
+                f"correlation matrix over {block.labels}: {exc}"
+            ) from exc
+
+    for i, (name, transform) in enumerate(zip(param_names, transforms)):
+        try:
+            z[i] = transform.safe_forward(np.float64(z[i]))
+        except OutOfSupportError as exc:
+            raise ValueError(
+                f"Value for '{name}' lies outside the region its transform maps "
+                f"from: {exc}"
+            ) from exc
+    return z
+
+
+def resolve_bounds(
+    bounds: Mapping[str, tuple[float | None, float | None]] | None,
+    param_index: Mapping[str, int],
+    matrix_blocks: Mapping[str, b.MatrixPriorBlock],
+    transforms: Sequence[Transform],
+    roles: tuple[set[str], set[str]] | None,
+) -> tuple[NDF, NDF]:
+    """One call's theta box, as two dense ``n_theta`` buffers.
+
+    ``roles`` is the ``(stds, correlations)`` the box is generated over and
+    arrives only on the transform-free leg, where nothing else holds a standard
+    deviation positive or a correlation inside its interval. A priored leg
+    passes ``None``: the transform already owns its region, so only the bounds
+    the caller asked for move.
+    """
+    lo, hi = _param_box(bounds, param_index, matrix_blocks, transforms, roles)
+    return _map_box(lo, hi, transforms)
+
+
+def _finite(name: str, value: float, side: str) -> np.float64:
+    out = np.float64(value)
+    if np.isnan(out):
+        raise ValueError(f"The {side} bound on '{name}' is not a number.")
+    return out
+
+
+def _param_box(
+    bounds: Mapping[str, tuple[float | None, float | None]] | None,
+    param_index: Mapping[str, int],
+    matrix_blocks: Mapping[str, b.MatrixPriorBlock],
+    transforms: Sequence[Transform],
+    roles: tuple[set[str], set[str]] | None,
+) -> tuple[NDF, NDF]:
+    """The parameter-space box per theta slot, seeded from the transform supports.
+
+    Seeding from the support is what keeps a transform from restating itself as
+    a bound: the support's image is the infinite side, so only an endpoint
+    strictly inside it survives the map as a finite number.
+    """
+    lo = np.array([t.support.low for t in transforms], dtype=np.float64)
+    hi = np.array([t.support.high for t in transforms], dtype=np.float64)
+    blocked = _blocked(lo.size, matrix_blocks)
+
+    if roles is not None:
+        std, corr = roles
+        for name, i in param_index.items():
+            if blocked[i]:
+                continue
+            if name in std:
+                lo[i] = max(lo[i], _STD_FLOOR)
+            elif name in corr:
+                lo[i] = max(lo[i], -_CORR_LIMIT)
+                hi[i] = min(hi[i], _CORR_LIMIT)
+
+    for name, pair in (bounds or {}).items():
+        idx = param_index.get(name)
+        if idx is None:
+            raise ValueError(f"Bound on {name!r}, which is not an estimated parameter.")
+        if blocked[idx]:
+            raise ValueError(
+                f"'{name}' is a member of an estimated correlation block and reaches "
+                f"the covariance through its Cholesky factor, so it owns no "
+                f"parameter of its own to bound."
+            )
+        bound_lo, bound_hi = pair
+        if bound_lo is not None:
+            lo[idx] = max(lo[idx], _finite(name, bound_lo, "lower"))
+        if bound_hi is not None:
+            hi[idx] = min(hi[idx], _finite(name, bound_hi, "upper"))
+        if lo[idx] > hi[idx]:
+            support = transforms[idx].support
+            raise ValueError(
+                f"Bound ({bound_lo}, {bound_hi}) on '{name}' leaves nothing of "
+                f"({support.low}, {support.high}), the region "
+                f"{type(transforms[idx]).__name__} maps from."
+            )
+    return lo, hi
+
+
+def _map_box(lo: NDF, hi: NDF, transforms: Sequence[Transform]) -> tuple[NDF, NDF]:
+    """Map a parameter-space box through the forward transforms.
+
+    Both endpoints always map, a support endpoint included, whose image is the
+    infinity on its side. Min/max then places the pair without reading the map's
+    direction, which is what spares a decreasing transform its own case.
+    """
+    low = np.empty_like(lo)
+    high = np.empty_like(hi)
+    for i, transform in enumerate(transforms):
+        low[i] = transform.forward(np.float64(lo[i]))
+        high[i] = transform.forward(np.float64(hi[i]))
+    return np.minimum(low, high), np.maximum(low, high)

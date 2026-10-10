@@ -36,14 +36,7 @@ class LogTransform(Transform):
     def forward(self, x: NDArray[float64]) -> NDArray[float64]: ...
 
     def forward(self, x: float64 | NDArray[float64]) -> float64 | NDArray[float64]:
-        if self.support.contains(x):
-            return log_fwd(x)
-        elif self.support.at_boundary(
-            x, "low"
-        ):  # Bound must be non-inclusive if the contains check falied but we're at the boundary
-            return log_fwd(self.eps)  # == log(x+eps)
-        else:
-            raise OutOfSupportError(x, self.support)
+        return log_fwd(x)
 
     @overload
     def inverse(self, y: float64) -> float64: ...

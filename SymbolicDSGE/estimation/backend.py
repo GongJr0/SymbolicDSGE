@@ -25,6 +25,7 @@ from .prior_program import (
     build_prior_tables,
     PyPriorTables,
 )
+from . import resolvers as r
 from ..core.compiled_model import (
     CompiledModel,
     _shock_covariance,
@@ -62,7 +63,7 @@ class PyParamMap(NamedTuple):
     """Gather of base model parameters and theta->param order resolution."""
 
     base_params: NDF  # n_par, calib_params order
-    param_slot: NDI  # n_scalars, theta -> params scatter
+    param_slot: NDI  # n_theta, theta -> params scatter
 
 
 class PyCovSpec(NamedTuple):
@@ -171,6 +172,63 @@ class EstimDTO(NamedTuple):
     r_spec: PyCovSpec
     prior: PyPriorTables
     n_theta: int
+
+
+class PyOptimOptions(NamedTuple):
+    """Mirror of ``sdsge_optim_options``: the driver-shared optimizer knobs.
+
+    Each driver reads its own subset, so the rest sit at their defaults on a
+    given run: L-BFGS-B takes ``m``, ``maxiter``, ``maxfun``, ``maxls``,
+    ``factr``, ``pgtol``, and ``fd_step``; Nelder-Mead takes ``maxiter``,
+    ``maxfun``, ``xatol``, and ``fatol``.
+    """
+
+    m: int
+    maxiter: int
+    maxfun: int
+    maxls: int
+    factr: float
+    pgtol: float
+    fd_step: float
+    xatol: float
+    fatol: float
+
+
+class PyEstimOptions(NamedTuple):
+    """Mirror of ``sdsge_estimation_options``: one optimizer run's inputs.
+
+    ``lo``/``hi`` run to ``n_theta`` and carry ``-inf``/``+inf`` on a free side,
+    so an unbounded run is the all-infinite box rather than a separate case;
+    ``nbd`` is absent because the driver derives the L-BFGS-B code from their
+    finiteness, keeping that convention inside C. ``method`` is
+    ``sdsge_estimation_method`` (0 L-BFGS-B, 1 Nelder-Mead) and ``filter_mode``
+    is ``sdsge_filter_mode`` (0 linear, 1 extended, 2 unscented).
+    """
+
+    filter_mode: int
+    method: int
+    has_priors: bool
+    lo: NDF  # n_theta
+    hi: NDF  # n_theta
+    optim: PyOptimOptions
+    compute_cov: bool
+    cov_fd_step_scale: float
+    cov_fd_absolute_floor: float
+
+
+class EstimCall(NamedTuple):
+    """One estimation call's caller-owned arguments.
+
+    Not a struct mirror: ``sdsge_run_estimation`` takes theta as a bare in-place
+    pointer beside its options struct, which is how these travel together
+    without being one struct. ``theta``, ``lo``, and ``hi`` are theta space; the
+    bounds the caller wrote are parameter space and stay with the caller.
+    """
+
+    dto: EstimDTO
+    theta: NDF
+    lo: NDF
+    hi: NDF
 
 
 # ---------------------------------------------------------------------------
@@ -372,18 +430,26 @@ def build_dto(
     priors: Mapping[str, Prior] | None,
     ss_seed: Any,
     R_override: NDF | None,
-) -> EstimDTO:
-    """Assemble the mode-independent objective inputs (``sdsge_obj_common``).
+    theta0: Mapping[str, float] | NDF | None = None,
+    bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
+) -> EstimCall:
+    """Assemble one estimation call's inputs around ``sdsge_obj_common``.
 
-    The single orchestration point for the input tables: it builds one
-    ``calib_index`` and threads it through the param map and both cov specs so the
-    calib ordering has one origin, and lowers ``priors`` to the packed log-prior
-    program here rather than taking pre-built tables, so every table the native
-    objective reads is produced in one place. Runtime addresses: ``residual`` from the
-    objective cfunc, ``bc_residual`` only for the unscented (second-order) path,
-    ``meas``/``jac`` off the prepared run. ``ss_seed`` is resolved to canonical
-    variable order by the solver's authority. Scratch buffers and the
-    ``bk_violations`` output are the composer's job, not here.
+    The single orchestration point: it builds one ``calib_index`` and threads it
+    through the param map and both cov specs so the calib ordering has one
+    origin, and lowers ``priors`` to the packed log-prior program here rather
+    than taking pre-built tables, so every table the native objective reads is
+    produced in one place. The transforms that program resolves never leave:
+    they map ``theta0`` and ``bounds`` out of parameter space here, which is the
+    only way the box and the density cannot disagree about a slot.
+
+    ``priors is None`` is the transform-free leg, and the only one that
+    generates a box of its own, over the standard deviations and correlations
+    its roles name. Runtime addresses: ``residual`` from the objective cfunc,
+    ``bc_residual`` only for the unscented (second-order) path, ``meas``/``jac``
+    off the prepared run. ``ss_seed`` is resolved to canonical variable order by
+    the solver's authority. Scratch buffers and the ``bk_violations`` output are
+    the composer's job, not here.
     """
     calib_index = build_calib_index(compiled)
     base_dict = extract_base_params(compiled)
@@ -394,7 +460,7 @@ def build_dto(
         else 0
     )
     ss_seed_vec = DSGESolver._resolve_ss_seed(ss_seed, compiled)
-    prior_tables = build_prior_tables(
+    pt, transforms = build_prior_tables(
         param_index=param_index,
         priors=priors,
         matrix_blocks=matrix_blocks,
@@ -402,6 +468,20 @@ def build_dto(
         kalman=compiled.kalman,
         observables=prepared.observables,
     )
+
+    theta = r.theta_from_params(
+        _seed_params(theta0, param_names, base_dict),
+        param_names,
+        matrix_blocks,
+        transforms,
+    )
+
+    roles = None
+    if priors is None:
+        std_q, corr_q = r.active_Q(param_names, compiled)
+        std_r, corr_r = r.active_R(param_names, compiled.kalman, prepared.observables)
+        roles = (std_q | std_r, corr_q | corr_r)
+    lo, hi = r.resolve_bounds(bounds, param_index, matrix_blocks, transforms, roles)
 
     solve = SolveDTO(
         residual_addr=int(compiled.construct_objective_cfunc().address),
@@ -415,7 +495,7 @@ def build_dto(
         n_par=compiled.n_par,
     )
 
-    return EstimDTO(
+    dto = EstimDTO(
         solve_ctx=solve,
         filter_ctx=prepared,
         pmap=build_param_map(
@@ -439,9 +519,49 @@ def build_dto(
             base_dict=base_dict,
             R_override=R_override,
         ),
-        prior=prior_tables,
+        prior=pt,
         n_theta=len(param_names),
     )
+    return EstimCall(dto=dto, theta=theta, lo=lo, hi=hi)
+
+
+def _seed_params(
+    theta0: Mapping[str, float] | NDF | None,
+    param_names: Sequence[str],
+    base_dict: Mapping[str, float64],
+) -> NDF:
+    """The parameter-space seed in theta order.
+
+    ``None`` takes the model calibration. A mapping must name every estimated
+    parameter and nothing else; an array is read in ``param_names`` order, and
+    is parameter space too, not theta.
+    """
+    if theta0 is None:
+        missing = [name for name in param_names if name not in base_dict]
+        if missing:
+            raise ValueError(
+                f"The calibration carries no value for {missing}, so it cannot seed them."
+            )
+        return asarray([base_dict[name] for name in param_names], dtype=float64)
+
+    if isinstance(theta0, Mapping):
+        missing = [name for name in param_names if name not in theta0]
+        if missing:
+            raise ValueError(f"theta0 is missing estimated parameters: {missing}")
+        unknown = [key for key in theta0 if key not in set(param_names)]
+        if unknown:
+            raise ValueError(
+                f"theta0 names parameters that are not estimated: {unknown}"
+            )
+        return asarray([float64(theta0[name]) for name in param_names], dtype=float64)
+
+    values = asarray(theta0, dtype=float64)
+    if values.ndim != 1 or values.shape[0] != len(param_names):
+        raise ValueError(
+            f"theta0 of length {values.size} does not match the "
+            f"{len(param_names)} estimated parameters."
+        )
+    return values
 
 
 def extract_base_params(compiled: CompiledModel) -> dict[str, float64]:
