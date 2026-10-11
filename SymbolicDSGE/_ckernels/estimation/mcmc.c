@@ -97,23 +97,20 @@ static inline f64 sdsge_unconstrained_to_params(const sdsge_obj_common *b,
                                                 f64 *SDSGE_RESTRICT Lblk,
                                                 f64 *SDSGE_RESTRICT out) {
   const sdsge_prior_tables *pr = &b->prior;
-  const sdsge_param_map *pmap = &b->pmap;
 
-  f64 lj = 0.0;
-  f64 x, logjac;
-  for (i64 i = 0; i < pmap->n_scalars; ++i) {
-    i64 idx = pmap->theta_idx[i];
-    sdsge_transform_inverse_and_logjac(pmap->transform_code[i],
-                                       pmap->transform_params + i * 3,
-                                       theta[idx], &x, &logjac);
-    out[idx] = x;
-  }
-
-  for (i64 i = 0; i < pr->n_scalar; ++i) {
-    sdsge_transform_inverse_and_logjac(
-        pr->scalar_transform_codes[i],
-        pr->scalar_transform_params + i * SDSGE_N_TRANSFORM_PARAMS,
-        theta[pr->scalar_indices[i]], &x, &logjac);
+  f64 x, logjac, lj = 0.0;
+  i64 len;
+  for (i64 i = 0; i < pr->n_theta; ++i) {
+    len = sdsge_block_run_len(pr, i);
+    if (len) {
+      i += len - 1; // skip the block fill
+      continue;
+    }
+    sdsge_transform_inverse_and_logjac(pr->transform_codes[i],
+                                       pr->transform_params +
+                                           i * SDSGE_N_TRANSFORM_PARAMS,
+                                       theta[i], &x, &logjac);
+    out[i] = x;
     lj += logjac;
   }
 
@@ -127,14 +124,7 @@ static inline f64 sdsge_unconstrained_to_params(const sdsge_obj_common *b,
     sdsge_corr_entries_from_unconstrained(theta + sp->block_theta_off, sp->K,
                                           Lblk, out + sp->block_theta_off,
                                           &block_lj);
-    /* Only a block carrying an LKJ put a jacobian into the logpost, and the
-     * prior tables list exactly those. */
-    for (i64 k = 0; k < pr->n_blocks; ++k) {
-      if (pr->matrix_offsets[k] == sp->block_theta_off) {
-        lj += block_lj;
-        break;
-      }
-    }
+    lj += block_lj;
   }
 
   return lj;

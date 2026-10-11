@@ -31,13 +31,16 @@ _RESERVED_TO_NAME = {
 def assert_only_prior_or_parameters(
     estimated_parameters: Sequence[str] | None, priors: Mapping[str, Prior] | None
 ) -> list[str]:
-    if estimated_parameters is not None and priors is not None:
-        raise ValueError(
-            "Specify `estimated_parameters` only when you intend to use MLE alone. "
-            "`priors` is keyed by estimated parameter names and is mandatory for MAP and MCMC. "
-            "Calling MLE with `priors` will estimate the parameters named as keys but ignore the prior distributions/transforms."
-        )
     if estimated_parameters is not None:
+        if priors is not None:
+            mismatch = sorted(set(estimated_parameters) ^ set(priors))
+            if mismatch:
+                raise ValueError(
+                    f"`estimated_parameters` and `priors` must name the same "
+                    f"parameters; {mismatch} appear in one and not the other. If you "
+                    f"specified a block prior, pass its name to "
+                    f"`estimated_parameters` instead of the members."
+                )
         return list(estimated_parameters)
     if priors is not None:
         return list(priors.keys())
@@ -101,6 +104,8 @@ def resolve_theta_layout(
             if block.K < 2:
                 raise ValueError(f"{key} requires a matrix of dimension at least 2.")
             _assert_dense_block(key, block)
+            if priored is not None:
+                _assert_lkj_prior(key, priored[key], block.K)
             doubled = sorted(set(members) & present)
             if doubled:
                 raise ValueError(
@@ -309,7 +314,6 @@ def _build_matrix_resolution(
         member_names=member_names,
         positions=np.asarray(positions, dtype=np.int64).reshape(-1, 2),
         theta_slice=slice(0, 0),
-        prior=None,
     )
 
 
@@ -479,86 +483,143 @@ def resolve_bounds(
 ) -> tuple[NDF, NDF]:
     """One call's theta box, as two dense ``n_theta`` buffers.
 
-    ``roles`` is the ``(stds, correlations)`` the box is generated over and
-    arrives only on the transform-free leg, where nothing else holds a standard
-    deviation positive or a correlation inside its interval. A priored leg
-    passes ``None``: the transform already owns its region, so only the bounds
-    the caller asked for move.
+    Seeded from the region each transform maps from, which is how parameter
+    space spells an unbounded side: the endpoint's image is the infinity theta
+    space spells it with. So nothing restates a transform, and a bound binds
+    only by sitting strictly inside it.
+
+    ``roles`` arrives on the transform-free leg alone and is written last.
+    There it is the only thing holding a standard deviation positive or a
+    correlation inside its interval, which makes it the only restriction
+    allowed to override what the caller asked for.
     """
-    lo, hi = _param_box(bounds, param_index, matrix_blocks, transforms, roles)
-    return _map_box(lo, hi, transforms)
-
-
-def _finite(name: str, value: float, side: str) -> np.float64:
-    out = np.float64(value)
-    if np.isnan(out):
-        raise ValueError(f"The {side} bound on '{name}' is not a number.")
-    return out
-
-
-def _param_box(
-    bounds: Mapping[str, tuple[float | None, float | None]] | None,
-    param_index: Mapping[str, int],
-    matrix_blocks: Mapping[str, b.MatrixPriorBlock],
-    transforms: Sequence[Transform],
-    roles: tuple[set[str], set[str]] | None,
-) -> tuple[NDF, NDF]:
-    """The parameter-space box per theta slot, seeded from the transform supports.
-
-    Seeding from the support is what keeps a transform from restating itself as
-    a bound: the support's image is the infinite side, so only an endpoint
-    strictly inside it survives the map as a finite number.
-    """
+    blocked = _blocked(len(param_index), matrix_blocks)
     lo = np.array([t.support.low for t in transforms], dtype=np.float64)
     hi = np.array([t.support.high for t in transforms], dtype=np.float64)
-    blocked = _blocked(lo.size, matrix_blocks)
 
+    _write_bounds(lo, hi, bounds, param_index, transforms, blocked)
     if roles is not None:
-        std, corr = roles
-        for name, i in param_index.items():
-            if blocked[i]:
-                continue
-            if name in std:
-                lo[i] = max(lo[i], _STD_FLOOR)
-            elif name in corr:
-                lo[i] = max(lo[i], -_CORR_LIMIT)
-                hi[i] = min(hi[i], _CORR_LIMIT)
+        _write_roles(lo, hi, param_index, roles, blocked)
+        empty = np.flatnonzero(lo > hi)
+        if empty.size:
+            slot = int(empty[0])
+            raise ValueError(
+                f"The role box on '{list(param_index)[slot]}' leaves nothing of the "
+                f"bound it was given: [{lo[slot]}, {hi[slot]}] is empty."
+            )
 
-    for name, pair in (bounds or {}).items():
+    for i, transform in enumerate(transforms):
+        # UpperBounded decreases, so the pair is placed by its image rather
+        # than by the side it came from.
+        low = transform.forward(np.float64(lo[i]))
+        high = transform.forward(np.float64(hi[i]))
+        lo[i], hi[i] = min(low, high), max(low, high)
+    return lo, hi
+
+
+def _write_bounds(
+    lo: NDF,
+    hi: NDF,
+    bounds: Mapping[str, tuple[float | None, float | None]] | None,
+    param_index: Mapping[str, int],
+    transforms: Sequence[Transform],
+    blocked: NDArray[np.bool_],
+) -> None:
+    """Write the caller's bounds over the seed, in place.
+
+    Assigned rather than intersected: a value reaching the write has already
+    been shown to lie in the region its transform maps from, so a ``max``
+    against the seed could only ever return the value itself.
+    """
+    for name, (bound_lo, bound_hi) in (bounds or {}).items():
         idx = param_index.get(name)
         if idx is None:
             raise ValueError(f"Bound on {name!r}, which is not an estimated parameter.")
         if blocked[idx]:
             raise ValueError(
                 f"'{name}' is a member of an estimated correlation block and reaches "
-                f"the covariance through its Cholesky factor, so it owns no "
-                f"parameter of its own to bound."
+                f"the covariance through its Cholesky factor, so it owns no parameter "
+                f"of its own to bound."
             )
-        bound_lo, bound_hi = pair
-        if bound_lo is not None:
-            lo[idx] = max(lo[idx], _finite(name, bound_lo, "lower"))
-        if bound_hi is not None:
-            hi[idx] = min(hi[idx], _finite(name, bound_hi, "upper"))
-        if lo[idx] > hi[idx]:
-            support = transforms[idx].support
-            raise ValueError(
-                f"Bound ({bound_lo}, {bound_hi}) on '{name}' leaves nothing of "
-                f"({support.low}, {support.high}), the region "
-                f"{type(transforms[idx]).__name__} maps from."
-            )
-    return lo, hi
+        low = _side(name, bound_lo, transforms[idx], "lower", lo[idx])
+        high = _side(name, bound_hi, transforms[idx], "upper", hi[idx])
+        if low > high:
+            raise ValueError(f"Bound ({bound_lo}, {bound_hi}) on '{name}' is reversed.")
+        lo[idx], hi[idx] = low, high
 
 
-def _map_box(lo: NDF, hi: NDF, transforms: Sequence[Transform]) -> tuple[NDF, NDF]:
-    """Map a parameter-space box through the forward transforms.
+def _write_roles(
+    lo: NDF,
+    hi: NDF,
+    param_index: Mapping[str, int],
+    roles: tuple[set[str], set[str]] | None,
+    blocked: NDArray[np.bool_],
+) -> None:
+    """Close the slots a role names over whatever is already there, in place.
 
-    Both endpoints always map, a support endpoint included, whose image is the
-    infinity on its side. Min/max then places the pair without reading the map's
-    direction, which is what spares a decreasing transform its own case.
+    A blocked slot is skipped: the role names reach it as a correlation, but
+    the slot holds a Cholesky coordinate whose block keeps the matrix valid
+    without restricting the coordinate.
     """
-    low = np.empty_like(lo)
-    high = np.empty_like(hi)
-    for i, transform in enumerate(transforms):
-        low[i] = transform.forward(np.float64(lo[i]))
-        high[i] = transform.forward(np.float64(hi[i]))
-    return np.minimum(low, high), np.maximum(low, high)
+    std, corr = roles if roles is not None else (set(), set())
+    for name, i in param_index.items():
+        if blocked[i]:
+            continue
+        if name in std:
+            lo[i] = max(lo[i], _STD_FLOOR)
+        elif name in corr:
+            lo[i] = max(lo[i], -_CORR_LIMIT)
+            hi[i] = min(hi[i], _CORR_LIMIT)
+
+
+def _side(
+    name: str,
+    value: float | None,
+    transform: Transform,
+    side: str,
+    seed: np.float64,
+) -> np.float64:
+    """The number one side of a caller's pair ends up at.
+
+    ``None`` and the side's own infinity are the same statement, that the
+    caller bounded nothing here, and both leave the seed standing; the opposite
+    infinity is not an open side but an empty one. A finite value must lie in
+    the closure of the region the transform maps from, endpoints included,
+    which is how a bound that only restates the transform costs nothing instead
+    of raising.
+    """
+    if value is None:
+        return seed
+
+    out = np.float64(value)
+    if np.isnan(out):
+        raise ValueError(f"The {side} bound on '{name}' is not a number.")
+    if np.isinf(out):
+        if out != np.float64(-np.inf if side == "lower" else np.inf):
+            raise ValueError(
+                f"The {side} bound on '{name}' is {out}, which admits nothing."
+            )
+        return seed
+
+    support = transform.support
+    if not (support.low <= out <= support.high):
+        raise ValueError(
+            f"The {side} bound on '{name}' is {out}, outside "
+            f"[{support.low}, {support.high}], the region "
+            f"{type(transform).__name__} maps from."
+        )
+    return out
+
+
+def serialize_bounds(
+    bounds: Mapping[str, tuple[float | None, float | None]] | None,
+) -> dict[str, list[float | None]] | None:
+    if bounds is None:
+        return None
+    return {
+        name: [
+            None if lo is None else float(lo),
+            None if hi is None else float(hi),
+        ]
+        for name, (lo, hi) in bounds.items()
+    }

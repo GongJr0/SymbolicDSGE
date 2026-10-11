@@ -56,7 +56,6 @@ class MatrixPriorBlock(NamedTuple):
     member_names: list[str]
     positions: NDArray[np.int64]
     theta_slice: slice
-    prior: Prior | None
 
 
 class PyParamMap(NamedTuple):
@@ -172,63 +171,6 @@ class EstimDTO(NamedTuple):
     r_spec: PyCovSpec
     prior: PyPriorTables
     n_theta: int
-
-
-class PyOptimOptions(NamedTuple):
-    """Mirror of ``sdsge_optim_options``: the driver-shared optimizer knobs.
-
-    Each driver reads its own subset, so the rest sit at their defaults on a
-    given run: L-BFGS-B takes ``m``, ``maxiter``, ``maxfun``, ``maxls``,
-    ``factr``, ``pgtol``, and ``fd_step``; Nelder-Mead takes ``maxiter``,
-    ``maxfun``, ``xatol``, and ``fatol``.
-    """
-
-    m: int
-    maxiter: int
-    maxfun: int
-    maxls: int
-    factr: float
-    pgtol: float
-    fd_step: float
-    xatol: float
-    fatol: float
-
-
-class PyEstimOptions(NamedTuple):
-    """Mirror of ``sdsge_estimation_options``: one optimizer run's inputs.
-
-    ``lo``/``hi`` run to ``n_theta`` and carry ``-inf``/``+inf`` on a free side,
-    so an unbounded run is the all-infinite box rather than a separate case;
-    ``nbd`` is absent because the driver derives the L-BFGS-B code from their
-    finiteness, keeping that convention inside C. ``method`` is
-    ``sdsge_estimation_method`` (0 L-BFGS-B, 1 Nelder-Mead) and ``filter_mode``
-    is ``sdsge_filter_mode`` (0 linear, 1 extended, 2 unscented).
-    """
-
-    filter_mode: int
-    method: int
-    has_priors: bool
-    lo: NDF  # n_theta
-    hi: NDF  # n_theta
-    optim: PyOptimOptions
-    compute_cov: bool
-    cov_fd_step_scale: float
-    cov_fd_absolute_floor: float
-
-
-class EstimCall(NamedTuple):
-    """One estimation call's caller-owned arguments.
-
-    Not a struct mirror: ``sdsge_run_estimation`` takes theta as a bare in-place
-    pointer beside its options struct, which is how these travel together
-    without being one struct. ``theta``, ``lo``, and ``hi`` are theta space; the
-    bounds the caller wrote are parameter space and stay with the caller.
-    """
-
-    dto: EstimDTO
-    theta: NDF
-    lo: NDF
-    hi: NDF
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +362,7 @@ def _build_r_spec(
     )
 
 
-def build_dto(
+def estim_context(
     *,
     compiled: CompiledModel,
     prepared: FilterDTO,
@@ -432,7 +374,7 @@ def build_dto(
     R_override: NDF | None,
     theta0: Mapping[str, float] | NDF | None = None,
     bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
-) -> EstimCall:
+) -> tuple[EstimDTO, NDF, NDF, NDF]:
     """Assemble one estimation call's inputs around ``sdsge_obj_common``.
 
     The single orchestration point: it builds one ``calib_index`` and threads it
@@ -478,9 +420,9 @@ def build_dto(
 
     roles = None
     if priors is None:
-        std_q, corr_q = r.active_Q(param_names, compiled)
-        std_r, corr_r = r.active_R(param_names, compiled.kalman, prepared.observables)
-        roles = (std_q | std_r, corr_q | corr_r)
+        stdQ, corrQ = r.active_Q(param_names, compiled)
+        stdR, corrR = r.active_R(param_names, compiled.kalman, prepared.observables)
+        roles = (stdQ | stdR, corrQ | corrR)
     lo, hi = r.resolve_bounds(bounds, param_index, matrix_blocks, transforms, roles)
 
     solve = SolveDTO(
@@ -522,7 +464,7 @@ def build_dto(
         prior=pt,
         n_theta=len(param_names),
     )
-    return EstimCall(dto=dto, theta=theta, lo=lo, hi=hi)
+    return dto, theta, lo, hi
 
 
 def _seed_params(

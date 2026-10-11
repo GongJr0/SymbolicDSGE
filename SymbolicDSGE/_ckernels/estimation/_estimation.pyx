@@ -443,18 +443,18 @@ cdef int _ACT_MCMC = 1
 cdef int _ACT_EVAL = 2
 
 
-cdef void _fill_bounds(object bounds, int64_t d, double[::1] lo, double[::1] hi,
-                       int64_t[::1] nbd) except *:
-    """scipy's L-BFGS-B convention: none=0, lower=1, both=2, upper=3."""
-    cdef int64_t i
+cdef void _fill_nbd(double[::1] lo, double[::1] hi, int64_t d,
+                    int64_t[::1] nbd) except *:
+    """scipy's L-BFGS-B convention: none=0, lower=1, both=2, upper=3.
+
+    An infinity is the box's only spelling of an absent bound, so an
+    all-infinite box leaves every code at 0 and the caller hands the driver
+    NULL. The comparisons are ``isfinite`` without the numpy call, NaN
+    included, which compares false on both sides and reads as absent.
+    """
     for i in range(d):
-        lb, ub = bounds[i]
-        has_lo = lb is not None
-        has_hi = ub is not None
-        if has_lo:
-            lo[i] = lb
-        if has_hi:
-            hi[i] = ub
+        has_lo = np.isfinite(lo[i])
+        has_hi = np.isfinite(hi[i])
         nbd[i] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
 
 
@@ -478,13 +478,15 @@ cdef dict _do_estimate(void *ctxp, sdsge_obj_common *b, int filter_mode,
     cdef double[::1] xv = x
     cdef int64_t d = xv.shape[0]
 
-    cdef double[::1] lo = np.zeros(d, dtype=np.float64)
-    cdef double[::1] hi = np.zeros(d, dtype=np.float64)
+    cdef double[::1] lo = np.ascontiguousarray(opts["lo"], dtype=np.float64)
+    cdef double[::1] hi = np.ascontiguousarray(opts["hi"], dtype=np.float64)
+    if lo.shape[0] != d or hi.shape[0] != d:
+        raise ValueError(
+            f"lo and hi must run to theta0's length; got {lo.shape[0]} and "
+            f"{hi.shape[0]} against {d}."
+        )
     cdef int64_t[::1] nbd = np.zeros(d, dtype=np.int64)
-    bounds = opts["bounds"]
-    cdef int has_bounds = bounds is not None
-    if has_bounds:
-        _fill_bounds(bounds, d, lo, hi, nbd)
+    _fill_nbd(lo, hi, d, nbd)
 
     cdef sdsge_estimation_options est
     est.filter_mode = filter_mode
@@ -492,7 +494,7 @@ cdef dict _do_estimate(void *ctxp, sdsge_obj_common *b, int filter_mode,
     est.has_priors = has_priors
     est.lo = &lo[0]
     est.hi = &hi[0]
-    est.nbd = &nbd[0] if has_bounds else NULL
+    est.nbd = &nbd[0] if np.sum(nbd) > 0 else NULL
     est.optim.m = opts["m"]
     est.optim.maxiter = opts["maxiter"]
     est.optim.maxfun = opts["maxfun"]
@@ -588,13 +590,15 @@ cdef dict _do_mcmc(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
     # The MAP leg the chain may start from, driven through the same options
     # struct a point estimate uses.
     mo = opts["map_options"]
-    cdef double[::1] mlo = np.zeros(d, dtype=np.float64)
-    cdef double[::1] mhi = np.zeros(d, dtype=np.float64)
+    cdef double[::1] mlo = np.ascontiguousarray(mo["lo"], dtype=np.float64)
+    cdef double[::1] mhi = np.ascontiguousarray(mo["hi"], dtype=np.float64)
+    if mlo.shape[0] != d or mhi.shape[0] != d:
+        raise ValueError(
+            f"MAP lo and hi must run to theta0's length; got {mlo.shape[0]} and "
+            f"{mhi.shape[0]} against {d}."
+        )
     cdef int64_t[::1] mnbd = np.zeros(d, dtype=np.int64)
-    map_bounds = mo.get("bounds")
-    cdef int has_map_bounds = map_bounds is not None
-    if has_map_bounds:
-        _fill_bounds(map_bounds, d, mlo, mhi, mnbd)
+    _fill_nbd(mlo, mhi, d, mnbd)
 
     cdef sdsge_estimation_options map_opt
     map_opt.filter_mode = filter_mode
@@ -602,7 +606,7 @@ cdef dict _do_mcmc(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
     map_opt.has_priors = 1
     map_opt.lo = &mlo[0]
     map_opt.hi = &mhi[0]
-    map_opt.nbd = &mnbd[0] if has_map_bounds else NULL
+    map_opt.nbd = &mnbd[0] if np.sum(mnbd) > 0 else NULL
     map_opt.optim.m = mo.get("m", 10)
     map_opt.optim.maxiter = mo.get("maxiter", 15000)
     map_opt.optim.maxfun = mo.get("maxfun", 15000)
@@ -767,7 +771,8 @@ def run_estimation(
     object ctx_dto,
     str method,
     double[::1] theta0,
-    bounds=None,
+    double[::1] lo,
+    double[::1] hi,
     bint has_priors=False,
     bint include_logjac=False,
     int m=10,
@@ -799,7 +804,8 @@ def run_estimation(
     cdef str mode = ctx_dto.filter_ctx.mode
     return _dispatch(ctx_dto, mode, _ACT_ESTIMATE, {
         "theta0": theta0,
-        "bounds": bounds,
+        "lo": lo,
+        "hi": hi,
         "method": method,
         "has_priors": has_priors,
         "include_logjac": include_logjac,
@@ -855,10 +861,9 @@ def run_mcmc(
         raise ValueError("thin must be positive.")
     if cov_fd_step_scale <= 0.0 or cov_fd_absolute_floor <= 0.0:
         raise ValueError("Hessian finite-difference settings must be positive.")
-    if map_options is None:
-        map_options = {}
+    map_options = {} if map_options is None else dict(map_options)
     unknown_map_options = set(map_options) - {
-        "method", "bounds", "m", "maxiter", "maxfun", "maxls", "factr",
+        "method", "lo", "hi", "m", "maxiter", "maxfun", "maxls", "factr",
         "pgtol", "fd_step", "xatol", "fatol",
     }
     if unknown_map_options:
@@ -867,6 +872,9 @@ def run_mcmc(
         )
 
     cdef int64_t d = theta0.shape[0]
+    map_options.setdefault("lo", np.full(d, -np.inf, dtype=np.float64))
+    map_options.setdefault("hi", np.full(d, np.inf, dtype=np.float64))
+
     cdef bint needs_hessian = True
     if proposal_cov is not None:
         needs_hessian = False

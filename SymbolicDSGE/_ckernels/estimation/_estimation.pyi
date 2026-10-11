@@ -7,7 +7,7 @@ the production optimizer driver; the ``obj_*_base`` entries are the n_theta == 0
 parity harnesses.
 """
 
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 from numpy import float64
@@ -19,7 +19,8 @@ def run_estimation(
     ctx_dto: Any,
     method: str,
     theta0: _F64,
-    bounds: Sequence[tuple[float | None, float | None]] | None = None,
+    lo: _F64,
+    hi: _F64,
     has_priors: bool = False,
     include_logjac: bool = False,
     m: int = 10,

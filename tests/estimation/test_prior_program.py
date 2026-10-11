@@ -13,7 +13,7 @@ from SymbolicDSGE.estimation.prior_program import (
     TransformCode,
     _pack_distribution,
     _pack_transform,
-    build_packed_logprior,
+    build_prior_tables,
 )
 from SymbolicDSGE._ckernels.estimation import (
     logprior_program,
@@ -32,27 +32,47 @@ from _oracles.estimation import (
 )
 
 
+@pytest.fixture(scope="module")
+def pack(post82):
+    """``build_prior_tables`` bound to the shared model.
+
+    The packer reads the model only through the role resolvers, which decide
+    whether a standard deviation or correlation prior's transform is swapped
+    for one whose support fits the role. No name used here is a Q or R role, so
+    these cases pack the rows they were given.
+    """
+    compiled = post82["compiled"]
+    observables = post82["obs"]
+
+    def _pack(priors, param_index, matrix_blocks=None):
+        tables, _ = build_prior_tables(
+            param_index=param_index,
+            priors=priors,
+            matrix_blocks=matrix_blocks or {},
+            compiled=compiled,
+            kalman=compiled.kalman,
+            observables=observables,
+        )
+        return tables
+
+    return _pack
+
+
 def _logprior_from_tables(tables, theta, jacobian: bool = True) -> float:
     """Run the packed program straight off its tables.
 
     The public entry point takes a full objective context, which a unit test of
-    the prior program alone has no reason to build. ``PyPriorTables`` is exactly
-    the eleven arrays the kernel reads, so unpacking it here keeps these cases
-    on the program rather than on a whole estimator.
+    the prior program alone has no reason to build. ``PyPriorTables`` carries
+    the four columns the kernel reads, so unpacking it here keeps these cases on
+    the program rather than on a whole estimator.
     """
     return float(
         logprior_program(
             theta,
-            tables.scalar_indices,
-            tables.scalar_dist_codes,
-            tables.scalar_transform_codes,
-            tables.scalar_dist_params,
-            tables.scalar_transform_params,
-            tables.matrix_offsets,
-            tables.matrix_dims,
-            tables.matrix_lengths,
-            tables.matrix_etas,
-            tables.matrix_log_constants,
+            tables.dist_codes,
+            tables.transform_codes,
+            tables.dist_params,
+            tables.transform_params,
             jacobian,
         )
     )
@@ -180,15 +200,9 @@ def _scalar_prior_cases():
 
 
 @pytest.mark.parametrize("name,prior,z,expected", _scalar_prior_cases())
-def test_packed_scalar_prior_unit_matches_python_golden(name, prior, z, expected):
-    packed = build_packed_logprior(
-        priors={name: prior},
-        param_index={name: 0},
-        matrix_blocks={},
-        matrix_member_names=set(),
-    )
+def test_packed_scalar_prior_unit_matches_python_golden(pack, name, prior, z, expected):
+    packed = pack({name: prior}, {name: 0})
 
-    assert packed is not None
     assert float(prior.logpdf(np.float64(z))) == pytest.approx(
         expected, rel=1e-13, abs=1e-13
     )
@@ -197,21 +211,15 @@ def test_packed_scalar_prior_unit_matches_python_golden(name, prior, z, expected
     ) == pytest.approx(expected, rel=1e-13, abs=1e-13)
 
 
-def test_packed_scalar_program_matches_python_golden_sum():
+def test_packed_scalar_program_matches_python_golden_sum(pack):
     cases = _scalar_prior_cases()
     priors = {name: prior for name, prior, _, _ in cases}
     theta = np.asarray([z for _, _, z, _ in cases], dtype=np.float64)
     expected_parts = [expected for _, _, _, expected in cases]
     expected_total = -12.277551433095528
 
-    packed = build_packed_logprior(
-        priors=priors,
-        param_index={name: i for i, name in enumerate(priors)},
-        matrix_blocks={},
-        matrix_member_names=set(),
-    )
+    packed = pack(priors, {name: i for i, name in enumerate(priors)})
 
-    assert packed is not None
     for i, (name, prior) in enumerate(priors.items()):
         assert float(prior.logpdf(np.float64(theta[i]))) == pytest.approx(
             expected_parts[i], rel=1e-13, abs=1e-13
@@ -222,7 +230,7 @@ def test_packed_scalar_program_matches_python_golden_sum():
     )
 
 
-def test_packed_lkj_block_unit_matches_python_golden():
+def test_packed_lkj_block_unit_matches_python_golden(pack):
     prior = make_prior(
         "lkj_chol",
         {"eta": 1.5, "K": 3, "random_state": 101},
@@ -235,85 +243,46 @@ def test_packed_lkj_block_unit_matches_python_golden():
     )
     expected = 0.5643752975616161
 
-    packed = build_packed_logprior(
-        priors={"R_corr": prior},
-        param_index={"rho10": 0, "rho20": 1, "rho21": 2},
-        matrix_blocks={"R_corr": block},
-        matrix_member_names={"rho10", "rho20", "rho21"},
+    packed = pack(
+        {"R_corr": prior},
+        {"rho10": 0, "rho20": 1, "rho21": 2},
+        {"R_corr": block},
     )
 
-    assert packed is not None
     assert float(prior.logpdf(theta)) == pytest.approx(expected, rel=1e-13, abs=1e-13)
     assert float(_logprior_from_tables(packed, theta, True)) == pytest.approx(
         expected, rel=1e-13, abs=1e-13
     )
 
 
-def test_packed_logprior_rejects_unsupported_specs():
+def test_packed_logprior_rejects_unsupported_specs(pack):
     prior = make_prior(
         "normal",
         {"mean": 0.0, "std": 1.0, "random_state": 1},
         "identity",
     )
-    packed = build_packed_logprior(
-        priors={"rho": prior},
-        param_index={"rho": 0},
-        matrix_blocks={},
-        matrix_member_names=set(),
+    lkj = make_prior(
+        "lkj_chol",
+        {"eta": 1.5, "K": 2, "random_state": 7},
+        "cholesky_corr",
     )
 
-    assert (
-        build_packed_logprior(
-            priors=None,
-            param_index={},
-            matrix_blocks={},
-            matrix_member_names=set(),
-        )
-        is None
-    )
-    assert packed is not None
+    # The prior-free leg packs too: the transform half runs on every leg and
+    # ``has_prior`` is what gates the density half.
+    assert pack(None, {}).has_prior is False
+    assert pack({"rho": prior}, {"rho": 0}).has_prior is True
 
-    block = SimpleNamespace(K=2, theta_slice=slice(0, 1))
-    with pytest.raises(TypeError, match="must be an LKJChol"):
-        build_packed_logprior(
-            priors={"corr": object()},
-            param_index={},
-            matrix_blocks={"corr": block},
-            matrix_member_names=set(),
-        )
-    with pytest.raises(TypeError, match="must pair LKJChol"):
-        build_packed_logprior(
-            priors={"corr": prior},
-            param_index={},
-            matrix_blocks={"corr": block},
-            matrix_member_names=set(),
-        )
-    with pytest.raises(ValueError, match="not an estimated parameter"):
-        build_packed_logprior(
-            priors={"rho": prior},
-            param_index={},
-            matrix_blocks={},
-            matrix_member_names=set(),
-        )
     with pytest.raises(TypeError, match="must be a Prior"):
-        build_packed_logprior(
-            priors={"rho": object()},
-            param_index={"rho": 0},
-            matrix_blocks={},
-            matrix_member_names=set(),
-        )
+        pack({"rho": object()}, {"rho": 0})
 
-    # A block member is packed by its block, so its own entry is skipped
-    # before anything looks at what it holds.
+    # A slot inside a block's run is packed by the block, so its own entry is
+    # never read.
+    block = SimpleNamespace(K=2, theta_slice=slice(0, 1))
     assert (
-        build_packed_logprior(
-            priors={"rho": object()},
-            param_index={},
-            matrix_blocks={},
-            matrix_member_names={"rho"},
-        )
-        is not None
+        pack({"R_corr": lkj, "rho": object()}, {"rho": 0}, {"R_corr": block}).has_prior
+        is True
     )
+
     assert _pack_distribution(object())[0] is None
     assert _pack_transform(object())[0] is None
 
@@ -324,12 +293,14 @@ def test_packed_logprior_rejects_unsupported_specs():
     )
     object.__setattr__(unsupported_dist_prior, "dist", object())
     with pytest.raises(TypeError, match="has no code for"):
-        build_packed_logprior(
-            priors={"rho": unsupported_dist_prior},
-            param_index={"rho": 0},
-            matrix_blocks={},
-            matrix_member_names=set(),
-        )
+        pack({"rho": unsupported_dist_prior}, {"rho": 0})
+
+    with pytest.raises(TypeError, match="has no code for"):
+        pack({"R_corr": unsupported_dist_prior}, {"rho": 0}, {"R_corr": block})
+
+    # A scalar slot cannot carry the block codes, which only a reserved key can.
+    with pytest.raises(ValueError, match="packs a block correlation code"):
+        pack({"rho": lkj}, {"rho": 0})
 
 
 def test_prior_program_scalar_transform_helpers_cover_all_branches():

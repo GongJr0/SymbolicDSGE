@@ -1,4 +1,5 @@
 # type: ignore
+import warnings
 from types import SimpleNamespace
 
 import numpy as np
@@ -13,12 +14,25 @@ from SymbolicDSGE.bayesian.priors import Prior
 from SymbolicDSGE.bayesian.transforms import (
     AffineLogitTransform,
     CholeskyCorrTransform,
-    Identity,
-    LogTransform,
-    TanhTransform,
 )
 from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
 from SymbolicDSGE.estimation.backend import MatrixPriorBlock
+from SymbolicDSGE.estimation.prior_program import TransformCode, build_prior_tables
+from SymbolicDSGE.estimation.resolvers import (
+    _CORR_LIMIT,
+    _STD_FLOOR,
+    _resolve_Q,
+    _resolve_R,
+    active_Q,
+    active_R,
+    resolve_bounds,
+)
+
+
+#: Bounds for ``post82_estimator``'s default ("psi_pi", "rho_r") pair. Bounds
+#: are keyed by name, so a positional pair no longer says which parameter it
+#: belongs to.
+_POST82_BOUNDS = {"psi_pi": (1.0, 5.0), "rho_r": (0.0, 0.99)}
 
 
 def _with_filter_prep(compiled):
@@ -49,6 +63,16 @@ def _with_filter_prep(compiled):
         compiled.kalman.R_param_names = None
     if not hasattr(compiled.kalman, "R_std_param_map"):
         compiled.kalman.R_std_param_map = None
+    if not hasattr(compiled.kalman, "R_corr_param_map"):
+        compiled.kalman.R_corr_param_map = None
+    # active_Q reads these three directly, so a stub that names no shocks still
+    # has to say so rather than omit them.
+    if not hasattr(compiled, "shock_names"):
+        compiled.shock_names = []
+    if not hasattr(compiled.config.calibration, "shock_std"):
+        compiled.config.calibration.shock_std = {}
+    if not hasattr(compiled.config.calibration, "shock_corr"):
+        compiled.config.calibration.shock_corr = {}
     if getattr(compiled.kalman, "R", None) is None:
         compiled.kalman.R = np.eye(len(compiled.observable_names), dtype=np.float64)
     return compiled
@@ -87,6 +111,56 @@ def _stub_compiled_with_r():
             observable_names=["y"],
         )
     )
+
+
+@pytest.fixture
+def role_context():
+    """Packed transform codes and the theta box for one stub spec.
+
+    ``estim_context`` also resolves the steady-state seed, the param map and
+    both covariance specs, none of which these cases assert and none of which
+    these stubs can reach, so this runs only the two steps that decide a
+    slot's transform and its box. The role merge mirrors the one
+    ``estim_context`` does inline.
+    """
+
+    def _build(compiled, y_shape, estimated_params, priors=None):
+        est = Estimator(
+            compiled=compiled,
+            y=np.zeros(y_shape, dtype=np.float64),
+            estimated_params=estimated_params,
+            priors=priors,
+        )
+        observables = est._prepared_filter.observables
+        tables, transforms = build_prior_tables(
+            param_index=est._param_index,
+            priors=est.priors,
+            matrix_blocks=est._matrix_blocks,
+            compiled=est.compiled,
+            kalman=est.kalman,
+            observables=observables,
+        )
+        roles = None
+        if est.priors is None:
+            std_q, corr_q = active_Q(est.param_names, est.compiled)
+            std_r, corr_r = active_R(est.param_names, est.kalman, observables)
+            roles = (std_q | std_r, corr_q | corr_r)
+        lo, hi = resolve_bounds(
+            None, est._param_index, est._matrix_blocks, transforms, roles
+        )
+        return SimpleNamespace(
+            est=est,
+            codes={
+                name: TransformCode(int(tables.transform_codes[i]))
+                for name, i in est._param_index.items()
+            },
+            box={
+                name: (float(lo[i]), float(hi[i]))
+                for name, i in est._param_index.items()
+            },
+        )
+
+    return _build
 
 
 def _stub_compiled_with_dense_r_block():
@@ -231,13 +305,13 @@ def test_mle_records_optimizer_config(post82_estimator):
     est = post82_estimator()
     out = est.mle(
         theta0=np.array([2.0, 0.8], dtype=np.float64),
-        bounds=[(1.0, 5.0), (0.0, 0.99)],
+        bounds=_POST82_BOUNDS,
         maxiter=10,
     )
 
     cfg = out.optimizer_config
     assert cfg["method"] == "L-BFGS-B"
-    assert cfg["bounds"] == [[1.0, 5.0], [0.0, 0.99]]
+    assert cfg["bounds"] == {"psi_pi": [1.0, 5.0], "rho_r": [0.0, 0.99]}
     assert cfg["maxiter"] == 10
     assert set(cfg) > {
         "m",
@@ -489,7 +563,7 @@ def test_mle_reports_the_covariance_at_the_optimum(post82_estimator):
     """Uncertainty is on by default, and se is the root of vcov's diagonal
     wherever the transforms are the identity."""
     est = post82_estimator()
-    res = est.mle(bounds=[(1.0, 5.0), (0.0, 0.99)])
+    res = est.mle(bounds=_POST82_BOUNDS)
 
     assert res.cov_status == 0
     assert res.vcov.shape == (len(res.theta), len(res.theta))
@@ -502,7 +576,7 @@ def test_mle_reports_the_covariance_at_the_optimum(post82_estimator):
 
 def test_mle_covariance_is_opt_out_and_does_not_move_the_estimate(post82_estimator):
     est = post82_estimator()
-    kw = dict(bounds=[(1.0, 5.0), (0.0, 0.99)])
+    kw = dict(bounds=_POST82_BOUNDS)
     with_cov = est.mle(**kw)
     without = est.mle(cov=False, **kw)
 
@@ -512,25 +586,23 @@ def test_mle_covariance_is_opt_out_and_does_not_move_the_estimate(post82_estimat
     assert without.theta == with_cov.theta
 
 
-def test_se_is_in_the_space_theta_reports(post82_estimator):
-    """`sig_r` carries a Log transform, so its se is not sqrt(diag(vcov)): the
-    covariance is over theta and has to cross the transform to sit beside a
-    constrained value."""
-    est = post82_estimator(estimated_params=("psi_pi", "sig_r"))
-    res = est.mle()
-    names = list(res.theta)
-    assert [type(est._param_transforms[n]).__name__ for n in names] == [
-        "Identity",
-        "LogTransform",
-    ]
+def test_mle_se_is_the_plain_diagonal(post82_estimator):
+    """MLE carries no transform, so theta is the parameter and the covariance
+    needs no change of variables to sit beside the value it describes.
 
+    ``sig_r`` is the case worth pinning: a standard deviation, which the role
+    box floors rather than a transform reparameterizing, so its se would be the
+    one to pick up a jacobian if any slot did.
+    """
+    est = post82_estimator(estimated_params=("sig_r",))
+    _, _, lo, _ = est._build_call_context(priored=False)
+    assert lo[0] == _STD_FLOOR
+
+    res = est.mle()
+    assert res.cov_status == 0
     se_theta = np.sqrt(np.diag(res.vcov))
-    # d exp(t)/dt is exp(t), which is the constrained value itself
-    assert float(res.se["psi_pi"]) == pytest.approx(float(se_theta[0]))
-    assert float(res.se["sig_r"]) == pytest.approx(
-        float(res.theta["sig_r"]) * float(se_theta[1]), rel=1e-6
-    )
-    assert float(res.se["sig_r"]) != pytest.approx(float(se_theta[1]))
+    for i, name in enumerate(res.theta):
+        assert float(res.se[name]) == pytest.approx(float(se_theta[i]))
 
 
 @pytest.fixture
@@ -581,12 +653,14 @@ def test_map_with_logjac_is_the_mode_the_sampler_starts_from(transformed_estimat
     found = transformed_estimator.mcmc(**kw)
 
     over_theta = transformed_estimator.map(cov=False, jacobian=True)
-    reused = transformed_estimator.mcmc(theta0=over_theta.x, compute_map=False, **kw)
+    reused = transformed_estimator.mcmc(
+        theta0=dict(over_theta.theta), compute_map=False, **kw
+    )
     assert np.array_equal(found.samples, reused.samples)
 
     over_params = transformed_estimator.map(cov=False)
     mismatched = transformed_estimator.mcmc(
-        theta0=over_params.x, compute_map=False, **kw
+        theta0=dict(over_params.theta), compute_map=False, **kw
     )
     assert not np.array_equal(found.samples, mismatched.samples)
 
@@ -646,7 +720,7 @@ def test_estimation_reports_warning_count_once(post82_estimator, capsys):
     est = post82_estimator()
     _ = est.mle(
         theta0=np.array([2.0, 0.8], dtype=np.float64),
-        bounds=[(1.0, 5.0), (0.0, 0.99)],
+        bounds=_POST82_BOUNDS,
     )
     lines = [
         ln
@@ -708,11 +782,11 @@ def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block():
     assert params["meas_a"] == pytest.approx(1.0)
     assert params["meas_b"] == pytest.approx(1.0)
 
-    # The block owns its member's density; the packed-program parity for it is
-    # asserted against a real model in test_estimator_lkj_integration.
+    # The block owns its member's reparameterization; the packed-program parity
+    # for it is asserted against a real model in test_estimator_lkj_integration.
     block = est._matrix_blocks["R_corr"]
     assert block.member_names == ["meas_rho_ab"]
-    assert block.prior is prior
+    assert block.K == 2
 
 
 def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform():
@@ -728,9 +802,11 @@ def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform():
         priors={"R_corr": prior},
     )
 
-    block = est._matrix_blocks["R_corr"]
-    assert isinstance(block.prior.transform, CholeskyCorrTransform)
-    assert block.prior.transform.K == 2
+    # make_prior reconciles the distribution's K with the transform's, which is
+    # what the block resolution then checks against the resolved dimension.
+    assert isinstance(prior.transform, CholeskyCorrTransform)
+    assert prior.transform.K == 2
+    assert est._matrix_blocks["R_corr"].K == 2
 
 
 def test_matrix_key_in_estimated_params_expands_to_member_names():
@@ -771,7 +847,7 @@ def test_estimated_params_none_uses_prior_keys_when_priors_supplied():
 def test_priors_outside_estimated_params_are_rejected():
     # A prior on something not being estimated is a mistake, not a no-op: it
     # would otherwise be dropped and the run would silently ignore it.
-    with pytest.raises(ValueError, match="not in the estimated parameters"):
+    with pytest.raises(ValueError, match="must name the same parameters"):
         Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
@@ -872,14 +948,16 @@ def test_loglik_reads_theta_through_the_parameter_transform(post82_estimator):
 
 
 def test_estimator_constructor_and_lkj_prior_validation_error_branches():
-    with pytest.raises(ValueError, match="are not estimable targets"):
+    with pytest.raises(ValueError, match="is not found in the compiled model"):
         Estimator(
             compiled=_stub_compiled(),
             y=np.zeros((3, 1), dtype=np.float64),
             estimated_params=["ghost"],
         )
 
-    with pytest.raises(ValueError, match="specified more than once"):
+    # Both names carry a prior so the two argument key sets agree; what the
+    # layout then rejects is naming the block and its member together.
+    with pytest.raises(ValueError, match="Estimate the block or its members"):
         Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
@@ -888,7 +966,10 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
                 "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=2, random_state=None),
                     transform=CholeskyCorrTransform(K=2),
-                )
+                ),
+                "meas_rho_ab": make_prior(
+                    "normal", {"mean": 0.0, "std": 1.0}, "identity"
+                ),
             },
         )
 
@@ -972,7 +1053,9 @@ def test_resolve_r_and_effective_observables_error_paths():
         estimated_params=["a"],
     )
     with pytest.raises(ValueError, match="parser-generated R std/correlation metadata"):
-        est_missing_meta._resolve_R()
+        _resolve_R(
+            est_missing_meta.kalman, est_missing_meta._prepared_filter.observables
+        )
 
     # Unknown observables are now rejected at construction by the filter prep.
     with pytest.raises(ValueError, match="Unknown observables"):
@@ -1061,7 +1144,7 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         y=np.zeros((3, 1), dtype=np.float64),
         estimated_params=["sig1"],
     )
-    block = est._resolve_Q()
+    block = _resolve_Q(est.compiled)
     present = {(int(r), int(c)) for r, c in block.positions}
     missing = [
         (block.labels[row], block.labels[col])
@@ -1086,7 +1169,6 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         member_names=[],
         positions=np.empty((0, 2), dtype=np.int64),
         theta_slice=slice(0, 0),
-        prior=None,
     )
     est_base.priors = {"R_corr": object()}
     monkeypatch.setattr(
@@ -1106,7 +1188,6 @@ def test_resolve_q_missing_pair_key_and_block_validation_branches(monkeypatch):
         member_names=["rho_ba", "rho_ca"],
         positions=np.array([[1, 0], [2, 0]], dtype=np.int64),
         theta_slice=slice(0, 0),
-        prior=None,
     )
     est_base.priors = {
         "R_corr": Prior(
@@ -1153,7 +1234,6 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         member_names=["meas_rho_ab"],
         positions=np.array([[1, 0]], dtype=np.int64),
         theta_slice=slice(0, 0),
-        prior=None,
     )
     est.priors = {
         "R_corr": Prior(
@@ -1208,73 +1288,62 @@ def test_matrix_block_overlap_k_mismatch_and_invalid_corr_error(monkeypatch):
         good_est._block_cpc_from_corr(good_block, bad_corr)
 
 
-def test_mle_std_member_without_prior_gets_log_transform():
-    est = Estimator(
-        compiled=_stub_compiled_with_dense_r_block(),
-        y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["meas_a"],
-    )
-    # A variance estimated prior-free is positivity-constrained by role.
-    assert isinstance(est._param_transforms["meas_a"], LogTransform)
+def test_mle_std_member_without_prior_gets_a_positivity_box(role_context):
+    ctx = role_context(_stub_compiled_with_dense_r_block(), (4, 2), ["meas_a"])
+    # A variance estimated prior-free is positivity-constrained by role, and
+    # with no transform to carry that, the box is what holds the floor.
+    assert ctx.codes["meas_a"] is TransformCode.IDENTITY
+    assert ctx.box["meas_a"] == (_STD_FLOOR, np.inf)
 
 
-def test_mle_isolated_scalar_corr_without_prior_gets_tanh_transform():
-    est = Estimator(
-        compiled=_stub_compiled_with_sparse_q_block(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["rho12"],
-    )
+def test_mle_isolated_scalar_corr_without_prior_gets_an_interval_box(role_context):
+    ctx = role_context(_stub_compiled_with_sparse_q_block(), (3, 1), ["rho12"])
     # rho12 is the sole named Q correlation (e1, e2): sparse and isolated, so it
-    # stays a standalone scalar tanh rather than folding into a block.
-    assert "Q_corr" not in est._matrix_blocks
-    assert isinstance(est._param_transforms["rho12"], TanhTransform)
+    # stays a standalone scalar rather than folding into a block, and its role
+    # interval is held by the box.
+    assert "Q_corr" not in ctx.est._matrix_blocks
+    assert ctx.codes["rho12"] is TransformCode.IDENTITY
+    assert ctx.box["rho12"] == (-_CORR_LIMIT, _CORR_LIMIT)
 
 
-def test_mle_full_dense_corr_set_promotes_to_cpc_block():
-    est = Estimator(
-        compiled=_stub_compiled_with_dense_r_block(),
-        y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["meas_rho_ab"],
-    )
+def test_mle_full_dense_corr_set_promotes_to_cpc_block(role_context):
+    ctx = role_context(_stub_compiled_with_dense_r_block(), (4, 2), ["meas_rho_ab"])
     # The dense R correlation set folds into an R_corr CPC block instead of a
-    # standalone scalar; its member is block-handled (scalar transform unused).
-    assert "R_corr" in est._matrix_blocks
-    assert "meas_rho_ab" in est._matrix_blocks["R_corr"].member_names
-    assert isinstance(est._param_transforms["meas_rho_ab"], Identity)
+    # standalone scalar, so the block owns the slot's reparameterization and
+    # the role box has nothing left to restrict.
+    assert "R_corr" in ctx.est._matrix_blocks
+    assert "meas_rho_ab" in ctx.est._matrix_blocks["R_corr"].member_names
+    assert ctx.codes["meas_rho_ab"] is TransformCode.CHOLESKY_CORR
+    assert ctx.box["meas_rho_ab"] == (-np.inf, np.inf)
 
 
-def test_spd_std_member_warns_on_conflicting_prior_transform():
+def test_spd_std_member_warns_on_conflicting_prior_transform(role_context):
     # An Identity-transform prior on a variance would map onto R, not (0, inf),
-    # so the role default is substituted. Construction records the substitution
-    # and the routines that read the prior are what announce it.
+    # so the role default is substituted, and the table build that resolves the
+    # transform is what announces it.
     prior = make_prior(
         distribution="normal",
         parameters={"mean": 0.0, "std": 1.0},
         transform="identity",
     )
-    est = Estimator(
-        compiled=_stub_compiled_with_dense_r_block(),
-        y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["meas_a"],
-        priors={"meas_a": prior},
-    )
-    assert isinstance(est._param_transforms["meas_a"], LogTransform)
-    assert "meas_a" in est._should_warn_transforms
-
-    with pytest.warns(UserWarning, match="requires a constraint to"):
-        est._warn_if_should_warn_transforms()
+    with pytest.warns(UserWarning, match="replaced with `LogTransform`"):
+        ctx = role_context(
+            _stub_compiled_with_dense_r_block(),
+            (4, 2),
+            ["meas_a"],
+            priors={"meas_a": prior},
+        )
+    assert ctx.codes["meas_a"] is TransformCode.LOG
 
 
-def test_spd_member_without_prior_records_no_transform_warning():
-    # No prior means no density for the role transform to disagree with, so the
-    # substitution is silent on the ordinary MLE path.
-    est = Estimator(
-        compiled=_stub_compiled_with_dense_r_block(),
-        y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["meas_a"],
-    )
-    assert isinstance(est._param_transforms["meas_a"], LogTransform)
-    assert est._should_warn_transforms == {}
+def test_spd_member_without_prior_warns_nothing(role_context):
+    # No prior means no density for a role transform to disagree with, and the
+    # prior-free leg carries no transform to substitute, so nothing is said.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        ctx = role_context(_stub_compiled_with_dense_r_block(), (4, 2), ["meas_a"])
+    assert not [w for w in caught if "replaced with" in str(w.message)]
+    assert ctx.codes["meas_a"] is TransformCode.IDENTITY
 
 
 @pytest.mark.parametrize("include_logjac", [False, True])

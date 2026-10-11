@@ -28,9 +28,9 @@ from .spec import EstimatorSpec, EstimatorParams, _coerce_ss_seed
 from . import backend as b
 from . import resolvers as r
 from .backend import (
-    EstimCall,
+    EstimDTO,
     MatrixPriorBlock,
-    build_dto,
+    estim_context,
 )
 
 NDF = NDArray[np.float64]
@@ -232,35 +232,6 @@ class Estimator:
             if sym is not None and (active_shocks is None or vars_ <= active_shocks):
                 out[sym] = ("Q_corr", vars_)
         return out
-
-    @staticmethod
-    def _requested_param_keys(
-        allowed_names: set[str],
-        estimated_params: Sequence[str] | None,
-        priors: Mapping[str, Prior] | None = None,
-    ) -> list[str]:
-        if estimated_params is not None:
-            if not all(param in allowed_names for param in estimated_params):
-                missing = set(estimated_params) - allowed_names
-                raise ValueError(
-                    f"Parameters {{{missing}}} are not estimable targets of the model: {sorted(allowed_names)}"
-                )
-            if not all(param in estimated_params for param in priors or {}):
-                missing = set(priors or {}) - set(estimated_params)
-                raise ValueError(
-                    f"Priors specified for parameters {{{missing}}} which are not in the estimated parameters: {list(estimated_params)}"
-                )
-            return list(estimated_params)
-        if priors is not None:
-            if not all(param in allowed_names for param in priors):
-                missing = set(priors) - allowed_names
-                raise ValueError(
-                    f"Parameters {{{missing}}} are not estimable targets of the model: {sorted(allowed_names)}"
-                )
-            return list(priors)
-        raise ValueError(
-            "Either estimated_params or priors must be provided to determine the requested parameters."
-        )
 
     @staticmethod
     def _format_pairs(pairs: Sequence[tuple[str, str]]) -> str:
@@ -530,7 +501,7 @@ class Estimator:
             Log-likelihood value of the data given the model and parameters.
 
         """
-        ctx = self._build_native_context(priored=self.priors is not None).dto
+        ctx, _, _, _ = self._build_call_context(priored=self.priors is not None)
         return loglik(ctx, theta)
 
     def logprior(self, theta: NDF, include_logjac: bool = False) -> float64:
@@ -551,7 +522,7 @@ class Estimator:
             Log-prior value of the parameters given the specified priors, optionally including the log-Jacobian term.
 
         """
-        ctx = self._build_native_context(priored=self.priors is not None).dto
+        ctx, _, _, _ = self._build_call_context(priored=self.priors is not None)
         return logprior(ctx, theta, include_logjac)
 
     def logpost(self, theta: NDF, include_logjac: bool = False) -> float64:
@@ -572,49 +543,13 @@ class Estimator:
             Log-posterior value of the parameters given the data, model, and priors, optionally including the log-Jacobian term.
 
         """
-        ctx = self._build_native_context(priored=self.priors is not None).dto
+        ctx, _, _, _ = self._build_call_context(priored=self.priors is not None)
         return logpost(ctx, theta, include_logjac)
 
     def _report_search_warning_count(self, kind: str, n_err: int) -> None:
         print(
             f"[Estimator:{kind}] BK stability warnings encountered during search: {n_err}"
         )
-
-    @staticmethod
-    def _serialize_bounds(
-        bounds: Mapping[str, tuple[float | None, float | None]] | None,
-    ) -> dict[str, list[float | None]] | None:
-        if bounds is None:
-            return None
-        return {
-            name: [
-                None if lo is None else float(lo),
-                None if hi is None else float(hi),
-            ]
-            for name, (lo, hi) in bounds.items()
-        }
-
-    @staticmethod
-    def _bounds_pairs(
-        lo: NDF, hi: NDF
-    ) -> list[tuple[float | None, float | None]] | None:
-        """The theta box as the per-slot pairs the native entry point parses.
-
-        That parser reads a present side as a bound, which here is a finite one;
-        an all-infinite box restricts nothing and passes as ``None``, so neither
-        driver enters its bounded path over a box that would never bind.
-        """
-        low = np.isfinite(lo)
-        high = np.isfinite(hi)
-        if not (low.any() or high.any()):
-            return None
-        return [
-            (
-                float(lo[i]) if low[i] else None,
-                float(hi[i]) if high[i] else None,
-            )
-            for i in range(lo.shape[0])
-        ]
 
     def _pack_opt_result(
         self,
@@ -653,13 +588,13 @@ class Estimator:
             return MAPResult(**common, logpost=-res["fun"], logprior=res["logprior"])
         raise ValueError(f"unknown result kind {kind!r}")
 
-    def _build_native_context(
+    def _build_call_context(
         self,
         *,
         priored: bool,
         theta0: NDF | Mapping[str, float] | None = None,
         bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
-    ) -> EstimCall:
+    ) -> tuple[EstimDTO, NDF, NDF, NDF]:
         """Build one call's native inputs for the current filter mode.
 
         ``priored`` is the method's answer rather than ``self``'s: MLE ignores
@@ -668,7 +603,7 @@ class Estimator:
         does with the ctx (minimized ``-logpost`` vs ``+logpost``) is still the
         driver's own business.
         """
-        return build_dto(
+        return estim_context(
             compiled=self.compiled,
             prepared=self._prepared_filter,
             param_names=self.param_names,
@@ -703,16 +638,17 @@ class Estimator:
         cov_fd_absolute_floor: float = 0.1,
     ) -> OptimizationResult:
 
-        call = self._build_native_context(
+        ctx, theta, lo, hi = self._build_call_context(
             priored=has_priors, theta0=theta0, bounds=bounds
         )
 
         res = run_estimation(
-            call.dto,
+            ctx,
             method,
             include_logjac=jacobian,
-            theta0=call.theta,
-            bounds=self._bounds_pairs(call.lo, call.hi),
+            theta0=theta,
+            lo=lo,
+            hi=hi,
             has_priors=has_priors,
             m=m,
             maxiter=maxiter,
@@ -734,7 +670,7 @@ class Estimator:
             config={
                 "theta0": theta0.tolist() if isinstance(theta0, np.ndarray) else theta0,
                 "method": method,
-                "bounds": self._serialize_bounds(bounds),
+                "bounds": r.serialize_bounds(bounds),
                 "m": m,
                 "maxiter": maxiter,
                 "maxfun": maxfun,
@@ -997,27 +933,26 @@ class Estimator:
 
         rng = np.random.default_rng(random_state)
 
-        map_bounds = None if map_options is None else map_options.get("bounds")
-        call = self._build_native_context(
-            priored=True, theta0=theta0, bounds=map_bounds
-        )
-        current = call.theta
-        if current.shape[0] == 0:
+        if not self.param_names:
             raise ValueError("No estimated parameters were provided.")
 
-        # The MAP seed is the only leg of the chain that takes a box, so the
-        # call's box is its box.
+        map_bounds = None if map_options is None else map_options.get("bounds")
+        ctx, theta, map_lo, map_hi = self._build_call_context(
+            priored=True, theta0=theta0, bounds=map_bounds
+        )
+
         native_map_options = dict(map_options or {})
-        if map_bounds is not None:
-            native_map_options["bounds"] = self._bounds_pairs(call.lo, call.hi)
+        native_map_options.pop("bounds", None)
+        native_map_options["lo"] = map_lo
+        native_map_options["hi"] = map_hi
 
         # The chain runs entirely in native nogil code; ``rng`` (numpy's own
         # PCG64) is borrowed for the run and must outlive it, which the local
         # reference here guarantees. Timing wraps only the native call.
         t0 = perf_counter()
         out = run_mcmc(
-            call.dto,
-            current,
+            ctx,
+            theta,
             rng,
             n_draws=n_draws,
             burn_in=burn_in,
@@ -1041,15 +976,9 @@ class Estimator:
             f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
         )
 
-        # Recorded, not re-used: the run already consumed map_options, so this
-        # copy exists only to carry a JSON-safe bounds shape into the config.
-        recorded_map_options: dict[str, Any] | None = None
-        if map_options is not None:
-            recorded_map_options = dict(map_options)
-            if recorded_map_options.get("bounds") is not None:
-                recorded_map_options["bounds"] = self._serialize_bounds(
-                    recorded_map_options["bounds"]
-                )
+        usr_opts = dict(map_options) if map_options is not None else None
+        if usr_opts and "bounds" in usr_opts:
+            usr_opts["bounds"] = r.serialize_bounds(usr_opts["bounds"])
 
         result = MCMCResult(
             param_names=list(self.param_names),
@@ -1070,7 +999,7 @@ class Estimator:
                 "proposal_scale": float(proposal_scale),
                 "adapt_epsilon": float(adapt_epsilon),
                 "compute_map": bool(compute_map),
-                "map_options": recorded_map_options,
+                "map_options": usr_opts,
                 "proposal_cov": (
                     proposal_cov.tolist() if proposal_cov is not None else None
                 ),
