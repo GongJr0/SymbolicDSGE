@@ -171,7 +171,7 @@ def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
         ),
     )
 
-    ll = est.loglik(est.theta0())
+    ll = est.loglik()
     assert np.isfinite(ll)
 
 
@@ -286,7 +286,7 @@ def test_build_R_from_config_params_raises_on_missing_param(post82_bundle):
 
 
 def _post82_estimator(bundle, **kwargs):
-    """One estimated parameter held at its calibration, so ``loglik(theta0())``
+    """One estimated parameter held at its calibration, so ``loglik()``
     is the likelihood at the base calibration and can be compared against
     ``SolvedModel.kalman`` on the same data."""
     return Estimator(
@@ -310,9 +310,7 @@ def test_estimator_loglik_linear_matches_model_kalman(post82_bundle):
         )
         .loglik
     )
-    assert np.allclose(
-        float(est.loglik(est.theta0())), ll_model_lin, rtol=1e-10, atol=1e-10
-    )
+    assert np.allclose(float(est.loglik()), ll_model_lin, rtol=1e-10, atol=1e-10)
 
 
 def test_estimator_loglik_extended_matches_model_kalman(post82_bundle):
@@ -326,9 +324,7 @@ def test_estimator_loglik_extended_matches_model_kalman(post82_bundle):
         )
         .loglik
     )
-    assert np.allclose(
-        float(est.loglik(est.theta0())), ll_model_ext, rtol=1e-10, atol=1e-10
-    )
+    assert np.allclose(float(est.loglik()), ll_model_ext, rtol=1e-10, atol=1e-10)
 
 
 def test_estimator_loglik_respects_R_override_and_mode_validation(post82_bundle):
@@ -339,8 +335,8 @@ def test_estimator_loglik_respects_R_override_and_mode_validation(post82_bundle)
     overridden = _post82_estimator(post82_bundle, filter_mode="linear", R=scaled_R)
     from_config = _post82_estimator(post82_bundle, filter_mode="linear")
     assert not np.isclose(
-        float(overridden.loglik(overridden.theta0())),
-        float(from_config.loglik(from_config.theta0())),
+        float(overridden.loglik()),
+        float(from_config.loglik()),
     )
 
 
@@ -475,7 +471,6 @@ def test_estimator_loglik_unscented_matches_model_kalman(rbc_ukf_bundle):
     the same data. Exercises the whole new path in one estimation: the
     ``order=2`` solve, the augmented ``build_unscented_P0``, and the seam's
     unscented branch (``bx``/``z0``/policy tensors -> ``run_unscented_raw``)."""
-    solver = rbc_ukf_bundle["solver"]
     compiled = rbc_ukf_bundle["compiled"]
     solved = rbc_ukf_bundle["solved"]
     y = rbc_ukf_bundle["y"]
@@ -488,7 +483,7 @@ def test_estimator_loglik_unscented_matches_model_kalman(rbc_ukf_bundle):
         estimated_params=["rho"],
         symmetrize=True,
     )
-    ll_est = float(est.loglik(est.theta0()))
+    ll_est = float(est.loglik())
 
     ll_ref = float(
         solved.kalman(
@@ -515,4 +510,4 @@ def test_estimator_loglik_unscented_accepts_full_length_x0(rbc_ukf_bundle):
         estimated_params=["rho"],
         symmetrize=True,
     )
-    assert np.isfinite(float(est.loglik(est.theta0())))
+    assert np.isfinite(float(est.loglik()))

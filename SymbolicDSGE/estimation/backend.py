@@ -372,7 +372,7 @@ def estim_context(
     priors: Mapping[str, Prior] | None,
     ss_seed: Any,
     R_override: NDF | None,
-    theta0: Mapping[str, float] | NDF | None = None,
+    theta0: Mapping[str, float] | None = None,
     bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
 ) -> tuple[EstimDTO, NDF, NDF, NDF]:
     """Assemble one estimation call's inputs around ``sdsge_obj_common``.
@@ -468,42 +468,38 @@ def estim_context(
 
 
 def _seed_params(
-    theta0: Mapping[str, float] | NDF | None,
+    theta0: Mapping[str, float] | None,
     param_names: Sequence[str],
     base_dict: Mapping[str, float64],
 ) -> NDF:
     """The parameter-space seed in theta order.
 
-    ``None`` takes the model calibration. A mapping must name every estimated
-    parameter and nothing else; an array is read in ``param_names`` order, and
-    is parameter space too, not theta.
+    ``None`` takes the model calibration.
+    Mappings fill in their values on top of the base calibration.
     """
     if theta0 is None:
-        missing = [name for name in param_names if name not in base_dict]
-        if missing:
-            raise ValueError(
-                f"The calibration carries no value for {missing}, so it cannot seed them."
-            )
         return asarray([base_dict[name] for name in param_names], dtype=float64)
 
-    if isinstance(theta0, Mapping):
-        missing = [name for name in param_names if name not in theta0]
-        if missing:
-            raise ValueError(f"theta0 is missing estimated parameters: {missing}")
-        unknown = [key for key in theta0 if key not in set(param_names)]
-        if unknown:
-            raise ValueError(
-                f"theta0 names parameters that are not estimated: {unknown}"
-            )
-        return asarray([float64(theta0[name]) for name in param_names], dtype=float64)
-
-    values = asarray(theta0, dtype=float64)
-    if values.ndim != 1 or values.shape[0] != len(param_names):
-        raise ValueError(
-            f"theta0 of length {values.size} does not match the "
-            f"{len(param_names)} estimated parameters."
+    if not isinstance(theta0, Mapping):
+        raise TypeError(
+            f"theta0 must be a mapping of parameter names to values, not {type(theta0).__name__}."
         )
-    return values
+
+    unknown = [key for key in theta0 if key not in param_names]
+    missing = [name for name in theta0 if name not in base_dict]
+    if missing:
+        raise ValueError(
+            f"theta0 names parameters that are not in the model calibration: {missing}"
+        )
+    if unknown:
+        raise ValueError(f"theta0 names parameters that are not estimated: {unknown}")
+    return asarray(
+        [
+            float64(theta0[name]) if name in theta0 else base_dict[name]
+            for name in param_names
+        ],
+        dtype=float64,
+    )
 
 
 def extract_base_params(compiled: CompiledModel) -> dict[str, float64]:

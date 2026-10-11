@@ -112,17 +112,17 @@ def resolve_theta_layout(
                     f"Correlations {doubled} are members of '{key}', which is itself an "
                     f"estimation target. Estimate the block or its members, not both."
                 )
-        elif members and len(members) == expected and set(members) <= present:
-            member_priors = sorted(
+        elif block.K > 2 and len([m for m in members if m in present]) == expected:
+            priored_members = sorted(
                 name for name in members if priored is not None and name in priored
             )
-            if member_priors:
+            if priored_members:
                 matrix_name = _RESERVED_TO_NAME[key]
                 raise ValueError(
-                    f"Correlations {member_priors} carry scalar priors but are the complete "
-                    f"{matrix_name} correlation set, so independent per-parameter densities "
+                    f"Correlations {priored_members} carry scalar priors but are the complete "
+                    f"{matrix_name!r} correlation set, so independent per-parameter densities "
                     f"cannot guarantee a joint positive-definite matrix. Estimate the block "
-                    f"via '{key}' with an LKJChol prior instead."
+                    f"via {key!r} with an LKJChol prior instead."
                 )
             folded.update(dict.fromkeys(members, key))
         else:
@@ -368,7 +368,8 @@ def active_Q(
     corr = {
         name
         for pair in combinations(shocks, 2)
-        if (name := corr_map.get(pair)) is not None and name in present
+        if (name := corr_map.get(pair)) is not None  # pyright: ignore
+        and name in present
     }
     return std, corr
 
@@ -399,9 +400,82 @@ def active_R(
         corr = {
             name
             for pair in combinations(observables, 2)
-            if (name := corr_map.get(pair)) is not None and name in present
+            if (name := corr_map.get(pair)) is not None  # pyright: ignore
+            and name in present
         }
     return std, corr
+
+
+def _corr_pairs(
+    compiled: CompiledModel,
+    kalman: KalmanConfig | None,
+    observables: Sequence[str],
+) -> list[tuple[str, str, frozenset[str]]]:
+    """Every active correlation as ``(matrix key, name, the pair it couples)``.
+
+    A name is unique within a matrix but not across the two, so an entry is the
+    pair rather than the name.
+    """
+    out: list[tuple[str, str, frozenset[str]]] = []
+    corr_map: Mapping[Any, str | None] = compiled.config.calibration.shock_corr
+    for pair in combinations(compiled.shock_names, 2):
+        if (name := corr_map.get(pair)) is not None:  # pyright: ignore
+            out.append(("Q_corr", name, frozenset(pair)))
+
+    r_map: Mapping[Any, str | None] | None = (
+        kalman.R_corr_param_map if kalman is not None else None
+    )
+    if r_map is not None:
+        for pair in combinations(observables, 2):
+            if (name := r_map.get(pair)) is not None:  # pyright: ignore
+                out.append(("R_corr", name, frozenset(pair)))
+    return out
+
+
+def assert_scalar_corr_spd_safe(
+    param_index: Mapping[str, int],
+    matrix_blocks: Mapping[str, b.MatrixPriorBlock],
+    compiled: CompiledModel,
+    kalman: KalmanConfig | None,
+    observables: Sequence[str],
+) -> None:
+    """Reject a standalone scalar correlation whose region admits a non-SPD matrix.
+
+    A block member reaches its matrix through the Cholesky reparameterization
+    and is positive definite by construction. A standalone scalar is confined
+    by its own interval alone, and a product of intervals over the off-diagonals
+    is not the elliptope: once another entry of the same matrix is free or fixed
+    nonzero over a shared variable, the region holds a non-definite corner. The
+    transform does not change that, since every scalar correlation map lands on
+    the same open interval, so the rejection is the same on either leg.
+    """
+    entries = _corr_pairs(compiled, kalman, observables)
+    blocked = {name for block in matrix_blocks.values() for name in block.member_names}
+    scalars = [e for e in entries if e[1] in param_index and e[1] not in blocked]
+    scalars.sort(key=lambda entry: param_index[entry[1]])
+    if not scalars:
+        return
+
+    base = b.extract_base_params(compiled)
+    for key, name, pair in scalars:
+        for other_key, other, other_pair in entries:
+            if other_key != key or other_pair == pair:
+                continue
+            # Two distinct pairs meet in at most one variable.
+            shared = pair & other_pair
+            if not shared:
+                continue
+            if other in param_index or float(base[other]) != 0.0:
+                (var,) = shared
+                matrix = _RESERVED_TO_NAME[key]
+                raise ValueError(
+                    f"Correlation {name!r} is estimated as a standalone scalar, but "
+                    f"{other!r} couples the same variable {var!r} in "
+                    f"{matrix!r} and is itself estimated or fixed nonzero. Two such "
+                    "estimation targets cannot guarantee joint positive-definiteness "
+                    f"of {matrix!r}. Estimate the whole block via {key!r} instead, "
+                    "which reparameterizes it through its Cholesky factor."
+                )
 
 
 # --- Theta Construction and Bounds ---

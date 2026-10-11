@@ -27,11 +27,7 @@ from .spec import EstimatorSpec, EstimatorParams, _coerce_ss_seed
 
 from . import backend as b
 from . import resolvers as r
-from .backend import (
-    EstimDTO,
-    MatrixPriorBlock,
-    estim_context,
-)
+from .backend import EstimDTO, estim_context
 
 NDF = NDArray[np.float64]
 
@@ -127,7 +123,6 @@ class Estimator:
         self.ss_seed = ss_seed
         self.R = R
         self.P0 = P0
-        self._base_params = b.extract_base_params(compiled)
         self._prepared_filter = b.prepare_filter_run(
             compiled=compiled,
             y=y,
@@ -159,111 +154,18 @@ class Estimator:
             self.kalman,
             self._prepared_filter.observables,
         )
-
-        self._matrix_member_names = {
-            name
-            for block in self._matrix_blocks.values()
-            for name in block.member_names
-        }
+        r.assert_scalar_corr_spd_safe(
+            self._param_index,
+            self._matrix_blocks,
+            self.compiled,
+            self.kalman,
+            self._prepared_filter.observables,
+        )
 
     @property
     def param_names(self) -> list[str]:
         """Estimated parameter names in theta order."""
         return list(self._param_index)
-
-    def _spd_member_names(self) -> tuple[set[str], set[str]]:
-        """Names of the SPD-relevant std (diagonal) and correlation (off-diagonal)
-        parameters across the R and Q matrices, read straight from the parser's
-        name maps.
-
-        The two roles are kept separate because they need different constraining
-        transforms: a variance wants a positivity map, a correlation a (-1, 1)
-        map. Membership is deliberately independent of whether a prior exists, so
-        this drives the transform defaults on the prior-free (MLE) path, not just
-        the prior-gated CPC block.
-        """
-        std_members: set[str] = set()
-        corr_members: set[str] = set()
-        observed = set(self._prepared_filter.observables)
-        active_shocks = set(self.compiled.shock_names)
-
-        r_std_map = getattr(self.kalman, "R_std_param_map", None) or {}
-        for obs, v in r_std_map.items():
-            if v is not None and (observed is None or str(obs) in observed):
-                std_members.add(v)
-        r_corr_map = getattr(self.kalman, "R_corr_param_map", None) or {}
-        for pair, v in r_corr_map.items():
-            if v is not None and (
-                observed is None or {str(x) for x in pair} <= observed
-            ):
-                corr_members.add(v)
-
-        calibration = self.compiled.config.calibration
-        shock_std = getattr(calibration, "shock_std", None) or {}
-        for shock, sym in shock_std.items():
-            if sym is not None and (
-                active_shocks is None or str(shock) in active_shocks
-            ):
-                std_members.add(sym)
-        shock_corr = getattr(calibration, "shock_corr", None) or {}
-        for pair, sym in shock_corr.items():
-            if sym is not None and (
-                active_shocks is None or {str(s) for s in pair} <= active_shocks
-            ):
-                corr_members.add(sym)
-
-        return std_members, corr_members
-
-    def _corr_pairs_by_name(self) -> dict[str, tuple[str, frozenset[str]]]:
-        """Map each named correlation parameter to ``(matrix_key, {var_a, var_b})``,
-        for the joint-SPD safety gate on standalone scalar correlations.
-        """
-        out: dict[str, tuple[str, frozenset[str]]] = {}
-        observed = set(self._prepared_filter.observables)
-        active_shocks = set(self.compiled.shock_names)
-        r_corr_map = getattr(self.kalman, "R_corr_param_map", None) or {}
-        for pair, nm in r_corr_map.items():
-            vars_ = frozenset(str(v) for v in pair)
-            if nm is not None and (observed is None or vars_ <= observed):
-                out[nm] = ("R_corr", vars_)
-        shock_corr = getattr(self.compiled.config.calibration, "shock_corr", None) or {}
-        for pair, sym in shock_corr.items():
-            vars_ = frozenset(str(s) for s in pair)
-            if sym is not None and (active_shocks is None or vars_ <= active_shocks):
-                out[sym] = ("Q_corr", vars_)
-        return out
-
-    @staticmethod
-    def _format_pairs(pairs: Sequence[tuple[str, str]]) -> str:
-        return ", ".join(f"({a}, {b})" for a, b in pairs)
-
-    @staticmethod
-    def _corr_from_member_values(block: MatrixPriorBlock, values: NDF) -> NDF:
-        corr = np.eye(block.K, dtype=float64)
-        rows = block.positions[:, 0]
-        cols = block.positions[:, 1]
-        vals = np.asarray(values, dtype=float64)
-        corr[rows, cols] = vals
-        corr[cols, rows] = vals
-        return corr
-
-    @staticmethod
-    def _block_cpc_from_corr(block: MatrixPriorBlock, corr: NDF) -> NDF:
-        try:
-            return b._unconstrained_from_corr(corr)
-        except ValueError as exc:
-            raise ValueError(
-                f"Correlation values do not form a valid positive-definite "
-                f"correlation matrix over {block.labels}: {exc}"
-            ) from exc
-
-    @staticmethod
-    def _block_corr_from_theta(
-        block: MatrixPriorBlock, theta_block: NDF
-    ) -> tuple[NDF, NDF]:
-        Lcorr = b._corr_chol_from_unconstrained(theta_block, block.K)
-        corr = np.asarray(Lcorr @ Lcorr.T, dtype=float64)
-        return corr, np.asarray(Lcorr, dtype=float64)
 
     def to_spec(self) -> EstimatorSpec:
         """Produce a bundle-format spec from an :class:`Estimator` instance, suitable for serialization and later reconstruction.
@@ -343,157 +245,13 @@ class Estimator:
             P0=P0,
         )
 
-    def theta0(self) -> NDF:
-        """Convert the model's base calibration to the unconstrained theta vector.
-
-        Returns
-        -------
-        NDF
-            Array of unconstrained initial parameter values corresponding to the model's base calibration.
-
-        """
-        constrained = asarray(
-            [self._base_params[name] for name in self.param_names],
-            dtype=float64,
-        )
-        return self.params_to_theta(constrained)
-
-    def resolve_theta0(self, theta0: NDF | Mapping[str, float] | None) -> NDF:
-        """Coerce a user ``theta0`` to the unconstrained theta vector.
-
-        ``None`` seeds from the model calibration (:meth:`theta0`); a mapping is
-        validated against the estimated parameter names and converted through
-        :meth:`params_to_theta`; an array is taken as-is.
-        """
-        if theta0 is None:
-            return self.theta0()
-        if isinstance(theta0, Mapping):
-            missing = [name for name in self.param_names if name not in theta0]
-            if missing:
-                raise ValueError(
-                    f"theta0 dictionary is missing estimated parameters: {missing}"
-                )
-            unknown = [key for key in theta0 if key not in self.param_names]
-            if unknown:
-                raise ValueError(f"theta0 dictionary has unknown parameters: {unknown}")
-            return self.params_to_theta(
-                {name: float64(theta0[name]) for name in self.param_names}
-            )
-        return asarray(theta0, dtype=float64)
-
-    def _validate_theta0(self, theta: NDF) -> None:
-        """Fail fast on an initial guess the objective cannot score.
-
-        A transform's inverse lands inside its own support, so a theta only
-        arrives unusable by being non-finite itself or by saturating its
-        transform: a std that overflows to infinity, or one that underflows to
-        the zero its support excludes. The support is the role's, so this holds
-        for an MLE start as much as a MAP one.
-        """
-        invalid: list[str] = []
-        for i, name in enumerate(self.param_names):
-            z = float64(theta[i])
-            if not np.isfinite(z):
-                invalid.append(f"{name}={z}")
-                continue
-            if name in self._matrix_member_names:
-                # A block's run decodes to a valid correlation for any finite z.
-                continue
-            transform = self._param_transforms[name]  # type: ignore
-            value = float64(transform.safe_inverse(z))
-            if not np.isfinite(value) or not transform.support.contains(value):
-                invalid.append(f"{name}={value}")
-        if invalid:
-            raise ValueError(
-                "Initial guess maps to parameter values the objective cannot "
-                "score: " + ", ".join(invalid)
-            )
-
-    def params_to_theta(self, params: Mapping[str, float] | NDF) -> NDF:
-        """Convert a parameter mapping or array to the unconstrained theta vector.
-
-        Parameters
-        ----------
-        params : Mapping[str, float] | NDF
-            Mapping of {name: value} or array of parameter values in the order of ``self.param_names``.
-
-        Returns
-        -------
-        NDF
-            Array of unconstrained parameter values corresponding to the provided parameters.
-
-        """
-        if isinstance(params, Mapping):
-            missing = [name for name in self.param_names if name not in params]
-            if missing:
-                raise ValueError(
-                    f"Parameter mapping is missing estimated parameters: {missing}"
-                )
-            vals = asarray(
-                [float64(params[name]) for name in self.param_names], dtype=float64
-            )
-        else:
-            vals = asarray(params, dtype=float64)
-            if vals.ndim != 1:
-                raise ValueError("params array must be 1D.")
-            if vals.shape[0] != len(self.param_names):
-                raise ValueError(
-                    f"params length {vals.shape[0]} does not match estimated parameter count {len(self.param_names)}."
-                )
-        out = np.empty_like(vals, dtype=float64)
-        handled = np.zeros((len(self.param_names),), dtype=bool)
-        for block in self._matrix_blocks.values():
-            corr_vals = np.asarray(vals[block.theta_slice], dtype=float64)
-            corr = self._corr_from_member_values(block, corr_vals)
-            out[block.theta_slice] = self._block_cpc_from_corr(block, corr)
-            handled[block.theta_slice] = True
-
-        for i, name in enumerate(self.param_names):
-            if handled[i]:
-                continue
-            out[i] = float64(
-                self._param_transforms[name].safe_forward(float64(vals[i]))  # type: ignore
-            )
-        return out
-
-    def theta_to_params(self, theta: NDF) -> dict[str, float64]:
-        """A theta draw as the named parameters, over the base calibration.
-
-        A CPC block's members come off the correlation its run decodes to;
-        every other estimated entry comes through its own inverse transform.
-        """
-        theta = asarray(theta, dtype=float64)
-        if theta.ndim != 1:
-            raise ValueError("theta must be a 1D array.")
-        if theta.shape[0] != len(self.param_names):
-            raise ValueError(
-                f"theta length {theta.shape[0]} does not match estimated parameter count {len(self.param_names)}."
-            )
-        full = dict(self._base_params)
-        handled = np.zeros((len(self.param_names),), dtype=bool)
-        for block in self._matrix_blocks.values():
-            theta_block = np.asarray(theta[block.theta_slice], dtype=float64)
-            corr, _ = self._block_corr_from_theta(block, theta_block)
-            member_vals = corr[block.positions[:, 0], block.positions[:, 1]]
-            for name, val in zip(block.member_names, member_vals):
-                full[name] = float64(val)
-            handled[block.theta_slice] = True
-
-        for i, name in enumerate(self.param_names):
-            if handled[i]:
-                continue
-            full[name] = float64(
-                self._param_transforms[name].safe_inverse(float64(theta[i]))  # type: ignore
-            )
-        return full
-
-    def loglik(self, theta: NDF) -> float64:
+    def loglik(self, params: Mapping[str, float] | None = None) -> float64:
         """Log-likelihood of the data given the model and parameters.
 
         Parameters
         ----------
-        theta : NDF
-            Parameter vector in the unconstrained space, corresponding to the estimated parameters of the model.
+        params : Mapping[str, float] | None
+            Values of the estimated parameters. Omitted parameters use the calibrated values from the model.
 
         Returns
         -------
@@ -501,16 +259,20 @@ class Estimator:
             Log-likelihood value of the data given the model and parameters.
 
         """
-        ctx, _, _, _ = self._build_call_context(priored=self.priors is not None)
+        ctx, theta, _, _ = self._build_call_context(
+            priored=self.priors is not None, theta0=params
+        )
         return loglik(ctx, theta)
 
-    def logprior(self, theta: NDF, include_logjac: bool = False) -> float64:
+    def logprior(
+        self, params: Mapping[str, float] | None = None, include_logjac: bool = False
+    ) -> float64:
         """Log-prior of the parameters given the specified priors.
 
         Parameters
         ----------
-        theta : NDF
-            Parameter vector in the unconstrained space, corresponding to the estimated parameters of the model.
+        params : Mapping[str, float] | None
+            Values of the estimated parameters. Omitted parameters use the calibrated values from the model.
         include_logjac : bool
             Whether to include the log-Jacobian term from the parameter transforms in the log-prior calculation.
             MAP estimation does not sample a distribution, therefore the change RV jacobian term should not be included.
@@ -522,16 +284,20 @@ class Estimator:
             Log-prior value of the parameters given the specified priors, optionally including the log-Jacobian term.
 
         """
-        ctx, _, _, _ = self._build_call_context(priored=self.priors is not None)
+        ctx, theta, _, _ = self._build_call_context(
+            priored=self.priors is not None, theta0=params
+        )
         return logprior(ctx, theta, include_logjac)
 
-    def logpost(self, theta: NDF, include_logjac: bool = False) -> float64:
+    def logpost(
+        self, params: Mapping[str, float] | None = None, include_logjac: bool = False
+    ) -> float64:
         """Log-posterior of the parameters given the data, model, and priors.
 
         Parameters
         ----------
-        theta : NDF
-            Parameter vector in the unconstrained space, corresponding to the estimated parameters of the model.
+        params : Mapping[str, float] | None
+            Values of the estimated parameters. Omitted parameters use the calibrated values from the model.
         include_logjac : bool
             Whether to include the log-Jacobian term from the parameter transforms in the log-posterior calculation.
             MAP estimation does not sample a distribution, therefore the change RV jacobian term should not be included.
@@ -543,7 +309,9 @@ class Estimator:
             Log-posterior value of the parameters given the data, model, and priors, optionally including the log-Jacobian term.
 
         """
-        ctx, _, _, _ = self._build_call_context(priored=self.priors is not None)
+        ctx, theta, _, _ = self._build_call_context(
+            priored=self.priors is not None, theta0=params
+        )
         return logpost(ctx, theta, include_logjac)
 
     def _report_search_warning_count(self, kind: str, n_err: int) -> None:
@@ -592,7 +360,7 @@ class Estimator:
         self,
         *,
         priored: bool,
-        theta0: NDF | Mapping[str, float] | None = None,
+        theta0: Mapping[str, float] | None = None,
         bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
     ) -> tuple[EstimDTO, NDF, NDF, NDF]:
         """Build one call's native inputs for the current filter mode.
@@ -621,7 +389,7 @@ class Estimator:
         routine: Literal["mle", "map"],
         has_priors: bool,
         jacobian: bool = False,
-        theta0: NDF | Mapping[str, float] | None = None,
+        theta0: Mapping[str, float] | None = None,
         bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
         method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
         m: int = 10,
@@ -668,7 +436,7 @@ class Estimator:
             routine,
             res,
             config={
-                "theta0": theta0.tolist() if isinstance(theta0, np.ndarray) else theta0,
+                "theta0": dict(theta0) if theta0 is not None else None,
                 "method": method,
                 "bounds": r.serialize_bounds(bounds),
                 "m": m,
@@ -692,7 +460,7 @@ class Estimator:
     def mle(
         self,
         *,
-        theta0: NDF | Mapping[str, float] | None = None,
+        theta0: Mapping[str, float] | None = None,
         bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
         method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
         m: int = 10,
@@ -782,7 +550,7 @@ class Estimator:
     def map(
         self,
         *,
-        theta0: NDF | Mapping[str, float] | None = None,
+        theta0: Mapping[str, float] | None = None,
         bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
         method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B",
         jacobian: bool = False,
@@ -875,7 +643,7 @@ class Estimator:
         n_draws: int,
         burn_in: int = 1000,
         thin: int = 1,
-        theta0: NDF | Mapping[str, float] | None = None,
+        theta0: Mapping[str, float] | None = None,
         random_state: int | None = None,
         adapt: bool = True,
         adapt_start: int = 100,
@@ -993,7 +761,7 @@ class Estimator:
                 "n_draws": int(n_draws),
                 "burn_in": int(burn_in),
                 "thin": int(thin),
-                "theta0": theta0.tolist() if isinstance(theta0, np.ndarray) else theta0,
+                "theta0": dict(theta0) if theta0 is not None else None,
                 "adapt": bool(adapt),
                 "adapt_start": int(adapt_start),
                 "proposal_scale": float(proposal_scale),

@@ -1,9 +1,11 @@
-"""Parity tests: native packed log-prior kernels vs the numba reference.
+"""Parity tests for the native packed log-prior kernels in ``_ckernels/estimation``.
 
-The native C kernels in ``_ckernels/estimation`` must match the compiled numba
-oracle in ``tests/_oracles/estimation`` bit-for-bit (up to libm). The compiled
-njit kernels are the oracle -- not their ``.py_func`` forms, which raise on
-``math.log`` domain errors where numba/C return -inf/nan.
+The transform kernel is compared against the ``Transform`` the packed row was
+built from, so one transform is checked against itself. The remaining kernels
+are still compared against the compiled numba oracle in
+``tests/_oracles/estimation``, bit-for-bit up to libm; the njit kernels are the
+oracle there, not their ``.py_func`` forms, which raise on ``math.log`` domain
+errors where numba and C return -inf/nan.
 """
 
 from __future__ import annotations
@@ -16,15 +18,24 @@ from SymbolicDSGE._ckernels.estimation import (
     dist_logpdf as native_dist_logpdf,
     lkj_chol_logjac as native_lkj_logjac,
     lkj_chol_logpdf_from_z as native_lkj_logpdf,
-    logprior_program as native_program,
     transform_inverse_and_logjac as native_transform,
     unconstrained_from_corr_chol as native_unconstrained_from_corr_chol,
 )
-from SymbolicDSGE.bayesian import make_prior
 from SymbolicDSGE.bayesian.distributions.distribution_dispatch import get_distribution
 from SymbolicDSGE.bayesian.distributions.lkj_chol import _log_lkj_normalizer_C
 from SymbolicDSGE.bayesian.distributions.param_builder import get_dist_params
-from SymbolicDSGE.bayesian.transforms import Identity
+from SymbolicDSGE.bayesian.transforms import (
+    AffineLogitTransform,
+    AffineProbitTransform,
+    Identity,
+    LogitTransform,
+    LogTransform,
+    LowerBoundedTransform,
+    ProbitTransform,
+    SoftplusTransform,
+    TanhTransform,
+    UpperBoundedTransform,
+)
 from SymbolicDSGE.estimation.prior_program import (
     DistCode,
     N_DIST_PARAMS,
@@ -36,11 +47,9 @@ from SymbolicDSGE.estimation.prior_program import (
 from _oracles.estimation import (
     _corr_chol_from_unconstrained,
     _dist_logpdf,
-    _evaluate_logprior_program,
     _lkj_chol_logjac,
     _lkj_chol_logpdf_from_z,
     _R_from_unconstrained,
-    _transform_inverse_and_logjac,
     _unconstrained_from_corr_chol,
 )
 
@@ -104,23 +113,59 @@ def test_dist_logpdf_unknown_code_is_nan():
     _agree(native_dist_logpdf(999, parr, 0.0), _dist_logpdf(999, parr, np.float64(0.0)))
 
 
-@pytest.mark.parametrize("code", list(TransformCode))
-def test_transform_parity(code):
-    # params = [low, high, span]; only the affine transforms read them.
-    params = np.array([-1.0, 2.0, 3.0], dtype=np.float64)
+#: One instance per scalar transform code, with bounds where the code reads them.
+_TRANSFORMS = (
+    Identity(),
+    LogTransform(),
+    SoftplusTransform(),
+    LogitTransform(),
+    ProbitTransform(),
+    AffineLogitTransform(low=-1.0, high=2.0),
+    AffineProbitTransform(low=-1.0, high=2.0),
+    LowerBoundedTransform(low=-1.0),
+    UpperBoundedTransform(high=2.0),
+    TanhTransform(),
+)
+
+
+@pytest.mark.parametrize("transform", _TRANSFORMS, ids=lambda t: type(t).__name__)
+def test_transform_parity(transform):
+    """The kernel against the transform its row was packed from.
+
+    The code and the params row both come off ``_pack_transform``, so the
+    comparison is of one transform against itself rather than of two hand-kept
+    dispatch tables that a renumbering can silently rotate apart.
+    """
+    code, params = _pack_transform(transform)
+    params = np.asarray(params, dtype=np.float64)
     for z in (-3.0, -0.7, 0.0, 0.4, 1.3, 4.0):
-        nx, nj = _transform_inverse_and_logjac(int(code), params, np.float64(z))
         cx, cj = native_transform(int(code), params, float(z))
-        _agree(cx, nx)
-        _agree(cj, nj)
+        _agree(cx, float(transform.inverse(np.float64(z))))
+        _agree(cj, float(transform.log_det_abs_jacobian_inverse(np.float64(z))))
+
+
+def test_every_scalar_transform_code_is_exercised():
+    """The sweep is a list of instances, so a code added without one would
+    otherwise go untested."""
+    packed = {int(_pack_transform(t)[0]) for t in _TRANSFORMS}
+    assert packed == {int(c) for c in TransformCode} - {
+        int(TransformCode.CHOLESKY_CORR)
+    }
+
+
+def test_transform_block_code_is_nan():
+    """A block's run is caught and skipped before the scalar dispatcher, so the
+    block code has no scalar inverse to give."""
+    params = np.zeros(N_TRANSFORM_PARAMS, dtype=np.float64)
+    params[0] = 3.0
+    cx, cj = native_transform(int(TransformCode.CHOLESKY_CORR), params, 0.4)
+    assert np.isnan(float(cx)) and np.isnan(float(cj))
 
 
 def test_transform_unknown_code_is_nan():
     params = np.zeros(N_TRANSFORM_PARAMS, dtype=np.float64)
     cx, cj = native_transform(999, params, 0.5)
-    nx, nj = _transform_inverse_and_logjac(999, params, np.float64(0.5))
-    _agree(cx, nx)
-    _agree(cj, nj)
+    assert np.isnan(float(cx)) and np.isnan(float(cj))
 
 
 @pytest.mark.parametrize("dim", [2, 3, 4, 5])
@@ -148,117 +193,6 @@ def test_lkj_length_too_short_is_nan(dim=4):
         native_lkj_logpdf(z, dim, z.size, 1.0, 0.0),
         _lkj_chol_logpdf_from_z(z, dim, z.size, np.float64(1.0), np.float64(0.0)),
     )
-
-
-def _empty_block_arrays():
-    return dict(
-        matrix_offsets=np.empty((0,), dtype=np.int64),
-        matrix_dims=np.empty((0,), dtype=np.int64),
-        matrix_lengths=np.empty((0,), dtype=np.int64),
-        matrix_etas=np.empty((0,), dtype=np.float64),
-        matrix_log_constants=np.empty((0,), dtype=np.float64),
-    )
-
-
-def _pack_pairs(pairs):
-    """Pack ``(dist, transform)`` object pairs into the program's scalar arrays."""
-    codes_d, codes_t, dp, tp = [], [], [], []
-    for dist, transform in pairs:
-        dc, dpar = _pack_distribution(dist)
-        tc, tpar = _pack_transform(transform)
-        codes_d.append(int(dc))
-        codes_t.append(int(tc))
-        dp.append(dpar)
-        tp.append(tpar)
-    n = len(pairs)
-    return dict(
-        scalar_dist_codes=np.asarray(codes_d, dtype=np.int64),
-        scalar_transform_codes=np.asarray(codes_t, dtype=np.int64),
-        scalar_dist_params=np.asarray(dp, dtype=np.float64).reshape(n, N_DIST_PARAMS),
-        scalar_transform_params=np.asarray(tp, dtype=np.float64).reshape(
-            n, N_TRANSFORM_PARAMS
-        ),
-    )
-
-
-def _pack_scalars(specs):
-    pairs = []
-    for fam, params, transform in specs:
-        prior = make_prior(fam, params, transform)
-        pairs.append((prior.dist, prior.transform))
-    return _pack_pairs(pairs)
-
-
-def _call_both(theta, scalar_indices, packed, block):
-    args = (
-        theta,
-        scalar_indices,
-        packed["scalar_dist_codes"],
-        packed["scalar_transform_codes"],
-        packed["scalar_dist_params"],
-        packed["scalar_transform_params"],
-        block["matrix_offsets"],
-        block["matrix_dims"],
-        block["matrix_lengths"],
-        block["matrix_etas"],
-        block["matrix_log_constants"],
-    )
-    return native_program(*args), _evaluate_logprior_program(*args)
-
-
-def test_logprior_program_scalar_only_parity():
-    specs = [
-        ("normal", {"mean": 0.0, "std": 1.0, "random_state": 1}, "identity"),
-        ("gamma", {"mean": 2.0, "std": 1.0, "random_state": 1}, "log"),
-        ("beta", {"a": 2.0, "b": 3.0, "random_state": 1}, "logit"),
-        ("half_normal", {"std": 1.0, "random_state": 1}, "softplus"),
-    ]
-    packed = _pack_scalars(specs)
-    rng = np.random.default_rng(7)
-    scalar_indices = np.arange(len(specs), dtype=np.int64)
-    for _ in range(20):
-        theta = np.ascontiguousarray(rng.normal(size=len(specs)), dtype=np.float64)
-        native, numba = _call_both(theta, scalar_indices, packed, _empty_block_arrays())
-        _agree(native, numba)
-
-
-def test_logprior_program_with_lkj_block_parity():
-    specs = [
-        ("normal", {"mean": 0.0, "std": 1.0, "random_state": 1}, "identity"),
-        ("gamma", {"mean": 2.0, "std": 1.0, "random_state": 1}, "log"),
-    ]
-    packed = _pack_scalars(specs)
-    scalar_indices = np.array([0, 1], dtype=np.int64)
-
-    dim = 3
-    length = dim * (dim - 1) // 2  # 3
-    block = dict(
-        matrix_offsets=np.array([2], dtype=np.int64),
-        matrix_dims=np.array([dim], dtype=np.int64),
-        matrix_lengths=np.array([length], dtype=np.int64),
-        matrix_etas=np.array([2.0], dtype=np.float64),
-        matrix_log_constants=np.array(
-            [float(_log_lkj_normalizer_C(dim, 2.0))], dtype=np.float64
-        ),
-    )
-    rng = np.random.default_rng(11)
-    for _ in range(20):
-        theta = np.ascontiguousarray(rng.normal(size=5), dtype=np.float64)
-        native, numba = _call_both(theta, scalar_indices, packed, block)
-        _agree(native, numba)
-
-
-def test_logprior_program_out_of_support_is_nan():
-    # gamma + identity with negative theta -> x < 0 -> NaN short-circuit. This is
-    # not a valid Prior (identity can emit x outside gamma's support), so pack the
-    # dist/transform objects directly to reach the program's out-of-support guard.
-    gamma = _build_dist("gamma", {"mean": 2.0, "std": 1.0, "random_state": 1})
-    packed = _pack_pairs([(gamma, Identity())])
-    scalar_indices = np.array([0], dtype=np.int64)
-    theta = np.array([-1.0], dtype=np.float64)
-    native, numba = _call_both(theta, scalar_indices, packed, _empty_block_arrays())
-    _agree(native, numba)
-    assert np.isnan(float(native))
 
 
 @pytest.mark.parametrize("K", [1, 2, 3, 5])

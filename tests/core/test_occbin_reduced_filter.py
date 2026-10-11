@@ -109,7 +109,7 @@ def test_estimation_likelihood_runs_on_a_constrained_model(
         joseph_cov=False,
     )
 
-    est_loglik = float(est.loglik(est.theta0()))
+    est_loglik = float(est.loglik())
     kf_loglik = float(
         solved.kalman(
             observations,
