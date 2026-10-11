@@ -71,37 +71,13 @@ static inline int sdsge_spec_has_block(const sdsge_cov_spec *sp) {
   return !sp->is_constant && sp->corr_from_block;
 }
 
-/* Packed log-prior program arguments. */
-typedef struct {
-  int has_prior;
-  const i64 *scalar_indices;          /* n_scalar */
-  const i64 *scalar_dist_codes;       /* n_scalar */
-  const i64 *scalar_transform_codes;  /* n_scalar */
-  const f64 *scalar_dist_params;      /* n_scalar*5 */
-  const f64 *scalar_transform_params; /* n_scalar*3 */
-  i64 n_scalar;
-  const i64 *matrix_offsets;       /* n_blocks */
-  const i64 *matrix_dims;          /* n_blocks */
-  const i64 *matrix_lengths;       /* n_blocks */
-  const f64 *matrix_etas;          /* n_blocks */
-  const f64 *matrix_log_constants; /* n_blocks */
-  i64 n_blocks;
-  /* Which density the prior evaluates to; see sdsge_logprior_program. Set per
-   * entry point: the sampler walks theta and takes it, a maximizer reporting a
-   * parameter value does not, because the jacobian moves the mode. */
-  int include_logjac;
-} sdsge_prior_tables;
-
 /* theta -> params resolution tables. base_params and every slot index
  * (scalars' param_slot, cov std_slots/pair_slot) are in calib_params order, so
  * params doubles as the residual/measurement argument vector: no gather. */
 typedef struct {
-  const f64 *base_params;      /* n_par */
-  const i64 *theta_idx;        /* n_scalars */
-  const i64 *param_slot;       /* n_scalars */
-  const i64 *transform_code;   /* n_scalars */
-  const f64 *transform_params; /* n_scalars*3 */
-  i64 n_scalars;
+  const f64 *base_params; /* n_par */
+  const i64 *param_slot;  /* n_theta */
+  i64 n_theta;
 } sdsge_param_map;
 
 /* Mode-independent objective context. */
@@ -165,12 +141,6 @@ arena_size sdsge_unscented_obj_arena_size(i64 n_var, i64 n_state, i64 n_ctrl,
 void sdsge_init_params(f64 *SDSGE_RESTRICT params,
                        const f64 *SDSGE_RESTRICT base_params, i64 n_par);
 
-/* Post-loop resolution at a theta (e.g. x_best): scatter into params, and the
- * log-prior from the packed tables. Both are scatter / prior only, no filter,
- * so they are cheap to call once after the optimizer returns. Shared by every
- * mode (they operate on the common base). */
-void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
-                          const f64 *SDSGE_RESTRICT theta);
 f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
                       const f64 *SDSGE_RESTRICT theta);
 

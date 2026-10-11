@@ -297,7 +297,7 @@ def test_linearized_model_supports_likelihood_evaluation(tmp_path):
         R=np.eye(1, dtype=np.float64),
     )
 
-    assert np.isfinite(float(est.loglik(est.theta0())))
+    assert np.isfinite(float(est.loglik()))
 
 
 def test_linearizer_accepts_model_config_directly(tmp_path):

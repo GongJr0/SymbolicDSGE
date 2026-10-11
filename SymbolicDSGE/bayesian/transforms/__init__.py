@@ -14,6 +14,7 @@ from .lower_bounded import LowerBoundedTransform
 from .upper_bounded import UpperBoundedTransform
 from .softplus import SoftplusTransform
 from .tanh import TanhTransform
+from .transform import Transform
 from .transform_dispatch import get_transform
 
 __all__ = [
@@ -28,5 +29,6 @@ __all__ = [
     "UpperBoundedTransform",
     "SoftplusTransform",
     "TanhTransform",
+    "Transform",
     "get_transform",
 ]

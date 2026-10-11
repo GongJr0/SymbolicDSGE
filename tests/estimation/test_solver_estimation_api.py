@@ -48,6 +48,16 @@ def _with_filter_prep(compiled):
         compiled.kalman.R_std_param_map = None
     if getattr(compiled.kalman, "R", None) is None:
         compiled.kalman.R = np.eye(len(compiled.observable_names), dtype=np.float64)
+    if not hasattr(compiled.kalman, "R_corr_param_map"):
+        compiled.kalman.R_corr_param_map = None
+    # active_Q and the joint-SPD guard read these three directly, so a stub that
+    # names no shocks still has to say so rather than omit them.
+    if not hasattr(compiled, "shock_names"):
+        compiled.shock_names = []
+    if not hasattr(compiled.config.calibration, "shock_std"):
+        compiled.config.calibration.shock_std = {}
+    if not hasattr(compiled.config.calibration, "shock_corr"):
+        compiled.config.calibration.shock_corr = {}
     return compiled
 
 
@@ -137,8 +147,8 @@ def test_solver_estimate_and_solve_mle(post82, monkeypatch):
         observables=post82["obs"],
         estimated_params=["psi_pi", "rho_r"],
         ss_seed=post82["steady"],
-        theta0=np.array([2.0, 0.8], dtype=np.float64),
-        bounds=[(1.0, 5.0), (0.0, 0.99)],
+        theta0={"psi_pi": 2.0, "rho_r": 0.8},
+        bounds={"psi_pi": (1.0, 5.0), "rho_r": (0.0, 0.99)},
     )
     assert isinstance(result, MLEResult)
     # The estimated point reaches solve through the calibration, not a kwarg,
@@ -161,24 +171,25 @@ def test_solver_estimate_accepts_theta0_dictionary(post82):
         estimated_params=["psi_pi", "rho_r"],
         ss_seed=post82["steady"],
         theta0={"psi_pi": 2.0, "rho_r": 0.8},
-        bounds=[(1.0, 5.0), (0.0, 0.99)],
+        bounds={"psi_pi": (1.0, 5.0), "rho_r": (0.0, 0.99)},
     )
     assert isinstance(out, MLEResult)
     assert out.success
     assert "psi_pi" in out.theta and "rho_r" in out.theta
 
 
-def test_solver_estimate_rejects_incomplete_theta0_dictionary():
-    solver = _make_solver()
-    compiled = _make_compiled(0.0)
-
-    with pytest.raises(ValueError, match="missing estimated parameters"):
-        solver.estimate(
-            compiled=compiled,
-            y=np.zeros((4, 1), dtype=np.float64),
+def test_solver_estimate_rejects_theta0_naming_an_unestimated_parameter(post82):
+    """A sparse theta0 fills from the calibration, so only a name that is not an
+    estimation target is an error."""
+    with pytest.raises(ValueError, match="not estimated"):
+        post82["solver"].estimate(
+            compiled=post82["compiled"],
+            y=post82["y"],
             routine="mle",
-            estimated_params=["a"],
-            theta0={},
+            observables=post82["obs"],
+            estimated_params=["psi_pi"],
+            ss_seed=post82["steady"],
+            theta0={"rho_r": 0.8},
         )
 
 
@@ -205,7 +216,7 @@ def test_solver_theta0_dictionary_is_mapped_to_unconstrained_for_transformed_pri
             priors={"psi_pi": prior},
             ss_seed=post82["steady"],
             theta0={"psi_pi": 2.0},
-            bounds=[(1.0, 5.0)],
+            bounds={"psi_pi": (1.0, 5.0)},
         )
     assert out.success
 

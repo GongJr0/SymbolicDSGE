@@ -33,8 +33,7 @@ def _native_loglik(
         ss_seed=ss_seed,
         **kwargs,
     )
-    theta0 = np.ascontiguousarray(est.resolve_theta0(None), dtype=np.float64)
-    return est.loglik(theta0)
+    return est.loglik()
 
 
 @pytest.fixture(scope="module")

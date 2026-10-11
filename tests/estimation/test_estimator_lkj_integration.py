@@ -12,6 +12,7 @@ from SymbolicDSGE.bayesian.priors import Prior
 from SymbolicDSGE.bayesian.transforms.cholesky_corr import CholeskyCorrTransform
 from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
 from SymbolicDSGE.estimation import Estimator
+from SymbolicDSGE.estimation.prior_program import TransformCode
 
 
 @pytest.fixture(scope="module")
@@ -74,7 +75,9 @@ def _assert_valid_corr_draws(samples: np.ndarray) -> None:
 
 
 def _full_size_prior_spec() -> dict[str, object]:
-    """Every estimable role at once: scalars, a bounded correlation, an LKJ block."""
+    """Every estimable role this config can carry at once: scalars, the stds, and
+    an LKJ block. A standalone scalar correlation is not one of them, since every
+    Q correlation here is named and nonzero for the block's sake."""
     return {
         "beta": make_prior(
             "beta",
@@ -116,12 +119,6 @@ def _full_size_prior_spec() -> dict[str, object]:
             parameters={"mean": 1.86, "std": 0.5},
             transform="log",
         ),
-        "rho_gz": make_prior(
-            "trunc_normal",
-            parameters={"mean": 0.0, "std": 0.20, "low": -1.0, "high": 1.0},
-            transform="affine_logit",
-            transform_kwargs={"low": -1.0, "high": 1.0},
-        ),
         "sig_r": make_prior(
             "gamma",
             parameters={"mean": 0.18, "std": 0.1},
@@ -156,28 +153,38 @@ def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
         estimated_params=list(prior_spec.keys()),
         priors=prior_spec,
     )
-    theta0 = est.theta0()
-    theta = theta0 + np.random.default_rng(20260513).normal(
-        loc=0.0,
-        scale=0.15,
-        size=theta0.shape[0],
-    )
+    # Off the calibration on every role at once, and inside every support: the
+    # stds stay positive and the three block members stay a PD correlation.
+    at = {
+        "beta": 0.965,
+        "rho_r": 0.80,
+        "rho_g": 0.86,
+        "rho_z": 0.81,
+        "psi_pi": 2.05,
+        "psi_x": 0.34,
+        "kappa": 0.62,
+        "tau_inv": 1.74,
+        "sig_r": 0.21,
+        "sig_g": 0.16,
+        "sig_z": 0.58,
+        "meas_rho_ir": 0.08,
+        "meas_rho_gi": -0.06,
+        "meas_rho_gr": 0.02,
+    }
 
     # expected_logprior does not see the filter, so it does not move when the
     # filter does. All three are regression anchors of our own output, not
     # oracles; their correctness rests upstream on the POST82 Dynare parity, and
     # they are recomputed whenever the filter contract changes.
-    expected_logprior = -3.677756133346315
-    expected_loglik = -79.71587915190194
-    expected_logpost = -83.39363528524827
+    expected_logprior = -5.607932470661046
+    expected_loglik = -80.05811738272585
+    expected_logpost = -85.6660498533869
 
-    assert float(est.logprior(theta, True)) == pytest.approx(
+    assert float(est.logprior(at, True)) == pytest.approx(
         expected_logprior, rel=1e-13, abs=1e-13
     )
-    assert float(est.loglik(theta)) == pytest.approx(
-        expected_loglik, rel=1e-13, abs=1e-13
-    )
-    assert float(est.logpost(theta, True)) == pytest.approx(
+    assert float(est.loglik(at)) == pytest.approx(expected_loglik, rel=1e-13, abs=1e-13)
+    assert float(est.logpost(at, True)) == pytest.approx(
         expected_logpost, rel=1e-13, abs=1e-13
     )
 
@@ -205,7 +212,16 @@ def test_mle_full_dense_q_corr_set_promotes_and_estimates(dense_lkj_bundle):
         estimated_params=["rho_gz", "rho_gr_shock", "rho_zr_shock"],
     )
     assert "Q_corr" in est._matrix_blocks
-    assert np.isfinite(est.loglik(est.theta0()))
+    assert np.isfinite(est.loglik())
+
+    # The block owns the whole run's reparameterization, so every slot carries
+    # the block code and the role box has nothing left to restrict.
+    ctx, _, lo, hi = est._build_call_context(priored=False)
+    assert all(
+        TransformCode(int(code)) is TransformCode.CHOLESKY_CORR
+        for code in ctx.prior.transform_codes
+    )
+    assert np.all(lo == -np.inf) and np.all(hi == np.inf)
 
 
 def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle):
@@ -223,16 +239,14 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         priors=prior_spec,
     )
 
-    theta0 = est.theta0()
-    theta_alt = est.params_to_theta(
+    ll0 = est.loglik()
+    ll1 = est.loglik(
         {
             "meas_rho_gi": -0.08,
             "meas_rho_gr": 0.10,
             "meas_rho_ir": 0.12,
         }
     )
-    ll0 = est.loglik(theta0)
-    ll1 = est.loglik(theta_alt)
 
     assert np.isfinite(ll0)
     assert np.isfinite(ll1)
@@ -283,7 +297,7 @@ def test_to_spec_round_trips_matrix_prior(dense_lkj_bundle):
     rebuilt = Estimator.from_spec(spec, dense_lkj_bundle["compiled"])
     assert rebuilt.param_names == est.param_names
     assert set(rebuilt._matrix_blocks) == {"R_corr"}
-    np.testing.assert_allclose(rebuilt.theta0(), est.theta0())
+    assert float(rebuilt.loglik()) == float(est.loglik())
 
 
 def test_matrix_prior_on_Q_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle):
@@ -301,16 +315,14 @@ def test_matrix_prior_on_Q_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         priors=prior_spec,
     )
 
-    theta0 = est.theta0()
-    theta_alt = est.params_to_theta(
+    ll0 = est.loglik()
+    ll1 = est.loglik(
         {
             "rho_gz": 0.08,
             "rho_gr_shock": -0.12,
             "rho_zr_shock": 0.10,
         }
     )
-    ll0 = est.loglik(theta0)
-    ll1 = est.loglik(theta_alt)
 
     assert np.isfinite(ll0)
     assert np.isfinite(ll1)

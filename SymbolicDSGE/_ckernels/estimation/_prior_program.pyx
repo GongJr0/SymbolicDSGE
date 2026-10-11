@@ -4,8 +4,9 @@
 Buffer to pointer marshalling and the GIL release only; the algorithms live in
 prior_program.c. Parity oracle: SymbolicDSGE/estimation/prior_program.py.
 ``logprior_program`` is the per-replication hot path; the leaves are exposed for
-the parity tests. A NaN result means out-of-support or an unknown code, and the
-caller falls back to the numba path.
+the parity tests. A NaN result means out-of-support or an unknown code, which
+reaches the optimizer as a rejected point: the estimation stack is native-only
+and has no Python leg to fall back to.
 """
 
 from libc.stdint cimport int64_t
@@ -14,6 +15,18 @@ import numpy as np
 
 
 cdef extern from "prior_program.h":
+    int SDSGE_N_DIST_PARAMS
+    int SDSGE_N_TRANSFORM_PARAMS
+
+    ctypedef struct sdsge_prior_tables:
+        int has_prior
+        const int64_t *dist_codes
+        const int64_t *transform_codes
+        const double *dist_params
+        const double *transform_params
+        int64_t n_theta
+        int include_logjac
+
     void sdsge_dist_logpdf(int64_t code, double *params, double x,
                            double *out_logpdf) nogil
     void sdsge_transform_inverse_and_logjac(int64_t code, double *params,
@@ -24,13 +37,8 @@ cdef extern from "prior_program.h":
     void sdsge_lkj_chol_logpdf_from_z(double *z, int64_t dim, int64_t length,
                                       double eta, double log_const,
                                       double *out_logpdf) nogil
-    double sdsge_logprior_program(
-        double *theta, int64_t *scalar_indices, int64_t *scalar_dist_codes,
-        int64_t *scalar_transform_codes, double *scalar_dist_params,
-        double *scalar_transform_params, int64_t n_scalar,
-        int64_t *matrix_offsets, int64_t *matrix_dims, int64_t *matrix_lengths,
-        double *matrix_etas, double *matrix_log_constants,
-        int64_t n_blocks, int include_logjac) nogil
+    double sdsge_logprior_program(double *theta,
+                                  const sdsge_prior_tables *pr) nogil
     void sdsge_cov_from_unconstrained(double *z, double *std, int64_t K,
                                       double *scratch_M, double *out) nogil
     void sdsge_unconstrained_from_corr_chol(double *L, int64_t K,
@@ -75,45 +83,55 @@ def lkj_chol_logpdf_from_z(double[::1] z, int64_t dim, int64_t length,
 
 
 def logprior_program(theta not None,
-                     int64_t[::1] scalar_indices,
-                     int64_t[::1] scalar_dist_codes,
-                     int64_t[::1] scalar_transform_codes,
-                     double[:, ::1] scalar_dist_params,
-                     double[:, ::1] scalar_transform_params,
-                     int64_t[::1] matrix_offsets,
-                     int64_t[::1] matrix_dims,
-                     int64_t[::1] matrix_lengths,
-                     double[::1] matrix_etas,
-                     double[::1] matrix_log_constants,
+                     int64_t[::1] dist_codes,
+                     int64_t[::1] transform_codes,
+                     double[:, ::1] dist_params,
+                     double[:, ::1] transform_params,
                      bint include_logjac=True):
-    """Full packed log-prior. Returns the scalar logprior (NaN -> numba fallback).
+    """Full packed log-prior over one theta layout's tables.
 
-    Each block's z is the contiguous theta run starting at ``matrix_offsets[b]``
-    of length ``matrix_lengths[b]``, read straight off ``theta`` in the kernel.
+    Every column runs to ``n_theta``, which the kernel walks once: a block's
+    row repeats across all of its slots, and the kernel reads its ``K`` off the
+    transform row to skip the run it heads, so the block offsets and lengths
+    are the layout rather than arguments.
 
     ``include_logjac`` picks the density: with it, the prior over theta, the
     change of variables a sampler walks; without, the prior over the parameters
     read at that theta. The C objectives make the same choice per entry point,
     off ``sdsge_prior_tables.include_logjac``."""
-    cdef int64_t n_scalar = scalar_indices.shape[0]
-    cdef int64_t n_blocks = matrix_dims.shape[0]
-
     cdef double[::1] thetav = np.ascontiguousarray(theta, dtype=np.float64)
-    cdef int64_t *si = &scalar_indices[0] if n_scalar > 0 else NULL
-    cdef int64_t *sdc = &scalar_dist_codes[0] if n_scalar > 0 else NULL
-    cdef int64_t *stc = &scalar_transform_codes[0] if n_scalar > 0 else NULL
-    cdef double *sdp = &scalar_dist_params[0, 0] if n_scalar > 0 else NULL
-    cdef double *stp = &scalar_transform_params[0, 0] if n_scalar > 0 else NULL
-    cdef int64_t *mo = &matrix_offsets[0] if n_blocks > 0 else NULL
-    cdef int64_t *md = &matrix_dims[0] if n_blocks > 0 else NULL
-    cdef int64_t *ml = &matrix_lengths[0] if n_blocks > 0 else NULL
-    cdef double *me = &matrix_etas[0] if n_blocks > 0 else NULL
-    cdef double *mlc = &matrix_log_constants[0] if n_blocks > 0 else NULL
+    cdef int64_t n_theta = thetav.shape[0]
+    if n_theta == 0:
+        return 0.0
+
+    if (dist_codes.shape[0] != n_theta
+            or transform_codes.shape[0] != n_theta
+            or dist_params.shape[0] != n_theta
+            or transform_params.shape[0] != n_theta):
+        raise ValueError(
+            "every table column must run to theta's length."
+        )
+    if (dist_params.shape[1] != SDSGE_N_DIST_PARAMS
+            or transform_params.shape[1] != SDSGE_N_TRANSFORM_PARAMS):
+        raise ValueError(
+            f"packed rows must be {SDSGE_N_DIST_PARAMS} and "
+            f"{SDSGE_N_TRANSFORM_PARAMS} wide."
+        )
+
+    cdef sdsge_prior_tables pr
+    # Unread by the program: it is the estimator's record of which leg packed
+    # the tables, and a table reaching here carries densities by construction.
+    pr.has_prior = 1
+    pr.dist_codes = &dist_codes[0]
+    pr.transform_codes = &transform_codes[0]
+    pr.dist_params = &dist_params[0, 0]
+    pr.transform_params = &transform_params[0, 0]
+    pr.n_theta = n_theta
+    pr.include_logjac = include_logjac
 
     cdef double out
     with nogil:
-        out = sdsge_logprior_program(&thetav[0], si, sdc, stc, sdp, stp, n_scalar,
-                                     mo, md, ml, me, mlc, n_blocks, include_logjac)
+        out = sdsge_logprior_program(&thetav[0], &pr)
     return out
 
 

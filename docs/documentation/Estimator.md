@@ -48,18 +48,17 @@ Estimator(
 ## Likelihood / Posterior Evaluation
 
 ```python
-Estimator.loglik(theta: np.ndarray) -> float
-Estimator.logprior(theta: np.ndarray, jacobian: bool = False) -> float
-Estimator.logpost(theta: np.ndarray, jacobian: bool = False) -> float
+Estimator.loglik(params: Mapping[str, float] | None = None) -> float
+Estimator.logprior(params: Mapping[str, float] | None = None, jacobian: bool = False) -> float
+Estimator.logpost(params: Mapping[str, float] | None = None, jacobian: bool = False) -> float
 ```
 
 ???+ note "Optimization Space"
-    `theta` is the vector space the optimizer and the sampler search in: steps, proposals and the covariance are all taken there, unconstrained wherever the parameter itself is constrained and identical to it elsewhere. Results come back mapped, so `OptimizationResult.theta` and `MCMCResult.samples` are named parameters and nothing asks a caller to convert them. The evaluators above are the one place a raw theta is the argument; `theta_to_params` and `params_to_theta` convert explicitly.
-
-    The mapping is assigned by role, not by prior. A shock or measurement standard deviation is log-transformed and a correlation block is reparameterized whether or not either carries a prior, which is what keeps an MLE search, where there are no priors at all, inside the model's valid region.
+    `params` are passed in constrained space (i.e. the values that estimation outputs and the model's calibration uses).
+    If any `prior`s imply a transformation to unconstrained space, the said transformation is executed before the objective is evaluated.
 
 ???+ note "Log-Jacobian"
-    `jacobian` controls whether the prior's transformation is treated as a coordinate change (`False`) or as a change of random variable (`True`).
+    `jacobian` controls whether the prior's transformation is treated as a coordinate change (`False`) or as a change of random variables (`True`).
     See the [map()](#map) note on the jacobian parameter for more details.
 
 ## MLE
@@ -67,7 +66,7 @@ Estimator.logpost(theta: np.ndarray, jacobian: bool = False) -> float
 ```python
 Estimator.mle(
     *,
-    theta0: np.ndarray | None = None, # (1)!
+    theta0: Mapping[str, float] | None = None, # (1)!
     bounds: Sequence[tuple[float, float]] | None = None,
     method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B", # (2)!
     m: int = 10, # (3)!
@@ -99,7 +98,7 @@ Enabling this will also compute the standard errors of the estimated parameters,
 ```python
 Estimator.map(
     *,
-    theta0: np.ndarray | None = None, # (1)!
+    theta0: Mapping[str, float] | None = None, # (1)!
     bounds: Sequence[tuple[float, float]] | None = None,
     method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B", # (2)!
     jacobian: bool = False, # (3)!
@@ -144,7 +143,7 @@ Estimator.mcmc(
     n_draws: int, # (1)!
     burn_in: int = 1000, # (2)!
     thin: int = 1, # (3)!
-    theta0: np.ndarray | None = None, # (4)!
+    theta0: Mapping[str, float] | None = None, # (4)!
     random_state: int | None = None,
     adapt: bool = True, 
     adapt_start: int = 100,

@@ -14,7 +14,7 @@ from numpy import float64, linalg
 from numba import njit
 
 from typing import TypedDict, Callable, cast
-from functools import lru_cache, wraps
+from functools import wraps
 
 
 class LKJParams(TypedDict):
@@ -100,7 +100,6 @@ def _log_beta(a: float64, b: float64) -> float64:
     )
 
 
-@lru_cache(maxsize=None)
 def _log_lkj_normalizer_C(K: int, eta: float) -> float64:
     if K < 1:
         raise ValueError("K must be >= 1.")
@@ -184,6 +183,7 @@ class LKJChol(Distribution[MatF64, MatF64]):
         self._eta = eta
         self._K = int(K)
         self._random_state = random_state
+        self._log_norm = _log_lkj_normalizer_C(self._K, self._eta)
 
     def __repr__(self) -> str:
         return self.__class__.__name__
@@ -210,8 +210,6 @@ class LKJChol(Distribution[MatF64, MatF64]):
         eta = self._eta
         K = self._K
 
-        logC = _log_lkj_normalizer_C(K, float(eta))
-
         d = np.diag(L).astype(float64, copy=False)
 
         log_kernel = float64(0.0)
@@ -219,7 +217,7 @@ class LKJChol(Distribution[MatF64, MatF64]):
             exponent = float64(K - i + 2.0 * eta - 3.0)
             log_kernel += exponent * np.log(d[i])
 
-        return float64(logC + log_kernel)
+        return float64(self._log_norm + log_kernel)
 
     def logpdf_from_R(self, R: MatF64) -> float64:
         """Evaluate the Cholesky-form density at ``chol(R)``.

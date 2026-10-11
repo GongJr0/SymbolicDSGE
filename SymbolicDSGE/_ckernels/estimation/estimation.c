@@ -38,22 +38,43 @@ void sdsge_init_params(f64 *SDSGE_RESTRICT params,
 
 static inline void sdsge_fill_params(sdsge_obj_common *base,
                                      const f64 *SDSGE_RESTRICT theta) {
+  sdsge_prior_tables *pr = &base->prior;
   sdsge_param_map *pmap = &base->pmap;
   f64 x, logjac;
-  for (i64 i = 0; i < pmap->n_scalars; ++i) {
-    i64 idx = pmap->theta_idx[i];
-    sdsge_transform_inverse_and_logjac(pmap->transform_code[i],
-                                       &pmap->transform_params[i * 3],
-                                       theta[idx], &x, &logjac);
+  i64 len;
+  for (i64 i = 0; i < pr->n_theta; ++i) {
+    len = sdsge_block_run_len(pr, i);
+    if (len) {
+      i += len - 1; // skip the block fill
+      continue;
+    }
+    sdsge_transform_inverse_and_logjac(
+        pr->transform_codes[i],
+        &pr->transform_params[i * SDSGE_N_TRANSFORM_PARAMS], theta[i], &x,
+        &logjac);
     base->params[pmap->param_slot[i]] = x;
   }
 }
 
-/* Public wrapper: scatter a theta into base->params (e.g. resolve x_best after
- * the optimizer returns). params then holds the named parameter vector. */
-void sdsge_scatter_params(sdsge_obj_common *SDSGE_RESTRICT base,
-                          const f64 *SDSGE_RESTRICT theta) {
-  sdsge_fill_params(base, theta);
+static inline void sdsge_scatter_block_corr(sdsge_obj_common *base,
+                                            const sdsge_cov_build *cb) {
+  const sdsge_cov_spec *spec = &cb->spec;
+  if (!sdsge_spec_has_block(spec)) {
+    return;
+  }
+  const i64 K = spec->K;
+  const i64 *slot = base->pmap.param_slot + spec->block_theta_off;
+
+  i64 m = 0;
+  for (i64 i = 0; i < K; ++i) {
+    for (i64 j = 0; j < i; ++j) {
+      f64 s = 0.0;
+      for (i64 c = 0; c <= j; ++c) {
+        s += cb->corr[i * K + c] * cb->corr[j * K + c];
+      }
+      base->params[slot[m++]] = s;
+    }
+  }
 }
 
 /* corr(K*K) := I, then off-diagonal pairs corr[i,j]=corr[j,i]=params[slot]. */
@@ -114,6 +135,15 @@ static inline void sdsge_build_cov(const sdsge_cov_build *cb,
   }
 }
 
+static inline void sdsge_fill_at_theta(sdsge_obj_common *base,
+                                       const f64 *SDSGE_RESTRICT theta) {
+  sdsge_fill_params(base, theta);
+  sdsge_build_cov(&base->q, theta, base->params);
+  sdsge_build_cov(&base->r, theta, base->params);
+  sdsge_scatter_block_corr(base, &base->q);
+  sdsge_scatter_block_corr(base, &base->r);
+}
+
 /* Estimation's reading of a core solve verdict: every way the pencil half can
  * fail leaves f/p/stab unusable, and so does a nonzero stab, so all of them
  * reject the draw as a Blanchard-Kahn violation. A missing steady state, an
@@ -160,13 +190,7 @@ static inline f64 sdsge_add_lp(const sdsge_obj_common *b,
     return ll;
   }
   const sdsge_prior_tables *pr = &b->prior;
-  const f64 lp = sdsge_logprior_program(
-      (f64 *)theta, (i64 *)pr->scalar_indices, (i64 *)pr->scalar_dist_codes,
-      (i64 *)pr->scalar_transform_codes, (f64 *)pr->scalar_dist_params,
-      (f64 *)pr->scalar_transform_params, pr->n_scalar,
-      (i64 *)pr->matrix_offsets, (i64 *)pr->matrix_dims,
-      (i64 *)pr->matrix_lengths, (f64 *)pr->matrix_etas,
-      (f64 *)pr->matrix_log_constants, pr->n_blocks, pr->include_logjac);
+  const f64 lp = sdsge_logprior_program((f64 *)theta, pr);
   if (!isfinite(lp)) {
     return -INFINITY;
   }
@@ -181,13 +205,7 @@ f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
   if (!pr->has_prior) {
     return 0.0;
   }
-  return sdsge_logprior_program(
-      (f64 *)theta, (i64 *)pr->scalar_indices, (i64 *)pr->scalar_dist_codes,
-      (i64 *)pr->scalar_transform_codes, (f64 *)pr->scalar_dist_params,
-      (f64 *)pr->scalar_transform_params, pr->n_scalar,
-      (i64 *)pr->matrix_offsets, (i64 *)pr->matrix_dims,
-      (i64 *)pr->matrix_lengths, (f64 *)pr->matrix_etas,
-      (f64 *)pr->matrix_log_constants, pr->n_blocks, pr->include_logjac);
+  return sdsge_logprior_program((f64 *)theta, pr);
 }
 
 /* Per-mode objective arena: the solve, the filter, and the P0 derivation run in
@@ -242,10 +260,7 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
   klein_spec *s = &ctx->solve_ctx;
   kf_inputs *kfin = &ctx->kf_ctx;
 
-  sdsge_fill_params(b, theta);
-  sdsge_build_cov(&b->q, theta, b->params);
-  sdsge_build_cov(&b->r, theta, b->params);
-
+  sdsge_fill_at_theta(b, theta);
   const int solve_rc =
       sdsge_solve1_run(&ctx->solve_ctx, out, b->arena, b->iarena);
   if (solve_rc == SDSGE_SOLVE_BK) {
@@ -280,10 +295,7 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
   klein_spec *s = &ctx->solve_ctx;
   ekf_inputs *ekfin = &ctx->ekf_ctx;
 
-  sdsge_fill_params(b, theta);
-  sdsge_build_cov(&b->q, theta, b->params);
-  sdsge_build_cov(&b->r, theta, b->params);
-
+  sdsge_fill_at_theta(b, theta);
   const int solve_rc =
       sdsge_solve1_run(&ctx->solve_ctx, out, b->arena, b->iarena);
   if (solve_rc == SDSGE_SOLVE_BK) {
@@ -318,10 +330,7 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
   sgu_klein_spec *s = &ctx->solve_ctx;
   ukf_inputs *ukfin = &ctx->ukf_ctx;
 
-  sdsge_fill_params(b, theta);
-  sdsge_build_cov(&b->q, theta, b->params);
-  sdsge_build_cov(&b->r, theta, b->params);
-
+  sdsge_fill_at_theta(b, theta);
   const int rc = sdsge_solve2_run(s, out1, out2, b->arena, b->iarena);
 
   if (rc == SDSGE_SOLVE_BK) {
@@ -571,16 +580,22 @@ static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
     out_se[i] = NAN;
   }
 
-  const sdsge_param_map *pmap = &b->pmap;
+  const sdsge_prior_tables *pr = &b->prior;
   f64 x, logjac;
-  for (i64 i = 0; i < pmap->n_scalars; ++i) {
-    const i64 idx = pmap->theta_idx[i];
-    sdsge_transform_inverse_and_logjac(pmap->transform_code[i],
-                                       pmap->transform_params + i * 3,
-                                       theta[idx], &x, &logjac);
-    const f64 v = vcov[idx * d + idx];
+  i64 len;
+  for (i64 i = 0; i < pr->n_theta; ++i) {
+    len = sdsge_block_run_len(pr, i);
+    if (len) {
+      i += len - 1; // skip the block fill
+      continue;
+    }
+    sdsge_transform_inverse_and_logjac(pr->transform_codes[i],
+                                       pr->transform_params +
+                                           i * SDSGE_N_TRANSFORM_PARAMS,
+                                       theta[i], &x, &logjac);
+    const f64 v = vcov[i * d + i];
     if (v >= 0.0) {
-      out_se[idx] = exp(logjac) * sqrt(v);
+      out_se[i] = exp(logjac) * sqrt(v);
     }
   }
 
@@ -701,5 +716,5 @@ void sdsge_run_estimation(void *ctx, i64 n_theta, f64 *SDSGE_RESTRICT theta,
 
   /* Last, not before the covariance: its probes scatter perturbed params, and
    * callers read the ctx expecting it to sit at the returned theta. */
-  sdsge_scatter_params((sdsge_obj_common *)ctx, theta);
+  sdsge_fill_at_theta((sdsge_obj_common *)ctx, theta);
 }

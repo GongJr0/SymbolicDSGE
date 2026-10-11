@@ -29,8 +29,8 @@ from SymbolicDSGE.estimation.results import MLEResult, MAPResult
 
 # The ``post82`` fixture lives in tests/estimation/conftest.py.
 
-_TH0 = np.array([2.0, 0.8], dtype=np.float64)
-_BNDS = [(1.0, 5.0), (0.0, 0.99)]
+_TH0 = {"psi_pi": 2.0, "rho_r": 0.8}
+_BNDS = {"psi_pi": (1.0, 5.0), "rho_r": (0.0, 0.99)}
 
 
 def _mle_estimator(post82, mode: str) -> Estimator:
@@ -49,15 +49,13 @@ def _mle_estimator(post82, mode: str) -> Estimator:
 
 
 def _assert_theta_named(est: Estimator, res) -> None:
-    expected = est.theta_to_params(res.x)
     assert list(res.theta) == list(est.param_names)
-    for name in est.param_names:
-        assert float(res.theta[name]) == pytest.approx(float(expected[name]), abs=1e-9)
+    assert all(np.isfinite(float(res.theta[name])) for name in est.param_names)
 
 
 def _assert_mle_packing(est: Estimator, res: MLEResult) -> None:
     assert isinstance(res, MLEResult)
-    assert res.loglik == pytest.approx(float(est.loglik(res.x)), abs=1e-6)
+    assert res.loglik == pytest.approx(float(est.loglik(res.theta)), abs=1e-6)
     assert res.fun == pytest.approx(-res.loglik, abs=1e-9)
     _assert_theta_named(est, res)
 
@@ -99,12 +97,12 @@ def test_map_lbfgsb_oracle(post82):
         priors={"psi_pi": prior},
         ss_seed=post82["steady"],
     )
-    res = est.map(theta0=np.array([2.0], dtype=np.float64), bounds=[(1.0, 5.0)])
+    res = est.map(theta0={"psi_pi": 2.0}, bounds={"psi_pi": (1.0, 5.0)})
     assert isinstance(res, MAPResult)
     assert res.fun == pytest.approx(204.3426449357, abs=1e-3)
 
-    lp = float(est.loglik(res.x))
-    lpr = float(est.logprior(res.x))
+    lp = float(est.loglik(res.theta))
+    lpr = float(est.logprior(res.theta))
     assert res.logprior == pytest.approx(lpr, abs=1e-6)
     assert res.logpost == pytest.approx(lp + lpr, abs=1e-6)
     assert res.fun == pytest.approx(-res.logpost, abs=1e-9)

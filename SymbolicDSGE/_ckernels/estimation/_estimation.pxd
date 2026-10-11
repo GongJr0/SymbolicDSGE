@@ -208,11 +208,8 @@ cdef extern from "../kalman/kalman.h":
 cdef extern from "estimation.h":
     ctypedef struct sdsge_param_map:
         const double *base_params
-        const int64_t *theta_idx
         const int64_t *param_slot
-        const int64_t *transform_code
-        const double *transform_params
-        int64_t n_scalars
+        int64_t n_theta
 
     ctypedef struct sdsge_cov_spec:
         int is_constant
@@ -235,18 +232,11 @@ cdef extern from "estimation.h":
 
     ctypedef struct sdsge_prior_tables:
         int has_prior
-        const int64_t *scalar_indices
-        const int64_t *scalar_dist_codes
-        const int64_t *scalar_transform_codes
-        const double *scalar_dist_params
-        const double *scalar_transform_params
-        int64_t n_scalar
-        const int64_t *matrix_offsets
-        const int64_t *matrix_dims
-        const int64_t *matrix_lengths
-        const double *matrix_etas
-        const double *matrix_log_constants
-        int64_t n_blocks
+        const int64_t *dist_codes
+        const int64_t *transform_codes
+        const double *dist_params
+        const double *transform_params
+        int64_t n_theta
         int include_logjac
 
     ctypedef struct sdsge_obj_common:
@@ -311,7 +301,6 @@ cdef extern from "estimation.h":
 
     void sdsge_init_params(double *params, const double *base_params,
                            int64_t n_par) nogil
-    void sdsge_scatter_params(sdsge_obj_common *base, const double *theta) nogil
     double sdsge_logprior_at(const sdsge_obj_common *base,
                              const double *theta) nogil
     double sdsge_obj_linear(sdsge_linear_ctx *ctx, const double *theta,

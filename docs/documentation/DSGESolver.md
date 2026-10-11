@@ -92,7 +92,7 @@ DSGESolver.estimate(
     compiled: CompiledModel,
     y: np.ndarray | pd.DataFrame,
     routine: Literal["mle", "map", "mcmc"] = "mle",
-    theta0: np.ndarray | Mapping[str, float] | None = None, # (1)!
+    theta0: Mapping[str, float] | None = None, # (1)!
     observables: list[str] | None = None,
     filter_mode: str = "linear", # (3)!
     estimated_params: list[str] | None = None,
@@ -106,7 +106,7 @@ DSGESolver.estimate(
 ) -> MCMCResult | OptimizationResult
 ```
 
-1. If `#!python theta0` is passed as a dictionary, it is reordered internally to the estimator's canonical parameter order.
+1. Initial parameter guess: A `dict` uses values that are specified and leaves the rest at their calibration. `None` uses the calibration values for each estimated parameter.
 2. If `#!python R` is not supplied, it comes from the Kalman config: a fixed calibrated matrix, or rebuilt from the current parameters each evaluation when the model exposes symbolic `R` metadata.
 3. Filter algorithm for the likelihood: `#!python "linear"` (affine measurements), `#!python "extended"` (EKF, nonlinear measurements), or `#!python "unscented"` (UKF).
 
@@ -138,7 +138,7 @@ DSGESolver.estimate_and_solve(
     compiled: CompiledModel,
     y: np.ndarray | pd.DataFrame,
     routine: Literal["mle", "map", "mcmc"] = "mle",
-    theta0: np.ndarray | Mapping[str, float] | None = None,
+    theta0: Mapping[str, float] | None = None,
     posterior_point: str = "mean",
     observables: list[str] | None = None,
     filter_mode: str = "linear",

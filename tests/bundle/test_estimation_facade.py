@@ -43,6 +43,16 @@ def _with_filter_prep(compiled: SimpleNamespace) -> SimpleNamespace:
         compiled.kalman.R_param_names = None
     if not hasattr(compiled.kalman, "R_std_param_map"):
         compiled.kalman.R_std_param_map = None
+    if not hasattr(compiled.kalman, "R_corr_param_map"):
+        compiled.kalman.R_corr_param_map = None
+    # active_Q and the joint-SPD guard read these three directly, so a stub that
+    # names no shocks still has to say so rather than omit them.
+    if not hasattr(compiled, "shock_names"):
+        compiled.shock_names = []
+    if not hasattr(compiled.config.calibration, "shock_std"):
+        compiled.config.calibration.shock_std = {}
+    if not hasattr(compiled.config.calibration, "shock_corr"):
+        compiled.config.calibration.shock_corr = {}
     if getattr(compiled.kalman, "R", None) is None:
         compiled.kalman.R = np.eye(len(compiled.observable_names), dtype=np.float64)
     return compiled

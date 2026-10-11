@@ -6,8 +6,6 @@ import numpy as np
 import pytest
 from numpy import float64
 
-from SymbolicDSGE.estimation import backend
-from SymbolicDSGE.estimation.estimator import Estimator
 from SymbolicDSGE.ui.estimation import _method_from_result
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult
 
@@ -38,13 +36,6 @@ def _mcmc_result() -> MCMCResult:
         thin=1,
         sampler_config={"adapt": True},
     )
-
-
-def test_matrix_name_for_reserved_key_rejects_unknown():
-    assert Estimator._matrix_name_for_reserved_key("R_corr") == "R"
-    assert Estimator._matrix_name_for_reserved_key("Q_corr") == "Q"
-    with pytest.raises(KeyError, match="Unknown reserved matrix key"):
-        Estimator._matrix_name_for_reserved_key("not_a_key")
 
 
 def test_method_from_result_branches():
