@@ -1,11 +1,11 @@
 """Parity tests for the native packed log-prior kernels in ``_ckernels/estimation``.
 
-The transform kernel is compared against the ``Transform`` the packed row was
-built from, so one transform is checked against itself. The remaining kernels
-are still compared against the compiled numba oracle in
-``tests/_oracles/estimation``, bit-for-bit up to libm; the njit kernels are the
-oracle there, not their ``.py_func`` forms, which raise on ``math.log`` domain
-errors where numba and C return -inf/nan.
+Each kernel is compared against the library object its packed row was built
+from, so the comparison is of one definition against itself rather than of two
+implementations kept in step by hand. Where the two differ by construction it
+is stated as such: a distribution raises out of its support where the kernel
+returns NaN, and the ``_from_z`` LKJ density carries the change of variables
+that ``LKJChol.logpdf`` leaves to the transform.
 """
 
 from __future__ import annotations
@@ -22,8 +22,12 @@ from SymbolicDSGE._ckernels.estimation import (
     unconstrained_from_corr_chol as native_unconstrained_from_corr_chol,
 )
 from SymbolicDSGE.bayesian.distributions.distribution_dispatch import get_distribution
-from SymbolicDSGE.bayesian.distributions.lkj_chol import _log_lkj_normalizer_C
+from SymbolicDSGE.bayesian.distributions.lkj_chol import (
+    LKJChol,
+    _log_lkj_normalizer_C,
+)
 from SymbolicDSGE.bayesian.distributions.param_builder import get_dist_params
+from SymbolicDSGE.bayesian.support import OutOfSupportError
 from SymbolicDSGE.bayesian.transforms import (
     AffineLogitTransform,
     AffineProbitTransform,
@@ -36,6 +40,11 @@ from SymbolicDSGE.bayesian.transforms import (
     TanhTransform,
     UpperBoundedTransform,
 )
+from SymbolicDSGE.bayesian.transforms.cholesky_corr import CholeskyCorrTransform
+from SymbolicDSGE.estimation.backend import (
+    _corr_chol_from_unconstrained,
+    _unconstrained_from_corr_chol,
+)
 from SymbolicDSGE.estimation.prior_program import (
     DistCode,
     N_DIST_PARAMS,
@@ -43,14 +52,6 @@ from SymbolicDSGE.estimation.prior_program import (
     TransformCode,
     _pack_distribution,
     _pack_transform,
-)
-from _oracles.estimation import (
-    _corr_chol_from_unconstrained,
-    _dist_logpdf,
-    _lkj_chol_logjac,
-    _lkj_chol_logpdf_from_z,
-    _R_from_unconstrained,
-    _unconstrained_from_corr_chol,
 )
 
 RTOL = 1e-12
@@ -65,14 +66,14 @@ def _build_dist(family, params):
     return get_distribution(family)(**(get_dist_params(family) | params))
 
 
-def _agree(native: float, numba: float) -> None:
+def _agree(native: float, expected: float) -> None:
     native = float(native)
-    numba = float(numba)
-    if np.isnan(native) or np.isnan(numba):
-        assert np.isnan(native) and np.isnan(numba), (native, numba)
+    expected = float(expected)
+    if np.isnan(native) or np.isnan(expected):
+        assert np.isnan(native) and np.isnan(expected), (native, expected)
         return
     # assert_allclose treats matching infinities as equal.
-    np.testing.assert_allclose(native, numba, rtol=RTOL, atol=ATOL)
+    np.testing.assert_allclose(native, expected, rtol=RTOL, atol=ATOL)
 
 
 _DIST_SPECS = {
@@ -95,22 +96,32 @@ _X_SWEEP = (-2.0, -0.5, 0.0, 0.25, 0.5, 0.7, 1.0, 1.5, 3.0)
 
 @pytest.mark.parametrize("code,spec", list(_DIST_SPECS.items()))
 def test_dist_logpdf_parity(code, spec):
+    """The kernel against the distribution its row was packed from.
+
+    The sweep deliberately leaves each support. The kernel reports that as NaN
+    rather than raising, which is what lets the objective fold it into its -inf
+    sentinel, so out of support the two agree by that correspondence rather
+    than by value.
+    """
     family, params = spec
-    # Only the distribution is packed/evaluated here (the x-sweep deliberately
-    # probes out-of-support values), so build the dist directly.
-    packed_code, packed_params = _pack_distribution(_build_dist(family, params))
+    dist = _build_dist(family, params)
+    packed_code, packed_params = _pack_distribution(dist)
     assert int(packed_code) == int(code)
     parr = np.asarray(packed_params, dtype=np.float64)
 
     for x in _X_SWEEP:
-        numba = _dist_logpdf(int(code), parr, np.float64(x))
         native = native_dist_logpdf(int(code), parr, float(x))
-        _agree(native, numba)
+        try:
+            expected = dist.logpdf(np.float64(x))
+        except OutOfSupportError:
+            assert np.isnan(float(native)), (x, native)
+        else:
+            _agree(native, expected)
 
 
 def test_dist_logpdf_unknown_code_is_nan():
     parr = np.zeros(N_DIST_PARAMS, dtype=np.float64)
-    _agree(native_dist_logpdf(999, parr, 0.0), _dist_logpdf(999, parr, np.float64(0.0)))
+    assert np.isnan(float(native_dist_logpdf(999, parr, 0.0)))
 
 
 #: One instance per scalar transform code, with bounds where the code reads them.
@@ -170,29 +181,29 @@ def test_transform_unknown_code_is_nan():
 
 @pytest.mark.parametrize("dim", [2, 3, 4, 5])
 def test_lkj_parity(dim):
+    """``LKJChol.logpdf`` is the density of the factor and the kernel's is the
+    density of the unconstrained vector, so the two differ by the transform's
+    jacobian and by nothing else."""
     rng = np.random.default_rng(dim)
     length = dim * (dim - 1) // 2
     z = np.ascontiguousarray(rng.normal(size=length), dtype=np.float64)
 
-    _agree(native_lkj_logjac(z, dim, length), _lkj_chol_logjac(z, dim, length))
+    logjac = float(CholeskyCorrTransform(K=dim).log_det_abs_jacobian_inverse(z))
+    _agree(native_lkj_logjac(z, dim, length), logjac)
 
+    L = _corr_chol_from_unconstrained(z, dim)
     for eta in (0.5, 1.0, 2.5):
         log_const = float(_log_lkj_normalizer_C(dim, eta))
-        _agree(
-            native_lkj_logpdf(z, dim, length, eta, log_const),
-            _lkj_chol_logpdf_from_z(
-                z, dim, length, np.float64(eta), np.float64(log_const)
-            ),
-        )
+        expected = float(LKJChol(eta=eta, K=dim, random_state=None).logpdf(L)) + logjac
+        _agree(native_lkj_logpdf(z, dim, length, eta, log_const), expected)
 
 
 def test_lkj_length_too_short_is_nan(dim=4):
+    """A run shorter than the dimension demands is unreachable through the
+    packer, so the kernel's own guard is the whole claim."""
     z = np.array([0.1, 0.2], dtype=np.float64)
-    _agree(native_lkj_logjac(z, dim, z.size), _lkj_chol_logjac(z, dim, z.size))
-    _agree(
-        native_lkj_logpdf(z, dim, z.size, 1.0, 0.0),
-        _lkj_chol_logpdf_from_z(z, dim, z.size, np.float64(1.0), np.float64(0.0)),
-    )
+    assert np.isnan(float(native_lkj_logjac(z, dim, z.size)))
+    assert np.isnan(float(native_lkj_logpdf(z, dim, z.size, 1.0, 0.0)))
 
 
 @pytest.mark.parametrize("K", [1, 2, 3, 5])
@@ -204,14 +215,11 @@ def test_cov_from_unconstrained_parity(K):
 
     cov, L = native_cov_from_unconstrained(z, std)
 
-    # Oracle covariance + correlation Cholesky from u = [log std, z].
-    u = np.concatenate([np.log(std), z])
-    R_ref, _, Lcorr_ref = _R_from_unconstrained(u, K)
     L_ref = _corr_chol_from_unconstrained(np.ascontiguousarray(z), K)
+    cov_ref = np.outer(std, std) * (L_ref @ L_ref.T)
 
-    np.testing.assert_allclose(cov, R_ref, rtol=RTOL, atol=ATOL)
+    np.testing.assert_allclose(cov, cov_ref, rtol=RTOL, atol=ATOL)
     np.testing.assert_allclose(L, L_ref, rtol=RTOL, atol=ATOL)
-    np.testing.assert_allclose(L, Lcorr_ref, rtol=RTOL, atol=ATOL)
 
 
 @pytest.mark.parametrize("K", [1, 2, 3, 5])

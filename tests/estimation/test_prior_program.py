@@ -9,16 +9,14 @@ from SymbolicDSGE.bayesian import make_prior
 from SymbolicDSGE.estimation.prior_program import (
     DistCode,
     N_DIST_PARAMS,
-    N_TRANSFORM_PARAMS,
-    TransformCode,
     _pack_distribution,
     _pack_transform,
     build_prior_tables,
 )
 from SymbolicDSGE._ckernels.estimation import (
+    dist_logpdf,
     logprior_program,
 )
-from _oracles.estimation import _dist_logpdf
 
 
 @pytest.fixture(scope="module")
@@ -345,7 +343,7 @@ def test_prior_program_distribution_logpdf_dispatch_and_support_edges():
     for prior in scalar_priors.values():
         code, params = _pack_distribution(prior.dist)
         assert code is not None
-        out = _dist_logpdf(
+        out = dist_logpdf(
             code,
             np.asarray(params, dtype=np.float64),
             np.float64(valid_x[code]),
@@ -364,7 +362,7 @@ def test_prior_program_distribution_logpdf_dispatch_and_support_edges():
         (999, [0.0] * N_DIST_PARAMS, 0.0),
     ):
         assert np.isnan(
-            _dist_logpdf(
+            dist_logpdf(
                 code,
                 np.asarray(params, dtype=np.float64),
                 np.float64(bad_x),
