@@ -13,7 +13,6 @@ from typing import Literal, cast
 import numpy as np
 import pytest
 
-from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.monte_carlo._arenas import resolve_retention
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
@@ -161,9 +160,9 @@ def test_the_mode_defaults_the_way_the_planner_defaults_it(
     assert result.filter_outputs["filt"].filter_mode == "linear"
 
 
-def test_unscented_reports_its_own_mode(solved_rbc_second_order: SolvedModel) -> None:
-    y = _observations(solved_rbc_second_order)
-    result = _run(solved_rbc_second_order, y, filter_mode="unscented")
+def test_unscented_reports_its_own_mode(solved_rbc_so: SolvedModel) -> None:
+    y = _observations(solved_rbc_so)
+    result = _run(solved_rbc_so, y, filter_mode="unscented")
 
     assert result.filter_outputs["filt"].filter_mode == "unscented"
 
@@ -202,16 +201,14 @@ def test_a_scalar_field_lands_on_the_replication_axis_alone(
 
 
 def test_unscented_covariances_are_in_the_augmented_frame(
-    solved_rbc_second_order: SolvedModel,
+    solved_rbc_so: SolvedModel,
 ) -> None:
     """The pruned state doubles the covariance frame but not the reported state."""
-    comp = solved_rbc_second_order.compiled
+    comp = solved_rbc_so.compiled
     n_z = 2 * comp.n_state
-    y = _observations(solved_rbc_second_order)
+    y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_second_order, y, filter_mode="unscented").filter_outputs[
-        "filt"
-    ]
+    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
 
     assert filt.P_pred.shape == (N_REP, T, n_z, n_z)
     assert filt.P_filt.shape == (N_REP, T, n_z, n_z)
@@ -262,14 +259,12 @@ def test_the_pruned_state_is_unavailable_off_the_unscented_path(
 
 
 def test_the_unscented_layout_reserves_nothing_for_shocks(
-    solved_rbc_second_order: SolvedModel,
+    solved_rbc_so: SolvedModel,
 ) -> None:
     """The unscented kernel cannot return shocks, so the field is simply absent."""
-    y = _observations(solved_rbc_second_order)
+    y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_second_order, y, filter_mode="unscented").filter_outputs[
-        "filt"
-    ]
+    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
 
     assert filt.eps_hat is None
 
@@ -309,16 +304,14 @@ def test_each_replication_matches_the_reference_filter_on_its_own_data(
 
 
 def test_unscented_replications_match_the_reference_filter(
-    solved_rbc_second_order: SolvedModel,
+    solved_rbc_so: SolvedModel,
 ) -> None:
-    y = _observations(solved_rbc_second_order)
+    y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_second_order, y, filter_mode="unscented").filter_outputs[
-        "filt"
-    ]
+    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
 
     for rep in range(N_REP):
-        expected = solved_rbc_second_order.kalman(y=y[rep], filter_mode="unscented")
+        expected = solved_rbc_so.kalman(y=y[rep], filter_mode="unscented")
         for field in ("x_pred", "x_filt", "P_pred", "P_filt", *_UNSCENTED_ONLY):
             np.testing.assert_allclose(
                 getattr(filt, field)[rep],
@@ -350,13 +343,11 @@ def test_a_replication_reads_back_as_a_plain_filter_result(
 
 
 def test_a_replication_of_an_unscented_run_carries_the_pruned_state(
-    solved_rbc_second_order: SolvedModel,
+    solved_rbc_so: SolvedModel,
 ) -> None:
-    y = _observations(solved_rbc_second_order)
+    y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_second_order, y, filter_mode="unscented").filter_outputs[
-        "filt"
-    ]
+    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
     one = filt.replication(1)
 
     assert isinstance(one, UnscentedFilterResult)

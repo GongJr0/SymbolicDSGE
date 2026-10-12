@@ -115,11 +115,11 @@ def test_a_filter_round_trips_every_field_it_produced(
 
 
 def test_the_unscented_pruned_state_survives_the_bundle(
-    solved_rbc_second_order: SolvedModel, tmp_path
+    solved_rbc_so: SolvedModel, tmp_path
 ) -> None:
     """Only this mode opens those four buffers, and the mode is what says so."""
     pipeline = _pipeline(
-        solved_rbc_second_order,
+        solved_rbc_so,
         filter_step(
             "filt",
             target="reference",
@@ -129,7 +129,7 @@ def test_the_unscented_pruned_state_survives_the_bundle(
         ),
     )
 
-    before, after = _roundtrip(solved_rbc_second_order, pipeline, tmp_path)
+    before, after = _roundtrip(solved_rbc_so, pipeline, tmp_path)
 
     _assert_same(before["filt"], after["filt"])
     for name in _PRUNED:

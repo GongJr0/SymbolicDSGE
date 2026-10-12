@@ -14,11 +14,6 @@ from __future__ import annotations
 import numpy as np
 import sympy as sp
 
-from SymbolicDSGE._ckernels.core._core import bicomplex_hessian, klein_preprocess
-from SymbolicDSGE._ckernels.core import residual_eval, second_order
-from SymbolicDSGE._symbolic_printers import ResidualLayout
-from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.core.solver_backend import klein_solve
 from _oracles import dynare_rbc_second_order as golden
 
 # Dynare's DR order [k', z, c] is our canonical order [k, z, c] row for row: k'
@@ -55,32 +50,8 @@ def _dynare_ghuu() -> np.ndarray:
 def _levels_steady_state(compiled) -> np.ndarray:
     """The RBC expansion point over the compiled layout."""
     calib = compiled.config.calibration.parameters
-    known = {"k": float(calib[sp.Symbol("k_ss")]), "c": float(calib[sp.Symbol("c_ss")])}
+    known = {"k": calib["k_ss"], "c": calib["c_ss"]}
     return np.array([known.get(n, 0.0) for n in compiled.var_names], dtype=np.float64)
-
-
-def _ss_seed_by_name(compiled) -> dict[str, float]:
-    """The expansion point as a mapping. A dense seed is read in declaration
-    order, which is not the canonical order the steady state comes back in."""
-    return dict(zip(compiled.var_names, _levels_steady_state(compiled)))
-
-
-def _shock_cov(compiled) -> np.ndarray:
-    """The one-shock covariance: ``sig`` is calibrated as a standard deviation."""
-    sig = float(compiled.config.calibration.parameters[sp.Symbol("sig")])
-    return np.array([[sig * sig]], dtype=np.float64)
-
-
-def _solved_rbc(rbc_second_order_test_model_path):
-    """The RBC model solved to second order, as (solved, compiled)."""
-    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    return solver.solve(compiled, order=2), compiled
-
-
-def _solve_rbc_second_order(rbc_second_order_test_model_path):
-    return _solved_rbc(rbc_second_order_test_model_path)[0]
 
 
 def _golden_columns(solved) -> list[int]:
@@ -124,60 +95,15 @@ def _golden_rows(block: np.ndarray, lead: int = 0) -> np.ndarray:
     return rows
 
 
-def test_rbc_second_order_matches_dynare(rbc_second_order_test_model_path):
-    """The golden, off the kernel directly: every second-order block against the
-    Dynare array that names it. The independent-solver check on the actual
-    second-order math."""
-    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
-    compiled = DSGESolver(model, kalman).compile()
-    # k and z occur at t-1, so they are the states and c is the only control.
-    assert list(compiled.var_names) == ["k", "z", "c"]
-    assert compiled.n_state == N_STATE
-
-    layout = ResidualLayout.from_compiled(compiled)
-    n_eq, n_state = layout.n_var, compiled.n_state
-    ss = _levels_steady_state(compiled)
-    calib = compiled.config.calibration.parameters
-    par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
-
-    cf = compiled.construct_objective_cfunc()
-    cf_bc = compiled.construct_objective_cfunc_bicomplex()
-
-    # Steady state actually clears the residual.
-    point = ss.astype(np.complex128)
-    resid = residual_eval(
-        cf.address,
-        point,
-        point,
-        point,
-        np.zeros(compiled.n_exog, np.complex128),
-        par.astype(np.complex128),
-        len(compiled.objective_eqs),
-    )
-    np.testing.assert_allclose(np.real(resid), 0.0, atol=1e-7)
-
-    a, b, _, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
-    sol = klein_solve(compiled, par, ss)
-    assert sol.stab == 0
-    f_xx = bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)
-    gxx, hxx, gxu, hxu, guu, huu, gss, hss = second_order(
-        a, b, f_xx, sol.f, sol.p, np.real(sol.B), _shock_cov(compiled), n_state
-    )
-
-    np.testing.assert_allclose(_stack(hxx, gxx), _dynare_ghxx(), rtol=5e-6, atol=2e-7)
-    np.testing.assert_allclose(_stack(hxu, gxu), _dynare_ghxu(), rtol=5e-6, atol=2e-7)
-    np.testing.assert_allclose(_stack(huu, guu), _dynare_ghuu(), rtol=5e-6, atol=2e-7)
-    np.testing.assert_allclose(_stack(hss, gss), golden.GHS2, rtol=5e-6, atol=1e-9)
-
-
-def test_rbc_second_order_structural_invariants(rbc_second_order_test_model_path):
+def test_rbc_second_order_structural_invariants(rbc_so_bundle):
     """What the model's own structure forces, independent of any golden.
 
     z is an AR(1), so every one of its second-order rows is flat, and its risk
     correction is zero. The tensors are symmetric in the pair they weigh, which
     the solve gets from the chain rule rather than by imposing it.
     """
-    solved, compiled = _solved_rbc(rbc_second_order_test_model_path)
+    solved = rbc_so_bundle["solved"]
+    compiled = rbc_so_bundle["compiled"]
     pol = solved.policy
     z = compiled.idx["z"]
 
@@ -194,15 +120,15 @@ def test_rbc_second_order_structural_invariants(rbc_second_order_test_model_path
     )
 
 
-def test_solve_order2_wiring(rbc_second_order_test_model_path):
+def test_solve_order2_wiring(rbc_so_bundle):
     """The .solve(order=2) public path end to end: it resolves + cross-checks the
     nonlinear steady state and returns a SecondOrderSolution whose tensors match
     the Dynare goldens. order=1 is unchanged (no second-order fields)."""
-    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
+    model, kalman = rbc_so_bundle["parsed"]
+    solved = rbc_so_bundle["solved"]
+    compiled = rbc_so_bundle["compiled"]
+    solver = rbc_so_bundle["solver"]
 
-    solved = solver.solve(compiled, order=2)
     pol = solved.policy
     assert pol.order == 2
 
@@ -223,15 +149,13 @@ def test_solve_order2_wiring(rbc_second_order_test_model_path):
 
     # First order path is untouched: no second-order tensors.
     # (levels model -> the expansion point must be supplied; zeros would fail BK.)
-    first = solver.solve(compiled, order=1, ss_seed=_ss_seed_by_name(compiled))
+    first = solver.solve(compiled, order=1)
     assert first.policy.order == 1
     assert not hasattr(first.policy, "gxx")
 
 
-def test_rbc_second_order_deterministic_sim_matches_dynare(
-    rbc_second_order_test_model_path,
-):
-    solved = _solve_rbc_second_order(rbc_second_order_test_model_path)
+def test_rbc_second_order_deterministic_sim_matches_dynare(solved_rbc_so):
+    solved = solved_rbc_so
 
     out = solved.sim(
         golden.DETERMINISTIC_SIM.shape[0] - 1,
@@ -246,10 +170,8 @@ def test_rbc_second_order_deterministic_sim_matches_dynare(
     )
 
 
-def test_rbc_second_order_stochastic_sim_matches_dynare(
-    rbc_second_order_test_model_path,
-):
-    solved = _solve_rbc_second_order(rbc_second_order_test_model_path)
+def test_rbc_second_order_stochastic_sim_matches_dynare(solved_rbc_so):
+    solved = solved_rbc_so
 
     # The generator hands Dynare a leading zero shock row, so the first period
     # it simulates is shock free. Ours has to be too, or every row is offset.
@@ -264,8 +186,8 @@ def test_rbc_second_order_stochastic_sim_matches_dynare(
     np.testing.assert_allclose(out[: len(expected)], expected, rtol=2e-6, atol=2e-6)
 
 
-def test_rbc_second_order_irf_matches_dynare(rbc_second_order_test_model_path):
-    solved = _solve_rbc_second_order(rbc_second_order_test_model_path)
+def test_rbc_second_order_irf_matches_dynare(solved_rbc_so):
+    solved = solved_rbc_so
 
     # The generator impulses ex_(2), one period after its lead-in zero, while
     # irf() impulses the first period it simulates.

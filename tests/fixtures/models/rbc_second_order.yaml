@@ -35,6 +35,7 @@ calibration:
     delta: 0.025
     rho: 0.95
     sig: 0.01
+    meas_c: 1e-3
     # Steady state (deterministic), consistent with the calibration above:
     #   k_ss = (alpha / (1/beta - 1 + delta))^(1/(1-alpha))
     #   c_ss = k_ss^alpha - delta*k_ss
@@ -44,3 +45,8 @@ calibration:
     std:
       e: sig
     corr: {}
+
+kalman:
+  R:
+    std:
+      c_obs: meas_c

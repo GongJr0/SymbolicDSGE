@@ -22,13 +22,11 @@ import numpy as np
 import pytest
 import sympy as sp
 
-from SymbolicDSGE._ckernels.core import klein_preprocess, klein_solve1
 from SymbolicDSGE._ckernels.occbin._occbin import (
     occbin_recursion,
     occbin_recursion_arena_size,
-    regime_pencil,
 )
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver
 from SymbolicDSGE.core.config import Constraint
 
 t = sp.Symbol("t", integer=True)
@@ -40,9 +38,9 @@ MIXED = np.array([0, 1, 1, 1, 0, 1, 1, 0, 0, 0], dtype=np.int8)
 
 
 @pytest.fixture(scope="module")
-def compiled(rbc_second_order_test_model_path):
+def solver(parsed_rbc_so):
     """Levels RBC where a bad-TFP regime shuts investment off."""
-    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
+    model, kalman = parsed_rbc_so
     conf = copy.deepcopy(model)
     _, k, z = conf.variables.variables
     delta = sp.Symbol("delta")
@@ -51,59 +49,32 @@ def compiled(rbc_second_order_test_model_path):
     conf.equations.regime = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
-    return DSGESolver(conf, kalman).compile()
+    return DSGESolver(conf, kalman)
 
 
 @pytest.fixture(scope="module")
-def par(compiled):
-    calib = compiled.config.calibration.parameters
-    return np.array([float(calib[p]) for p in compiled.calib_params])
+def compiled(solver):
+    return solver.compile()
 
 
 @pytest.fixture(scope="module")
-def solved(compiled, par):
-    """(ss, reference pencil, ghx, B) for the reference regime."""
-    seed = DSGESolver._resolve_ss_seed(None, compiled)
-    addr = compiled.construct_objective_cfunc().address
-    _, ss, f, p, _, _, _, B = klein_solve1(
-        addr,
-        seed,
-        par,
-        compiled._incidence,
-        compiled.n_state,
-        compiled.n_exog,
-    )
-    # The solve keeps the pencil internal, so take it at the steady state the
-    # solve resolved: the same linearization, one call later.
-    ref = klein_preprocess(addr, ss, par, compiled.n_var, compiled.n_exog)
+def policy(solver, compiled):
+    """The piecewise solve at the calibration.
+
+    A constrained model solves to a ``PiecewiseSolution``, which is where the
+    regime pencils and the reference rule come from: the kernel under test
+    consumes exactly what the production path hands it.
+    """
+    pol = solver.solve(compiled).policy
     # The whole point of a levels fixture: the expansion point is not the origin.
-    assert np.abs(ss).max() > 1.0
-    return ss, ref, np.vstack([p, f]), B
+    assert np.abs(pol.steady_state).max() > 1.0
+    return pol
 
 
 @pytest.fixture(scope="module")
-def table(compiled, par, solved):
+def table(policy):
     """(a, b, c, d, cst) by bitmask: slot 0 the reference, slot 1 the regime."""
-    ss, ref, _, _ = solved
-    n_state = compiled.n_state
-    func = compiled.construct_regime_pencil_func()
-
-    slots = [
-        regime_pencil(0, np.empty(0, dtype=np.int64), ss, par, *ref),
-        regime_pencil(func.address(LOW), func.rows[LOW], ss, par, *ref),
-    ]
-    # The regime is only a test of the constant path if it carries one, and the
-    # reference is the linearization the steady state solves, so it carries none.
-    assert np.abs(slots[LOW][4]).max() > 0.5
-    np.testing.assert_array_equal(slots[0][4], np.zeros(compiled.n_var))
-    # The recursion reads only the state columns of the lag block, on the
-    # grounds that a control does not occur at t-1.
-    for blocks in slots:
-        np.testing.assert_array_equal(
-            blocks[2][:, n_state:], np.zeros((compiled.n_var, compiled.n_ctrl))
-        )
-
-    return tuple(np.stack([lo[i] for lo in slots]) for i in range(5))
+    return policy.a, policy.b, policy.c, policy.d, policy.cst
 
 
 def _worst_residual(table, ghx, mask, out):
@@ -149,12 +120,12 @@ def _worst_residual(table, ghx, mask, out):
     return worst
 
 
-def test_an_all_relaxed_guess_is_the_reference_rule(table, solved):
+def test_an_all_relaxed_guess_is_the_reference_rule(table, policy):
     # ghx_ref seeds the recursion, so the reference rule is its fixed point and
     # every date reproduces it: a partition or sign error moves this at once.
     # `B` is the same regime's impact matrix out of the solve, which pins the
     # shock columns against something the recursion did not compute.
-    _, _, ghx, B = solved
+    ghx, B = policy.ghx_ref, policy.B
     n_state = ghx.shape[1]
 
     out = occbin_recursion(*table, np.zeros(6, dtype=np.int8), ghx)
@@ -166,18 +137,18 @@ def test_an_all_relaxed_guess_is_the_reference_rule(table, solved):
     np.testing.assert_array_equal(out[:, :, -1], np.zeros(out.shape[:2]))
 
 
-def test_every_block_solves_the_pencil_of_its_own_date(table, solved):
-    _, _, ghx, _ = solved
+def test_every_block_solves_the_pencil_of_its_own_date(table, policy):
+    ghx = policy.ghx_ref
 
     out = occbin_recursion(*table, MIXED, ghx)
 
     assert _worst_residual(table, ghx, MIXED, out) < 1e-9
 
 
-def test_a_binding_terminal_date_still_closes_on_the_reference_rule(table, solved):
+def test_a_binding_terminal_date_still_closes_on_the_reference_rule(table, policy):
     # Nothing in the kernel forces the guess to relax before the horizon ends,
     # and the seed is what the last date binds against.
-    _, _, ghx, _ = solved
+    ghx = policy.ghx_ref
     mask = np.ones(4, dtype=np.int8)
 
     out = occbin_recursion(*table, mask, ghx)
@@ -185,10 +156,10 @@ def test_a_binding_terminal_date_still_closes_on_the_reference_rule(table, solve
     assert _worst_residual(table, ghx, mask, out) < 1e-9
 
 
-def test_a_binding_date_moves_the_rule_off_the_reference(table, solved):
+def test_a_binding_date_moves_the_rule_off_the_reference(table, policy):
     # Guards the residual check above from passing on a kernel that ignores the
     # mask: the two rules would then agree everywhere.
-    _, _, ghx, _ = solved
+    ghx = policy.ghx_ref
 
     relaxed = occbin_recursion(*table, np.zeros_like(MIXED), ghx)
     mixed = occbin_recursion(*table, MIXED, ghx)
@@ -199,8 +170,8 @@ def test_a_binding_date_moves_the_rule_off_the_reference(table, solved):
     assert np.abs(mixed[:, :, -1]).max() > 1e-6
 
 
-def test_out_is_written_in_place(table, solved):
-    _, _, ghx, _ = solved
+def test_out_is_written_in_place(table, policy):
+    ghx = policy.ghx_ref
     a, _, _, d, _ = table
     n_var, n_rhs = a.shape[1], ghx.shape[1] + d.shape[2] + 1
     out = np.zeros((MIXED.size, n_var, n_rhs))
@@ -211,8 +182,8 @@ def test_out_is_written_in_place(table, solved):
     np.testing.assert_array_equal(out, occbin_recursion(*table, MIXED, ghx))
 
 
-def test_an_empty_guess_returns_an_empty_stack(table, solved):
-    _, _, ghx, _ = solved
+def test_an_empty_guess_returns_an_empty_stack(table, policy):
+    ghx = policy.ghx_ref
     a, _, _, d, _ = table
 
     out = occbin_recursion(*table, np.empty(0, dtype=np.int8), ghx)
@@ -232,10 +203,10 @@ def test_the_arena_holds_the_pencil_the_rhs_and_the_seed(table, compiled):
     assert n_int == n_var
 
 
-def test_the_recursion_stays_inside_its_arena(table, solved, compiled):
+def test_the_recursion_stays_inside_its_arena(table, policy, compiled):
     # Sized exactly and followed by sentinels: an overrun lands in the guard
     # instead of in whatever the live path put after the arena.
-    _, _, ghx, _ = solved
+    ghx = policy.ghx_ref
     n_float, n_int = occbin_recursion_arena_size(
         compiled.n_var, compiled.n_state, compiled.n_exog
     )
@@ -252,8 +223,8 @@ def test_the_recursion_stays_inside_its_arena(table, solved, compiled):
     np.testing.assert_array_equal(out, occbin_recursion(*table, MIXED, ghx))
 
 
-def test_a_short_arena_is_rejected(table, solved, compiled):
-    _, _, ghx, _ = solved
+def test_a_short_arena_is_rejected(table, policy, compiled):
+    ghx = policy.ghx_ref
     n_float, _ = occbin_recursion_arena_size(
         compiled.n_var, compiled.n_state, compiled.n_exog
     )
@@ -262,10 +233,10 @@ def test_a_short_arena_is_rejected(table, solved, compiled):
         occbin_recursion(*table, MIXED, ghx, None, np.empty(n_float - 1))
 
 
-def test_a_singular_date_is_named(table, solved):
+def test_a_singular_date_is_named(table, policy):
     # The LU is the only failure the recursion can report, and the date is the
     # single piece of information the caller cannot recover on its own.
-    _, _, ghx, _ = solved
+    ghx = policy.ghx_ref
     dead = tuple(np.concatenate([blk, np.zeros_like(blk[:1])]) for blk in table)
     mask = np.array([0, 0, 2, 0], dtype=np.int8)
 
@@ -273,20 +244,20 @@ def test_a_singular_date_is_named(table, solved):
         occbin_recursion(*dead, mask, ghx)
 
 
-def test_a_mask_outside_the_table_is_rejected(table, solved):
+def test_a_mask_outside_the_table_is_rejected(table, policy):
     # The kernel indexes table[mask[t]] unguarded, so an out-of-range bit reads
     # past the regime array instead of raising.
-    _, _, ghx, _ = solved
+    ghx = policy.ghx_ref
     mask = np.array([0, 1, 2, 0], dtype=np.int8)
 
     with pytest.raises(ValueError, match=re.escape("mask[2] is 2, outside 0..1")):
         occbin_recursion(*table, mask, ghx)
 
 
-def test_a_pencil_that_does_not_partition_is_rejected(table, solved):
+def test_a_pencil_that_does_not_partition_is_rejected(table, policy):
     # n_state comes from ghx_ref alone; if its rows miss n_var the kernel reads
     # the seed off the end of the array it was handed.
-    _, _, ghx, _ = solved
+    ghx = policy.ghx_ref
 
     with pytest.raises(ValueError, match="expected"):
         occbin_recursion(*table, np.zeros(3, dtype=np.int8), ghx[:-1])

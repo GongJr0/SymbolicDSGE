@@ -434,7 +434,7 @@ def test_solved_model_kalman_smoke(solved_post82):
     assert out is not None
 
 
-def test_extended_matches_linear_on_a_levels_model(solved_rbc):
+def test_extended_matches_linear_on_a_levels_model(solved_rbc_so):
     # The rbc observable is `c_obs: c(t)`, affine in the model variables, so the
     # extended filter relinearizes onto the same (C, d) the linear filter is
     # handed and the two must agree period by period. The data is arbitrary:
@@ -447,9 +447,9 @@ def test_extended_matches_linear_on_a_levels_model(solved_rbc):
     # and it only bites when that steady state is away from the origin: the
     # measurement cfunc is a function of levels, so a filter that evaluates it
     # at deviations drops `h(ss)` from every prediction.
-    compiled = solved_rbc.compiled
+    compiled = solved_rbc_so.compiled
     obs = list(compiled.observable_names)
-    ss = np.asarray(solved_rbc.policy.steady_state, dtype=np.float64)
+    ss = np.asarray(solved_rbc_so.policy.steady_state, dtype=np.float64)
 
     # Guard the premise: at ss == 0 both conventions coincide and the test below
     # cannot fail for the reason it exists.
@@ -459,8 +459,8 @@ def test_extended_matches_linear_on_a_levels_model(solved_rbc):
     y = pd.DataFrame(rng.normal(size=(24, len(obs))), columns=obs)
     R = np.eye(len(obs), dtype=np.float64) * 1e-4
 
-    linear = solved_rbc.kalman(y, filter_mode="linear", R=R)
-    extended = solved_rbc.kalman(y, filter_mode="extended", R=R)
+    linear = solved_rbc_so.kalman(y, filter_mode="linear", R=R)
+    extended = solved_rbc_so.kalman(y, filter_mode="extended", R=R)
 
     np.testing.assert_allclose(extended.y_pred, linear.y_pred, rtol=1e-10, atol=1e-12)
     np.testing.assert_allclose(extended.innov, linear.innov, rtol=1e-10, atol=1e-12)

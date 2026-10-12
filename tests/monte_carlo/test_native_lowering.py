@@ -426,8 +426,8 @@ def test_native_lowering_runs_first_order_simulation_with_observables(
         np.testing.assert_allclose(actual, expected_values, rtol=1e-12, atol=1e-12)
 
 
-def test_native_lowering_runs_second_order_simulation(solved_rbc_second_order) -> None:
-    solved = solved_rbc_second_order
+def test_native_lowering_runs_second_order_simulation(solved_rbc_so) -> None:
+    solved = solved_rbc_so
     pipeline = MCPipeline(
         [simulation_step("sim", target="reference", T=6, observables=False)]
     )
@@ -591,9 +591,9 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides(
 
 
 def test_native_lowering_runs_unscented_filter_with_rbc_fixture(
-    solved_rbc_second_order,
+    solved_rbc_so,
 ) -> None:
-    solved = solved_rbc_second_order
+    solved = solved_rbc_so
     T = 5
     y = np.zeros((T, len(solved.compiled.observable_names)), dtype=np.float64)
     pipeline = MCPipeline(

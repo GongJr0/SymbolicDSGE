@@ -23,7 +23,7 @@ from SymbolicDSGE._ckernels.core import (
     steady_state_newton,
 )
 from SymbolicDSGE._ckernels.occbin import regime_pencil
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver
 from SymbolicDSGE.core.config import Constraint
 from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
 
@@ -47,9 +47,9 @@ def _regime_cfuncs(compiled):
 
 
 @pytest.fixture(scope="module")
-def compiled(rbc_second_order_test_model_path):
+def compiled(parsed_rbc_so):
     """Levels RBC where a bad-TFP regime shuts investment off."""
-    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
+    model, kalman = parsed_rbc_so
     conf = copy.deepcopy(model)
     _, k, z = conf.variables.variables
     delta = sp.Symbol("delta")
@@ -188,6 +188,22 @@ def test_reference_regime_is_a_verbatim_copy(compiled, par, ss_ref, reference):
     np.testing.assert_array_equal(c, c_ref)
     np.testing.assert_array_equal(d, d_ref)
     np.testing.assert_array_equal(cst, np.zeros(n_var))
+
+
+def test_the_lag_block_carries_no_control_columns(
+    compiled, par, ss_ref, reference, patched
+):
+    # The backward recursion reads only the state columns of `c`, on the
+    # grounds that a control does not occur at t-1. Both slots, since a patched
+    # row is written by the regime sweep rather than copied.
+    n_var = len(compiled.var_names)
+    empty = np.zeros((n_var, compiled.n_ctrl))
+    reference_slot = regime_pencil(
+        0, np.empty(0, dtype=np.int64), ss_ref, par, *reference
+    )
+
+    for _, _, c, _, _ in (reference_slot, patched):
+        np.testing.assert_array_equal(c[:, compiled.n_state :], empty)
 
 
 def test_rows_outside_the_pencil_are_rejected(compiled, par, ss_ref, reference):

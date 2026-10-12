@@ -1037,9 +1037,9 @@ def test_output_plan_carries_step_retention_count(solved_test) -> None:
 
 
 def test_output_shape_resolution_includes_unscented_filter_fields(
-    solved_rbc_second_order,
+    solved_rbc_so,
 ) -> None:
-    reference = solved_rbc_second_order
+    reference = solved_rbc_so
     compiled = reference.compiled
 
     # The state paths span the compiled layout, generated variables included.

@@ -19,9 +19,10 @@ from SymbolicDSGE.core import DSGESolver, ModelParser
 from _oracles.core import compiled_residual
 
 
-def _rbc(rbc_second_order_test_model_path):
-    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
-    compiled = DSGESolver(model, kalman).compile()
+@pytest.fixture(scope="module")
+def rbc(compiled_rbc_so):
+    """``(compiled, par, cfunc, residual, true_ss)`` for the levels RBC."""
+    compiled = compiled_rbc_so
     calib = compiled.config.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     cf = compiled.construct_objective_cfunc()
@@ -61,8 +62,8 @@ def _resid_norm(eq, ss, par, n_exog):
     return float(np.max(np.abs(np.real(r))))
 
 
-def test_newton_rbc_from_exact_seed(rbc_second_order_test_model_path):
-    _compiled, par, cf, eq, true_ss = _rbc(rbc_second_order_test_model_path)
+def test_newton_rbc_from_exact_seed(rbc):
+    _compiled, par, cf, eq, true_ss = rbc
     ss, iters = steady_state_newton(cf.address, true_ss.copy(), par, _compiled.n_exog)
     assert iters <= 2
     assert _resid_norm(eq, ss, par, _compiled.n_exog) < 1e-10
@@ -70,8 +71,8 @@ def test_newton_rbc_from_exact_seed(rbc_second_order_test_model_path):
     np.testing.assert_allclose(ss, true_ss, rtol=1e-6, atol=1e-8)
 
 
-def test_newton_rbc_from_perturbed_seed(rbc_second_order_test_model_path):
-    compiled, par, cf, eq, true_ss = _rbc(rbc_second_order_test_model_path)
+def test_newton_rbc_from_perturbed_seed(rbc):
+    compiled, par, cf, eq, true_ss = rbc
     seed = _perturbed(compiled, true_ss, capital=1.1, consumption=0.9, tfp=0.05)
     ss, iters = steady_state_newton(cf.address, seed, par, compiled.n_exog)
     assert 1 <= iters <= 20
@@ -79,10 +80,10 @@ def test_newton_rbc_from_perturbed_seed(rbc_second_order_test_model_path):
     np.testing.assert_allclose(ss, true_ss, rtol=1e-6, atol=1e-8)
 
 
-def test_newton_non_convergence_raises(rbc_second_order_test_model_path):
+def test_newton_non_convergence_raises(rbc):
     # One iteration from a far seed cannot reach tol -> the driver reports failure
     # rather than returning a bogus point.
-    compiled, par, cf, _eq, true_ss = _rbc(rbc_second_order_test_model_path)
+    compiled, par, cf, _eq, true_ss = rbc
     seed = _perturbed(compiled, true_ss, capital=2.0, consumption=0.5, tfp=0.5)
     with pytest.raises(ValueError, match="did not converge"):
         steady_state_newton(cf.address, seed, par, compiled.n_exog, max_iter=1)
