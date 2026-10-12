@@ -693,9 +693,6 @@ class Estimator:
 
         rng = np.random.default_rng(random_state)
 
-        if not self.param_names:
-            raise ValueError("No estimated parameters were provided.")
-
         map_bounds = None if map_options is None else map_options.get("bounds")
         ctx, theta, map_lo, map_hi = self._build_call_context(
             priored=True, theta0=theta0, bounds=map_bounds
