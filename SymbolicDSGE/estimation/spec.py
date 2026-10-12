@@ -93,7 +93,7 @@ class EstimatorParams(TypedDict):
     filter_mode: str
     P0: Sequence[Sequence[float]] | None
     R: Sequence[Sequence[float]] | None
-    estimated_params: Sequence[str] | None
+    estimated_params: Sequence[str]
     priors: Mapping[str, PriorSpec] | None
     ss_seed: Sequence[float] | Mapping[str, float] | None
     jitter: float

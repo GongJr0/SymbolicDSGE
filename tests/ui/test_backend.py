@@ -349,7 +349,8 @@ def test_ui_estimation_inputs_build_scalar_priors_and_validate_selection() -> No
     assert theta0 == {"beta": 0.99}
     assert priors is not None
     assert set(priors) == {"beta"}
-    assert bounds == [(0.9, 1.0)]
+    assert bounds
+    assert bounds["beta"] == (0.9, 1.0)
 
     with np.testing.assert_raises_regex(ValueError, "Select at least one parameter"):
         build_estimation_inputs(
@@ -467,7 +468,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(
     assert captured["routine"] == "mle"
     assert captured["theta0"] == {"beta": 0.99}
     assert captured["estimated_params"] == ["beta"]
-    assert captured["bounds"] == [(0.9, 1.0)]
+    assert captured["bounds"] == {"beta": (0.9, 1.0)}
     assert captured["maxiter"] == 25
     # `method` is the optimizer and is no longer reserved, so it rides through
     # method_kwargs alongside the routine that arrives as the request's own.

@@ -370,6 +370,7 @@ class UISession:
             request["parameters"],
             routine=request["routine"],
         )
+
         # Built before the run, not after: the spec describes the estimator
         # about to be constructed, so a prior that cannot be projected says so
         # here rather than discarding a result that already cost the compute.
@@ -383,7 +384,7 @@ class UISession:
                     R=None,
                     estimated_params=names,
                     priors=(
-                        {name: prior.to_spec() for name, prior in priors.items()}
+                        {n: pr.to_spec() for n, pr in priors.items() if pr is not None}
                         if priors is not None
                         else None
                     ),
@@ -396,11 +397,11 @@ class UISession:
         )
         kwargs = dict(request["method_kwargs"])
         reserved = {
+            "bounds",
             "compiled",
             "estimated_params",
             "observables",
             "posterior_point",
-            "priors",
             "routine",
             "ss_seed",
             "theta0",
@@ -426,8 +427,7 @@ class UISession:
             "routine": request["routine"],
             "theta0": theta0,
             "observables": observables,
-            "estimated_params": names,
-            "priors": priors,
+            "estimated_params": priors if priors is not None else names,
             "ss_seed": request["ss_seed"],
             **kwargs,
         }

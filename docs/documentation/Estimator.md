@@ -22,8 +22,7 @@ Estimator(
     y: np.ndarray | pd.DataFrame, # (2)!
     observables: list[str] | None = None,
     filter_mode: str = "linear", # (3)!
-    estimated_params: Sequence[str] | None = None,
-    priors: Mapping[str, Prior] | None = None, # (4)!
+    estimated_params: Sequence[str] | Mapping[str, Prior] | None = None, # (4)!
     ss_seed: np.ndarray | dict[str, float] | None = None,
     jitter: float | None = None,
     symmetrize: bool = True,
@@ -36,7 +35,7 @@ Estimator(
 1. Compiled model from `DSGESolver.compile(...)`.
 2. Measurement data for Kalman likelihood.
 3. Filter algorithm for the likelihood: `#!python "linear"`, `#!python "extended"` (EKF), or `#!python "unscented"` (UKF). Chosen explicitly, not inferred.
-4. Required for `map(...)` and `mcmc(...)`.
+4. Parameter names to estimate, or a mapping from parameter name to `Prior` object. If `None`, all parameters are estimated with uniform priors. `map()` and `mcmc()` require priors to be specified and `mle()` ignores them.
 5. Optional constant observation-covariance override. If omitted, `R` comes from the Kalman config: a fixed calibrated matrix, or rebuilt from the current parameters each evaluation when the model exposes symbolic `R` metadata.
 6. Optional initial state-covariance override. If omitted, the stationary state-space covariance is used. Supply a full `(n_var, n_var)` matrix in compiled variable order; for `unscented` mode its state block is embedded automatically.
 
@@ -67,7 +66,7 @@ Estimator.logpost(params: Mapping[str, float] | None = None, jacobian: bool = Fa
 Estimator.mle(
     *,
     theta0: Mapping[str, float] | None = None, # (1)!
-    bounds: Sequence[tuple[float, float]] | None = None,
+    bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
     method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B", # (2)!
     m: int = 10, # (3)!
     maxiter: int = 15000,
@@ -99,7 +98,7 @@ Enabling this will also compute the standard errors of the estimated parameters,
 Estimator.map(
     *,
     theta0: Mapping[str, float] | None = None, # (1)!
-    bounds: Sequence[tuple[float, float]] | None = None,
+    bounds: Mapping[str, tuple[float | None, float | None]] | None = None,
     method: Literal["L-BFGS-B", "Nelder-Mead"] = "L-BFGS-B", # (2)!
     jacobian: bool = False, # (3)!
     m: int = 10, # (4)!

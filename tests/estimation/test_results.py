@@ -244,7 +244,7 @@ def test_mle_result_spec_roundtrips():
         nit=None,
         optimizer_config={
             "method": "L-BFGS-B",
-            "bounds": [[0.0, 1.0]],
+            "bounds": {"a": [0.0, 1.0]},
             "options": {"maxiter": 10},
         },
         loglik=float64(-2.0),

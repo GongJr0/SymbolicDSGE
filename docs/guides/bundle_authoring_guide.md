@@ -86,7 +86,7 @@ We define a small MCMC run estimating `psi_pi` and `psi_x` against synthetic obs
 You can refer to the [Estimation Guide](estimation_guide.md) and [API Reference](../documentation/Estimator.md) for details on the `Estimator` API usage.
 
 ```python
-priors = {
+estimated = {
     "psi_pi": make_prior(
         distribution="normal",
         parameters={"mean": 1.5, "std": 0.25},
@@ -105,7 +105,7 @@ estim = Estimator(
     compiled=compiled,
     observables=["OutGap", "Infl", "Rate"],
     y=observed,
-    priors=priors,
+    estimated_params=estimated,
 )
 res = estim.mcmc(  # (1)!
     n_draws=1000,
@@ -240,25 +240,21 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     5167  09-14-2026 17:59   manifest.json
-     2134  09-14-2026 17:59   model/reference.yaml
-     2134  09-14-2026 17:59   model/dgp.yaml
-      630  09-14-2026 17:59   estimation/spec.json
-     1891  09-14-2026 17:59   estimation/observed.parquet
-    18903  09-14-2026 17:59   estimation/posterior.parquet
-      585  09-14-2026 17:59   estimation/result.json
-     1087  09-14-2026 17:59   montecarlo/pipeline.json
-      564  09-14-2026 17:59   montecarlo/result/meta.json
-      548  09-14-2026 17:59   montecarlo/result/datagen/datagen_steps.json
-      175  09-14-2026 17:59   montecarlo/result/tests/test_steps.json
-      829  09-14-2026 17:59   montecarlo/result/datagen/datagen_retained_reps.parquet
-   714503  09-14-2026 17:59   montecarlo/result/datagen/datagen_states.parquet
-   428886  09-14-2026 17:59   montecarlo/result/datagen/datagen_shocks.parquet
-   421699  09-14-2026 17:59   montecarlo/result/datagen/datagen_observables.parquet
-     2274  09-14-2026 17:59   montecarlo/result/tests/test_traces.parquet
-     1282  09-14-2026 17:59   data/auxiliary_series.parquet
+     3787  12-10-2026 04:20   manifest.json
+     2099  12-10-2026 04:20   model/reference.yaml
+     2099  12-10-2026 04:20   model/dgp.yaml
+      643  12-10-2026 04:20   estimation/spec.json
+     1891  12-10-2026 04:20   estimation/observed.parquet
+    18922  12-10-2026 04:20   estimation/posterior.parquet
+      585  12-10-2026 04:20   estimation/result.json
+     1148  12-10-2026 04:20   montecarlo/pipeline.json
+      562  12-10-2026 04:20   montecarlo/result/meta.json
+      538  12-10-2026 04:20   montecarlo/result/datagen/datagen_steps.json
+      175  12-10-2026 04:20   montecarlo/result/tests/test_steps.json
+     2270  12-10-2026 04:20   montecarlo/result/tests/test_traces.parquet
+     1282  12-10-2026 04:20   data/auxiliary_series.parquet
 ---------                     -------
-  1603291                     17 files
+    36001                     13 files
 ```
 
 For a structured view, decompile it:

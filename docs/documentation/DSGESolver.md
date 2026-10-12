@@ -95,8 +95,7 @@ DSGESolver.estimate(
     theta0: Mapping[str, float] | None = None, # (1)!
     observables: list[str] | None = None,
     filter_mode: str = "linear", # (3)!
-    estimated_params: list[str] | None = None,
-    priors: Mapping[str, Any] | None = None,
+    estimated_params: list[str] | Mapping[str, Prior] | None = None,
     ss_seed: np.ndarray | dict[str, float] | None = None,
     P0: np.ndarray | None = None,
     jitter: float | None = None,
@@ -142,8 +141,7 @@ DSGESolver.estimate_and_solve(
     posterior_point: str = "mean",
     observables: list[str] | None = None,
     filter_mode: str = "linear",
-    estimated_params: list[str] | None = None,
-    priors: Mapping[str, Any] | None = None,
+    estimated_params: list[str] | Mapping[str, Prior] | None = None,
     ss_seed: np.ndarray | dict[str, float] | None = None,
     P0: np.ndarray | None = None,
     jitter: float | None = None,

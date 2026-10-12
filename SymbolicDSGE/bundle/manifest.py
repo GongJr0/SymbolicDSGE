@@ -21,15 +21,25 @@ from numpy import ndarray
 from ..core.shock.generators import ShockParameters, ShockPathParameters
 from ..core.shock.spec import shock_from_json
 
-#: Bundle format version. Bump on every manifest change.
-SDSGE_FORMAT_VERSION = 10
+# --- LAST BREAK ---
+# V11: Breakage from a bound specification format change in estimation (#554).
+# Bounds are in `Mapping[str, tuple[float | None, float | None]]` when specified.
+# Current readers (notably the UI wire) misinterpret the V10 bounds of shape
+# `Sequence[tuple[float | None, float | None]]` via a valid but wrong `dict()` wrap.
+#
+# Note: Parameter ordering and resolution in estimation changed between V10 and V11.
+# It is not possible to reliably map back the `Sequence` bounds to named mappings.
+# ------
+
+#: Bundle format version. Bump on every manifest or member change.
+SDSGE_FORMAT_VERSION = 11
 
 #: Oldest bundle format this reader can reconstruct.
-SDSGE_MIN_READABLE_VERSION = 10
+SDSGE_MIN_READABLE_VERSION = 11
 
 #: Most recent format change requiring a newer reader. Written into the
 #: manifest so older readers reject bundles they cannot interpret.
-SDSGE_LAST_BREAKING_VERSION = 9
+SDSGE_LAST_BREAKING_VERSION = 11
 
 MemberKind = Literal[
     "model_config",

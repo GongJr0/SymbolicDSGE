@@ -604,7 +604,6 @@ export function EstimationView({
                                 options={{ ...MAP_OPTION_DEFAULTS, ...(knobs.map_options ?? {}) }}
                                 optimizers={catalog?.optimizer_methods ?? [DEFAULTS.optimizer]}
                                 bounds={knobs.map_options?.bounds ?? null}
-                                estimatedNames={estimatedNames}
                                 onChange={(update) =>
                                     setKnob("map_options", { ...(knobs.map_options ?? {}), ...update })
                                 }
@@ -956,13 +955,11 @@ function MapOptionsPanel({
     options,
     optimizers,
     bounds,
-    estimatedNames,
     onChange,
 }: {
     options: Required<Omit<MapOptions, "bounds">>;
     optimizers: string[];
-    bounds: Array<[number | null, number | null]> | null;
-    estimatedNames: string[];
+    bounds: Record<string, [number | null, number | null]> | null;
     onChange: (update: MapOptions) => void;
 }) {
     return (
@@ -1033,13 +1030,13 @@ function MapOptionsPanel({
                     </>
                 )}
             </div>
-            {bounds !== null && (
+            {bounds !== null && Object.keys(bounds).length > 0 && (
                 <>
                     <h4>Bounds</h4>
                     <MatrixTable
-                        rowLabels={estimatedNames}
+                        rowLabels={Object.keys(bounds)}
                         columnLabels={["lower", "upper"]}
-                        values={bounds.map(([low, high]) => [low, high])}
+                        values={Object.values(bounds).map(([low, high]) => [low, high])}
                     />
                 </>
             )}

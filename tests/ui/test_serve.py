@@ -385,9 +385,9 @@ def test_prefill_restores_the_settings_a_run_was_made_with(test_model_yaml) -> N
         nfev=9,
         nit=3,
         optimizer_config={
-            "theta0": [0.93],
+            "theta0": {"beta": 0.93},
             "method": "Nelder-Mead",
-            "bounds": [[0.9, 0.999]],
+            "bounds": {"beta": [0.9, 0.999]},
             "options": {
                 "maxiter": 250,
                 "xatol": 1e-7,

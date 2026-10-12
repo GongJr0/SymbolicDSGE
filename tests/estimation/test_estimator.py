@@ -103,26 +103,6 @@ def _stub_compiled():
     )
 
 
-def _stub_compiled_with_r():
-    a = Symbol("a")
-    meas = Symbol("meas")
-    calibration = SimpleNamespace(parameters={a: float64(0.0), meas: float64(1.0)})
-    config = SimpleNamespace(calibration=calibration)
-    kalman = SimpleNamespace(
-        R_param_names=["a"],
-        R_builder=lambda *vals: np.array([[vals[0]]], dtype=np.float64),
-        y_names=["y"],
-    )
-    return _with_filter_prep(
-        SimpleNamespace(
-            config=config,
-            calib_params=[a, meas],
-            kalman=kalman,
-            observable_names=["y"],
-        )
-    )
-
-
 @pytest.fixture
 def role_context():
     """Packed transform codes and the theta box for one stub spec.
@@ -134,12 +114,11 @@ def role_context():
     ``estim_context`` does inline.
     """
 
-    def _build(compiled, y_shape, estimated_params, priors=None):
+    def _build(compiled, y_shape, estimated_params):
         est = Estimator(
             compiled=compiled,
             y=np.zeros(y_shape, dtype=np.float64),
             estimated_params=estimated_params,
-            priors=priors,
         )
         observables = est._prepared_filter.observables
         tables, transforms = build_prior_tables(
@@ -293,8 +272,7 @@ def test_to_spec_reverses_live_scalar_priors():
     est = Estimator(
         compiled=_stub_compiled(),
         y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={
+        estimated_params={
             "a": make_prior(
                 distribution="normal",
                 parameters={"mean": 0.0, "std": 1.0},
@@ -359,7 +337,10 @@ def mcmc_estimator(post82_estimator):
     mcmc. The native mcmc path drives the compiled kernels, so these tests need a
     real model rather than a SimpleNamespace stub + fake loglik."""
     return post82_estimator(
-        priors={"psi_pi": _normal_prior(2.0, 0.5), "rho_r": _normal_prior(0.8, 0.1)}
+        estimated_params={
+            "psi_pi": _normal_prior(2.0, 0.5),
+            "rho_r": _normal_prior(0.8, 0.1),
+        }
     )
 
 
@@ -617,8 +598,7 @@ def transformed_estimator(post82_estimator):
     these tests to see.
     """
     return post82_estimator(
-        estimated_params=("psi_pi", "rho_r"),
-        priors={
+        estimated_params={
             "psi_pi": make_prior(
                 distribution="normal",
                 parameters={"mean": 2.19, "std": 0.5},
@@ -742,7 +722,7 @@ def test_forward_map_applies_the_prior_transform(role_context):
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
     )
-    ctx = role_context(_stub_compiled(), (3, 1), ["a"], {"a": prior})
+    ctx = role_context(_stub_compiled(), (3, 1), {"a": prior})
 
     theta = theta_from_params(
         np.array([np.e], dtype=np.float64),
@@ -758,9 +738,7 @@ def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block(role_conte
         dist=LKJChol(eta=2.0, K=2, random_state=None),
         transform=CholeskyCorrTransform(K=2),
     )
-    ctx = role_context(
-        _stub_compiled_with_dense_r_block(), (4, 2), ["R_corr"], {"R_corr": prior}
-    )
+    ctx = role_context(_stub_compiled_with_dense_r_block(), (4, 2), {"R_corr": prior})
     est = ctx.est
 
     theta = theta_from_params(
@@ -787,8 +765,7 @@ def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform():
     est = Estimator(
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R_corr"],
-        priors={"R_corr": prior},
+        estimated_params={"R_corr": prior},
     )
 
     # make_prior reconciles the distribution's K with the transform's, which is
@@ -802,8 +779,7 @@ def test_matrix_key_in_estimated_params_expands_to_member_names():
     est = Estimator(
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=["R_corr"],
-        priors={
+        estimated_params={
             "R_corr": Prior(
                 dist=LKJChol(eta=2.0, K=2, random_state=None),
                 transform=CholeskyCorrTransform(K=2),
@@ -815,12 +791,11 @@ def test_matrix_key_in_estimated_params_expands_to_member_names():
     assert list(est.priors.keys()) == ["R_corr"]
 
 
-def test_estimated_params_none_uses_prior_keys_when_priors_supplied():
+def test_a_mapping_carries_the_priors_of_the_names_it_lists():
     est = Estimator(
         compiled=_stub_compiled_with_dense_r_block(),
         y=np.zeros((4, 2), dtype=np.float64),
-        estimated_params=None,
-        priors={
+        estimated_params={
             "R_corr": Prior(
                 dist=LKJChol(eta=2.0, K=2, random_state=None),
                 transform=CholeskyCorrTransform(K=2),
@@ -833,22 +808,13 @@ def test_estimated_params_none_uses_prior_keys_when_priors_supplied():
     assert list(est.priors.keys()) == ["R_corr", "meas_a"]
 
 
-def test_priors_outside_estimated_params_are_rejected():
-    # A prior on something not being estimated is a mistake, not a no-op: it
-    # would otherwise be dropped and the run would silently ignore it.
-    with pytest.raises(ValueError, match="must name the same parameters"):
-        Estimator(
-            compiled=_stub_compiled_with_dense_r_block(),
-            y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R_corr"],
-            priors={
-                "R_corr": Prior(
-                    dist=LKJChol(eta=2.0, K=2, random_state=None),
-                    transform=CholeskyCorrTransform(K=2),
-                ),
-                "meas_a": make_prior("log_normal", {"mean": 0.0, "std": 1.0}, "log"),
-            },
-        )
+def test_none_estimates_every_calibrated_parameter_without_priors(
+    post82, post82_estimator
+):
+    est = post82_estimator(estimated_params=None)
+
+    assert est.estimated_params == list(post82["compiled"].calib_params)
+    assert est.priors is None
 
 
 def test_matrix_prior_overlap_with_scalar_component_prior_raises():
@@ -856,8 +822,7 @@ def test_matrix_prior_overlap_with_scalar_component_prior_raises():
         Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R_corr"],
-            priors={
+            estimated_params={
                 "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=2, random_state=None),
                     transform=CholeskyCorrTransform(K=2),
@@ -880,8 +845,7 @@ def test_sparse_q_block_for_lkj_prior_raises_descriptive_error():
         Estimator(
             compiled=_stub_compiled_with_sparse_q_block(),
             y=np.zeros((4, 1), dtype=np.float64),
-            estimated_params=["Q_corr"],
-            priors={
+            estimated_params={
                 "Q_corr": Prior(
                     dist=LKJChol(eta=2.0, K=3, random_state=None),
                     transform=CholeskyCorrTransform(K=3),
@@ -904,7 +868,7 @@ def test_mcmc_reports_samples_in_constrained_space_for_log_transform(post82_esti
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
     )
-    est = post82_estimator(estimated_params=["sig_r"], priors={"sig_r": prior})
+    est = post82_estimator(estimated_params={"sig_r": prior})
     out = est.mcmc(
         n_draws=20,
         burn_in=10,
@@ -926,9 +890,7 @@ def test_loglik_is_unchanged_by_the_parameter_transform(post82_estimator):
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
     )
-    transformed = post82_estimator(
-        estimated_params=("psi_pi",), priors={"psi_pi": prior}
-    )
+    transformed = post82_estimator(estimated_params={"psi_pi": prior})
     identity = post82_estimator(estimated_params=("psi_pi",))
 
     at = {"psi_pi": 2.0}
@@ -943,14 +905,11 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
             estimated_params=["ghost"],
         )
 
-    # Both names carry a prior so the two argument key sets agree; what the
-    # layout then rejects is naming the block and its member together.
     with pytest.raises(ValueError, match="Estimate the block or its members"):
         Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R_corr", "meas_rho_ab"],
-            priors={
+            estimated_params={
                 "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=2, random_state=None),
                     transform=CholeskyCorrTransform(K=2),
@@ -965,8 +924,7 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
         Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R_corr"],
-            priors={
+            estimated_params={
                 # Support-valid but not a CholeskyCorrTransform: exercises the
                 # estimator's LKJ-transform check (AffineLogit(-1,1) matches the
                 # LKJChol (-1, 1) support so Prior construction itself succeeds).
@@ -981,8 +939,7 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
         Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R_corr"],
-            priors={
+            estimated_params={
                 "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=2, random_state=None),
                     transform=CholeskyCorrTransform(K=3),
@@ -994,8 +951,7 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches():
         Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R_corr"],
-            priors={
+            estimated_params={
                 "R_corr": make_prior("normal", {"mean": 0.0, "std": 1.0}, "identity")
             },
         )
@@ -1059,7 +1015,6 @@ def test_forward_map_rejects_a_mismatched_parameter_vector(role_context):
     ctx = role_context(
         _stub_compiled(),
         (3, 1),
-        ["a"],
         {"a": make_prior("normal", {"mean": 0.0, "std": 1.0}, "identity")},
     )
 
@@ -1085,8 +1040,9 @@ def test_mcmc_validation_branches():
     est = Estimator(
         compiled=_stub_compiled(),
         y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-        priors={"a": make_prior("normal", {"mean": 0.0, "std": 1.0}, "identity")},
+        estimated_params={
+            "a": make_prior("normal", {"mean": 0.0, "std": 1.0}, "identity")
+        },
     )
 
     est_no_priors = Estimator(
@@ -1097,16 +1053,14 @@ def test_mcmc_validation_branches():
     with pytest.raises(ValueError, match="requires priors"):
         est_no_priors.mcmc(n_draws=1)
 
-    est_empty = Estimator(
-        compiled=_stub_compiled(),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=[],
-    )
-    est_empty.priors = {
-        "dummy": make_prior("normal", {"mean": 0.0, "std": 1.0}, "identity")
-    }
-    with pytest.raises(ValueError, match="No estimated parameters"):
-        est_empty.mcmc(n_draws=1)
+    # An empty target set never reaches a routine: the constructor is where it
+    # is refused, so mcmc's own emptiness guard is no longer reachable.
+    with pytest.raises(ValueError, match="at least one parameter"):
+        Estimator(
+            compiled=_stub_compiled(),
+            y=np.zeros((3, 1), dtype=np.float64),
+            estimated_params=[],
+        )
 
 
 def test_resolve_q_reports_the_missing_pair_of_a_sparse_block():
@@ -1265,8 +1219,7 @@ def test_reserved_block_keys_reject_a_shared_member():
         Estimator(
             compiled=_stub_compiled_sharing_a_corr_name(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R_corr", "Q_corr"],
-            priors={"R_corr": _lkj(2), "Q_corr": _lkj(2)},
+            estimated_params={"R_corr": _lkj(2), "Q_corr": _lkj(2)},
         )
 
 
@@ -1275,8 +1228,7 @@ def test_lkj_prior_k_must_match_the_resolved_block():
         Estimator(
             compiled=_stub_compiled_with_dense_r_block(),
             y=np.zeros((4, 2), dtype=np.float64),
-            estimated_params=["R_corr"],
-            priors={"R_corr": _lkj(3)},
+            estimated_params={"R_corr": _lkj(3)},
         )
 
 
@@ -1325,9 +1277,7 @@ def test_a_prior_confines_through_its_transform_and_not_through_the_box(
     """With a prior the region is the transform's, so the box stays open. POST82
     names three Q correlations but calibrates two at zero, which is what leaves
     ``rho_gz`` estimable as a standalone scalar."""
-    est = post82_estimator(
-        estimated_params=("rho_gz",), priors={"rho_gz": _BOUNDED_CORR_PRIOR}
-    )
+    est = post82_estimator(estimated_params={"rho_gz": _BOUNDED_CORR_PRIOR})
     _, _, lo, hi = est._build_call_context(priored=True)
 
     assert (float(lo[0]), float(hi[0])) == (-np.inf, np.inf)
@@ -1338,9 +1288,7 @@ def test_bounds_tighter_than_the_transform_bind_in_parameter_space(post82_estima
     optimizer. Read as a theta box instead, the same pair would pin the
     parameter an order of magnitude short of where it was asked to stop.
     """
-    est = post82_estimator(
-        estimated_params=("rho_gz",), priors={"rho_gz": _BOUNDED_CORR_PRIOR}
-    )
+    est = post82_estimator(estimated_params={"rho_gz": _BOUNDED_CORR_PRIOR})
     low, high = -0.2, 0.1
     transform = AffineLogitTransform(low=-1.0, high=1.0)
 
@@ -1369,8 +1317,7 @@ def test_spd_std_member_warns_on_conflicting_prior_transform(role_context):
         ctx = role_context(
             _stub_compiled_with_dense_r_block(),
             (4, 2),
-            ["meas_a"],
-            priors={"meas_a": prior},
+            {"meas_a": prior},
         )
     assert ctx.codes["meas_a"] is TransformCode.LOG
 
@@ -1394,7 +1341,7 @@ def test_logpost_decomposes_into_loglik_and_logprior(post82_estimator, include_l
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
     )
-    est = post82_estimator(estimated_params=("psi_pi",), priors={"psi_pi": prior})
+    est = post82_estimator(estimated_params={"psi_pi": prior})
     at = {"psi_pi": 2.0}
 
     assert est.logpost(at, include_logjac) == pytest.approx(
@@ -1410,9 +1357,7 @@ def test_mcmc_adaptation_runs_for_scalar_and_vector(post82_estimator, estimated)
         "psi_pi": _normal_prior(2.0, 0.5),
         "rho_r": _normal_prior(0.8, 0.1),
     }
-    est = post82_estimator(
-        estimated_params=estimated, priors={n: priors[n] for n in estimated}
-    )
+    est = post82_estimator(estimated_params={n: priors[n] for n in estimated})
     out = est.mcmc(
         n_draws=10,
         burn_in=10,

@@ -9,11 +9,11 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
-    "@handsontable/react-wrapper": "^17.1.0",
+    "@handsontable/react-wrapper": "^18.1.2",
     "@monaco-editor/react": "^4.7.0",
     "@xyflow/react": "^12.11.0",
     "chart.js": "^4.4.7",
-    "handsontable": "^17.1.0",
+    "handsontable": "^18.1.2",
     "lucide-react": "^0.468.0",
     "monaco-editor": "^0.53.0",
     "monaco-yaml": "^5.5.1",

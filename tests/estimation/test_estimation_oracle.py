@@ -93,8 +93,7 @@ def test_map_lbfgsb_oracle(post82):
         y=post82["y"],
         observables=post82["obs"],
         filter_mode="linear",
-        estimated_params=["psi_pi"],
-        priors={"psi_pi": prior},
+        estimated_params={"psi_pi": prior},
         ss_seed=post82["steady"],
     )
     res = est.map(theta0={"psi_pi": 2.0}, bounds={"psi_pi": (1.0, 5.0)})

@@ -150,8 +150,7 @@ def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
-        estimated_params=list(prior_spec.keys()),
-        priors=prior_spec,
+        estimated_params=prior_spec,
     )
     # Off the calibration on every role at once, and inside every support: the
     # stds stay positive and the three block members stay a PD correlation.
@@ -235,8 +234,7 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
-        estimated_params=list(prior_spec.keys()),
-        priors=prior_spec,
+        estimated_params=prior_spec,
     )
 
     ll0 = est.loglik()
@@ -273,8 +271,7 @@ def test_to_spec_round_trips_matrix_prior(dense_lkj_bundle):
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
-        estimated_params=["R_corr"],
-        priors={
+        estimated_params={
             "R_corr": Prior(
                 dist=LKJChol(eta=2.0, K=3, random_state=None),
                 transform=CholeskyCorrTransform(K=3),
@@ -311,8 +308,7 @@ def test_matrix_prior_on_Q_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
-        estimated_params=list(prior_spec.keys()),
-        priors=prior_spec,
+        estimated_params=prior_spec,
     )
 
     ll0 = est.loglik()

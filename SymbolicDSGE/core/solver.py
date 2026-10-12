@@ -43,6 +43,7 @@ from .solver_backend import klein_solve, piecewise_solve, sgu_solve
 
 if TYPE_CHECKING:
     from ..estimation.estimator import Estimator
+    from ..bayesian.priors import Prior
 from ..kalman.config import KalmanConfig
 
 NDF = NDArray[float64]
@@ -683,8 +684,7 @@ class DSGESolver:
         y: NDArray | pd.DataFrame,
         observables: list[str] | None = None,
         filter_mode: str = "linear",
-        estimated_params: list[str] | None = None,
-        priors: Mapping[str, Any] | None = None,
+        estimated_params: list[str] | Mapping[str, Prior] | None = None,
         ss_seed: list[float] | NDArray | dict[str, float] | None = None,
         x0: NDArray | None = None,
         P0: NDArray | None = None,
@@ -701,7 +701,6 @@ class DSGESolver:
             observables=observables,
             filter_mode=filter_mode,
             estimated_params=estimated_params,
-            priors=priors,
             ss_seed=(
                 asarray(ss_seed, dtype=float64)
                 if isinstance(ss_seed, list)
@@ -732,8 +731,7 @@ class DSGESolver:
         theta0: Mapping[str, float] | None = None,
         observables: list[str] | None = None,
         filter_mode: str = "linear",
-        estimated_params: list[str] | None = None,
-        priors: Mapping[str, Any] | None = None,
+        estimated_params: list[str] | Mapping[str, Prior] | None = None,
         ss_seed: list[float] | NDArray | dict[str, float] | None = None,
         P0: NDArray | None = None,
         jitter: float | float64 | None = None,
@@ -751,18 +749,15 @@ class DSGESolver:
             Observed data, Array in observable order or ``DataFrame`` with columns named for the observables.
         routine : str
             "mle" (Maximum Likelihood Estimation), "map" (Maximum A Posteriori), or "mcmc" (Markov Chain Monte Carlo).
-            "map" and "mcmc" require priors to be specified for the estimated parameters.
+            "map" and "mcmc" require `estimated_params` to be in the `{name: Prior}` mapping form.
         theta0 : NDArray | Mapping[str, float] | None
             Initial guess for estimatied parameters. Mapping of {name: guess} or array in order of appearance in calibration.
         observables : list[str] | None
             Names of model observables to use in the estimation. If None, all observables are used.
         filter_mode : str
             Kalman filter routine to use. "linear" (linear Gaussian), "extended" (linear Gaussian with nonlinear measurements), "unscented" (pruned unscented)
-        estimated_params : list[str] | None
-            Names of model parameters to estimate. If priors are specified names can be derived from there.
-        priors : Mapping[str, Any] | None
-            Mapping of {name: Prior(...)} for the estimated parameters. If None, no priors are used.
-            Use estimation.make_prior or bayesian.make_prior to create prior objects with built-in distributions and transformations.
+        estimated_params : list[str] | Mapping[str, Prior] | None
+            Names of estimated parameters, or mapping with priors to use in MAP or MCMC. `None` estimates all parameters and uses no priors.
         ss_seed : list[float] | NDArray | dict[str, float] | None
             Initial guess of the steady state Newton solver. List or array in declaration order or
             mapping of {name: guess} for the model's declared variables.
@@ -788,7 +783,6 @@ class DSGESolver:
             observables=observables,
             filter_mode=filter_mode,
             estimated_params=estimated_params,
-            priors=priors,
             ss_seed=(
                 asarray(ss_seed, dtype=float64)
                 if isinstance(ss_seed, list)
@@ -819,8 +813,7 @@ class DSGESolver:
         posterior_point: str = "mean",
         observables: list[str] | None = None,
         filter_mode: str = "linear",
-        estimated_params: list[str] | None = None,
-        priors: Mapping[str, Any] | None = None,
+        estimated_params: list[str] | Mapping[str, Prior] | None = None,
         ss_seed: list[float] | NDArray | dict[str, float] | None = None,
         P0: NDArray | None = None,
         jitter: float | float64 | None = None,
@@ -838,7 +831,7 @@ class DSGESolver:
             Observed data, Array in observable order or ``DataFrame`` with columns named for the observables.
         routine : str
             "mle" (Maximum Likelihood Estimation), "map" (Maximum A Posteriori), or "mcmc" (Markov Chain Monte Carlo).
-            "map" and "mcmc" require priors to be specified for the estimated parameters.
+            "map" and "mcmc" require `estimated_params` to be in the `{name: Prior}` mapping form.
         theta0 : NDArray | Mapping[str, float] | None
             Initial guess for estimatied parameters. Mapping of {name: guess} or array in order of appearance in calibration.
             If None, the calibration values are used as initial guess.
@@ -849,12 +842,8 @@ class DSGESolver:
             Names of model observables to use in the estimation. If None, all observables are used.
         filter_mode : str
             Kalman filter routine to use. "linear" (linear Gaussian), "extended" (linear Gaussian with nonlinear measurements), "unscented" (pruned unscented)
-        estimated_params : list[str] | None
-            Names of model parameters to estimate. If priors are specified names can be derived from there.
-            If both keys are specified they must match. If None, all parameters are estimated.
-        priors : Mapping[str, Any] | None
-            Mapping of {name: Prior(...)} for the estimated parameters. If None, no priors are used.
-            Use estimation.make_prior or bayesian.make_prior to create prior objects with built-in distributions and transformations.
+        estimated_params : list[str] | Mapping[str, Prior] | None
+            Names of estimated parameters, or mapping with priors to use in MAP or MCMC. `None` estimates all parameters and uses no priors.
         ss_seed : list[float] | NDArray | dict[str, float] | None
             Initial guess of the steady state Newton solver. List or array in declaration order or
             mapping of {name: guess} for the model's declared variables.
@@ -884,7 +873,6 @@ class DSGESolver:
             observables=observables,
             filter_mode=filter_mode,
             estimated_params=estimated_params,
-            priors=priors,
             ss_seed=ss_seed,
             P0=P0,
             jitter=jitter,

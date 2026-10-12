@@ -1,107 +1,17 @@
-# type: ignore
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
-from numpy import float64
-from sympy import Symbol
 
-from SymbolicDSGE.core.solver import DSGESolver
 from SymbolicDSGE.estimation import Estimator, make_prior
 from SymbolicDSGE.estimation.results import MLEResult
 
 
-def _make_solver() -> DSGESolver:
-    return DSGESolver(
-        model_config=SimpleNamespace(),
-        kalman_config=SimpleNamespace(),
-    )
-
-
-def _with_filter_prep(compiled):
-    """Complete a stub with the surface Estimator's construction-time filter prep
-    needs. ``Estimator.__init__`` builds the filter run unconditionally now (the
-    old duck-typed guard is gone), so every stub must satisfy
-    ``prepare_filter_run``. No test on a stub evaluates an objective, so the cfunc
-    addresses and P0 are never read; they only have to exist."""
-    if not hasattr(compiled, "observable_names"):
-        compiled.observable_names = ["y"]
-    if not hasattr(compiled, "var_names"):
-        compiled.var_names = [
-            Symbol(f"s{i}") for i in range(len(compiled.observable_names))
-        ]
-    if not hasattr(compiled, "cur_syms"):
-        compiled.cur_syms = list(compiled.var_names)
-    compiled.construct_measurement_cfunc = lambda obs: SimpleNamespace(address=0)
-    compiled.construct_measurement_jacobian_cfunc = lambda obs: SimpleNamespace(
-        address=0
-    )
-    if not hasattr(compiled, "n_state"):
-        compiled.n_state = len(compiled.var_names)
-    if not hasattr(compiled, "n_var"):
-        compiled.n_var = len(compiled.var_names)
-    if getattr(compiled.kalman, "P0", None) is None:
-        compiled.kalman.P0 = np.eye(len(compiled.var_names), dtype=np.float64)
-    if not hasattr(compiled.kalman, "R_param_names"):
-        compiled.kalman.R_param_names = None
-    if not hasattr(compiled.kalman, "R_std_param_map"):
-        compiled.kalman.R_std_param_map = None
-    if getattr(compiled.kalman, "R", None) is None:
-        compiled.kalman.R = np.eye(len(compiled.observable_names), dtype=np.float64)
-    if not hasattr(compiled.kalman, "R_corr_param_map"):
-        compiled.kalman.R_corr_param_map = None
-    # active_Q and the joint-SPD guard read these three directly, so a stub that
-    # names no shocks still has to say so rather than omit them.
-    if not hasattr(compiled, "shock_names"):
-        compiled.shock_names = []
-    if not hasattr(compiled.config.calibration, "shock_std"):
-        compiled.config.calibration.shock_std = {}
-    if not hasattr(compiled.config.calibration, "shock_corr"):
-        compiled.config.calibration.shock_corr = {}
-    return compiled
-
-
-def _make_compiled(a0: float = 0.0):
-    a = Symbol("a")
-    return _with_filter_prep(
-        SimpleNamespace(
-            config=SimpleNamespace(
-                calibration=SimpleNamespace(parameters={a: float64(a0)}),
-            ),
-            calib_params=[a],
-            kalman=SimpleNamespace(
-                R=None, P0=None, R_std_param_map=None, R_corr_param_map=None
-            ),
-        )
-    )
-
-
-def _make_compiled_two(a0: float = 0.0, b0: float = 3.0):
-    a = Symbol("a")
-    b = Symbol("b")
-    return _with_filter_prep(
-        SimpleNamespace(
-            config=SimpleNamespace(
-                calibration=SimpleNamespace(
-                    parameters={a: float64(a0), b: float64(b0)}
-                ),
-            ),
-            calib_params=[a, b],
-            kalman=SimpleNamespace(
-                R=None, P0=None, R_std_param_map=None, R_corr_param_map=None
-            ),
-        )
-    )
-
-
-def test_solver_exposes_private_estimator_factory():
-    solver = _make_solver()
-    compiled = _make_compiled(0.0)
-
-    est = solver._estimator(
-        compiled=compiled,
-        y=np.zeros((4, 1), dtype=np.float64),
-        estimated_params=["a"],
+def test_solver_exposes_private_estimator_factory(post82):
+    est = post82["solver"]._estimator(
+        compiled=post82["compiled"],
+        y=post82["y"],
+        observables=post82["obs"],
+        estimated_params=["psi_pi"],
+        ss_seed=post82["steady"],
     )
     assert isinstance(est, Estimator)
 
@@ -118,8 +28,9 @@ def test_solver_estimate_validates_config_initial_guess_against_prior(post82):
             y=post82["y"],
             routine="map",
             observables=post82["obs"],
-            estimated_params=["psi_pi"],
-            priors={"psi_pi": make_prior("gamma", {"mean": 2.0, "std": 0.5}, "log")},
+            estimated_params={
+                "psi_pi": make_prior("gamma", {"mean": 2.0, "std": 0.5}, "log")
+            },
             ss_seed=post82["steady"],
             theta0={"psi_pi": -1.0},
         )
@@ -128,17 +39,17 @@ def test_solver_estimate_validates_config_initial_guess_against_prior(post82):
 def test_solver_estimate_and_solve_mle(post82, monkeypatch):
     solver = post82["solver"]
 
-    captured = {}
+    # Spied rather than replaced: the solve has to run for ``solved`` to be a
+    # real model, and the only thing a run cannot show is a kwarg that is never
+    # passed.
+    seen = {}
+    real_solve = solver.solve
 
-    def fake_solve(compiled, *, parameters=None, ss_seed=None):
-        captured["parameters"] = parameters
-        captured["calibration"] = {
-            getattr(k, "name", k): float(v)
-            for k, v in compiled.config.calibration.parameters.items()
-        }
-        return SimpleNamespace(params=captured["calibration"])
+    def spy(*args, **kwargs):
+        seen["parameters"] = kwargs.get("parameters")
+        return real_solve(*args, **kwargs)
 
-    monkeypatch.setattr(solver, "solve", fake_solve)
+    monkeypatch.setattr(solver, "solve", spy)
 
     result, solved = solver.estimate_and_solve(
         compiled=post82["compiled"],
@@ -153,11 +64,12 @@ def test_solver_estimate_and_solve_mle(post82, monkeypatch):
     assert isinstance(result, MLEResult)
     # The estimated point reaches solve through the calibration, not a kwarg,
     # and the result names only what was estimated.
-    assert captured["parameters"] is None
+    assert seen["parameters"] is None
     assert set(result.theta) == {"psi_pi", "rho_r"}
+
+    calibrated = _calibrated(solved)
     for name, value in result.theta.items():
-        assert captured["calibration"][name] == pytest.approx(float(value))
-    assert solved.params == captured["calibration"]
+        assert calibrated[name] == pytest.approx(float(value))
 
 
 def test_solver_estimate_accepts_theta0_dictionary(post82):
@@ -212,13 +124,24 @@ def test_solver_theta0_dictionary_is_mapped_to_unconstrained_for_transformed_pri
             y=post82["y"],
             routine="mle",
             observables=post82["obs"],
-            estimated_params=["psi_pi"],
-            priors={"psi_pi": prior},
+            estimated_params={"psi_pi": prior},
             ss_seed=post82["steady"],
             theta0={"psi_pi": 2.0},
             bounds={"psi_pi": (1.0, 5.0)},
         )
     assert out.success
+
+
+def _calibrated(solved):
+    """The solved model's parameter point, by name.
+
+    ``solved.config`` is the compiled model's own config, so this is the
+    calibration ``estimate_and_solve`` wrote the estimated point into.
+    """
+    return {
+        str(name): float(value)
+        for name, value in solved.config.calibration.parameters.items()
+    }
 
 
 def _normal_prior(mean, std):
@@ -229,28 +152,13 @@ def _normal_prior(mean, std):
     )
 
 
-def test_solver_estimate_and_solve_mcmc(post82, monkeypatch):
-    solver = post82["solver"]
-
-    captured = {}
-
-    def fake_solve(compiled, *, parameters=None, ss_seed=None):
-        captured["parameters"] = parameters
-        captured["calibration"] = {
-            getattr(k, "name", k): float(v)
-            for k, v in compiled.config.calibration.parameters.items()
-        }
-        return SimpleNamespace(params=captured["calibration"])
-
-    monkeypatch.setattr(solver, "solve", fake_solve)
-
-    result, solved = solver.estimate_and_solve(
+def test_solver_estimate_and_solve_mcmc(post82):
+    result, solved = post82["solver"].estimate_and_solve(
         compiled=post82["compiled"],
         y=post82["y"],
         routine="mcmc",
         observables=post82["obs"],
-        estimated_params=["psi_pi"],
-        priors={"psi_pi": _normal_prior(2.0, 0.5)},
+        estimated_params={"psi_pi": _normal_prior(2.0, 0.5)},
         ss_seed=post82["steady"],
         posterior_point="map",
         n_draws=30,
@@ -259,34 +167,21 @@ def test_solver_estimate_and_solve_mcmc(post82, monkeypatch):
     )
 
     assert result.samples.shape == (30, 1)
-    assert "psi_pi" in captured["calibration"]
-    assert solved.params == captured["calibration"]
+    # ``posterior_point="map"`` is the draw with the highest log-posterior, and
+    # that draw is what the solved model was calibrated to.
+    at_map = float(result.samples[int(np.argmax(result.logpost_trace)), 0])
+    assert _calibrated(solved)["psi_pi"] == pytest.approx(at_map)
 
 
-def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(
-    post82, monkeypatch
-):
-    solver = post82["solver"]
+def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(post82):
+    entered = _calibrated(post82["solver"].solve(post82["compiled"]))["rho_r"]
 
-    captured = {}
-
-    def fake_solve(compiled, *, parameters=None, ss_seed=None):
-        captured["parameters"] = parameters
-        captured["calibration"] = {
-            getattr(k, "name", k): float(v)
-            for k, v in compiled.config.calibration.parameters.items()
-        }
-        return SimpleNamespace(params=captured["calibration"])
-
-    monkeypatch.setattr(solver, "solve", fake_solve)
-
-    result, solved = solver.estimate_and_solve(
+    result, solved = post82["solver"].estimate_and_solve(
         compiled=post82["compiled"],
         y=post82["y"],
         routine="mcmc",
         observables=post82["obs"],
-        estimated_params=["psi_pi"],
-        priors={"psi_pi": _normal_prior(2.0, 0.5)},
+        estimated_params={"psi_pi": _normal_prior(2.0, 0.5)},
         ss_seed=post82["steady"],
         posterior_point="mean",
         n_draws=20,
@@ -295,14 +190,8 @@ def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(
     )
 
     assert result.samples.shape == (20, 1)
-    assert "psi_pi" in captured["calibration"]
-    # only the estimated name is written back, so the rest still read at the
-    # calibration they entered with
-    sym_map = {
-        getattr(k, "name", k): v
-        for k, v in post82["compiled"].config.calibration.parameters.items()
-    }
-    assert float(captured["calibration"]["rho_r"]) == pytest.approx(
-        float(sym_map["rho_r"])
-    )
-    assert solved.params == captured["calibration"]
+    calibrated = _calibrated(solved)
+    assert calibrated["psi_pi"] == pytest.approx(float(result.samples.mean(axis=0)[0]))
+    # Only the estimated name is written back; the rest still read at the value
+    # they entered with, captured before the run rather than after it.
+    assert calibrated["rho_r"] == pytest.approx(entered)

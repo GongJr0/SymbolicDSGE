@@ -78,8 +78,7 @@ def _estimator() -> Estimator:
         compiled=_stub_compiled(),
         y=np.zeros((6, 1), dtype=np.float64),
         observables=["y"],
-        estimated_params=["a"],
-        priors={
+        estimated_params={
             "a": make_prior(
                 distribution="normal",
                 parameters={"mean": 0.3, "std": 0.1},
@@ -101,7 +100,7 @@ def _optimization_result() -> MAPResult:
         nit=4,
         optimizer_config={
             "method": "L-BFGS-B",
-            "bounds": [[-1.0, 1.0]],
+            "bounds": {"a": [-1.0, 1.0]},
             "options": {"maxiter": 20},
         },
         logpost=float64(-1.5),
@@ -129,7 +128,7 @@ def test_facade_flattens_optimization_run(test_model_yaml) -> None:
     assert result_doc["type"] == "map"
     config = result_doc["data"]["optimizer_config"]
     assert config["method"] == "L-BFGS-B"
-    assert config["bounds"] == [[-1.0, 1.0]]
+    assert config["bounds"] == {"a": [-1.0, 1.0]}
     assert config["options"]["maxiter"] == 20
 
     assert "estimation/observed.parquet" in files
