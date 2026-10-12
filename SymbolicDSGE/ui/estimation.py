@@ -55,7 +55,7 @@ def build_estimation_inputs(
     list[str],
     dict[str, float],
     dict[str, Prior] | None,
-    list[tuple[float | None, float | None]] | None,
+    dict[str, tuple[float | None, float | None]] | None,
 ]:
     """Lower the GUI parameter table to ``Estimator`` arguments.
 
@@ -76,12 +76,11 @@ def build_estimation_inputs(
 
     theta0 = {parameter["name"]: float(parameter["initial"]) for parameter in active}
 
-    bounds = [(parameter["lower"], parameter["upper"]) for parameter in active]
-    bound_arg = (
-        bounds
-        if any(low is not None or high is not None for low, high in bounds)
-        else None
-    )
+    bounds = {
+        p["name"]: (p["lower"], p["upper"])
+        for p in active
+        if p["lower"] is not None or p["upper"] is not None
+    }
 
     priors: dict[str, Prior] | None = None
     if routine in {"map", "mcmc"}:
@@ -94,7 +93,7 @@ def build_estimation_inputs(
                 )
             priors[parameter["name"]] = make_prior(**parameter["prior"])
 
-    return names, theta0, priors, bound_arg
+    return names, theta0, priors, bounds or None
 
 
 def emit_estimation_wire(
@@ -266,18 +265,6 @@ def _method_from_result(
     raise TypeError(f"Unsupported estimation result type: {type(result).__name__}")
 
 
-def _bounds_from_result(
-    result: MLEResult | MAPResult | MCMCResult | None,
-    param_names: Sequence[str],
-) -> dict[str, tuple[float | None, float | None]]:
-    """Per-parameter bounds recorded on an optimization result (empty otherwise)."""
-    if isinstance(result, OptimizationResult):
-        raw = result.optimizer_config.get("bounds")
-        if raw:
-            return {name: (pair[0], pair[1]) for name, pair in zip(param_names, raw)}
-    return {}
-
-
 #: The optimizer options a run records that the form re-posts.
 _OPTIMIZER_KNOBS = [
     "maxiter",
@@ -348,24 +335,6 @@ def _knobs_from_result(
     return knobs
 
 
-def _theta0_from_result(
-    result: MLEResult | MAPResult | MCMCResult | None,
-    param_names: Sequence[str],
-) -> dict[str, float]:
-    """The starting point the run used, per estimated parameter.
-
-    Recorded as a vector ordered like the estimated names, or as the mapping
-    it was given as. Without it the form would seed from the model's
-    calibration, which is not where the stored run started.
-    """
-    raw = _run_config(result).get("theta0")
-    if raw is None:
-        return {}
-    if isinstance(raw, Mapping):
-        return {str(name): float(value) for name, value in raw.items()}
-    return {name: float(value) for name, value in zip(param_names, raw)}
-
-
 def estimator_spec_wire(spec: EstimatorSpec) -> dict[str, Any]:
     """An :class:`EstimatorSpec` as JSON, verbatim.
 
@@ -394,11 +363,12 @@ def build_estimation_prefill(
     arrives over its own defaults, so a key a run never recorded is left out
     rather than invented here.
     """
+    config = _run_config(result)
     params = spec.params
     estimated = list(params["estimated_params"] or [])
     priors = dict(params["priors"] or {})
-    bounds = _bounds_from_result(result, estimated)
-    theta0 = _theta0_from_result(result, estimated)
+    bounds = dict(config.get("bounds") or {})
+    theta0 = dict(config.get("theta0") or {})
     base = extract_base_params(compiled)
 
     rows: list[dict[str, Any]] = []

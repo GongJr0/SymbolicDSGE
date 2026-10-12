@@ -49,12 +49,9 @@ class Estimator:
         Declared observable names in the order they appear in (array) data. If none, all observables in the model are used in the order they were declared in the config.
     filter_mode : str
         Filter mode to use for the estimation procedure. One of 'linear', 'extended', or 'unscented'.
-    estimated_params : Sequence[str] | None
-        Names of the parameters to be estimated. If none, all parameters in the model are estimated.
-    priors : Mapping[str, Prior] | None
-        Mapping of parameter names to their prior distributions. If none, no priors are used.
-        "map" and "mcmc" require priors to be specified for all estimated parameters.
-        When priors are specified, estimated_params must match the names of the priors or be omitted.
+    estimated_params : Sequence[str] | Mapping[str, Prior] | None
+        Names of the parameters to be estimated, or a mapping of parameter names to their `Prior`s.
+        MAP and MCMC require priors; MLE ignores any provided priors. `None` uses all parameters and no priors.
     ss_seed : Sequence[float] | NDF | Mapping[str, float] | None
         Initial guess for the Newton steady state solver.
     jitter : float | float64 | None
@@ -99,8 +96,7 @@ class Estimator:
         y: NDF | pd.DataFrame,
         observables: Sequence[str] | None = None,
         filter_mode: str = "linear",
-        estimated_params: Sequence[str] | None = None,
-        priors: Mapping[str, Prior] | None = None,
+        estimated_params: Sequence[str] | Mapping[str, Prior] | None = None,
         ss_seed: Sequence[float] | NDF | Mapping[str, float] | None = None,
         jitter: float | float64 | None = None,
         symmetrize: bool = True,
@@ -108,7 +104,9 @@ class Estimator:
         R: NDF | None = None,
         P0: NDF | None = None,
     ) -> None:
-        self.estimated_params = estimated_params
+        self.estimated_params, self.priors = r.get_names_and_priors(
+            estimated_params, compiled
+        )
         self.compiled = compiled
         if compiled.kalman is None and R is None:
             raise ValueError(
@@ -134,21 +132,15 @@ class Estimator:
             P0=P0,
         )
 
-        self.priors = dict(priors) if priors is not None else None
-
-        requested_names_raw = r.assert_only_prior_or_parameters(
-            estimated_params,
-            self.priors,
-        )
-        r.check_parameters(compiled, requested_names_raw)
+        r.check_parameters(compiled, self.estimated_params)
         r.check_estimated_versus_constant_R(
-            requested_names_raw,
+            self.estimated_params,
             self.kalman,
             self.R,
         )
 
         self._param_index, self._matrix_blocks = r.resolve_theta_layout(
-            requested_names_raw,
+            self.estimated_params,
             self.priors,
             self.compiled,
             self.kalman,
@@ -230,13 +222,13 @@ class Estimator:
             name: Prior.from_spec(prior_spec)
             for name, prior_spec in (params["priors"] or {}).items()
         }
+        estimated_params = priors if priors else params["estimated_params"]
         return cls(
             compiled=compiled,
             y=y,
             observables=params["observables"],
             filter_mode=params["filter_mode"],
-            estimated_params=params["estimated_params"],
-            priors=priors or None,
+            estimated_params=estimated_params,
             ss_seed=params["ss_seed"],
             jitter=params["jitter"],
             symmetrize=params["symmetrize"],
@@ -700,9 +692,6 @@ class Estimator:
             raise ValueError("MCMC requires priors to define a posterior.")
 
         rng = np.random.default_rng(random_state)
-
-        if not self.param_names:
-            raise ValueError("No estimated parameters were provided.")
 
         map_bounds = None if map_options is None else map_options.get("bounds")
         ctx, theta, map_lo, map_hi = self._build_call_context(

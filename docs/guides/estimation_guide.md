@@ -79,7 +79,7 @@ as long as we specify a `Transform` that maps the distribution support $(a, b) \
 Using `make_prior` we can define individual priors for each parameter we wish to estimate:
 
 ```python
-prior_spec = {
+estimated = {
     # (0, 1)
     "beta": make_prior(
         "beta",
@@ -123,7 +123,7 @@ res, sol = solver.estimate_and_solve(
     y=observed.loc[observed.index >= "1984-01-01", :], # (2)!
     observables=["Infl", "Rate"], # (3)!
     routine="mcmc", # (4)!
-    priors=prior_spec,
+    estimated_params=estimated,
     ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
     posterior_point="mean", # (5)!
     n_draws=100_000, # (6)!
@@ -144,7 +144,7 @@ res = cast(MCMCResult, res)
 8. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
 
 ```text
-MCMC sampling concluded in 7.58 seconds with 14504.47 iterations per second.
+MCMC sampling concluded in 6.21 seconds with 17709.52 iterations per second.
 [Estimator:mcmc] BK stability warnings encountered during search: 0
 ```
 
@@ -196,25 +196,25 @@ pd.Series(
 2. Acceptance rate is specific to MCMC and is a percent measure of how many samples were "acceptable" within the specified priors and bounds; and of course, model stability constraints. (An unsolvable model is automatically disqualified)
 
 ```text
-beta                0.971
-rho_r               0.806
-rho_g               0.862
-rho_z               0.862
-psi_pi              3.308
-psi_x               0.339
-kappa               0.480
-tau_inv             0.973
-rho_gz             -0.008
-rho_gr             -0.354
-rho_zr              0.190
-meas_rho_ir        -0.191
-sig_r               0.083
-sig_g               0.162
-sig_z               0.658
-meas_infl           1.278
-meas_rate           0.042
-loglik           -246.682
-accept_rate         0.206
+beta                0.970
+rho_r               0.820
+rho_g               0.881
+rho_z               0.857
+psi_pi              3.124
+psi_x               0.335
+kappa               0.477
+tau_inv             1.138
+rho_gz              0.103
+rho_gr             -0.092
+rho_zr              0.086
+meas_rho_ir        -0.137
+sig_r               0.090
+sig_g               0.197
+sig_z               0.638
+meas_infl           1.206
+meas_rate           0.044
+loglik           -228.498
+accept_rate         0.168
 n_draws        100000.000
 burn_in         10000.000
 thin                1.000
@@ -236,23 +236,23 @@ res.hpd_intervals(alpha=0.05, n_digits=3) # (1)!
 1. `alpha` is the probability mass outside the interval. For example, `alpha=0.05` means we want to compute the 95% HPD interval. `n_digits` is the number of digits to round the output to.
 
 ```text
-{'beta': (np.float64(0.946), np.float64(0.991)),
- 'rho_r': (np.float64(0.759), np.float64(0.872)),
- 'rho_g': (np.float64(0.817), np.float64(0.914)),
- 'rho_z': (np.float64(0.805), np.float64(0.907)),
- 'psi_pi': (np.float64(2.017), np.float64(4.432)),
- 'psi_x': (np.float64(0.143), np.float64(0.573)),
- 'kappa': (np.float64(0.287), np.float64(0.642)),
- 'tau_inv': (np.float64(0.41), np.float64(1.622)),
- 'rho_gz': (np.float64(-0.699), np.float64(0.85)),
- 'rho_gr': (np.float64(0.457), np.float64(0.981)),
- 'rho_zr': (np.float64(-0.959), np.float64(0.532)),
- 'meas_rho_ir': (np.float64(-0.843), np.float64(0.739)),
- 'sig_r': (np.float64(0.082), np.float64(0.143)),
- 'sig_g': (np.float64(0.04), np.float64(0.289)),
- 'sig_z': (np.float64(0.444), np.float64(0.848)),
- 'meas_infl': (np.float64(0.439), np.float64(1.535)),
- 'meas_rate': (np.float64(0.0), np.float64(0.107))}
+{'beta': (np.float64(0.947), np.float64(0.991)),
+ 'rho_r': (np.float64(0.771), np.float64(0.866)),
+ 'rho_g': (np.float64(0.841), np.float64(0.92)),
+ 'rho_z': (np.float64(0.805), np.float64(0.905)),
+ 'psi_pi': (np.float64(2.076), np.float64(4.166)),
+ 'psi_x': (np.float64(0.125), np.float64(0.549)),
+ 'kappa': (np.float64(0.298), np.float64(0.656)),
+ 'tau_inv': (np.float64(0.552), np.float64(1.892)),
+ 'rho_gz': (np.float64(-0.701), np.float64(0.868)),
+ 'rho_gr': (np.float64(-0.747), np.float64(0.584)),
+ 'rho_zr': (np.float64(-0.64), np.float64(0.808)),
+ 'meas_rho_ir': (np.float64(-0.892), np.float64(0.636)),
+ 'sig_r': (np.float64(0.022), np.float64(0.159)),
+ 'sig_g': (np.float64(0.076), np.float64(0.308)),
+ 'sig_z': (np.float64(0.452), np.float64(0.834)),
+ 'meas_infl': (np.float64(0.724), np.float64(1.523)),
+ 'meas_rate': (np.float64(0.0), np.float64(0.106))}
 ```
 
 ### Posterior Density Estimation

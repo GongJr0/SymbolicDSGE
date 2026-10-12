@@ -27,7 +27,6 @@ We use `experiment-1.sdsge` as produced by the [Bundle Authoring Guide](bundle_a
 import numpy as np
 
 from SymbolicDSGE import load_bundle
-from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult
 
@@ -145,11 +144,11 @@ mc_repro = pipeline.run(
 ```
 
 ```text
->>> MC run concluded successfully in 0.00s with 357538.70 it/s.
+>>> MC run concluded successfully in 0.00s with 357283.22 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 34183.71 worker it/s (0.03 worker-s), 357538.70 wall it/s.
-    jb_test: 0 failures, 1177024.11 worker it/s (0.00 worker-s), 357538.70 wall it/s.
+    datagen: 0 failures, 37086.76 worker it/s (0.03 worker-s), 357283.22 wall it/s.
+    jb_test: 0 failures, 1168634.59 worker it/s (0.00 worker-s), 357283.22 wall it/s.
 ```
 
 ```python

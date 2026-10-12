@@ -15,6 +15,8 @@ RBC_SECOND_ORDER_TEST_MODEL_PATH = MODELS_DIR / "rbc_second_order.yaml"
 RBC_MULTISHOCK_TEST_MODEL_PATH = MODELS_DIR / "rbc_multishock_second_order.yaml"
 RBC_OCCBIN_TEST_MODEL_PATH = MODELS_DIR / "rbc_occbin.yaml"
 NK_ZLB_TEST_MODEL_PATH = MODELS_DIR / "nk_zlb_1_constraint.yaml"
+#: Three shocks with no named correlation, the unnamed-pair case estimation rejects.
+GALI_2015_TEST_MODEL_PATH = MODELS_DIR / "gali_2015.yaml"
 
 #: Names an indirect ``parametrize`` passes to the ``model_path`` fixture.
 MODEL_PATHS = {
@@ -98,6 +100,11 @@ def rbc_occbin_test_model_path() -> Path:
 @pytest.fixture(scope="session")
 def nk_zlb_test_model_path() -> Path:
     return NK_ZLB_TEST_MODEL_PATH
+
+
+@pytest.fixture(scope="session")
+def gali_2015_test_model_path() -> Path:
+    return GALI_2015_TEST_MODEL_PATH
 
 
 @pytest.fixture

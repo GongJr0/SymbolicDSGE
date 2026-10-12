@@ -28,23 +28,32 @@ _RESERVED_TO_NAME = {
 # --- Name and Membership Validation ---
 
 
-def assert_only_prior_or_parameters(
-    estimated_parameters: Sequence[str] | None, priors: Mapping[str, Prior] | None
-) -> list[str]:
-    if estimated_parameters is not None:
-        if priors is not None:
-            mismatch = sorted(set(estimated_parameters) ^ set(priors))
-            if mismatch:
-                raise ValueError(
-                    f"`estimated_parameters` and `priors` must name the same "
-                    f"parameters; {mismatch} appear in one and not the other. If you "
-                    f"specified a block prior, pass its name to "
-                    f"`estimated_parameters` instead of the members."
-                )
-        return list(estimated_parameters)
-    if priors is not None:
-        return list(priors.keys())
-    raise ValueError("Either `estimated_parameters` or `priors` must be specified.")
+def get_names_and_priors(
+    estimated_parameters: Sequence[str] | Mapping[str, Prior] | None,
+    compiled: CompiledModel,
+) -> tuple[list[str], Mapping[str, Prior] | None]:
+    """Resolve the names of estimated parameters and their priors."""
+    if estimated_parameters is None:
+        return list(compiled.calib_params), None
+
+    if isinstance(estimated_parameters, Mapping):
+        names = list(estimated_parameters.keys())
+        priors = dict(estimated_parameters)
+    elif isinstance(estimated_parameters, Sequence) and not isinstance(
+        estimated_parameters, str
+    ):
+        names = list(estimated_parameters)
+        priors = None
+    else:
+        raise ValueError(
+            "`estimated_parameters` must be either a sequence of parameter names "
+            "or a mapping from parameter names to Prior objects."
+        )
+
+    if not names:
+        raise ValueError("`estimated_parameters` must name at least one parameter.")
+
+    return names, priors
 
 
 def check_parameters(

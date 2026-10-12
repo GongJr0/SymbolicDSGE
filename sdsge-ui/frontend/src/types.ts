@@ -57,7 +57,8 @@ export interface MapOptions {
     xatol?: number;
     fatol?: number;
     // Carried through untouched; the sampler's own tab renders no bounds table.
-    bounds?: Array<[number | null, number | null]> | null;
+    // Keyed by parameter name, the way the estimator records and takes them.
+    bounds?: Record<string, [number | null, number | null]> | null;
 }
 
 export interface EstimationViewState {
