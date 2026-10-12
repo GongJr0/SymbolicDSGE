@@ -7,7 +7,7 @@ import warnings
 import sympy as sp
 from sympy import Symbol, Function, Expr
 from sympy.logic.boolalg import Boolean
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
 
 import numpy as np
 from numpy import float64, asarray, ndarray
@@ -16,7 +16,7 @@ from numpy.typing import NDArray
 import pandas as pd
 
 if TYPE_CHECKING:
-    from ..estimation.results import MCMCResult, OptimizationResult
+    from ..estimation.results import MLEResult, MAPResult, MCMCResult
 
 from .config import ModelConfig
 from .compiled_model import (
@@ -727,10 +727,10 @@ class DSGESolver:
         *,
         compiled: CompiledModel,
         y: NDArray | pd.DataFrame,
-        routine: str = "mle",
+        routine: Literal["mle", "map", "mcmc"] = "mle",
         theta0: Mapping[str, float] | None = None,
         observables: list[str] | None = None,
-        filter_mode: str = "linear",
+        filter_mode: Literal["linear", "extended", "unscented"] = "linear",
         estimated_params: list[str] | Mapping[str, Prior] | None = None,
         ss_seed: list[float] | NDArray | dict[str, float] | None = None,
         P0: NDArray | None = None,
@@ -738,7 +738,7 @@ class DSGESolver:
         symmetrize: bool = True,
         R: NDArray | None = None,
         **method_kwargs: Any,
-    ) -> OptimizationResult | MCMCResult:
+    ) -> MLEResult | MAPResult | MCMCResult:
         """Estimate a model specification without producing a solved model object.
 
         Parameters
@@ -747,14 +747,14 @@ class DSGESolver:
             Compiled model holding attrs and methods feeding the solution and esitmation routines.
         y : NDArray | pd.DataFrame
             Observed data, Array in observable order or ``DataFrame`` with columns named for the observables.
-        routine : str
+        routine : Literal["mle", "map", "mcmc"]
             "mle" (Maximum Likelihood Estimation), "map" (Maximum A Posteriori), or "mcmc" (Markov Chain Monte Carlo).
             "map" and "mcmc" require `estimated_params` to be in the `{name: Prior}` mapping form.
         theta0 : NDArray | Mapping[str, float] | None
             Initial guess for estimatied parameters. Mapping of {name: guess} or array in order of appearance in calibration.
         observables : list[str] | None
             Names of model observables to use in the estimation. If None, all observables are used.
-        filter_mode : str
+        filter_mode : Literal["linear", "extended", "unscented"]
             Kalman filter routine to use. "linear" (linear Gaussian), "extended" (linear Gaussian with nonlinear measurements), "unscented" (pruned unscented)
         estimated_params : list[str] | Mapping[str, Prior] | None
             Names of estimated parameters, or mapping with priors to use in MAP or MCMC. `None` estimates all parameters and uses no priors.
@@ -773,8 +773,8 @@ class DSGESolver:
 
         Returns
         -------
-        OptimizationResult | MCMCResult
-            Result of the estimation routine. OptimizationResult is a base for MLEResult and MAPResult.
+        MLEResult | MAPResult | MCMCResult
+            Result of the estimation routine.
 
         """
         est = self._estimator(
@@ -794,25 +794,27 @@ class DSGESolver:
             R=R,
         )
 
-        routine_norm = routine.lower()
-        if routine_norm == "mle":
-            return est.mle(theta0=theta0, **method_kwargs)
-        if routine_norm == "map":
-            return est.map(theta0=theta0, **method_kwargs)
-        if routine_norm == "mcmc":
-            return est.mcmc(theta0=theta0, **method_kwargs)
-        raise ValueError("routine must be one of {'mle', 'map', 'mcmc'}.")
+        match routine.lower():
+            case "mle":
+                return est.mle(theta0=theta0, **method_kwargs)
+            case "map":
+                return est.map(theta0=theta0, **method_kwargs)
+            case "mcmc":
+                return est.mcmc(theta0=theta0, **method_kwargs)
+            case _:
+                raise ValueError("`routine` must be one of {'mle', 'map', 'mcmc'}.")
 
     def estimate_and_solve(
         self,
         *,
         compiled: CompiledModel,
         y: NDArray | pd.DataFrame,
-        routine: str = "mle",
+        order: int | None = None,
+        routine: Literal["mle", "map", "mcmc"] = "mle",
         theta0: Mapping[str, float] | None = None,
-        posterior_point: str = "mean",
+        posterior_point: Literal["mean", "mode", "map", "last"] = "mean",
         observables: list[str] | None = None,
-        filter_mode: str = "linear",
+        filter_mode: Literal["linear", "extended", "unscented"] = "linear",
         estimated_params: list[str] | Mapping[str, Prior] | None = None,
         ss_seed: list[float] | NDArray | dict[str, float] | None = None,
         P0: NDArray | None = None,
@@ -820,7 +822,7 @@ class DSGESolver:
         symmetrize: bool = True,
         R: NDArray | None = None,
         **method_kwargs: Any,
-    ) -> tuple[OptimizationResult | MCMCResult, SolvedModel]:
+    ) -> tuple[MLEResult | MAPResult | MCMCResult, SolvedModel]:
         """Estimate and solve a model specification.
 
         Parameters
@@ -829,18 +831,21 @@ class DSGESolver:
             Compiled model holding attrs and methods feeding the solution and esitmation routines.
         y : NDArray | pd.DataFrame
             Observed data, Array in observable order or ``DataFrame`` with columns named for the observables.
-        routine : str
+        order : int | None
+            Perturbation order for the final solution. `None` uses the lowest order compatible with the
+            selected filter mode: 1 for linear and extended, 2 for unscented.
+        routine : Literal["mle", "map", "mcmc"]
             "mle" (Maximum Likelihood Estimation), "map" (Maximum A Posteriori), or "mcmc" (Markov Chain Monte Carlo).
             "map" and "mcmc" require `estimated_params` to be in the `{name: Prior}` mapping form.
         theta0 : NDArray | Mapping[str, float] | None
             Initial guess for estimatied parameters. Mapping of {name: guess} or array in order of appearance in calibration.
             If None, the calibration values are used as initial guess.
-        posterior_point : str
-            Point estimates to use when sampling a posterior distribution with MCMC.
-            "mean", "mode", "median", "map". Mode and median are equivalent aliases.
+        posterior_point : Literal["mean", "mode", "map", "last"]
+            Point estimates to use when sampling a posterior distribution with MCMC {"mean", "mode", "map", "last"}.
+            "mode" and "map" are equivalent aliases.
         observables : list[str] | None
             Names of model observables to use in the estimation. If None, all observables are used.
-        filter_mode : str
+        filter_mode : Literal["linear", "extended", "unscented"]
             Kalman filter routine to use. "linear" (linear Gaussian), "extended" (linear Gaussian with nonlinear measurements), "unscented" (pruned unscented)
         estimated_params : list[str] | Mapping[str, Prior] | None
             Names of estimated parameters, or mapping with priors to use in MAP or MCMC. `None` estimates all parameters and uses no priors.
@@ -859,14 +864,11 @@ class DSGESolver:
 
         Returns
         -------
-        tuple[OptimizationResult | MCMCResult, SolvedModel]
+        tuple[MLEResult | MAPResult | MCMCResult, SolvedModel]
             Estimation result and solved model produced with the estimated parameters.
-            OptimizationResult is a base for MLEResult and MAPResult.
 
         """
-        ss_seed = (
-            np.asarray(ss_seed, dtype=float64) if isinstance(ss_seed, list) else ss_seed
-        )
+        order = _resolve_order(order, filter_mode)
         est = self._estimator(
             compiled=compiled,
             y=y,
@@ -880,30 +882,20 @@ class DSGESolver:
             R=R,
         )
 
-        routine_norm = routine.lower()
-        result: Any
-        if routine_norm == "mle":
-            result = est.mle(theta0=theta0, **method_kwargs)
-            solve_params = result.theta
-        elif routine_norm == "map":
-            result = est.map(theta0=theta0, **method_kwargs)
-            solve_params = result.theta
-        elif routine_norm == "mcmc":
-            result = est.mcmc(theta0=theta0, **method_kwargs)
-            if posterior_point == "mean":
-                theta_star = asarray(result.samples.mean(axis=0), dtype=float64)
-            elif posterior_point == "last":
-                theta_star = asarray(result.samples[-1], dtype=float64)
-            elif (posterior_point == "map") or (posterior_point == "mode"):
-                idx = int(np.argmax(result.logpost_trace))
-                theta_star = asarray(result.samples[idx], dtype=float64)
-            else:
-                raise ValueError(
-                    "posterior_point must be one of {'mean', 'last', 'map', 'mode'}."
-                )
-            solve_params = dict(zip(est.param_names, (float64(v) for v in theta_star)))
-        else:
-            raise ValueError("routine must be one of {'mle', 'map', 'mcmc'}.")
+        result: MLEResult | MAPResult | MCMCResult
+
+        match routine.lower():
+            case "mle":
+                result = est.mle(theta0=theta0, **method_kwargs)
+                solve_params = result.theta
+            case "map":
+                result = est.map(theta0=theta0, **method_kwargs)
+                solve_params = result.theta
+            case "mcmc":
+                result = est.mcmc(theta0=theta0, **method_kwargs)
+                solve_params = _mcmc_posterior_point(result, posterior_point)
+            case _:
+                raise ValueError("`routine` must be one of {'mle', 'map', 'mcmc'}.")
 
         # Sync writes the estimated values into the calibration, which is where
         # `solve` reads its full parameter vector from; passing them again would
@@ -911,6 +903,40 @@ class DSGESolver:
         self._sync_calibration_with_params(compiled, solve_params)
         solved = self.solve(
             compiled=compiled,
+            order=order,
             ss_seed=ss_seed,
         )
         return result, solved
+
+
+def _resolve_order(order: int | None, filter_mode: str) -> int:
+    if order is not None:
+        if order not in (1, 2):
+            raise ValueError(f"order must be 1 or 2, got {order}.")
+        if order == 1 and filter_mode == "unscented":
+            raise ValueError("UKF requires second-order tensors, use `order=2`.")
+        return order
+
+    if filter_mode == "unscented":
+        return 2
+    if filter_mode in ("linear", "extended"):
+        return 1
+    raise ValueError(
+        f"Unrecognized filter_mode {filter_mode!r}, must be one of {{'linear', 'extended', 'unscented'}}."
+    )
+
+
+def _mcmc_posterior_point(result: MCMCResult, point: str) -> dict[str, float64]:
+    if point == "mean":
+        theta_star = asarray(result.samples.mean(axis=0), dtype=float64)
+    elif point == "last":
+        theta_star = asarray(result.samples[-1], dtype=float64)
+    elif point in ("map", "mode"):
+        idx = int(np.argmax(result.logpost_trace))
+        theta_star = asarray(result.samples[idx], dtype=float64)
+    else:
+        raise ValueError(
+            "`posterior_point` must be one of {'mean', 'last', 'map', 'mode'}, got "
+            f"{point!r}."
+        )
+    return dict(zip(result.param_names, (float64(v) for v in theta_star)))

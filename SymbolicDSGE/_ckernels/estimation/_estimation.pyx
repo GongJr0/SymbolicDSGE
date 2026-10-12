@@ -842,13 +842,12 @@ def run_mcmc(
     dict map_options=None,
 ):
     """Native adaptive random-walk Metropolis over the linear / extended /
-    unscented +logpost objective. Marshals the mode's context DTO once, borrows
-    ``rng``'s PCG64 state, and runs the whole chain in native ``nogil`` code,
-    returning the kept draws (in theta space) plus the acceptance / BK counters.
-    ``rng`` must be a numpy ``Generator``; it is held for the whole native run
-    (the ``bitgen_t*`` is borrowed). Draws stay bit-exact numpy; the proposal
-    (Cholesky) and covariance adaptation are native (statistical, not bit,
-    equivalence with the numpy chain).
+    unscented objective. Returns the kept draws (in parameter space) plus
+    the acceptance / BK counters. ``rng`` must be a numpy ``Generator``;
+    it is held for the whole native run (the ``bitgen_t*`` is borrowed).
+    Draws stay bit-exact numpy; the proposal (Cholesky) and covariance
+    adaptation are statistically equivalent but not bit exact against a
+    numpy chain.
 
     ``theta0`` is where the chain begins. With ``compute_map`` the MAP is found
     from it first and the chain begins at the mode instead; without, ``theta0``

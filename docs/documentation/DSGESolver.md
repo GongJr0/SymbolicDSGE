@@ -94,9 +94,9 @@ DSGESolver.estimate(
     routine: Literal["mle", "map", "mcmc"] = "mle",
     theta0: Mapping[str, float] | None = None, # (1)!
     observables: list[str] | None = None,
-    filter_mode: str = "linear", # (3)!
+    filter_mode: Literal["linear", "extended", "unscented"] = "linear", # (3)!
     estimated_params: list[str] | Mapping[str, Prior] | None = None,
-    ss_seed: np.ndarray | dict[str, float] | None = None,
+    ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
     P0: np.ndarray | None = None,
     jitter: float | None = None,
     symmetrize: bool = True, 
@@ -108,9 +108,6 @@ DSGESolver.estimate(
 1. Initial parameter guess: A `dict` uses values that are specified and leaves the rest at their calibration. `None` uses the calibration values for each estimated parameter.
 2. If `#!python R` is not supplied, it comes from the Kalman config: a fixed calibrated matrix, or rebuilt from the current parameters each evaluation when the model exposes symbolic `R` metadata.
 3. Filter algorithm for the likelihood: `#!python "linear"` (affine measurements), `#!python "extended"` (EKF, nonlinear measurements), or `#!python "unscented"` (UKF).
-
-???+ note "Filter Mode"
-    `#!python filter_mode` is an explicit choice and is no longer inferred. Use `#!python "linear"` when all selected measurement equations are affine, `#!python "extended"` for nonlinear measurements, and `#!python "unscented"` to run the UKF. The `#!python "unscented"` mode solves the model to second order internally and is the only mode that consumes the perturbation policy tensors.
 
 ???+ note "Point Estimation Result"
     `routine="mle"` and `routine="map"` return `SymbolicDSGE.OptimizationResult`. They run entirely in the native backend, whose optimizer set is `#!python "L-BFGS-B"` (default) and `#!python "Nelder-Mead"`; passing any other optimizer raises. See [`Estimator`](./Estimator.md#mle) for the per-optimizer keyword arguments.
@@ -136,19 +133,20 @@ DSGESolver.estimate_and_solve(
     *,
     compiled: CompiledModel,
     y: np.ndarray | pd.DataFrame,
+    order: int | None = None,
     routine: Literal["mle", "map", "mcmc"] = "mle",
     theta0: Mapping[str, float] | None = None,
-    posterior_point: str = "mean",
+    posterior_point: Literal["mean", "mode", "map", "last"] = "mean",
     observables: list[str] | None = None,
-    filter_mode: str = "linear",
+    filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     estimated_params: list[str] | Mapping[str, Prior] | None = None,
-    ss_seed: np.ndarray | dict[str, float] | None = None,
+    ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
     P0: np.ndarray | None = None,
     jitter: float | None = None,
     symmetrize: bool = True, 
     R: np.ndarray | None = None,
     **method_kwargs: Any,
-) -> tuple[MCMCResult | OptimizationResult, SolvedModel]
+) -> tuple[MLEResult | MAPResult | MCMCResult, SolvedModel]
 ```
 
 Runs estimation and then solves the model at the estimated parameter point.
