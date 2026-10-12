@@ -1,8 +1,11 @@
 import numpy as np
+import pandas as pd
 import pytest
 
+from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.estimation import Estimator, make_prior
 from SymbolicDSGE.estimation.results import MLEResult
+from SymbolicDSGE.kalman.config import KalmanConfig
 
 
 def test_solver_exposes_private_estimator_factory(post82):
@@ -66,6 +69,8 @@ def test_solver_estimate_and_solve_mle(post82, monkeypatch):
     # and the result names only what was estimated.
     assert seen["parameters"] is None
     assert set(result.theta) == {"psi_pi", "rho_r"}
+    # No order asked for, and the linear filter's minimum is first.
+    assert solved.policy.order == 1
 
     calibrated = _calibrated(solved)
     for name, value in result.theta.items():
@@ -195,3 +200,49 @@ def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(post82):
     # Only the estimated name is written back; the rest still read at the value
     # they entered with, captured before the run rather than after it.
     assert calibrated["rho_r"] == pytest.approx(entered)
+
+
+@pytest.fixture(scope="module")
+def rbc_solve_order_bundle(rbc_second_order_test_model_path):
+    """Second-order RBC, the smallest model an ``order=2`` return can come off:
+    one shock, one observable, and a levels specification the expansion is taken
+    about. The fixture has no kalman section, so a scalar measurement-noise
+    configuration is supplied."""
+    model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
+    solver = DSGESolver(model, KalmanConfig(R=np.array([[0.01]], dtype=np.float64)))
+    compiled = solver.compile()
+
+    # The config's own ss_seed resolves Newton here, and x0 defaults to the
+    # steady state.
+    solved = solver.solve(compiled=compiled, order=2)
+    T = 40
+    rng = np.random.default_rng(20261012)
+    sim = solved.sim(
+        T=T,
+        shocks={"e": rng.normal(0.0, 0.01, size=T)},
+        observables=True,
+    )
+    return {
+        "solver": solver,
+        "compiled": compiled,
+        "y": pd.DataFrame({"c_obs": sim.observables["c_obs"]}),
+    }
+
+
+def test_solver_estimate_and_solve_returns_the_order_it_was_asked_for(
+    rbc_solve_order_bundle,
+):
+    """Order is a statement about the returned model, not about the objective: a
+    linear filter reads nothing above first order, so a second-order model is a
+    valid thing to ask back from one."""
+    _, solved = rbc_solve_order_bundle["solver"].estimate_and_solve(
+        compiled=rbc_solve_order_bundle["compiled"],
+        y=rbc_solve_order_bundle["y"],
+        order=2,
+        routine="mle",
+        observables=["c_obs"],
+        estimated_params=["rho"],
+        theta0={"rho": 0.9},
+        bounds={"rho": (0.0, 0.99)},
+    )
+    assert solved.policy.order == 2

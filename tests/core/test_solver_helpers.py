@@ -9,7 +9,7 @@ import pytest
 import sympy as sp
 
 from SymbolicDSGE.core import ModelParser
-from SymbolicDSGE.core.solver import DSGESolver
+from SymbolicDSGE.core.solver import DSGESolver, _resolve_order
 
 t = sp.Symbol("t")
 c = sp.Function("c")
@@ -73,6 +73,35 @@ def test_resolve_variable_order_errors():
 def test_solve_rejects_bad_order():
     with pytest.raises(ValueError, match="order must be 1 or 2"):
         DSGESolver.solve(SimpleNamespace(), None, order=3)
+
+
+def test_resolve_order_defaults_to_the_filter_minimum():
+    assert _resolve_order(None, "linear") == 1
+    assert _resolve_order(None, "extended") == 1
+    assert _resolve_order(None, "unscented") == 2
+
+
+def test_resolve_order_keeps_an_explicit_order_at_or_above_the_minimum():
+    # A filter reads nothing above the order it needs, so every order from its
+    # minimum up produces the same likelihood and the choice is the caller's.
+    assert _resolve_order(1, "linear") == 1
+    assert _resolve_order(2, "linear") == 2
+    assert _resolve_order(2, "unscented") == 2
+
+
+def test_resolve_order_rejects_first_order_under_the_ukf():
+    with pytest.raises(ValueError, match="UKF requires second-order tensors"):
+        _resolve_order(1, "unscented")
+
+
+def test_resolve_order_rejects_an_order_no_solve_produces():
+    with pytest.raises(ValueError, match="order must be 1 or 2"):
+        _resolve_order(3, "linear")
+
+
+def test_resolve_order_rejects_an_unknown_filter_mode():
+    with pytest.raises(ValueError, match="Unrecognized filter_mode"):
+        _resolve_order(None, "kalman")
 
 
 @pytest.fixture

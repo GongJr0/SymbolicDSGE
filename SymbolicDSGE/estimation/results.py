@@ -186,8 +186,8 @@ class MCMCResult:
     param_names : list[str]
         Names of the parameters in the order they appear in the samples array.
     samples : NDF
-        Posterior samples drawn from the MCMC run, typically a 2D array of shape
-        (n_draws, n_params).
+        Posterior samples (in parameter space) drawn from the MCMC run, typically
+        a 2D array of shape (n_draws, n_params).
     logpost_trace : NDF
         Log-posterior values corresponding to each sample in the samples array.
     logjac_trace : NDF

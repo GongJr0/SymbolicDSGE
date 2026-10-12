@@ -6,6 +6,7 @@ from ..estimation.spec import PriorSpec
 
 FunctionKind = Literal["array", "figure"]
 EstimationMethod = Literal["mle", "map", "mcmc"]
+PosteriorPoint = Literal["mean", "map", "mode", "last"]
 WorkspaceTab = Literal["estimation", "mc"]
 
 
@@ -64,5 +65,5 @@ class EstimationRunRequest(TypedDict):
     method_kwargs: dict[str, Any]
     compile_kwargs: dict[str, Any]
     ss_seed: list[float] | None
-    posterior_point: str
+    posterior_point: PosteriorPoint
     estimate_and_solve: bool
