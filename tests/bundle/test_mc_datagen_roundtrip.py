@@ -6,22 +6,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.bundle import BundleBuilder, load_bundle
-from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.step_factories import (
     add_payload_step,
     raw_model_data_step,
     simulation_step,
 )
-
-
-@pytest.fixture(scope="module")
-def simulation_model(post82_test_model_path) -> SolvedModel:
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    return solver.solve(solver.compile())
 
 
 @pytest.mark.parametrize("as_parquet", [True, False], ids=["parquet", "csv"])
@@ -44,7 +35,7 @@ def test_datagen_counts_roundtrip(
     request: pytest.FixtureRequest,
     tmp_path: Path,
 ) -> None:
-    reference = request.getfixturevalue("simulation_model") if n_simulations else None
+    reference = request.getfixturevalue("solved_post82") if n_simulations else None
     payload = np.arange(12, dtype=np.float64).reshape(6, 2)
     # A source-free transform first also exercises the absence of a positional datagen.
     steps = [add_payload_step("payload", payload)]

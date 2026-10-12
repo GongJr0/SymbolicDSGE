@@ -8,7 +8,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from SymbolicDSGE import DSGESolver, ModelParser, Shock
+from SymbolicDSGE import Shock
 from SymbolicDSGE.core.shock.spec import _normalized_spec
 from SymbolicDSGE.monte_carlo.allocation import native_shock_scratch
 from SymbolicDSGE.core.solved_model import SolvedModel
@@ -43,13 +43,6 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 
 T = 12
 N_REP = 2
-
-
-@pytest.fixture(scope="module")
-def solved(post82_test_model_path) -> SolvedModel:
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    return solver.solve(solver.compile())
 
 
 def _plan(steps: list[MCStep], reference: object = None) -> Any:
@@ -269,7 +262,7 @@ def test_selecting_a_field_the_producer_does_not_emit_is_rejected() -> None:
         _plan(steps)
 
 
-def test_a_filter_needs_datagen_observables(solved: SolvedModel) -> None:
+def test_a_filter_needs_datagen_observables(solved_post82: SolvedModel) -> None:
     steps = [
         simulation_step("sim", target="reference", T=T, observables=False),
         filter_step(
@@ -278,7 +271,7 @@ def test_a_filter_needs_datagen_observables(solved: SolvedModel) -> None:
     ]
 
     with pytest.raises(ValueError, match="does not produce source field 'observables'"):
-        _plan(steps, reference=solved)
+        _plan(steps, reference=solved_post82)
 
 
 # --------------------------------------------------------------------------

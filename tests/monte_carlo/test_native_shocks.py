@@ -18,12 +18,12 @@ from scipy.stats import t
 T = 16
 
 
-def _plan(solved_test_model, shocks, shock_scale=1.0):
-    resolved = resolve_shock_plan(solved_test_model.compiled, shocks, T)
+def _plan(solved_test, shocks, shock_scale=1.0):
+    resolved = resolve_shock_plan(solved_test.compiled, shocks, T)
     return get_native_shock_plan(resolved, T, shock_scale)
 
 
-def _run_states(solved_test_model, shocks, n_rep, n_jobs):
+def _run_states(solved_test, shocks, n_rep, n_jobs):
     """Simulate ``n_rep`` replications and return their retained state paths."""
     pipeline = MCPipeline(
         [
@@ -33,7 +33,7 @@ def _run_states(solved_test_model, shocks, n_rep, n_jobs):
         ]
     )
     lowered = lower_native_run(
-        pipeline, models={"reference": solved_test_model}, n_rep=n_rep, n_jobs=n_jobs
+        pipeline, models={"reference": solved_test}, n_rep=n_rep, n_jobs=n_jobs
     )
     assert (
         run_native(lowered.allocation, lowered.steps, lowered.input_bindings).status
@@ -61,33 +61,33 @@ def _run_states(solved_test_model, shocks, n_rep, n_jobs):
 )
 @pytest.mark.parametrize("n_jobs", [1, 2])
 def test_replication_shocks_reproduce_a_single_replication(
-    solved_test_model, shocks, n_jobs
+    solved_test, shocks, n_jobs
 ) -> None:
     step = simulation_step("sim", target="reference", T=T, shocks=shocks)
-    states = _run_states(solved_test_model, shocks, 5, n_jobs)
+    states = _run_states(solved_test, shocks, 5, n_jobs)
 
     for rep_idx in (0, 2, 4):
-        drawn = replication_shocks(solved_test_model, step, rep_idx)
-        expected = solved_test_model.sim(T, shocks=drawn, shock_scale=1.0).X
+        drawn = replication_shocks(solved_test, step, rep_idx)
+        expected = solved_test.sim(T, shocks=drawn, shock_scale=1.0).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)
 
 
-def test_replication_shocks_rejects_a_deterministic_step(solved_test_model) -> None:
+def test_replication_shocks_rejects_a_deterministic_step(solved_test) -> None:
     step = simulation_step("sim", target="reference", T=T, shocks=None)
     with pytest.raises(ValueError, match="draws no shocks"):
-        replication_shocks(solved_test_model, step, 0)
+        replication_shocks(solved_test, step, 0)
 
 
 # --- the fallback route ------------------------------------------------------
 
 
-def test_unported_spec_still_runs_off_the_python_slab(solved_test_model) -> None:
+def test_unported_spec_still_runs_off_the_python_slab(solved_test) -> None:
     shocks = {("e_u",): Shock(t, seed=3, dist_kwargs={"df": 5})}
-    assert _plan(solved_test_model, shocks) is None
+    assert _plan(solved_test, shocks) is None
 
-    states = _run_states(solved_test_model, shocks, 3, 1)
-    resolved = resolve_shock_plan(solved_test_model.compiled, shocks, T)
+    states = _run_states(solved_test, shocks, 3, 1)
+    resolved = resolve_shock_plan(solved_test.compiled, shocks, T)
     for rep_idx in range(3):
         drawn = resolved.matrix(T, 1.0, rep_idx)
-        expected = solved_test_model.sim(T, shocks={("e_u",): drawn[:, 0]}).X
+        expected = solved_test.sim(T, shocks={("e_u",): drawn[:, 0]}).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)

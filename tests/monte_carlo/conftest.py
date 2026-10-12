@@ -54,14 +54,6 @@ def mc_run():
     return run
 
 
-@pytest.fixture(scope="session")
-def solved_test_model(test_model_path) -> SolvedModel:
-    """A first-order solve of ``test.yaml``, shared across the suite."""
-    model, kalman = ModelParser(test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    return solver.solve(solver.compile())
-
-
 @dataclass(frozen=True)
 class TransformRun:
     """Retained transform payloads, beside the inputs and parameters used.
@@ -87,7 +79,7 @@ class TransformRun:
 
 
 @pytest.fixture(scope="session")
-def transform_run(solved_test_model, mc_run) -> TransformRun:
+def transform_run(solved_test, mc_run) -> TransformRun:
     """One pipeline covering every built-in TRANSFORM step, run once.
 
     Costs one solve and one lowering, with no simulation.
@@ -122,7 +114,7 @@ def transform_run(solved_test_model, mc_run) -> TransformRun:
         ]
     )
 
-    result = mc_run(pipeline, solved_test_model, n_rep=1)
+    result = mc_run(pipeline, solved_test, n_rep=1)
     assert result.failures == ()
 
     # One replication, so the leading axis is dropped here rather than in every

@@ -7,7 +7,6 @@ import numpy as np
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.monte_carlo._runner import run as run_native
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
-from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run

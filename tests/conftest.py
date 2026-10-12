@@ -118,6 +118,79 @@ def model_path(request) -> Path:
 
 
 @pytest.fixture(scope="session")
+def post82_bundle(post82_test_model_path):
+    from SymbolicDSGE import DSGESolver, ModelParser
+
+    parser = ModelParser(post82_test_model_path).get_all()
+    solver = DSGESolver(*parser)
+    compiled = solver.compile()
+    solved = solver.solve(compiled=compiled)
+    return {
+        "solver": solver,
+        "parsed": parser,
+        "compiled": compiled,
+        "solved": solved,
+    }
+
+
+@pytest.fixture(scope="session")
+def solver_post82(post82_bundle):
+    return post82_bundle["solver"]
+
+
+@pytest.fixture(scope="session")
+def parsed_post82(post82_bundle):
+    return post82_bundle["parsed"]
+
+
+@pytest.fixture(scope="session")
+def compiled_post82(post82_bundle):
+    return post82_bundle["compiled"]
+
+
+@pytest.fixture(scope="session")
+def solved_post82(post82_bundle):
+    return post82_bundle["solved"]
+
+
+@pytest.fixture(scope="session")
+def test_bundle(test_model_path):
+    from SymbolicDSGE import DSGESolver, ModelParser
+
+    parser = ModelParser(test_model_path).get_all()
+    solver = DSGESolver(*parser)
+    compiled = solver.compile()
+    solved = solver.solve(compiled=compiled)
+    return {
+        "solver": solver,
+        "parsed": parser,
+        "compiled": compiled,
+        "solved": solved,
+    }
+
+
+@pytest.fixture(scope="session")
+def solver_test(test_bundle):
+    return test_bundle["solver"]
+
+
+@pytest.fixture(scope="session")
+def parsed_test(test_bundle):
+    return test_bundle["parsed"]
+
+
+@pytest.fixture(scope="session")
+def compiled_test(test_bundle):
+    return test_bundle["compiled"]
+
+
+@pytest.fixture(scope="session")
+def solved_test(test_bundle):
+    """A solved model for the test fixture, for Monte Carlo tests."""
+    return test_bundle["solved"]
+
+
+@pytest.fixture(scope="session")
 def solved_rbc_second_order(rbc_second_order_test_model_path):
     """Second-order RBC model with positive observation noise for filter tests."""
     import numpy as np
