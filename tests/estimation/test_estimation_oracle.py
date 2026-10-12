@@ -27,23 +27,24 @@ import pytest
 from SymbolicDSGE.estimation import Estimator, make_prior
 from SymbolicDSGE.estimation.results import MLEResult, MAPResult
 
-# The ``post82`` fixture lives in tests/estimation/conftest.py.
+# The POST82 model is the session-wide bundle; ``y_post82`` lives in
+# tests/estimation/conftest.py.
 
 _TH0 = {"psi_pi": 2.0, "rho_r": 0.8}
 _BNDS = {"psi_pi": (1.0, 5.0), "rho_r": (0.0, 0.99)}
 
 
-def _mle_estimator(post82, mode: str) -> Estimator:
+def _mle_estimator(compiled, solved, y, mode: str) -> Estimator:
     P0 = None
     if mode == "unscented":
-        P0 = np.eye(len(post82["compiled"].var_names), dtype=np.float64)
+        P0 = np.eye(len(compiled.var_names), dtype=np.float64)
     return Estimator(
-        compiled=post82["compiled"],
-        y=post82["y"],
-        observables=post82["obs"],
+        compiled=compiled,
+        y=y,
+        observables=compiled.observable_names,
         filter_mode=mode,
         estimated_params=["psi_pi", "rho_r"],
-        ss_seed=post82["steady"],
+        ss_seed=solved.policy.steady_state,
         P0=P0,
     )
 
@@ -68,33 +69,33 @@ def _assert_mle_packing(est: Estimator, res: MLEResult) -> None:
         ("unscented", 205.1999554164),
     ],
 )
-def test_mle_lbfgsb_oracle(post82, mode, golden_fun):
-    est = _mle_estimator(post82, mode)
+def test_mle_lbfgsb_oracle(compiled_post82, solved_post82, y_post82, mode, golden_fun):
+    est = _mle_estimator(compiled_post82, solved_post82, y_post82, mode)
     res = est.mle(theta0=_TH0, bounds=_BNDS)
     assert res.fun == pytest.approx(golden_fun, abs=1e-3)
     _assert_mle_packing(est, res)
 
 
-def test_mle_nelder_mead_oracle(post82):
-    est = _mle_estimator(post82, "linear")
+def test_mle_nelder_mead_oracle(compiled_post82, solved_post82, y_post82):
+    est = _mle_estimator(compiled_post82, solved_post82, y_post82, "linear")
     res = est.mle(theta0=_TH0, bounds=_BNDS, method="Nelder-Mead")
     assert res.fun == pytest.approx(203.5359358684, abs=1e-3)
     _assert_mle_packing(est, res)
 
 
-def test_map_lbfgsb_oracle(post82):
+def test_map_lbfgsb_oracle(compiled_post82, solved_post82, y_post82):
     prior = make_prior(
         distribution="normal",
         parameters={"mean": 2.0, "std": 0.5},
         transform="identity",
     )
     est = Estimator(
-        compiled=post82["compiled"],
-        y=post82["y"],
-        observables=post82["obs"],
+        compiled=compiled_post82,
+        y=y_post82,
+        observables=compiled_post82.observable_names,
         filter_mode="linear",
         estimated_params={"psi_pi": prior},
-        ss_seed=post82["steady"],
+        ss_seed=solved_post82.policy.steady_state,
     )
     res = est.map(theta0={"psi_pi": 2.0}, bounds={"psi_pi": (1.0, 5.0)})
     assert isinstance(res, MAPResult)

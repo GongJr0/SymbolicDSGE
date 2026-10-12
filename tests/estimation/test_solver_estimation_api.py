@@ -2,45 +2,49 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE import DSGESolver
 from SymbolicDSGE.estimation import Estimator, make_prior
 from SymbolicDSGE.estimation.results import MLEResult
-from SymbolicDSGE.kalman.config import KalmanConfig
 
 
-def test_solver_exposes_private_estimator_factory(post82):
-    est = post82["solver"]._estimator(
-        compiled=post82["compiled"],
-        y=post82["y"],
-        observables=post82["obs"],
+def test_solver_exposes_private_estimator_factory(
+    solver_post82, compiled_post82, solved_post82, y_post82
+):
+    est = solver_post82._estimator(
+        compiled=compiled_post82,
+        y=y_post82,
+        observables=compiled_post82.observable_names,
         estimated_params=["psi_pi"],
-        ss_seed=post82["steady"],
+        ss_seed=solved_post82.policy.steady_state,
     )
     assert isinstance(est, Estimator)
 
 
-def test_solver_estimate_validates_config_initial_guess_against_prior(post82):
-    solver = post82["solver"]
+def test_solver_estimate_validates_config_initial_guess_against_prior(
+    solver_post82, compiled_post82, solved_post82, y_post82
+):
+    solver = solver_post82
 
     # The prior's transform is the parameter's domain, so map rejects an initial
     # guess outside it before the search: psi_pi is positive under the log
     # transform its gamma prior carries, and the config starts it at -1.0.
     with pytest.raises(ValueError, match="out of support"):
         solver.estimate(
-            compiled=post82["compiled"],
-            y=post82["y"],
+            compiled=compiled_post82,
+            y=y_post82,
             routine="map",
-            observables=post82["obs"],
+            observables=compiled_post82.observable_names,
             estimated_params={
                 "psi_pi": make_prior("gamma", {"mean": 2.0, "std": 0.5}, "log")
             },
-            ss_seed=post82["steady"],
+            ss_seed=solved_post82.policy.steady_state,
             theta0={"psi_pi": -1.0},
         )
 
 
-def test_solver_estimate_and_solve_mle(post82, monkeypatch):
-    solver = post82["solver"]
+def test_solver_estimate_and_solve_mle(post82_restore, y_post82, monkeypatch):
+    solver = post82_restore["solver"]
+    compiled = post82_restore["compiled"]
 
     # Spied rather than replaced: the solve has to run for ``solved`` to be a
     # real model, and the only thing a run cannot show is a kwarg that is never
@@ -55,12 +59,12 @@ def test_solver_estimate_and_solve_mle(post82, monkeypatch):
     monkeypatch.setattr(solver, "solve", spy)
 
     result, solved = solver.estimate_and_solve(
-        compiled=post82["compiled"],
-        y=post82["y"],
+        compiled=compiled,
+        y=y_post82,
         routine="mle",
-        observables=post82["obs"],
+        observables=compiled.observable_names,
         estimated_params=["psi_pi", "rho_r"],
-        ss_seed=post82["steady"],
+        ss_seed=post82_restore["solved"].policy.steady_state,
         theta0={"psi_pi": 2.0, "rho_r": 0.8},
         bounds={"psi_pi": (1.0, 5.0), "rho_r": (0.0, 0.99)},
     )
@@ -77,16 +81,18 @@ def test_solver_estimate_and_solve_mle(post82, monkeypatch):
         assert calibrated[name] == pytest.approx(float(value))
 
 
-def test_solver_estimate_accepts_theta0_dictionary(post82):
-    solver = post82["solver"]
+def test_solver_estimate_accepts_theta0_dictionary(
+    solver_post82, compiled_post82, solved_post82, y_post82
+):
+    solver = solver_post82
 
     out = solver.estimate(
-        compiled=post82["compiled"],
-        y=post82["y"],
+        compiled=compiled_post82,
+        y=y_post82,
         routine="mle",
-        observables=post82["obs"],
+        observables=compiled_post82.observable_names,
         estimated_params=["psi_pi", "rho_r"],
-        ss_seed=post82["steady"],
+        ss_seed=solved_post82.policy.steady_state,
         theta0={"psi_pi": 2.0, "rho_r": 0.8},
         bounds={"psi_pi": (1.0, 5.0), "rho_r": (0.0, 0.99)},
     )
@@ -95,25 +101,30 @@ def test_solver_estimate_accepts_theta0_dictionary(post82):
     assert "psi_pi" in out.theta and "rho_r" in out.theta
 
 
-def test_solver_estimate_rejects_theta0_naming_an_unestimated_parameter(post82):
+def test_solver_estimate_rejects_theta0_naming_an_unestimated_parameter(
+    solver_post82, compiled_post82, solved_post82, y_post82
+):
     """A sparse theta0 fills from the calibration, so only a name that is not an
     estimation target is an error."""
     with pytest.raises(ValueError, match="not estimated"):
-        post82["solver"].estimate(
-            compiled=post82["compiled"],
-            y=post82["y"],
+        solver_post82.estimate(
+            compiled=compiled_post82,
+            y=y_post82,
             routine="mle",
-            observables=post82["obs"],
+            observables=compiled_post82.observable_names,
             estimated_params=["psi_pi"],
-            ss_seed=post82["steady"],
+            ss_seed=solved_post82.policy.steady_state,
             theta0={"rho_r": 0.8},
         )
 
 
 def test_solver_theta0_dictionary_is_mapped_to_unconstrained_for_transformed_prior(
-    post82,
+    solver_post82,
+    compiled_post82,
+    solved_post82,
+    y_post82,
 ):
-    solver = post82["solver"]
+    solver = solver_post82
 
     # A log-transformed prior means the dict theta0 (given in parameter space) is
     # mapped through the transform to the unconstrained theta the driver expects;
@@ -125,12 +136,12 @@ def test_solver_theta0_dictionary_is_mapped_to_unconstrained_for_transformed_pri
     )
     with pytest.warns(UserWarning, match="MLE will ignore"):
         out = solver.estimate(
-            compiled=post82["compiled"],
-            y=post82["y"],
+            compiled=compiled_post82,
+            y=y_post82,
             routine="mle",
-            observables=post82["obs"],
+            observables=compiled_post82.observable_names,
             estimated_params={"psi_pi": prior},
-            ss_seed=post82["steady"],
+            ss_seed=solved_post82.policy.steady_state,
             theta0={"psi_pi": 2.0},
             bounds={"psi_pi": (1.0, 5.0)},
         )
@@ -157,14 +168,15 @@ def _normal_prior(mean, std):
     )
 
 
-def test_solver_estimate_and_solve_mcmc(post82):
-    result, solved = post82["solver"].estimate_and_solve(
-        compiled=post82["compiled"],
-        y=post82["y"],
+def test_solver_estimate_and_solve_mcmc(post82_restore, y_post82):
+    compiled = post82_restore["compiled"]
+    result, solved = post82_restore["solver"].estimate_and_solve(
+        compiled=compiled,
+        y=y_post82,
         routine="mcmc",
-        observables=post82["obs"],
+        observables=compiled.observable_names,
         estimated_params={"psi_pi": _normal_prior(2.0, 0.5)},
-        ss_seed=post82["steady"],
+        ss_seed=post82_restore["solved"].policy.steady_state,
         posterior_point="map",
         n_draws=30,
         burn_in=30,
@@ -178,16 +190,20 @@ def test_solver_estimate_and_solve_mcmc(post82):
     assert _calibrated(solved)["psi_pi"] == pytest.approx(at_map)
 
 
-def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(post82):
-    entered = _calibrated(post82["solver"].solve(post82["compiled"]))["rho_r"]
+def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(
+    post82_restore, y_post82
+):
+    solver = post82_restore["solver"]
+    compiled = post82_restore["compiled"]
+    entered = _calibrated(solver.solve(compiled))["rho_r"]
 
-    result, solved = post82["solver"].estimate_and_solve(
-        compiled=post82["compiled"],
-        y=post82["y"],
+    result, solved = solver.estimate_and_solve(
+        compiled=compiled,
+        y=y_post82,
         routine="mcmc",
-        observables=post82["obs"],
+        observables=compiled.observable_names,
         estimated_params={"psi_pi": _normal_prior(2.0, 0.5)},
-        ss_seed=post82["steady"],
+        ss_seed=post82_restore["solved"].policy.steady_state,
         posterior_point="mean",
         n_draws=20,
         burn_in=20,
@@ -202,42 +218,33 @@ def test_solver_estimate_and_solve_mcmc_preserves_non_estimated_params(post82):
     assert calibrated["rho_r"] == pytest.approx(entered)
 
 
-@pytest.fixture(scope="module")
-def rbc_solve_order_bundle(rbc_second_order_test_model_path):
-    """Second-order RBC, the smallest model an ``order=2`` return can come off:
+def test_solver_estimate_and_solve_returns_the_order_it_was_asked_for(parsed_rbc_so):
+    """Order is a statement about the returned model, not about the objective: a
+    linear filter reads nothing above first order, so a second-order model is a
+    valid thing to ask back from one.
+
+    Second-order RBC is the smallest model an ``order=2`` return can come off:
     one shock, one observable, and a levels specification the expansion is taken
-    about. The fixture has no kalman section, so a scalar measurement-noise
-    configuration is supplied."""
-    model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
-    solver = DSGESolver(model, KalmanConfig(R=np.array([[0.01]], dtype=np.float64)))
+    about. Compiled here rather than shared, since the estimate writes its point
+    into the compiled model's own calibration.
+    """
+    solver = DSGESolver(*parsed_rbc_so)
     compiled = solver.compile()
 
     # The config's own ss_seed resolves Newton here, and x0 defaults to the
     # steady state.
-    solved = solver.solve(compiled=compiled, order=2)
+    reference = solver.solve(compiled=compiled, order=2)
     T = 40
     rng = np.random.default_rng(20261012)
-    sim = solved.sim(
+    sim = reference.sim(
         T=T,
         shocks={"e": rng.normal(0.0, 0.01, size=T)},
         observables=True,
     )
-    return {
-        "solver": solver,
-        "compiled": compiled,
-        "y": pd.DataFrame({"c_obs": sim.observables["c_obs"]}),
-    }
 
-
-def test_solver_estimate_and_solve_returns_the_order_it_was_asked_for(
-    rbc_solve_order_bundle,
-):
-    """Order is a statement about the returned model, not about the objective: a
-    linear filter reads nothing above first order, so a second-order model is a
-    valid thing to ask back from one."""
-    _, solved = rbc_solve_order_bundle["solver"].estimate_and_solve(
-        compiled=rbc_solve_order_bundle["compiled"],
-        y=rbc_solve_order_bundle["y"],
+    _, solved = solver.estimate_and_solve(
+        compiled=compiled,
+        y=pd.DataFrame({"c_obs": sim.observables["c_obs"]}),
         order=2,
         routine="mle",
         observables=["c_obs"],

@@ -20,7 +20,7 @@ from SymbolicDSGE._ckernels.estimation import (
 
 
 @pytest.fixture(scope="module")
-def pack(post82):
+def pack(compiled_post82):
     """``build_prior_tables`` bound to the shared model.
 
     The packer reads the model only through the role resolvers, which decide
@@ -28,8 +28,8 @@ def pack(post82):
     for one whose support fits the role. No name used here is a Q or R role, so
     these cases pack the rows they were given.
     """
-    compiled = post82["compiled"]
-    observables = post82["obs"]
+    compiled = compiled_post82
+    observables = compiled_post82.observable_names
 
     def _pack(priors, param_index, matrix_blocks=None):
         tables, _ = build_prior_tables(
