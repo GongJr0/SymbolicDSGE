@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from functools import cache
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,24 +16,10 @@ from SymbolicDSGE.bundle.loader import (
     LoadedMC,
     load_bundle,
 )
-from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation.results import MCMCResult, MAPResult, OptimizationResult
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "bundle_fixture.sdsge"
-
-
-@cache
-def _compiled_reference(test_model_path):
-    """A real compiled model for the estimator the loader now builds eagerly.
-
-    The archive and manifest below stay mocked, since the branch under test is
-    the loader's result dispatch. The model does not: ``_load_estimation``
-    constructs the estimator the spec describes, so a stand-in that cannot be
-    bound to would test a load that never happens.
-    """
-    model, kalman = ModelParser(test_model_path).get_all()
-    return DSGESolver(model, kalman).compile()
 
 
 def test_load_bundle_fixture_end_to_end():
@@ -103,7 +88,7 @@ def test_rebuild_mcmc_result_ok():
     assert res.n_draws == 3 and res.thin == 1
 
 
-def test_load_estimation_optimization_result_dispatch(test_model_path):
+def test_load_estimation_optimization_result_dispatch(compiled_test):
     # A non-mcmc estimation_result routes through _rebuild_optimization_result,
     # with no estimation_data / estimation_trace members present.
     spec_member = SimpleNamespace(path="spec.json", model_name="reference")
@@ -142,7 +127,7 @@ def test_load_estimation_optimization_result_dispatch(test_model_path):
         read_text=lambda path: spec_json if path == "spec.json" else result_json,
         read=lambda path: b"y.0,y.1\n1.0,2.0\n3.0,4.0\n",
     )
-    reference = SimpleNamespace(compiled=_compiled_reference(test_model_path))
+    reference = SimpleNamespace(compiled=compiled_test)
 
     loaded = L._load_estimation(archive, manifest, {"reference": reference})
     assert isinstance(loaded.result, OptimizationResult)

@@ -1,7 +1,6 @@
 # type: ignore
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib.pyplot as plt

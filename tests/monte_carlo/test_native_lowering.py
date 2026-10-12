@@ -456,12 +456,8 @@ def test_native_lowering_runs_second_order_simulation(solved_rbc_so) -> None:
     )
 
 
-def test_native_lowering_runs_linear_and_extended_filters(
-    post82_test_model_path,
-) -> None:
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    solved = solver.solve(solver.compile())
+def test_native_lowering_runs_linear_and_extended_filters(solved_post82) -> None:
+    solved = solved_post82
     T = 8
     expected_simulation = solved.sim(T, observables=True)
     expected_y = np.column_stack(

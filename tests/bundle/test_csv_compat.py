@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import cache
 from types import SimpleNamespace
 from typing import Any
 
@@ -22,7 +21,6 @@ from SymbolicDSGE.bundle.parquet import (
     csv_to_columns,
     trace_to_csv,
 )
-from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult
 from SymbolicDSGE.estimation.spec import (
@@ -138,7 +136,7 @@ def test_builder_observable_names_length_must_match_matrix() -> None:
 
 
 def test_csv_mode_round_trips_through_builder_and_loader(
-    tmp_path: Path, test_model_yaml, test_model_path
+    tmp_path: Path, test_model_yaml, compiled_test
 ) -> None:
     rng = np.random.default_rng(1)
     observed = rng.standard_normal((10, 2))
@@ -162,7 +160,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(
         BundleBuilder(created_by="csv-test")
         .add_model("reference", test_model_yaml, compile_kwargs={})
         .add_estimation(
-            _estimator(test_model_path, observed),
+            _estimator(compiled_test, observed),
             result=result,
             as_parquet=False,
         )
@@ -181,7 +179,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(
 
 
 def test_loader_reads_hand_built_csv_only_bundle(
-    tmp_path: Path, test_model_yaml, test_model_path
+    tmp_path: Path, test_model_yaml, compiled_test
 ) -> None:
     """A hand-zipped bundle with CSV members (no Parquet) is a valid archive."""
     observed_csv = b"Infl,Rate\n0.1,0.2\n0.3,0.4\n0.5,0.6\n"
@@ -192,7 +190,7 @@ def test_loader_reads_hand_built_csv_only_bundle(
         }
     )
 
-    spec = _estimator(test_model_path).to_spec()
+    spec = _estimator(compiled_test).to_spec()
     manifest = Manifest(
         created_by="hand-zipped",
         members=[
@@ -285,15 +283,8 @@ def _estimation_source(spec: EstimatorSpec) -> Any:
     return SimpleNamespace(to_spec=lambda: spec)
 
 
-@cache
-def _compiled_reference(test_model_path) -> Any:
-    """The compiled ``test.yaml`` a loaded reference model comes back as."""
-    model, kalman = ModelParser(test_model_path).get_all()
-    return DSGESolver(model, kalman).compile()
-
-
 def _estimator(
-    test_model_path, y: Any = None, *, observables: tuple[str, ...] = ("Infl", "Rate")
+    compiled_test, y: Any = None, *, observables: tuple[str, ...] = ("Infl", "Rate")
 ) -> Estimator:
     """A live estimator over the bundled model, in the shape a loader rebuilds.
 
@@ -306,7 +297,7 @@ def _estimator(
         else np.asarray(y, dtype=np.float64)
     )
     return Estimator(
-        compiled=_compiled_reference(test_model_path),
+        compiled=compiled_test,
         y=matrix,
         observables=list(observables),
         estimated_params=["beta", "sigma"],

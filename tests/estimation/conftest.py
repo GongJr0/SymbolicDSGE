@@ -18,40 +18,31 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from sympy import Symbol
 
-from SymbolicDSGE import ModelParser, DSGESolver
 from SymbolicDSGE.core.config import SymbolGetterDict
 from SymbolicDSGE.estimation import Estimator
 
 
 @pytest.fixture(scope="session")
-def post82(post82_test_model_path):
+def post82(post82_bundle):
     """A compiled POST82 model plus a short simulated observation panel.
 
     Returns the solver, compiled model, observation frame, steady-state seed and
     observable names. The simulation seed is fixed so the golden oracle values
     stay reproducible.
     """
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    steady = np.zeros((compiled.n_declared,), dtype=np.float64)
-    solved = solver.solve(compiled=compiled, ss_seed=steady)
+    compiled = post82_bundle["compiled"]
+    solved = post82_bundle["solved"]
 
-    calib = compiled.config.calibration
-    sig = {
-        s: float(calib.parameters[calib.shock_std[Symbol(s)]])
-        for s in ("e_g", "e_z", "e_r")
-    }
+    calib = compiled.config.calibration.parameters
     T = 48
     rng = np.random.default_rng(20260724)
     sim = solved.sim(
         T=T,
         shocks={
-            "e_g": rng.normal(0.0, sig["e_g"], size=T),
-            "e_z": rng.normal(0.0, sig["e_z"], size=T),
-            "e_r": rng.normal(0.0, sig["e_r"], size=T),
+            "e_g": rng.normal(0.0, calib["sig_g"], size=T),
+            "e_z": rng.normal(0.0, calib["sig_z"], size=T),
+            "e_r": rng.normal(0.0, calib["sig_r"], size=T),
         },
         x0=np.zeros((compiled.n_var,), dtype=np.float64),
         observables=True,
@@ -64,10 +55,10 @@ def post82(post82_test_model_path):
         }
     )
     return {
-        "solver": solver,
+        "solver": post82_bundle["solver"],
         "compiled": compiled,
         "y": y,
-        "steady": steady,
+        "steady": solved.policy.steady_state,
         "obs": ["OutGap", "Infl", "Rate"],
     }
 

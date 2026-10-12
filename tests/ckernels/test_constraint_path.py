@@ -18,7 +18,7 @@ import pytest
 import sympy as sp
 
 from SymbolicDSGE._ckernels.occbin._occbin import constraint_path
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver
 from SymbolicDSGE.core.config import Constraint
 
 t = sp.Symbol("t", integer=True)
@@ -31,8 +31,8 @@ OVER_ON, OVER_BOTH, OVER_OFF = -2.0, 0.0, 2.0
 
 
 @pytest.fixture(scope="module")
-def compiled(post82_test_model_path):
-    model, kalman = ModelParser(post82_test_model_path).get_all()
+def compiled(parsed_post82):
+    model, kalman = parsed_post82
     conf = copy.deepcopy(model)
     by_name = {v.__name__: v for v in conf.variables.variables}
     g, z = by_name["g"], by_name["z"]

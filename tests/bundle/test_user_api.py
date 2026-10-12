@@ -15,20 +15,10 @@ import pytest
 import SymbolicDSGE
 from SymbolicDSGE import (
     BundleBuilder,
-    DSGESolver,
     ModelParser,
     load_bundle,
 )
 from SymbolicDSGE.bundle import LoadedBundle
-from SymbolicDSGE.core.solved_model import SolvedModel
-
-
-def _solve_test_model(test_model_path) -> SolvedModel:
-    parser = ModelParser(test_model_path)
-    model, kalman = parser.get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    return solver.solve(compiled)
 
 
 def test_top_level_exports_are_importable() -> None:
@@ -51,10 +41,8 @@ def test_from_string_preserves_source_text_exactly(test_model_yaml) -> None:
     assert parser.parsed.model.source_yaml == weird_text
 
 
-def test_save_sdsge_round_trips_via_load_bundle(
-    tmp_path: Path, test_model_path
-) -> None:
-    solved = _solve_test_model(test_model_path)
+def test_save_sdsge_round_trips_via_load_bundle(tmp_path: Path, solved_test) -> None:
+    solved = solved_test
     target = solved.save_sdsge(
         tmp_path / "model.sdsge",
         compile_kwargs={},
@@ -67,9 +55,9 @@ def test_save_sdsge_round_trips_via_load_bundle(
 
 
 def test_to_bundle_builder_returns_chainable_builder(
-    tmp_path: Path, test_model_path
+    tmp_path: Path, solved_test
 ) -> None:
-    solved = _solve_test_model(test_model_path)
+    solved = solved_test
     builder = solved.to_bundle_builder(compile_kwargs={}, created_by="api-test")
     assert isinstance(builder, BundleBuilder)
     target = builder.write(tmp_path / "chained.sdsge")
@@ -79,9 +67,9 @@ def test_to_bundle_builder_returns_chainable_builder(
 
 
 def test_save_sdsge_yaml_text_override_takes_precedence(
-    tmp_path: Path, test_model_yaml, test_model_path
+    tmp_path: Path, test_model_yaml, solved_test
 ) -> None:
-    solved = _solve_test_model(test_model_path)
+    solved = solved_test
     override = test_model_yaml + "\n# explicit override marker\n"
     target = solved.save_sdsge(
         tmp_path / "override.sdsge",
@@ -98,8 +86,8 @@ def test_save_sdsge_yaml_text_override_takes_precedence(
     assert archive.read_text(member_path) == override
 
 
-def test_save_sdsge_raises_without_source_yaml(tmp_path: Path, test_model_path) -> None:
-    solved = _solve_test_model(test_model_path)
+def test_save_sdsge_raises_without_source_yaml(tmp_path: Path, solved_test) -> None:
+    solved = solved_test
     # Simulate a programmatically constructed config (no parse history).
     solved.compiled.config.source_yaml = None
     with pytest.raises(ValueError, match="source YAML"):

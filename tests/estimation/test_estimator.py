@@ -975,17 +975,15 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches(post82):
         )
 
 
-def test_resolve_r_and_effective_observables_error_paths(post82, test_model_path):
+def test_resolve_r_and_effective_observables_error_paths(post82, compiled_test):
     # A model with no `kalman:` block parses to no config at all. Without one
     # there is nothing to build R from, so the estimator fails fast at
     # construction rather than lazily when the R block is resolved. P0 has a
     # default and is not part of the demand.
-    model, kalman = ModelParser(test_model_path).get_all()
-    compiled_no_kalman = DSGESolver(model, kalman).compile()
-    assert compiled_no_kalman.kalman is None
+    assert compiled_test.kalman is None
     with pytest.raises(ValueError, match="R must be provided"):
         Estimator(
-            compiled=compiled_no_kalman,
+            compiled=compiled_test,
             y=np.zeros((3, 2), dtype=np.float64),
             estimated_params=["beta"],
         )
