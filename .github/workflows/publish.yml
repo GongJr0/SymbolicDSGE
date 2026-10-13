@@ -19,9 +19,15 @@ on:
 permissions:
   contents: read
 
+# A force-push supersedes a PR run and frees its share of the job budget; a tag
+# gets its own group and is never cancelled mid-publish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build_wheels:
-    name: Wheels (${{ matrix.os }})
+    name: Wheels (${{ matrix.os }}, ${{ matrix.shard.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -31,6 +37,13 @@ jobs:
           - ubuntu-24.04-arm   # manylinux aarch64 (public-repo runner)
           - windows-latest     # win_amd64
           - macos-latest       # arm64 only (numba ships no x86_64 macOS wheels since 0.63)
+        # Pair leave one tested version on reach runner.
+        # cp311 and cp315 are tested.
+        shard:
+          - name: cp311-cp313
+            build: "cp311-* cp312-* cp313-*"
+          - name: cp314-cp315
+            build: "cp314-* cp315-*"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,13 +78,14 @@ jobs:
       - name: Build & test wheels
         uses: pypa/cibuildwheel@v4.1.0
         env:
+          CIBW_BUILD: ${{ matrix.shard.build }}
           CIBW_ENVIRONMENT_WINDOWS: SDSGE_TOOLCHAIN=clang-cl
 
       - name: Upload wheels
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.os }}-${{ matrix.shard.name }}
           path: ./wheelhouse/*.whl
 
   build_sdist:
