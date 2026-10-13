@@ -16,9 +16,8 @@ chow_test_step(
     X_field: str,
     y_column: int | Sequence[int] | slice | ndarray | None = None,
     X_columns: int | Sequence[int] | slice | ndarray | None = None,
-    t_break: int = 10,
     burn_in: int = 0,
-    drop_initial: bool = False,
+    t_break: int = 10,
     alpha: float = 0.05,
 ) -> MCStep
 ```
@@ -41,8 +40,7 @@ __Inputs:__
 | X_field | required | Regressor producer field. |
 | y_column | `None` | Response column selector. It must resolve to one series. |
 | X_columns | `None` | Optional regressor column subset. |
-| t_break | `10` | Break point row after selection and row trimming. |
 | burn_in | `0` | Rows dropped from both inputs before the test. |
-| drop_initial | `False` | Start at row `1` when `burn_in=0`. |
+| t_break | `10` | Break point row after selection and row trimming. |
 | alpha | `0.05` | Test size. |
 | n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |

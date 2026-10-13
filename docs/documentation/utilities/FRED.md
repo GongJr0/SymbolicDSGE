@@ -16,10 +16,10 @@ tags:
 ???+ warning "API Key Required"
     An API key from the "St. Louis FED" is required for the `#!python FRED` class to operate. If you don't have an API key, you can generate one for free by making an account on FRED.
 
-    [FRED](//fred.stlouisfed.org){ .md-button }
+    [FRED](https://fred.stlouisfed.org){ .md-button }
 
 ```python
-class FRED(key_name: str, key_env: str | pathlib.Path | None)
+class FRED(key_name: str, key_env: str | pathlib.Path | None = None)
 ```
 
 `#!python FRED` allows easy retrieval of time series stored in the FRED database. The class can identify the given `#!python key_name` if placed in the `.env` file anywhere in the discoverable file tree of the project. Alternatively, you can specify an `env` file that contains `key_name` in it.

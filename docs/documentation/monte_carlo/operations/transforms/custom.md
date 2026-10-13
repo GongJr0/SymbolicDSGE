@@ -15,7 +15,6 @@ transform_step(
     output_shape: tuple[int, int],
     columns: ColumnSelector = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
 ) -> MCStep
 ```
 
@@ -43,7 +42,6 @@ __Inputs:__
 | output_shape | `(rows, columns)` of the output buffer. Both dimensions must be non-negative. It fixes the arena size, so it cannot depend on the replication. |
 | columns | Column selector applied to the input: an int, a sequence of ints, a slice, or `None` for all columns. |
 | burn_in | Number of leading input rows to drop. |
-| drop_initial | If `True` and `burn_in` is zero, start at input row `1`. |
 
 ???+ note "Bundled custom operations"
     A pipeline written to an `.sdsge` bundle stores the `NumbaCustomFunc` as a side-channel resource, and the portable spec references it by key. Compiled Numba artifacts are never serialized; a loaded transform recompiles on first use.

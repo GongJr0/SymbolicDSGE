@@ -14,7 +14,6 @@ jarque_bera_test_step(
     field: str,
     column: int | Sequence[int] | slice | ndarray | None = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     alpha: float = 0.05,
 ) -> MCStep
 ```
@@ -32,6 +31,5 @@ __Inputs:__
 | field | required | Producer field. Use `states` or `observables` for data steps, a filter output field for filter steps, or `payload` for transform steps. |
 | column | `None` | Column selector. It must resolve to one series. |
 | burn_in | `0` | Rows dropped before the test. |
-| drop_initial | `False` | Start at row `1` when `burn_in=0`. |
 | alpha | `0.05` | Test size. |
 | n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |

@@ -8,7 +8,11 @@ tags:
 ```python
 kde_step(
     name: str,
-    **kwargs: Any,
+    *,
+    trace: str,
+    bandwidth: float | str = "scott",
+    grid_points: int = 200,
+    kernel: str = "gaussian"
 ) -> MCStep
 ```
 

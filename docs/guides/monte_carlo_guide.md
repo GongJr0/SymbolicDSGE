@@ -112,7 +112,8 @@ datagen_step = simulation_step(
 )
 ```
 
-1. `target` can be either `"reference"` or `"dgp"` and defaults to `"dgp"`. It selects which model role is simulated.
+1. `target` is the name of a model later supplied to the pipeline. It can be any key in the `models` dictionary passed to `MCPipeline.run(...)`.
+2. `n_retain` controls how many replications are retained for post-processing. `-1` retains all, `0` retains none, and any positive integer retains that many evenly spaced replications.
 
 ???+ note "Replication Streams"
     Normal and uniform shocks are drawn inside the native loop. Each replication addresses its own stream of a counter based engine keyed on the specification's seed and its position in the mapping, so replications never overlap and two specifications sharing a seed stay independent.
@@ -137,12 +138,12 @@ Scaling is already applied to what comes back, which is why `shock_scale` is `1.
 ### Filtering
 
 The first step after datagen is filtering the reference model using a Kalman filter against the DGP simulated observables.
-`filter_step` selects its model with `target`, which defaults to `"reference"`, and reads observations from the named producer and field.
+`filter_step` selects its model with `target` and reads observations from the named producer and field.
 
 ```python
 from SymbolicDSGE.monte_carlo.step_factories import filter_step
 
-kf_step = filter_step(obs_source="datagen", obs_field="observables")
+kf_step = filter_step(target="reference", obs_source="datagen", obs_field="observables")
 ```
 
 `filter_step` accepts `filter_mode`, `observables`, `x0`, `P0`, `R`, `jitter`, `symmetrize`, `joseph_cov`, and `return_shocks`, mirroring the `SolvedModel.kalman` configuration.
@@ -226,7 +227,7 @@ builtin_std = standardize_step(
 
 1. Name of the step. It becomes the trace key `payload.custom_std`.
 2. The function to be executed. A bare function is wrapped in `NumbaCustomFunc` automatically.
-3. `source` and `field` select the upstream array. `columns`, `burn_in`, and `drop_initial` narrow it further.
+3. `source` and `field` select the upstream array. `columns` and `burn_in` narrow it further.
 4. Required. The output buffer is planned before the run starts, so the transform must declare the exact `(rows, columns)` it writes.
 5. In this case, the `innov` attribute (raw innovations) of the filter output is used.
 
@@ -310,8 +311,7 @@ The `MCPipeline` object explains the procedure that will run per iteration.
 
 ```python
 mc = pipeline.run(
-    reference=reference,
-    dgp=dgp,
+    models={"reference": reference, "dgp": dgp},
     n_rep=1000,
     n_jobs=-1,  # (1)!
     verbosity=2,  # (2)!
@@ -325,26 +325,34 @@ mc = pipeline.run(
     The native loop only collects per-step profiling when it is asked to. At any lower verbosity `meta.step_elapsed_s`, `meta.step_counts`, and `meta.step_failures` are empty dictionaries.
 
 ```bash
->>> MC run concluded successfully in 0.03s with 35908.90 it/s.
+>>> MC run concluded successfully in 0.03s with 38767.80 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 68953.51 worker it/s (0.01 worker-s), 35908.90 wall it/s.
-    filter: 0 failures, 6023.76 worker it/s (0.17 worker-s), 35908.90 wall it/s.
-    custom_std: 0 failures, 374324.32 worker it/s (0.00 worker-s), 35908.90 wall it/s.
-    builtin_std: 0 failures, 261767.71 worker it/s (0.00 worker-s), 35908.90 wall it/s.
-    std_innov_mean: 0 failures, 95516.12 worker it/s (0.01 worker-s), 35908.90 wall it/s.
+    datagen: 0 failures, 45168.13 worker it/s (0.02 worker-s), 38767.80 wall it/s.
+    filter: 0 failures, 4032.96 worker it/s (0.25 worker-s), 38767.80 wall it/s.
+    custom_std: 0 failures, 205495.06 worker it/s (0.00 worker-s), 38767.80 wall it/s.
+    builtin_std: 0 failures, 214224.37 worker it/s (0.00 worker-s), 38767.80 wall it/s.
+    std_innov_mean: 0 failures, 85341.00 worker it/s (0.01 worker-s), 38767.80 wall it/s.
 
 Post-processing Report:
 
-    custom_postproc: Succeeded in 0.0018s.
-    builtin_kde: Succeeded in 0.2148s.
+    custom_postproc: Succeeded in 0.0026s.
+    builtin_kde: Succeeded in 1.4043s.
 ```
 
 ???+ note "Worker Time vs Wall Time"
     Worker rates divide by the time summed across threads, so they describe the cost of a step. Wall rates divide by the elapsed run time, so they describe what the step contributed to the observed duration. The two coincide when `n_jobs` resolves to `1`.
 
 This returns a `MCPipelineResult` object containing test summaries for each test step executed in the pipeline.
-To extract the test results, their p-values, and other relevant statistics, we can access the test summaries by key (step names).
+We can examine each test via its `MCTestResult` object (see [MC result containers](../documentation/monte_carlo/results.md)):
+```python
+std_innov_mean_res = mc.test_summaries["std_innov_mean"]
+print(f"Mean statistic: {std_innov_mean_res.mean_statistic:.3f}")
+print(f"Mean p-value: {std_innov_mean_res.mean_pval:.3f}")
+...
+```
+
+Alternatively, all results can be iterated over to produce a single summary table:
 
 ```python
 
@@ -366,8 +374,7 @@ print(t_summary.round(3))
 
 ```bash
 >>>                mean_statistic  mean_pval  rejection_rate  ci_low  ci_high
-std_innov_mean           3.196      0.488           0.068   0.063    0.073
-
+std_innov_mean           4.829      0.373           0.178   0.354    0.392
 ```
 
 Regression results are accessed similarly in `MCPipelineResult.regression_summaries`, and post-processing artifacts are accessed by key in `MCPipelineResult.postproc: dict[str, Any]`.
@@ -380,7 +387,7 @@ Regression results are accessed similarly in `MCPipelineResult.regression_summar
     `MCPipeline.validate_memory_requirements` takes the arguments `run` takes and reports what they would allocate, broken down by step. `run` performs the same check unless `check_memory_availability=False`. If a run is provably too large (meaning your RAM and swap combined are smaller than the required allocation), a `MemoryError` will block the run instead of seeing it crash hours later. `check_memory_availability=False` also disables this behavior.
 
     ```python
-    print(pipeline.validate_memory_requirements(reference=reference, dgp=dgp, n_rep=400_000, n_jobs=-1))
+    print(pipeline.validate_memory_requirements(models={"reference": reference, "dgp": dgp}, n_rep=400_000, n_jobs=-1))
     ```
 
     ```bash

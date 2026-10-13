@@ -10,6 +10,13 @@ regression_step(
     name: str,
     n_retain: int = -1,
     *,
+    y_source: str,
+    y_field: str,
+    X_source: str,
+    X_field: str,
+    y_column: int | Sequence[int] | slice | ndarray | None = None,
+    X_columns: int | Sequence[int] | slice | ndarray | None = None,
+    burn_in: int = 0,
     kind: Literal[
         "ols",
         "ridge",
@@ -19,15 +26,7 @@ regression_step(
         "elastic_net",
         "elastic_net_gs",
     ] = "ols",
-    y_source: str,
-    y_field: str,
-    X_source: str,
-    X_field: str,
-    y_column: int | Sequence[int] | slice | ndarray | None = None,
-    X_columns: int | Sequence[int] | slice | ndarray | None = None,
     intercept: bool = True,
-    burn_in: int = 0,
-    drop_initial: bool = False,
     variables: Sequence[str] | None = None,
     **kind_kwargs: Any,
 ) -> MCStep
@@ -57,16 +56,15 @@ __Inputs:__
 
 | __Name__ | __Default__ | __Description__ |
 |:---------|:-----------:|----------------:|
-| kind | `"ols"` | Regression estimator. |
+| n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |
 | y_source | required | Producer step for the response. |
 | y_field | required | Response producer field. |
 | X_source | required | Producer step for regressors. |
 | X_field | required | Regressor producer field. |
 | y_column | `None` | Response column selector. It must resolve to one series. |
 | X_columns | `None` | Optional regressor column subset. |
-| intercept | `True` | Add an intercept column. |
 | burn_in | `0` | Rows dropped from both inputs before fitting. |
-| drop_initial | `False` | Start at row `1` when `burn_in=0`. |
+| kind | `"ols"` | Regression estimator. |
+| intercept | `True` | Add an intercept column. |
 | variables | `None` | Optional names for design columns. |
-| kind_kwargs | none | Extra estimator arguments, such as `alpha`, `l1_ratio`, or grid settings. |
-| n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |
+| kind_kwargs | N/A | Extra estimator arguments, such as `alpha`, `l1_ratio`, or grid settings. |

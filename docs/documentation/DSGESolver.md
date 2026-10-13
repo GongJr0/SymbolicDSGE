@@ -5,7 +5,7 @@ tags:
 # DSGESolver
 
 ```python
-class DSGESolver(model_config: ModelConfig, kalman_config: KalmanConfig | None)
+class DSGESolver(model_config: ModelConfig, kalman_config: KalmanConfig | None = None)
 ```
 
 Class responsible for model compilation and solution.

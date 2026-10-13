@@ -17,7 +17,6 @@ cusumsq_test_step(
     y_column: int | Sequence[int] | slice | ndarray | None = None,
     X_columns: int | Sequence[int] | slice | ndarray | None = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     alpha: float = 0.05,
 ) -> MCStep
 ```
@@ -41,6 +40,5 @@ __Inputs:__
 | y_column | `None` | Response column selector. It must resolve to one series. |
 | X_columns | `None` | Optional regressor column subset. |
 | burn_in | `0` | Rows dropped from both inputs before the test. |
-| drop_initial | `False` | Start at row `1` when `burn_in=0`. |
 | alpha | `0.05` | Test size. |
 | n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |

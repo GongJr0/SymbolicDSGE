@@ -200,7 +200,7 @@ SolvedModel.kalman(
     filter_mode: Literal['linear', 'extended', 'unscented'] = 'linear',
     *,
     observables: list[str] | None = None, # (1)!
-    x0: dict[str, float | float64] | list[float | float64] | NDF | None = None, # (2)!
+    x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None, # (2)!
     jitter: float | None = None, # (3)!
     symmetrize: bool = False,
     joseph_cov: bool = False, 
