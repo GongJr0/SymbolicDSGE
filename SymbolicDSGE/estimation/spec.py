@@ -66,8 +66,9 @@ class EstimatorParams(TypedDict):
 
     Attributes
     ----------
-    observables : Sequence[str] | None
-        Selected observables for the estimation. If ``None``, all observables are used.
+    observables : Sequence[str]
+        Selected observables for the estimation. Records resolved names for a bundle,
+        therefore cannot be `None` in any `.sdsge` file.
     filter_mode : str
         Kalman filter mode. One of "linear", "extended", or "unscented".
     P0 : Sequence[Sequence[float]] | None
