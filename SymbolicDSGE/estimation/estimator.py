@@ -171,7 +171,7 @@ class Estimator:
         priors = {name: prior.to_spec() for name, prior in (self.priors or {}).items()}
 
         params = EstimatorParams(
-            observables=self.observables,
+            observables=self._prepared_filter.observables,
             filter_mode=self._prepared_filter.mode,
             P0=self.P0.tolist() if self.P0 is not None else None,
             R=self.R.tolist() if self.R is not None else None,
@@ -183,10 +183,7 @@ class Estimator:
             joseph_cov=self._prepared_filter.joseph_cov,
         )
 
-        if isinstance(self.y, pd.DataFrame):
-            y = self.y.to_numpy().tolist()
-        else:
-            y = self.y.tolist()
+        y = self._prepared_filter.y_reordered.tolist()
 
         return EstimatorSpec(
             y=y,
