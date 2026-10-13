@@ -507,11 +507,9 @@ def test_native_lowering_runs_linear_and_extended_filters(solved_post82) -> None
 
 
 def test_native_lowering_reorders_linear_filter_inputs_and_overrides(
-    post82_test_model_path,
+    solved_post82,
 ) -> None:
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    solved = solver.solve(solver.compile())
+    solved = solved_post82
     T = 8
     requested = ["Rate", "OutGap"]
     n_var = len(solved.compiled.var_names)
