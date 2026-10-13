@@ -185,21 +185,19 @@ def test_graph_faults_are_rejected_at_construction(steps, match) -> None:
     ],
     ids=["window-over-length", "window-zero", "order-zero", "order-negative"],
 )
-def test_invalid_step_parameters_fail_in_the_run(
-    mc_run, solved_test_model, step
-) -> None:
+def test_invalid_step_parameters_fail_in_the_run(mc_run, solved_test, step) -> None:
     # These build and lower without complaint; the kernel rejects them per
     # replication. The status code is carried in the message and deliberately not
     # asserted via catching the `fail_fast` raise.
     pipeline = MCPipeline([_datagen(), step()])
 
     with pytest.raises(RuntimeError, match="'bad'"):
-        mc_run(pipeline, solved_test_model, n_rep=1, fail_fast=True)
+        mc_run(pipeline, solved_test, n_rep=1, fail_fast=True)
 
 
 def test_run_failures_are_collected_per_replication_when_not_failing_fast(
     mc_run,
-    solved_test_model,
+    solved_test,
 ) -> None:
     pipeline = MCPipeline(
         [
@@ -210,7 +208,7 @@ def test_run_failures_are_collected_per_replication_when_not_failing_fast(
         ]
     )
 
-    result = mc_run(pipeline, solved_test_model, n_rep=3, fail_fast=False)
+    result = mc_run(pipeline, solved_test, n_rep=3, fail_fast=False)
 
     assert result.n_successful == 0
     assert len(result.failures) == 3
@@ -220,7 +218,7 @@ def test_run_failures_are_collected_per_replication_when_not_failing_fast(
 
 def test_log_of_a_non_positive_sample_is_rejected(
     mc_run,
-    solved_test_model,
+    solved_test,
 ) -> None:
     result = MCPipeline(
         [
@@ -229,7 +227,7 @@ def test_log_of_a_non_positive_sample_is_rejected(
             log_step("log_bad", source="nonpositive", field="payload"),
         ]
     ).run(
-        {"reference": solved_test_model},
+        {"reference": solved_test},
         n_rep=1,
         fail_fast=False,
         check_memory_availability=False,
@@ -239,14 +237,14 @@ def test_log_of_a_non_positive_sample_is_rejected(
     assert all("log_bad" in f.failures for f in result.failures)
 
 
-def test_diff_order_at_the_sample_length_fails(mc_run, solved_test_model) -> None:
+def test_diff_order_at_the_sample_length_fails(mc_run, solved_test) -> None:
     result = MCPipeline(
         [
             _datagen(),
             diff_step("drained", source="dat", field="observables", order=PERIODS),
         ]
     ).run(
-        {"reference": solved_test_model},
+        {"reference": solved_test},
         n_rep=1,
         fail_fast=False,
         check_memory_availability=False,

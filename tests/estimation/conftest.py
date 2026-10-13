@@ -1,16 +1,12 @@
 """Shared real-model fixtures for the estimation suite.
 
 The native estimation path (``Estimator.mle`` / ``map``, ``solver.estimate``)
-drives the compiled kernels end to end, so it can no longer be exercised on a
+drives the compiled kernels end to end, so it cannot be exercised on a
 ``SimpleNamespace`` stub: construction resolves ``ss_seed`` through the solver
-and the driver needs real cfunc addresses and a real Klein solve. Tests that
-run an optimization therefore share one compiled POST82 model, built once for
-the package.
-
-Sharing it means the one mutable thing it carries has to be put back after
-every test: ``estimate_and_solve`` writes the estimated point into the model's
-calibration, so a golden computed off that calibration would otherwise depend
-on what ran before it.
+and the driver needs real cfunc addresses and a real Klein solve. The model is
+the session-wide ``post82_bundle``; what this package adds is the observation
+panel the goldens are values off, and a guarded handle for the one call that
+writes to the model it was given.
 """
 
 from __future__ import annotations
@@ -18,81 +14,55 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-from sympy import Symbol
 
-from SymbolicDSGE import ModelParser, DSGESolver
 from SymbolicDSGE.core.config import SymbolGetterDict
 from SymbolicDSGE.estimation import Estimator
 
 
 @pytest.fixture(scope="session")
-def post82(post82_test_model_path):
-    """A compiled POST82 model plus a short simulated observation panel.
+def y_post82(compiled_post82, solved_post82):
+    """A simulated panel over POST82's observables, in their compiled order.
 
-    Returns the solver, compiled model, observation frame, steady-state seed and
-    observable names. The simulation seed is fixed so the golden oracle values
-    stay reproducible.
+    The seed and ``T`` are fixed because the oracle goldens are values off this
+    panel, not properties of it.
     """
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    steady = np.zeros((compiled.n_declared,), dtype=np.float64)
-    solved = solver.solve(compiled=compiled, ss_seed=steady)
-
-    calib = compiled.config.calibration
-    sig = {
-        s: float(calib.parameters[calib.shock_std[Symbol(s)]])
-        for s in ("e_g", "e_z", "e_r")
-    }
+    calib = compiled_post82.config.calibration.parameters
     T = 48
     rng = np.random.default_rng(20260724)
-    sim = solved.sim(
+    sim = solved_post82.sim(
         T=T,
         shocks={
-            "e_g": rng.normal(0.0, sig["e_g"], size=T),
-            "e_z": rng.normal(0.0, sig["e_z"], size=T),
-            "e_r": rng.normal(0.0, sig["e_r"], size=T),
+            "e_g": rng.normal(0.0, calib["sig_g"], size=T),
+            "e_z": rng.normal(0.0, calib["sig_z"], size=T),
+            "e_r": rng.normal(0.0, calib["sig_r"], size=T),
         },
-        x0=np.zeros((compiled.n_var,), dtype=np.float64),
+        x0=np.zeros((compiled_post82.n_var,), dtype=np.float64),
         observables=True,
     )
-    y = pd.DataFrame(
-        {
-            "OutGap": sim.observables["OutGap"],
-            "Infl": sim.observables["Infl"],
-            "Rate": sim.observables["Rate"],
-        }
+    return pd.DataFrame(
+        {name: sim.observables[name] for name in compiled_post82.observable_names}
     )
-    return {
-        "solver": solver,
-        "compiled": compiled,
-        "y": y,
-        "steady": steady,
-        "obs": ["OutGap", "Infl", "Rate"],
-    }
 
 
-@pytest.fixture(autouse=True)
-def post82_calibration_is_restored(request):
-    """Put the shared model's calibration back after each test.
+@pytest.fixture
+def post82_restore(post82_bundle):
+    """The session bundle, with its calibration put back afterwards.
 
-    Requested lazily: a test that never asks for ``post82`` does not pay for
-    building it.
+    ``estimate_and_solve`` syncs the estimated point into the model's
+    calibration, and the bundle is shared with the whole suite, so a test that
+    runs one reaches the model through here rather than through
+    ``compiled_post82``.
     """
-    if "post82" not in request.fixturenames:
-        yield
-        return
-
-    calibration = request.getfixturevalue("post82")["compiled"].config.calibration
+    calibration = post82_bundle["compiled"].config.calibration
     entered = SymbolGetterDict(calibration.parameters)
     try:
-        yield
+        yield post82_bundle
     finally:
         calibration.parameters = entered
 
 
 @pytest.fixture
-def post82_estimator(post82):
+def post82_estimator(compiled_post82, solved_post82, y_post82):
     """Factory building an :class:`Estimator` on the shared POST82 model.
 
     Defaults to the two-parameter linear MLE setup the oracle uses; callers
@@ -102,12 +72,12 @@ def post82_estimator(post82):
 
     def _make(mode="linear", estimated_params=("psi_pi", "rho_r")):
         return Estimator(
-            compiled=post82["compiled"],
-            y=post82["y"],
-            observables=post82["obs"],
+            compiled=compiled_post82,
+            y=y_post82,
+            observables=compiled_post82.observable_names,
             filter_mode=mode,
             estimated_params=estimated_params,
-            ss_seed=post82["steady"],
+            ss_seed=solved_post82.policy.steady_state,
         )
 
     return _make

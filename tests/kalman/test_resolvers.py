@@ -418,35 +418,30 @@ def test_resolve_observations_rejects_invalid_inputs(observables, y, match):
         resolvers._resolve_observations(_make_stub_model(), observables, y)
 
 
-def _levels_rbc_solved(order: int):
-    """The RBC at a nonzero steady state, with a one-observable Kalman config.
+@pytest.fixture(scope="module")
+def solved_rbc_order1(solver_rbc_so, compiled_rbc_so) -> SolvedModel:
+    """The RBC at first order. The shared bundle solves it to second."""
+    return solver_rbc_so.solve(compiled=compiled_rbc_so, order=1)
 
-    POST82 is deviation form, so every existing filter test runs where levels
-    and gaps coincide and cannot see which one it was handed. This fixture is
-    the opposite: c_ss is far from zero, so the two are distinguishable.
+
+@pytest.fixture(scope="module")
+def levels_rbc_y(solved_rbc_so):
+    """Observations around a nonzero consumption steady state.
+
+    POST82 is deviation form, so every other filter test runs where levels and
+    gaps coincide and cannot see which one it was handed. Here c_ss is far from
+    zero, so the two are distinguishable. Both orders expand about the same
+    Newton point, so one panel serves either.
     """
-    from pathlib import Path
-    from SymbolicDSGE import ModelParser, DSGESolver
-    from SymbolicDSGE.kalman.config import KalmanConfig
-
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "fixtures"
-        / "models"
-        / "rbc_second_order.yaml"
-    )
-    model, _ = ModelParser(path).get_all()
-    kalman = KalmanConfig(R=np.array([[0.01]], dtype=FLOAT))
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled, order=order)
+    compiled = solved_rbc_so.compiled
+    ss_c = float(solved_rbc_so.policy.steady_state[compiled.idx["c"]])
     rng = np.random.default_rng(20260815)
-    ss_c = float(solved.policy.steady_state[compiled.idx["c"]])
-    y = ss_c + rng.normal(0.0, 0.01, size=(12, 1))
-    return solved, y
+    return ss_c + rng.normal(0.0, 0.01, size=(12, 1))
 
 
-def test_solved_model_filter_reports_levels_at_both_orders():
+def test_solved_model_filter_reports_levels_at_both_orders(
+    solved_rbc_order1, solved_rbc_so, levels_rbc_y
+):
     """The public filter path is in levels whatever the order.
 
     A solved model knows its expansion point and hands it to the kernel, so
@@ -456,7 +451,7 @@ def test_solved_model_filter_reports_levels_at_both_orders():
     """
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
 
-    solved1, y1 = _levels_rbc_solved(1)
+    solved1, y1 = solved_rbc_order1, levels_rbc_y
     lin = solved1.kalman(y=y1, filter_mode="linear", observables=["c_obs"])
     ss1 = np.asarray(solved1.policy.steady_state, dtype=FLOAT)
 
@@ -466,14 +461,14 @@ def test_solved_model_filter_reports_levels_at_both_orders():
     c = solved1.compiled.idx["c"]
     assert abs(float(np.mean(lin.x_filt[:, c])) - ss1[c]) < 0.5 * abs(ss1[c])
 
-    solved2, y2 = _levels_rbc_solved(2)
+    solved2, y2 = solved_rbc_so, levels_rbc_y
     ukf = solved2.kalman(y=y2, filter_mode="unscented", observables=["c_obs"])
 
     ss2 = np.asarray(solved2.policy.steady_state, dtype=FLOAT)
     assert abs(float(np.mean(ukf.x_filt[:, c])) - ss2[c]) < 0.5 * abs(ss2[c])
 
 
-def test_filter_classes_shift_only_the_state_series():
+def test_filter_classes_shift_only_the_state_series(solved_rbc_order1, levels_rbc_y):
     """``steady_state`` moves the state series and nothing else.
 
     The recursion runs in gaps either way, so the expansion point is an offset
@@ -484,7 +479,7 @@ def test_filter_classes_shift_only_the_state_series():
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
     from SymbolicDSGE.kalman.filter import KalmanFilter
 
-    solved, y = _levels_rbc_solved(1)
+    solved, y = solved_rbc_order1, levels_rbc_y
     pol = solved.policy
     C, d = solved._build_C_d_from_obs(["c_obs"])
     Q = np.asarray(_shock_covariance(solved.compiled), dtype=FLOAT)

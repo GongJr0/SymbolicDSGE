@@ -7,7 +7,6 @@ import numpy as np
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.monte_carlo._runner import run as run_native
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
-from SymbolicDSGE._diag_tests.status import TestStatus
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
@@ -427,8 +426,8 @@ def test_native_lowering_runs_first_order_simulation_with_observables(
         np.testing.assert_allclose(actual, expected_values, rtol=1e-12, atol=1e-12)
 
 
-def test_native_lowering_runs_second_order_simulation(solved_rbc_second_order) -> None:
-    solved = solved_rbc_second_order
+def test_native_lowering_runs_second_order_simulation(solved_rbc_so) -> None:
+    solved = solved_rbc_so
     pipeline = MCPipeline(
         [simulation_step("sim", target="reference", T=6, observables=False)]
     )
@@ -457,12 +456,8 @@ def test_native_lowering_runs_second_order_simulation(solved_rbc_second_order) -
     )
 
 
-def test_native_lowering_runs_linear_and_extended_filters(
-    post82_test_model_path,
-) -> None:
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    solved = solver.solve(solver.compile())
+def test_native_lowering_runs_linear_and_extended_filters(solved_post82) -> None:
+    solved = solved_post82
     T = 8
     expected_simulation = solved.sim(T, observables=True)
     expected_y = np.column_stack(
@@ -512,11 +507,9 @@ def test_native_lowering_runs_linear_and_extended_filters(
 
 
 def test_native_lowering_reorders_linear_filter_inputs_and_overrides(
-    post82_test_model_path,
+    solved_post82,
 ) -> None:
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    solved = solver.solve(solver.compile())
+    solved = solved_post82
     T = 8
     requested = ["Rate", "OutGap"]
     n_var = len(solved.compiled.var_names)
@@ -592,9 +585,9 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides(
 
 
 def test_native_lowering_runs_unscented_filter_with_rbc_fixture(
-    solved_rbc_second_order,
+    solved_rbc_so,
 ) -> None:
-    solved = solved_rbc_second_order
+    solved = solved_rbc_so
     T = 5
     y = np.zeros((T, len(solved.compiled.observable_names)), dtype=np.float64)
     pipeline = MCPipeline(

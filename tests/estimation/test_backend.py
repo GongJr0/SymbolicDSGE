@@ -6,7 +6,6 @@ import pandas as pd
 import pytest
 from sympy import Symbol
 
-from SymbolicDSGE import ModelParser, DSGESolver
 from SymbolicDSGE.core.compiled_model import (
     _measurement_covariance,
     _shock_covariance,
@@ -14,50 +13,6 @@ from SymbolicDSGE.core.compiled_model import (
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation import backend
 from SymbolicDSGE.kalman.config import KalmanConfig
-
-
-@pytest.fixture(scope="module")
-def post82_bundle(post82_test_model_path):
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-
-    steady = np.zeros((compiled.n_declared,), dtype=np.float64)
-    solved = solver.solve(compiled=compiled, ss_seed=steady)
-
-    params = model.calibration.parameters
-    std_map = model.calibration.shock_std
-    sig_g = float(params[std_map[Symbol("e_g")]])
-    sig_z = float(params[std_map[Symbol("e_z")]])
-    sig_r = float(params[std_map[Symbol("e_r")]])
-
-    T = 24
-    rng = np.random.default_rng(20260303)
-    sim = solved.sim(
-        T=T,
-        shocks={
-            "e_g": rng.normal(0.0, sig_g, size=T),
-            "e_z": rng.normal(0.0, sig_z, size=T),
-            "e_r": rng.normal(0.0, sig_r, size=T),
-        },
-        x0=np.zeros((compiled.n_var,), dtype=np.float64),
-        observables=True,
-    )
-    y = pd.DataFrame(
-        {
-            "OutGap": sim.observables["OutGap"][1:],
-            "Infl": sim.observables["Infl"][1:],
-            "Rate": sim.observables["Rate"][1:],
-        }
-    )
-    return {
-        "model": model,
-        "solver": solver,
-        "compiled": compiled,
-        "solved": solved,
-        "steady": steady,
-        "y": y,
-    }
 
 
 def test_extract_base_params_reads_the_calibration_by_name():
@@ -121,8 +76,8 @@ def test_reorder_observables_uses_compiled_default_and_validates_dataframe_colum
         )
 
 
-def test_build_Q_matches_post82_manual_structure(post82_bundle):
-    compiled = post82_bundle["compiled"]
+def test_build_Q_matches_post82_manual_structure(compiled_post82):
+    compiled = compiled_post82
     params = backend.extract_base_params(compiled)
     Q = _shock_covariance(compiled, params)
 
@@ -142,16 +97,16 @@ def test_build_Q_matches_post82_manual_structure(post82_bundle):
 
 
 def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
-    post82_bundle, monkeypatch
+    compiled_post82, solved_post82, y_post82, monkeypatch
 ):
-    compiled = post82_bundle["compiled"]
+    compiled = compiled_post82
     compiled_type = type(compiled)
     est = Estimator(
         compiled=compiled,
-        y=post82_bundle["y"],
+        y=y_post82,
         observables=["Infl", "Rate"],
         estimated_params=["psi_pi", "rho_r"],
-        ss_seed=post82_bundle["steady"],
+        ss_seed=solved_post82.policy.steady_state,
     )
 
     # prepare_filter_run resolves both cfunc addresses once; a loglik that
@@ -234,8 +189,8 @@ def test_build_R_override_and_config_branches():
     reason="R-estimation rework: R_builder/R_symbolic removed; build_R_from_config_params "
     "is being rewired onto make_R and the R std/corr param maps."
 )
-def test_kalman_symbolic_R_builder_matches_numeric_config_R(post82_bundle):
-    compiled = post82_bundle["compiled"]
+def test_kalman_symbolic_R_builder_matches_numeric_config_R(compiled_post82):
+    compiled = compiled_post82
     kalman = compiled.kalman
     assert kalman is not None
     assert kalman.R_symbolic is not None
@@ -269,8 +224,8 @@ def test_kalman_symbolic_R_builder_matches_numeric_config_R(post82_bundle):
     reason="R-estimation rework: build_R_from_config_params is being rewired onto make_R "
     "and the R std/corr param maps; the R_builder metadata guard no longer applies."
 )
-def test_build_R_from_config_params_raises_on_missing_param(post82_bundle):
-    compiled = post82_bundle["compiled"]
+def test_build_R_from_config_params_raises_on_missing_param(compiled_post82):
+    compiled = compiled_post82
     kalman = compiled.kalman
     assert kalman is not None
     params = backend.extract_base_params(compiled)
@@ -285,55 +240,63 @@ def test_build_R_from_config_params_raises_on_missing_param(post82_bundle):
         )
 
 
-def _post82_estimator(bundle, **kwargs):
+def _post82_estimator(compiled, solved, y, **kwargs):
     """One estimated parameter held at its calibration, so ``loglik()``
     is the likelihood at the base calibration and can be compared against
     ``SolvedModel.kalman`` on the same data."""
     return Estimator(
-        compiled=bundle["compiled"],
-        y=bundle["y"],
+        compiled=compiled,
+        y=y,
         observables=["Infl", "Rate"],
-        ss_seed=bundle["steady"],
+        ss_seed=solved.policy.steady_state,
         estimated_params=["psi_pi"],
         **kwargs,
     )
 
 
-def test_estimator_loglik_linear_matches_model_kalman(post82_bundle):
-    est = _post82_estimator(post82_bundle, filter_mode="linear")
-    ll_model_lin = (
-        post82_bundle["solved"]
-        .kalman(
-            y=post82_bundle["y"],
-            filter_mode="linear",
-            observables=["Infl", "Rate"],
-        )
-        .loglik
+def test_estimator_loglik_linear_matches_model_kalman(
+    compiled_post82, solved_post82, y_post82
+):
+    est = _post82_estimator(
+        compiled_post82, solved_post82, y_post82, filter_mode="linear"
     )
+    ll_model_lin = solved_post82.kalman(
+        y=y_post82,
+        filter_mode="linear",
+        observables=["Infl", "Rate"],
+    ).loglik
     assert np.allclose(float(est.loglik()), ll_model_lin, rtol=1e-10, atol=1e-10)
 
 
-def test_estimator_loglik_extended_matches_model_kalman(post82_bundle):
-    est = _post82_estimator(post82_bundle, filter_mode="extended")
-    ll_model_ext = (
-        post82_bundle["solved"]
-        .kalman(
-            y=post82_bundle["y"],
-            filter_mode="extended",
-            observables=["Infl", "Rate"],
-        )
-        .loglik
+def test_estimator_loglik_extended_matches_model_kalman(
+    compiled_post82, solved_post82, y_post82
+):
+    est = _post82_estimator(
+        compiled_post82, solved_post82, y_post82, filter_mode="extended"
     )
+    ll_model_ext = solved_post82.kalman(
+        y=y_post82,
+        filter_mode="extended",
+        observables=["Infl", "Rate"],
+    ).loglik
     assert np.allclose(float(est.loglik()), ll_model_ext, rtol=1e-10, atol=1e-10)
 
 
-def test_estimator_loglik_respects_R_override_and_mode_validation(post82_bundle):
+def test_estimator_loglik_respects_R_override_and_mode_validation(
+    compiled_post82, solved_post82, y_post82
+):
     with pytest.raises(ValueError, match="is not a valid FilterMode"):
-        _post82_estimator(post82_bundle, filter_mode="bad_mode")
+        _post82_estimator(
+            compiled_post82, solved_post82, y_post82, filter_mode="bad_mode"
+        )
 
-    scaled_R = 2.0 * post82_bundle["compiled"].kalman.R[:2, :2]
-    overridden = _post82_estimator(post82_bundle, filter_mode="linear", R=scaled_R)
-    from_config = _post82_estimator(post82_bundle, filter_mode="linear")
+    scaled_R = 2.0 * compiled_post82.kalman.R[:2, :2]
+    overridden = _post82_estimator(
+        compiled_post82, solved_post82, y_post82, filter_mode="linear", R=scaled_R
+    )
+    from_config = _post82_estimator(
+        compiled_post82, solved_post82, y_post82, filter_mode="linear"
+    )
     assert not np.isclose(
         float(overridden.loglik()),
         float(from_config.loglik()),
@@ -437,43 +400,28 @@ def test_unconstrained_from_corr_chol_clips_extreme_cpc_values():
 
 
 @pytest.fixture(scope="module")
-def rbc_ukf_bundle():
-    """Second-order RBC with a minimal one-observable Kalman config, solved to
-    order 2. The observed series is pure RNG around the consumption steady state;
-    parity only compares two filter implementations on the same data, so it need
-    not be model-consistent."""
-    from pathlib import Path
+def rbc_ukf_y(compiled_rbc_so):
+    """Pure RNG around the consumption steady state. Parity compares two filter
+    implementations on the same data, so it need not be model-consistent.
 
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "fixtures"
-        / "models"
-        / "rbc_second_order.yaml"
-    )
-    model, _ = ModelParser(path).get_all()
-    kalman = KalmanConfig(R=np.array([[0.01]], dtype=np.float64))
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled, order=2)
-
-    # ndarray (not a single-column DataFrame): pandas hands back a read-only
-    # view for one column under copy-on-write, which ``ukf_hot_loop`` rejects on
-    # the standalone interface path. Same values reach both filters either way.
-    c_ss = float(model.calibration.parameters[Symbol("c_ss")])
+    ndarray, not a one-column frame: pandas hands back a read-only view for a
+    single column under copy-on-write, which ``ukf_hot_loop`` rejects on the
+    standalone interface path.
+    """
+    c_ss = float(compiled_rbc_so.config.calibration.parameters[Symbol("c_ss")])
     rng = np.random.default_rng(20260713)
-    y = (c_ss + rng.normal(0.0, 0.05, size=(6, 1))).astype(np.float64)
-    return {"solver": solver, "compiled": compiled, "solved": solved, "y": y}
+    return c_ss + rng.normal(0.0, 0.05, size=(6, 1))
 
 
-def test_estimator_loglik_unscented_matches_model_kalman(rbc_ukf_bundle):
+def test_estimator_loglik_unscented_matches_model_kalman(
+    compiled_rbc_so, solved_rbc_so, rbc_ukf_y
+):
     """End-to-end UKF estimation parity: one ``Estimator.loglik`` at the
     calibration point (unscented) must equal ``SolvedModel.kalman`` unscented on
     the same data. Exercises the whole new path in one estimation: the
     ``order=2`` solve, the augmented ``build_unscented_P0``, and the seam's
     unscented branch (``bx``/``z0``/policy tensors -> ``run_unscented_raw``)."""
-    compiled = rbc_ukf_bundle["compiled"]
-    solved = rbc_ukf_bundle["solved"]
-    y = rbc_ukf_bundle["y"]
+    compiled, solved, y = compiled_rbc_so, solved_rbc_so, rbc_ukf_y
 
     est = Estimator(
         compiled=compiled,
@@ -498,13 +446,13 @@ def test_estimator_loglik_unscented_matches_model_kalman(rbc_ukf_bundle):
     assert ll_est == pytest.approx(ll_ref, rel=1e-9, abs=1e-9)
 
 
-def test_estimator_loglik_unscented_accepts_full_length_x0(rbc_ukf_bundle):
+def test_estimator_loglik_unscented_accepts_full_length_x0(compiled_rbc_so, rbc_ukf_y):
     """A full n_var x0 exercises the seam's z0 slicing branch (raw[:n_state])."""
-    compiled = rbc_ukf_bundle["compiled"]
+    compiled = compiled_rbc_so
 
     est = Estimator(
         compiled=compiled,
-        y=rbc_ukf_bundle["y"],
+        y=rbc_ukf_y,
         observables=["c_obs"],
         filter_mode="unscented",
         estimated_params=["rho"],

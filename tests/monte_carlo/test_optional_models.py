@@ -5,7 +5,6 @@ from typing import Literal
 import numpy as np
 import pytest
 
-from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.step_factories import (
@@ -15,13 +14,6 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     simulation_step,
     standardize_step,
 )
-
-
-@pytest.fixture(scope="module")
-def dgp_model(post82_test_model_path) -> SolvedModel:
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    return solver.solve(solver.compile())
 
 
 def test_model_free_pipeline_omits_reference() -> None:
@@ -42,7 +34,9 @@ def test_model_free_pipeline_omits_reference() -> None:
     assert np.isfinite(result.transform_outputs["scaled"]).all()
 
 
-def test_dgp_only_simulation_and_filter_omit_reference(dgp_model: SolvedModel) -> None:
+def test_dgp_only_simulation_and_filter_omit_reference(
+    solved_post82: SolvedModel,
+) -> None:
     pipeline = MCPipeline(
         [
             filter_step("kf", target="dgp", obs_source="sim", obs_field="observables"),
@@ -51,7 +45,7 @@ def test_dgp_only_simulation_and_filter_omit_reference(dgp_model: SolvedModel) -
     )
 
     result = pipeline.run(
-        models={"dgp": dgp_model}, n_rep=2, n_jobs=1, verbosity=0, fail_fast=True
+        models={"dgp": solved_post82}, n_rep=2, n_jobs=1, verbosity=0, fail_fast=True
     )
 
     assert not result.failures

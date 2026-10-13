@@ -30,22 +30,22 @@ RTOL = 1e-12
 ATOL = 1e-14
 
 
-def _plan(solved_test_model, shocks, shock_scale=1.0):
-    resolved = resolve_shock_plan(solved_test_model.compiled, shocks, T)
+def _plan(solved_test, shocks, shock_scale=1.0):
+    resolved = resolve_shock_plan(solved_test.compiled, shocks, T)
     return get_native_shock_plan(resolved, T, shock_scale)
 
 
-def _entries(solved_test_model, shocks):
-    return resolve_shock_plan(solved_test_model.compiled, shocks, T).entries
+def _entries(solved_test, shocks):
+    return resolve_shock_plan(solved_test.compiled, shocks, T).entries
 
 
-def test_a_spec_with_no_entries_lowers_to_no_plan(solved_test_model) -> None:
-    assert _plan(solved_test_model, {}) is None
+def test_a_spec_with_no_entries_lowers_to_no_plan(solved_test) -> None:
+    assert _plan(solved_test, {}) is None
 
 
-def test_a_mixed_spec_splits_by_family(solved_test_model) -> None:
+def test_a_mixed_spec_splits_by_family(solved_test) -> None:
     resolved = resolve_shock_plan(
-        solved_test_model.compiled,
+        solved_test.compiled,
         {
             ("e_u",): Shock("norm", seed=0),
             ("e_v",): Shock(t, seed=1, dist_kwargs={"df": 5}),
@@ -64,30 +64,30 @@ def test_a_mixed_spec_splits_by_family(solved_test_model) -> None:
 # --- the draw itself --------------------------------------------------------
 
 
-def test_univariate_normal_draw_is_the_scaled_engine_stream(solved_test_model) -> None:
+def test_univariate_normal_draw_is_the_scaled_engine_stream(solved_test) -> None:
     shocks = {("e_u",): Shock("norm", seed=7)}
-    (entry,) = _entries(solved_test_model, shocks)
-    block = _plan(solved_test_model, shocks).draw(3)
+    (entry,) = _entries(solved_test, shocks)
+    block = _plan(solved_test, shocks).draw(3)
 
     z = philox_standard_normal(entry._native_seed_key, 0, 3, 0, T)
-    expected = np.zeros((T, solved_test_model.compiled.n_exog))
+    expected = np.zeros((T, solved_test.compiled.n_exog))
     expected[:, entry.indices[0]] = z * entry.factor[0, 0]
 
     np.testing.assert_array_equal(block, expected)
 
 
 def test_multivariate_normal_draw_applies_the_covariance_factor(
-    solved_test_model,
+    solved_test,
 ) -> None:
     shocks = {("e_u", "e_v"): Shock("norm", seed=11)}
-    (entry,) = _entries(solved_test_model, shocks)
-    block = _plan(solved_test_model, shocks).draw(2)
+    (entry,) = _entries(solved_test, shocks)
+    block = _plan(solved_test, shocks).draw(2)
 
     width = len(entry.indices)
     z = philox_standard_normal(entry._native_seed_key, 0, 2, 0, T * width).reshape(
         T, width
     )
-    expected = np.zeros((T, solved_test_model.compiled.n_exog))
+    expected = np.zeros((T, solved_test.compiled.n_exog))
     expected[:, entry.indices] = z @ entry.factor.T
 
     np.testing.assert_array_equal(block, expected)
@@ -95,10 +95,10 @@ def test_multivariate_normal_draw_applies_the_covariance_factor(
     assert not np.allclose(entry.factor, np.eye(width))
 
 
-def test_normal_draw_applies_the_location_shift(solved_test_model) -> None:
+def test_normal_draw_applies_the_location_shift(solved_test) -> None:
     shocks = {("e_u",): Shock("norm", seed=7, dist_kwargs={"loc": 2.5})}
-    (entry,) = _entries(solved_test_model, shocks)
-    block = _plan(solved_test_model, shocks).draw(0)
+    (entry,) = _entries(solved_test, shocks)
+    block = _plan(solved_test, shocks).draw(0)
 
     z = philox_standard_normal(entry._native_seed_key, 0, 0, 0, T)
     np.testing.assert_array_equal(
@@ -106,23 +106,21 @@ def test_normal_draw_applies_the_location_shift(solved_test_model) -> None:
     )
 
 
-def test_shock_scale_multiplies_the_whole_block(solved_test_model) -> None:
+def test_shock_scale_multiplies_the_whole_block(solved_test) -> None:
     shocks = {("e_u",): Shock("norm", seed=7)}
-    plain = _plan(solved_test_model, shocks, shock_scale=1.0).draw(1)
-    scaled = _plan(solved_test_model, shocks, shock_scale=2.5).draw(1)
+    plain = _plan(solved_test, shocks, shock_scale=1.0).draw(1)
+    scaled = _plan(solved_test, shocks, shock_scale=2.5).draw(1)
 
     np.testing.assert_array_equal(scaled, 2.5 * plain)
 
 
-def test_untargeted_columns_stay_zero(solved_test_model) -> None:
+def test_untargeted_columns_stay_zero(solved_test) -> None:
     shocks = {("e_u",): Shock("norm", seed=7)}
-    (entry,) = _entries(solved_test_model, shocks)
-    block = _plan(solved_test_model, shocks).draw(0)
+    (entry,) = _entries(solved_test, shocks)
+    block = _plan(solved_test, shocks).draw(0)
 
     untargeted = [
-        i
-        for i in range(solved_test_model.compiled.n_exog)
-        if i not in set(entry.indices)
+        i for i in range(solved_test.compiled.n_exog) if i not in set(entry.indices)
     ]
     assert untargeted
     np.testing.assert_array_equal(block[:, untargeted], 0.0)
@@ -196,11 +194,11 @@ SINGLE_STREAM_FAMILIES = [
 @pytest.mark.parametrize("loc, shock_scale", [(0.0, 1.0), (1.5, 2.5)])
 @pytest.mark.parametrize("dist, kwargs", SINGLE_STREAM_FAMILIES)
 def test_a_standardized_family_is_its_centered_stream(
-    solved_test_model, dist, kwargs, loc, shock_scale
+    solved_test, dist, kwargs, loc, shock_scale
 ) -> None:
     shocks = {("e_u",): Shock(dist, seed=7, dist_kwargs={**kwargs, "loc": loc})}
-    (entry,) = _entries(solved_test_model, shocks)
-    block = _plan(solved_test_model, shocks, shock_scale=shock_scale).draw(3)
+    (entry,) = _entries(solved_test, shocks)
+    block = _plan(solved_test, shocks, shock_scale=shock_scale).draw(3)
 
     reference = _reference(dist, kwargs)
     raw = _raw_variate(dist, kwargs, _address(entry, 3, 0), T)
@@ -208,7 +206,7 @@ def test_a_standardized_family_is_its_centered_stream(
 
     np.testing.assert_allclose(
         block,
-        _scattered(solved_test_model, entry, v[:, None], shock_scale),
+        _scattered(solved_test, entry, v[:, None], shock_scale),
         rtol=RTOL,
         atol=ATOL,
     )
@@ -216,11 +214,11 @@ def test_a_standardized_family_is_its_centered_stream(
 
 @pytest.mark.parametrize("targets, df", [(("e_u",), 5.0), (("e_u", "e_v"), 6.0)])
 def test_student_t_scales_a_gaussian_by_its_own_chi_square(
-    solved_test_model, targets, df
+    solved_test, targets, df
 ) -> None:
     shocks = {targets: Shock("t", seed=11, dist_kwargs={"df": df})}
-    (entry,) = _entries(solved_test_model, shocks)
-    block = _plan(solved_test_model, shocks).draw(3)
+    (entry,) = _entries(solved_test, shocks)
+    block = _plan(solved_test, shocks).draw(3)
 
     # The Gaussian core rides stream 0 and the chi-square it is divided by rides
     # stream 1, one chi-square per period whatever the width.
@@ -231,7 +229,7 @@ def test_student_t_scales_a_gaussian_by_its_own_chi_square(
     v = (z / np.sqrt(g / df)[:, None]) / t(df).std()
 
     np.testing.assert_allclose(
-        block, _scattered(solved_test_model, entry, v), rtol=RTOL, atol=ATOL
+        block, _scattered(solved_test, entry, v), rtol=RTOL, atol=ATOL
     )
 
 
@@ -311,27 +309,27 @@ def test_a_correlated_pair_draws_through_the_off_diagonal(solved_post82) -> None
     np.testing.assert_allclose(block, expected, rtol=RTOL, atol=ATOL)
 
 
-def test_a_path_entry_is_scattered_verbatim(solved_test_model) -> None:
+def test_a_path_entry_is_scattered_verbatim(solved_test) -> None:
     values = np.arange(T, dtype=np.float64) * 0.5
     shocks = {("e_u",): values}
-    (entry,) = _entries(solved_test_model, shocks)
-    block = _plan(solved_test_model, shocks, shock_scale=2.5).draw(0)
+    (entry,) = _entries(solved_test, shocks)
+    block = _plan(solved_test, shocks, shock_scale=2.5).draw(0)
 
-    expected = np.zeros((T, solved_test_model.compiled.n_exog))
+    expected = np.zeros((T, solved_test.compiled.n_exog))
     expected[:, entry.indices[0]] = 2.5 * values
     np.testing.assert_array_equal(block, expected)
 
 
 def test_a_multi_column_path_keeps_each_column_with_its_own_shock(
-    solved_test_model,
+    solved_test,
 ) -> None:
     # Width 1 cannot separate a correct scatter from a transposed one.
     values = np.arange(T * 2, dtype=np.float64).reshape(T, 2)
     shocks = [ShockPath(values, "e_u", "e_v")]
-    (entry,) = _entries(solved_test_model, shocks)
-    block = _plan(solved_test_model, shocks).draw(0)
+    (entry,) = _entries(solved_test, shocks)
+    block = _plan(solved_test, shocks).draw(0)
 
-    expected = np.zeros((T, solved_test_model.compiled.n_exog))
+    expected = np.zeros((T, solved_test.compiled.n_exog))
     expected[:, entry.indices] = values
     np.testing.assert_array_equal(block, expected)
 
@@ -340,37 +338,37 @@ def test_a_multi_column_path_keeps_each_column_with_its_own_shock(
 
 
 def test_the_kernel_addresses_a_draw_by_the_declared_seed_and_column(
-    solved_test_model,
+    solved_test,
 ) -> None:
     """The Philox address is literal here, not read back off the entry.
 
     Every reconstruction above takes the key from ``_native_seed_key``, so a
     changed derivation moves both sides together and passes. This one does not.
     """
-    assert solved_test_model.compiled.shock_idx["e_v"] == 1
+    assert solved_test.compiled.shock_idx["e_v"] == 1
     shocks = {("e_v",): Shock("norm", seed=7)}
-    (entry,) = _entries(solved_test_model, shocks)
-    block = _plan(solved_test_model, shocks).draw(3)
+    (entry,) = _entries(solved_test, shocks)
+    block = _plan(solved_test, shocks).draw(3)
 
     # seed 7, e_v's canonical column, replication 3, the family's first stream.
     z = philox_standard_normal(7, 1, 3, 0, T)
-    expected = np.zeros((T, solved_test_model.compiled.n_exog))
+    expected = np.zeros((T, solved_test.compiled.n_exog))
     expected[:, 1] = z * entry.factor[0, 0]
 
     np.testing.assert_array_equal(block, expected)
 
 
-def test_a_seeded_spec_replays_across_plans(solved_test_model) -> None:
+def test_a_seeded_spec_replays_across_plans(solved_test) -> None:
     shocks = {("e_u",): Shock("norm", seed=1), ("e_v",): Shock("uni", seed=2)}
-    first = _plan(solved_test_model, shocks)
-    second = _plan(solved_test_model, shocks)
+    first = _plan(solved_test, shocks)
+    second = _plan(solved_test, shocks)
 
     for rep_idx in (0, 1, 97):
         np.testing.assert_array_equal(first.draw(rep_idx), second.draw(rep_idx))
 
 
-def test_replications_do_not_share_a_stream(solved_test_model) -> None:
-    plan = _plan(solved_test_model, {("e_u", "e_v"): Shock("norm", seed=1)})
+def test_replications_do_not_share_a_stream(solved_test) -> None:
+    plan = _plan(solved_test, {("e_u", "e_v"): Shock("norm", seed=1)})
     blocks = [plan.draw(rep_idx) for rep_idx in range(4)]
 
     for i in range(len(blocks)):
@@ -378,10 +376,10 @@ def test_replications_do_not_share_a_stream(solved_test_model) -> None:
             assert not np.array_equal(blocks[i], blocks[j])
 
 
-def test_entries_sharing_a_seed_stay_independent(solved_test_model) -> None:
+def test_entries_sharing_a_seed_stay_independent(solved_test) -> None:
     shocks = {("e_u",): Shock("norm", seed=5), ("e_v",): Shock("norm", seed=5)}
-    entries = _entries(solved_test_model, shocks)
-    block = _plan(solved_test_model, shocks).draw(0)
+    entries = _entries(solved_test, shocks)
+    block = _plan(solved_test, shocks).draw(0)
 
     assert entries[0]._native_seed_key == entries[1]._native_seed_key
     left = block[:, entries[0].indices[0]]
@@ -389,24 +387,24 @@ def test_entries_sharing_a_seed_stay_independent(solved_test_model) -> None:
     assert not np.array_equal(left, right)
 
 
-def test_an_unseeded_spec_redraws_each_run(solved_test_model) -> None:
+def test_an_unseeded_spec_redraws_each_run(solved_test) -> None:
     shocks = {("e_u",): Shock("norm", seed=None)}
     assert not np.array_equal(
-        _plan(solved_test_model, shocks).draw(0),
-        _plan(solved_test_model, shocks).draw(0),
+        _plan(solved_test, shocks).draw(0),
+        _plan(solved_test, shocks).draw(0),
     )
 
 
-def test_negative_replication_index_is_rejected(solved_test_model) -> None:
+def test_negative_replication_index_is_rejected(solved_test) -> None:
     with pytest.raises(ValueError, match="non-negative"):
-        _plan(solved_test_model, {("e_u",): Shock("norm", seed=0)}).draw(-1)
+        _plan(solved_test, {("e_u",): Shock("norm", seed=0)}).draw(-1)
 
 
 # --- the caller-owned buffer -------------------------------------------------
 
 
 def test_fill_writes_in_place_and_leaves_untargeted_columns_alone(
-    solved_test_model,
+    solved_test,
 ) -> None:
     """``fill`` writes the spec's columns and nothing else.
 
@@ -415,15 +413,15 @@ def test_fill_writes_in_place_and_leaves_untargeted_columns_alone(
     zeros, so nothing else can state this.
     """
     shocks = {("e_u",): Shock("norm", seed=7)}
-    (entry,) = _entries(solved_test_model, shocks)
-    plan = _plan(solved_test_model, shocks)
+    (entry,) = _entries(solved_test, shocks)
+    plan = _plan(solved_test, shocks)
 
-    out = np.full((T, solved_test_model.compiled.n_exog), 9.5)
+    out = np.full((T, solved_test.compiled.n_exog), 9.5)
     plan.fill(out, 3)
 
     untargeted = [
         column
-        for column in range(solved_test_model.compiled.n_exog)
+        for column in range(solved_test.compiled.n_exog)
         if column not in set(entry.indices)
     ]
     assert untargeted
@@ -434,11 +432,9 @@ def test_fill_writes_in_place_and_leaves_untargeted_columns_alone(
 
 
 @pytest.mark.parametrize("d_rows, d_cols", [(1, 0), (0, 1), (-1, 2)])
-def test_fill_rejects_a_block_of_the_wrong_shape(
-    solved_test_model, d_rows, d_cols
-) -> None:
-    n_exog = solved_test_model.compiled.n_exog
-    plan = _plan(solved_test_model, {("e_u",): Shock("norm", seed=7)})
+def test_fill_rejects_a_block_of_the_wrong_shape(solved_test, d_rows, d_cols) -> None:
+    n_exog = solved_test.compiled.n_exog
+    plan = _plan(solved_test, {("e_u",): Shock("norm", seed=7)})
 
     with pytest.raises(ValueError, match=rf"must have shape \({T}, {n_exog}\)"):
         plan.fill(np.zeros((T + d_rows, n_exog + d_cols)), 0)
@@ -470,12 +466,12 @@ def test_fill_rejects_a_block_of_the_wrong_shape(
     ],
 )
 def test_fill_rejects_a_block_it_cannot_write_through(
-    solved_test_model, build, message
+    solved_test, build, message
 ) -> None:
     # The buffer protocol raises these, not the shape check above, and they are
     # what stands between a caller's wrong layout and a corrupt write.
-    n_exog = solved_test_model.compiled.n_exog
-    plan = _plan(solved_test_model, {("e_u",): Shock("norm", seed=7)})
+    n_exog = solved_test.compiled.n_exog
+    plan = _plan(solved_test, {("e_u",): Shock("norm", seed=7)})
 
     with pytest.raises(ValueError, match=message):
         plan.fill(build(T, n_exog), 0)
@@ -483,12 +479,12 @@ def test_fill_rejects_a_block_it_cannot_write_through(
 
 @pytest.mark.parametrize("n_periods", [T + 3, T - 3])
 def test_a_path_whose_length_is_not_the_horizon_is_rejected(
-    solved_test_model, n_periods
+    solved_test, n_periods
 ) -> None:
     # Resolution accepts any length; the horizon is only known where the plan is
     # built, which is the one place that can compare them.
     with pytest.raises(ValueError, match=f"Path period length {n_periods}"):
-        _plan(solved_test_model, {("e_u",): np.zeros(n_periods)})
+        _plan(solved_test, {("e_u",): np.zeros(n_periods)})
 
 
 # --- entry invariance, on both routes (#507) --------------------------------
@@ -501,8 +497,8 @@ def test_a_path_whose_length_is_not_the_horizon_is_rejected(
 # ``_native_draw`` asserts the lowering actually happened rather than trusting it.
 
 
-def _draw(solved_test_model, spec, rep_idx):
-    plan = _plan(solved_test_model, spec)
+def _draw(solved_test, spec, rep_idx):
+    plan = _plan(solved_test, spec)
     assert plan is not None, "spec was expected to lower to the native draw"
     return plan.draw(rep_idx)
 
@@ -520,7 +516,7 @@ def _entry(family, seed, target):
 
 @pytest.mark.parametrize("family, draw", ROUTES)
 def test_entry_draw_does_not_depend_on_its_position_in_the_spec(
-    solved_test_model, family, draw
+    solved_test, family, draw
 ) -> None:
     """Reordering a spec must move nothing.
 
@@ -531,14 +527,14 @@ def test_entry_draw_does_not_depend_on_its_position_in_the_spec(
     spec = [_entry(family, 11, "e_u"), _entry(family, 12, "e_v")]
 
     np.testing.assert_array_equal(
-        draw(solved_test_model, spec, 3),
-        draw(solved_test_model, list(reversed(spec)), 3),
+        draw(solved_test, spec, 3),
+        draw(solved_test, list(reversed(spec)), 3),
     )
 
 
 @pytest.mark.parametrize("family, draw", ROUTES)
 def test_entry_draw_does_not_depend_on_the_rest_of_the_spec(
-    solved_test_model, family, draw
+    solved_test, family, draw
 ) -> None:
     """Adding a second seeded entry leaves the first untouched.
 
@@ -548,17 +544,17 @@ def test_entry_draw_does_not_depend_on_the_rest_of_the_spec(
     """
     alone = [_entry(family, 11, "e_u")]
     joined = alone + [_entry(family, 12, "e_v")]
-    col = solved_test_model.compiled.shock_idx["e_u"]
+    col = solved_test.compiled.shock_idx["e_u"]
 
     np.testing.assert_array_equal(
-        draw(solved_test_model, alone, 3)[:, col],
-        draw(solved_test_model, joined, 3)[:, col],
+        draw(solved_test, alone, 3)[:, col],
+        draw(solved_test, joined, 3)[:, col],
     )
 
 
 @pytest.mark.parametrize("family, draw", ROUTES)
 def test_identically_seeded_copies_are_not_degenerate(
-    solved_test_model, family, draw
+    solved_test, family, draw
 ) -> None:
     """Copies sharing one seed still draw independently.
 
@@ -573,4 +569,4 @@ def test_identically_seeded_copies_are_not_degenerate(
     )
     assert [shock.seed for shock in spec] == [5, 5]
 
-    assert np.linalg.matrix_rank(draw(solved_test_model, spec, 0)) == len(spec)
+    assert np.linalg.matrix_rank(draw(solved_test, spec, 0)) == len(spec)

@@ -40,9 +40,7 @@ def _estimation_spec(y, *, names=("beta", "sigma")) -> EstimatorSpec:
     )
 
 
-def test_full_bundle_round_trip(
-    tmp_path: Path, test_model_yaml, test_model_path
-) -> None:
+def test_full_bundle_round_trip(tmp_path: Path, test_model_yaml, compiled_test) -> None:
     rng = np.random.default_rng(0)
     observed = rng.standard_normal((20, 2))
     posterior = {
@@ -69,7 +67,7 @@ def test_full_bundle_round_trip(
             test_model_yaml,
             compile_kwargs={},
         )
-        .add_estimation(_estimator(observed, test_model_path), result=result)
+        .add_estimation(_estimator(observed, compiled_test), result=result)
         .add_mc(pipeline)
         .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
         .set_simulation(
@@ -185,21 +183,14 @@ def _estimation_source(spec: EstimatorSpec) -> Any:
     return SimpleNamespace(to_spec=lambda: spec)
 
 
-@cache
-def _compiled_reference(test_model_path) -> Any:
-    """The compiled ``test.yaml`` a loaded reference model comes back as."""
-    model, kalman = ModelParser(test_model_path).get_all()
-    return DSGESolver(model, kalman).compile()
-
-
-def _estimator(y: Any, test_model_path) -> Estimator:
+def _estimator(y: Any, compiled_test) -> Estimator:
     """A live estimator over the bundled model, in the shape a loader rebuilds.
 
     ``test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
     explicitly; without one the estimator a bundle describes cannot be built.
     """
     return Estimator(
-        compiled=_compiled_reference(test_model_path),
+        compiled=compiled_test,
         y=np.asarray(y, dtype=np.float64),
         observables=["Infl", "Rate"],
         estimated_params=["beta", "sigma"],

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
 import sympy as sp
 
@@ -105,12 +104,6 @@ def test_resolve_order_rejects_an_unknown_filter_mode():
 
 
 @pytest.fixture
-def rbc_compiled(rbc_second_order_test_model_path):
-    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
-    return DSGESolver(model, kalman).compile()
-
-
-@pytest.fixture
 def deep_compiled(tmp_path, test_model_path):
     """test.yaml with u lagged three deep, so the compiler mints a chain."""
     import yaml
@@ -123,36 +116,36 @@ def deep_compiled(tmp_path, test_model_path):
     return DSGESolver(model, kalman).compile()
 
 
-def test_ss_seed_is_written_over_the_declared_variables(rbc_compiled):
+def test_ss_seed_is_written_over_the_declared_variables(compiled_rbc_so):
     # Declared order is c, k, z, which is not the compiled order k, z, c.
-    seed = DSGESolver._resolve_ss_seed([1.9, 28.6, 0.5], rbc_compiled)
+    seed = DSGESolver._resolve_ss_seed([1.9, 28.6, 0.5], compiled_rbc_so)
 
-    idx = rbc_compiled.idx
+    idx = compiled_rbc_so.idx
     assert seed[idx["c"]] == 1.9
     assert seed[idx["k"]] == 28.6
     assert seed[idx["z"]] == 0.5
 
 
-def test_ss_seed_falls_to_the_config_then_to_zero(rbc_compiled):
+def test_ss_seed_falls_to_the_config_then_to_zero(compiled_rbc_so):
     # Per variable: what the dict names wins, what it does not keeps the seed
     # the config declares, and a variable the config skips starts at zero.
-    configured = DSGESolver._resolve_ss_seed(None, rbc_compiled)
-    seed = DSGESolver._resolve_ss_seed({"k": 99.0}, rbc_compiled)
+    configured = DSGESolver._resolve_ss_seed(None, compiled_rbc_so)
+    seed = DSGESolver._resolve_ss_seed({"k": 99.0}, compiled_rbc_so)
 
-    idx = rbc_compiled.idx
+    idx = compiled_rbc_so.idx
     assert seed[idx["k"]] == 99.0
     assert seed[idx["c"]] == configured[idx["c"]] != 0.0
     assert seed[idx["z"]] == configured[idx["z"]] == 0.0
 
 
-def test_ss_seed_of_the_wrong_length_names_the_declaration_order(rbc_compiled):
+def test_ss_seed_of_the_wrong_length_names_the_declaration_order(compiled_rbc_so):
     with pytest.raises(ValueError, match=r"expected \(3,\).*\['c', 'k', 'z'\]"):
-        DSGESolver._resolve_ss_seed([0.0, 1.0], rbc_compiled)
+        DSGESolver._resolve_ss_seed([0.0, 1.0], compiled_rbc_so)
 
 
-def test_ss_seed_rejects_an_unknown_variable(rbc_compiled):
+def test_ss_seed_rejects_an_unknown_variable(compiled_rbc_so):
     with pytest.raises(ValueError, match=r"does not have: \['ghost'\]"):
-        DSGESolver._resolve_ss_seed({"k": 1.0, "ghost": 2.0}, rbc_compiled)
+        DSGESolver._resolve_ss_seed({"k": 1.0, "ghost": 2.0}, compiled_rbc_so)
 
 
 def test_ss_seed_seeds_a_minted_lag_through_its_origin(deep_compiled):

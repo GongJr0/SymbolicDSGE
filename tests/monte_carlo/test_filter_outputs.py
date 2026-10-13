@@ -13,7 +13,6 @@ from typing import Literal, cast
 import numpy as np
 import pytest
 
-from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.monte_carlo._arenas import resolve_retention
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
@@ -50,13 +49,6 @@ _SHARED_FIELDS = (
 _UNSCENTED_ONLY = ("x1_pred", "x2_pred", "x1_filt", "x2_filt")
 
 
-@pytest.fixture(scope="module")
-def linear(post82_test_model_path) -> SolvedModel:
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    return solver.solve(solver.compile())
-
-
 def _observations(solved: SolvedModel, n_rep: int = N_REP) -> np.ndarray:
     """Distinct data per replication, so a rep reading another's shows up."""
     rng = np.random.default_rng(20260908)
@@ -70,12 +62,12 @@ def _add_one(sample: np.ndarray, output: np.ndarray) -> int:
 
 
 def test_transforms_consume_scalar_loglik_and_vector_payload(
-    linear: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     vector = np.array([-2.0, 0.0, 3.0, 7.0])
     pipeline = MCPipeline(
         [
-            raw_model_data_step("data", observables=_observations(linear)),
+            raw_model_data_step("data", observables=_observations(solved_post82)),
             filter_step(
                 "filt", target="reference", obs_source="data", obs_field="observables"
             ),
@@ -98,7 +90,7 @@ def test_transforms_consume_scalar_loglik_and_vector_payload(
     )
 
     result = pipeline.run(
-        {"reference": linear}, n_rep=N_REP, n_jobs=1, verbosity=0, fail_fast=True
+        {"reference": solved_post82}, n_rep=N_REP, n_jobs=1, verbosity=0, fail_fast=True
     )
 
     assert not result.failures
@@ -149,28 +141,28 @@ def _run(
 
 @pytest.mark.parametrize("mode", ["linear", "extended"])
 def test_the_result_carries_the_mode_that_selected_the_kernel(
-    linear: SolvedModel, mode: str
+    solved_post82: SolvedModel, mode: str
 ) -> None:
     """Lowering consumes the mode to pick a kernel and keeps no note of it."""
-    y = _observations(linear)
-    result = _run(linear, y, filter_mode=mode)
+    y = _observations(solved_post82)
+    result = _run(solved_post82, y, filter_mode=mode)
 
     assert result.filter_outputs["filt"].filter_mode == mode
 
 
 def test_the_mode_defaults_the_way_the_planner_defaults_it(
-    linear: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     """A step that never named a mode still reports the one it ran under."""
-    y = _observations(linear)
-    result = _run(linear, y)
+    y = _observations(solved_post82)
+    result = _run(solved_post82, y)
 
     assert result.filter_outputs["filt"].filter_mode == "linear"
 
 
-def test_unscented_reports_its_own_mode(solved_rbc_second_order: SolvedModel) -> None:
-    y = _observations(solved_rbc_second_order)
-    result = _run(solved_rbc_second_order, y, filter_mode="unscented")
+def test_unscented_reports_its_own_mode(solved_rbc_so: SolvedModel) -> None:
+    y = _observations(solved_rbc_so)
+    result = _run(solved_rbc_so, y, filter_mode="unscented")
 
     assert result.filter_outputs["filt"].filter_mode == "unscented"
 
@@ -182,13 +174,13 @@ def test_unscented_reports_its_own_mode(solved_rbc_second_order: SolvedModel) ->
 
 @pytest.mark.parametrize("mode", ["linear", "extended"])
 def test_every_field_is_restored_to_its_planned_shape(
-    linear: SolvedModel, mode: str
+    solved_post82: SolvedModel, mode: str
 ) -> None:
-    comp = linear.compiled
+    comp = solved_post82.compiled
     dims = {"T": T, "n_var": comp.n_var, "n_obs": len(comp.observable_names)}
-    y = _observations(linear)
+    y = _observations(solved_post82)
 
-    filt = _run(linear, y, filter_mode=mode).filter_outputs["filt"]
+    filt = _run(solved_post82, y, filter_mode=mode).filter_outputs["filt"]
 
     for field, axes in _SHARED_FIELDS:
         expected = (N_REP, *(dims[axis] for axis in axes))
@@ -198,27 +190,25 @@ def test_every_field_is_restored_to_its_planned_shape(
 
 
 def test_a_scalar_field_lands_on_the_replication_axis_alone(
-    linear: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     """``loglik`` is planned with no axes, so it must not keep a trailing one."""
-    y = _observations(linear)
+    y = _observations(solved_post82)
 
-    filt = _run(linear, y).filter_outputs["filt"]
+    filt = _run(solved_post82, y).filter_outputs["filt"]
 
     assert filt.loglik.shape == (N_REP,)
 
 
 def test_unscented_covariances_are_in_the_augmented_frame(
-    solved_rbc_second_order: SolvedModel,
+    solved_rbc_so: SolvedModel,
 ) -> None:
     """The pruned state doubles the covariance frame but not the reported state."""
-    comp = solved_rbc_second_order.compiled
+    comp = solved_rbc_so.compiled
     n_z = 2 * comp.n_state
-    y = _observations(solved_rbc_second_order)
+    y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_second_order, y, filter_mode="unscented").filter_outputs[
-        "filt"
-    ]
+    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
 
     assert filt.P_pred.shape == (N_REP, T, n_z, n_z)
     assert filt.P_filt.shape == (N_REP, T, n_z, n_z)
@@ -233,50 +223,48 @@ def test_unscented_covariances_are_in_the_augmented_frame(
 
 
 def test_shocks_are_absent_unless_the_step_asked_for_them(
-    linear: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     """The layout sizes ``eps_hat`` to nothing, which reads as "not produced"."""
-    y = _observations(linear)
+    y = _observations(solved_post82)
 
-    filt = _run(linear, y, return_shocks=False).filter_outputs["filt"]
+    filt = _run(solved_post82, y, return_shocks=False).filter_outputs["filt"]
 
     assert filt.eps_hat is None
 
 
 def test_requested_shocks_come_back_shaped_by_the_exogenous_count(
-    linear: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
-    y = _observations(linear)
+    y = _observations(solved_post82)
 
-    filt = _run(linear, y, return_shocks=True).filter_outputs["filt"]
+    filt = _run(solved_post82, y, return_shocks=True).filter_outputs["filt"]
 
     assert filt.eps_hat is not None
-    assert filt.eps_hat.shape == (N_REP, T, linear.compiled.n_exog)
+    assert filt.eps_hat.shape == (N_REP, T, solved_post82.compiled.n_exog)
 
 
 @pytest.mark.parametrize("mode", ["linear", "extended"])
 @pytest.mark.parametrize("field", _UNSCENTED_ONLY)
 def test_the_pruned_state_is_unavailable_off_the_unscented_path(
-    linear: SolvedModel, mode: str, field: str
+    solved_post82: SolvedModel, mode: str, field: str
 ) -> None:
     """Those layouts reserve no buffer at all, so the result must not invent one."""
-    y = _observations(linear)
+    y = _observations(solved_post82)
 
-    filt = _run(linear, y, filter_mode=mode).filter_outputs["filt"]
+    filt = _run(solved_post82, y, filter_mode=mode).filter_outputs["filt"]
 
     with pytest.raises(AttributeError, match="only available for unscented"):
         getattr(filt, field)
 
 
 def test_the_unscented_layout_reserves_nothing_for_shocks(
-    solved_rbc_second_order: SolvedModel,
+    solved_rbc_so: SolvedModel,
 ) -> None:
     """The unscented kernel cannot return shocks, so the field is simply absent."""
-    y = _observations(solved_rbc_second_order)
+    y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_second_order, y, filter_mode="unscented").filter_outputs[
-        "filt"
-    ]
+    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
 
     assert filt.eps_hat is None
 
@@ -288,14 +276,16 @@ def test_the_unscented_layout_reserves_nothing_for_shocks(
 
 @pytest.mark.parametrize("mode", ["linear", "extended"])
 def test_each_replication_matches_the_reference_filter_on_its_own_data(
-    linear: SolvedModel, mode: str
+    solved_post82: SolvedModel, mode: str
 ) -> None:
-    y = _observations(linear)
+    y = _observations(solved_post82)
 
-    filt = _run(linear, y, filter_mode=mode, return_shocks=True).filter_outputs["filt"]
+    filt = _run(solved_post82, y, filter_mode=mode, return_shocks=True).filter_outputs[
+        "filt"
+    ]
 
     for rep in range(N_REP):
-        expected = linear.kalman(
+        expected = solved_post82.kalman(
             y=y[rep], filter_mode=cast(FilterMode, mode), return_shocks=True
         )
         for field, _ in _SHARED_FIELDS:
@@ -314,16 +304,14 @@ def test_each_replication_matches_the_reference_filter_on_its_own_data(
 
 
 def test_unscented_replications_match_the_reference_filter(
-    solved_rbc_second_order: SolvedModel,
+    solved_rbc_so: SolvedModel,
 ) -> None:
-    y = _observations(solved_rbc_second_order)
+    y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_second_order, y, filter_mode="unscented").filter_outputs[
-        "filt"
-    ]
+    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
 
     for rep in range(N_REP):
-        expected = solved_rbc_second_order.kalman(y=y[rep], filter_mode="unscented")
+        expected = solved_rbc_so.kalman(y=y[rep], filter_mode="unscented")
         for field in ("x_pred", "x_filt", "P_pred", "P_filt", *_UNSCENTED_ONLY):
             np.testing.assert_allclose(
                 getattr(filt, field)[rep],
@@ -341,11 +329,11 @@ def test_unscented_replications_match_the_reference_filter(
 
 
 def test_a_replication_reads_back_as_a_plain_filter_result(
-    linear: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
-    y = _observations(linear)
+    y = _observations(solved_post82)
 
-    filt = _run(linear, y).filter_outputs["filt"]
+    filt = _run(solved_post82, y).filter_outputs["filt"]
     one = filt.replication(2)
 
     assert isinstance(one, FilterResult)
@@ -355,13 +343,11 @@ def test_a_replication_reads_back_as_a_plain_filter_result(
 
 
 def test_a_replication_of_an_unscented_run_carries_the_pruned_state(
-    solved_rbc_second_order: SolvedModel,
+    solved_rbc_so: SolvedModel,
 ) -> None:
-    y = _observations(solved_rbc_second_order)
+    y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_second_order, y, filter_mode="unscented").filter_outputs[
-        "filt"
-    ]
+    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
     one = filt.replication(1)
 
     assert isinstance(one, UnscentedFilterResult)
@@ -370,7 +356,7 @@ def test_a_replication_of_an_unscented_run_carries_the_pruned_state(
 
 
 @pytest.mark.parametrize("idx", [-1, PARTIAL_N_RETAIN, PARTIAL_N_REP])
-def test_oob_index_retained_is_refused(linear: SolvedModel, idx: int) -> None:
+def test_oob_index_retained_is_refused(solved_post82: SolvedModel, idx: int) -> None:
     """The bound is what was retained, not the run's replication count.
 
     Retention is partial so the counts differ. ``PARTIAL_N_RETAIN`` is the
@@ -378,21 +364,21 @@ def test_oob_index_retained_is_refused(linear: SolvedModel, idx: int) -> None:
     a bound on ``n_rep`` would let through.
     """
     n_rep, n_retain = PARTIAL_N_REP, PARTIAL_N_RETAIN
-    y = _observations(linear, n_rep=n_rep)
+    y = _observations(solved_post82, n_rep=n_rep)
 
-    filt = _run(linear, y, n_rep=n_rep, n_retain=n_retain).filter_outputs["filt"]
+    filt = _run(solved_post82, y, n_rep=n_rep, n_retain=n_retain).filter_outputs["filt"]
 
     with pytest.raises(IndexError, match="retained replications"):
         filt.replication(idx)
 
 
 def test_retention_indices_match_the_run_when_everything_is_kept(
-    linear: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     """Retaining everything makes ``retained_reps`` the identity"""
-    y = _observations(linear)
+    y = _observations(solved_post82)
 
-    filt = _run(linear, y).filter_outputs["filt"]
+    filt = _run(solved_post82, y).filter_outputs["filt"]
 
     for rep in range(N_REP):
         np.testing.assert_array_equal(filt.replication(rep).x_filt, filt.x_filt[rep])
@@ -404,13 +390,13 @@ def test_retention_indices_match_the_run_when_everything_is_kept(
 
 
 def test_partial_retention_reports_only_the_rows_it_kept(
-    linear: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     """The leading axis counts retained replications, not run replications."""
     n_rep, n_retain = PARTIAL_N_REP, PARTIAL_N_RETAIN
-    y = _observations(linear, n_rep=n_rep)
+    y = _observations(solved_post82, n_rep=n_rep)
 
-    result = _run(linear, y, n_rep=n_rep, n_retain=n_retain)
+    result = _run(solved_post82, y, n_rep=n_rep, n_retain=n_retain)
     filt = result.filter_outputs["filt"]
 
     assert filt.x_filt.shape[0] == n_retain
@@ -419,13 +405,13 @@ def test_partial_retention_reports_only_the_rows_it_kept(
 
 
 def test_each_retained_entry_holds_the_replication_it_was_sampled_from(
-    linear: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     """Storage is compact, so entry ``i`` is the filter for ``retained_reps[i]``."""
     n_rep, n_retain = PARTIAL_N_REP, PARTIAL_N_RETAIN
-    y = _observations(linear, n_rep=n_rep)
+    y = _observations(solved_post82, n_rep=n_rep)
 
-    filt = _run(linear, y, n_rep=n_rep, n_retain=n_retain).filter_outputs["filt"]
+    filt = _run(solved_post82, y, n_rep=n_rep, n_retain=n_retain).filter_outputs["filt"]
 
     # Which replications get sampled is the allocator's rule, so it is asked
     # rather than restated here, and what the result reports has to agree.
@@ -433,18 +419,21 @@ def test_each_retained_entry_holds_the_replication_it_was_sampled_from(
     np.testing.assert_array_equal(filt.retained_reps, retained_reps)
     for idx, rep in enumerate(retained_reps):
         np.testing.assert_allclose(
-            filt.x_filt[idx], linear.kalman(y=y[rep]).x_filt, rtol=1e-9, atol=1e-12
+            filt.x_filt[idx],
+            solved_post82.kalman(y=y[rep]).x_filt,
+            rtol=1e-9,
+            atol=1e-12,
         )
 
 
 def test_retaining_nothing_still_reports_the_planned_shapes(
-    linear: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     """An empty run retained nothing, and the axes still have to be right."""
-    comp = linear.compiled
-    y = _observations(linear)
+    comp = solved_post82.compiled
+    y = _observations(solved_post82)
 
-    filt = _run(linear, y, n_retain=0).filter_outputs["filt"]
+    filt = _run(solved_post82, y, n_retain=0).filter_outputs["filt"]
 
     assert filt.x_filt.shape == (0, T, comp.n_var)
     assert filt.P_pred.shape == (0, T, comp.n_var, comp.n_var)
@@ -456,14 +445,14 @@ def test_retaining_nothing_still_reports_the_planned_shapes(
 # --------------------------------------------------------------------------
 
 
-def test_filters_are_keyed_by_step_name(linear: SolvedModel) -> None:
-    y = _observations(linear)
+def test_filters_are_keyed_by_step_name(solved_post82: SolvedModel) -> None:
+    y = _observations(solved_post82)
     pipeline = MCPipeline(
         [
             raw_model_data_step(
                 "data",
                 observables=y,
-                observable_names=tuple(linear.compiled.observable_names),
+                observable_names=tuple(solved_post82.compiled.observable_names),
             ),
             filter_step(
                 "kf",
@@ -482,7 +471,7 @@ def test_filters_are_keyed_by_step_name(linear: SolvedModel) -> None:
         ]
     )
 
-    result = pipeline.run({"reference": linear}, n_rep=N_REP, verbosity=0)
+    result = pipeline.run({"reference": solved_post82}, n_rep=N_REP, verbosity=0)
 
     assert set(result.filter_outputs) == {"kf", "ekf"}
     assert result.filter_outputs["kf"].filter_mode == "linear"
@@ -490,27 +479,27 @@ def test_filters_are_keyed_by_step_name(linear: SolvedModel) -> None:
 
 
 def test_a_pipeline_without_filters_reports_no_filter_outputs(
-    linear: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     """Emptiness is how every step kind reports "none of these"."""
-    y = _observations(linear)
+    y = _observations(solved_post82)
     pipeline = MCPipeline(
         [
             raw_model_data_step(
                 "data",
                 observables=y,
-                observable_names=tuple(linear.compiled.observable_names),
+                observable_names=tuple(solved_post82.compiled.observable_names),
             )
         ]
     )
 
-    result = pipeline.run({"reference": linear}, n_rep=N_REP, verbosity=0)
+    result = pipeline.run({"reference": solved_post82}, n_rep=N_REP, verbosity=0)
 
     assert result.filter_outputs == {}
 
 
-def test_filter_reads_observations_from_payload(linear: SolvedModel) -> None:
-    names = tuple(linear.compiled.observable_names)
+def test_filter_reads_observations_from_payload(solved_post82: SolvedModel) -> None:
+    names = tuple(solved_post82.compiled.observable_names)
     y = np.random.default_rng(517).normal(scale=0.01, size=(2, T, len(names)))
     # Present columns in a different order, with an unrelated column between them.
     order = np.roll(np.arange(len(names)), 1)
@@ -537,13 +526,17 @@ def test_filter_reads_observations_from_payload(linear: SolvedModel) -> None:
         "filt",
     ]
     result = pipeline.run(
-        models={"reference": linear}, n_rep=2, n_jobs=1, verbosity=0, fail_fast=True
+        models={"reference": solved_post82},
+        n_rep=2,
+        n_jobs=1,
+        verbosity=0,
+        fail_fast=True,
     )
     assert not result.failures
     assert result.datagen_outputs == {}
     actual = result.filter_outputs["filt"]
     for rep in range(2):
-        expected = linear.kalman(y=y[rep], filter_mode="linear")
+        expected = solved_post82.kalman(y=y[rep], filter_mode="linear")
         for field in ("x_pred", "x_filt", "P_pred", "P_filt", "innov", "loglik"):
             np.testing.assert_allclose(
                 getattr(actual, field)[rep],

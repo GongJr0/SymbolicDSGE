@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import sympy as sp
 
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver
 from SymbolicDSGE.core.compiled_model import RegimeBlock
 from SymbolicDSGE.core.config import Constraint
 from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
@@ -658,14 +658,14 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
 
 
 @pytest.fixture(scope="module")
-def compiled_rbc_obc(rbc_second_order_test_model_path):
+def compiled_rbc_obc(parsed_rbc_so):
     """Levels RBC where a bad-TFP regime shuts investment off.
 
     POST82 is a gap model, so its regime constants can be zero purely because
     the reference steady state is. This fixture is in levels, where the
     constant is what actually drives the piecewise solve.
     """
-    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
+    model, kalman = parsed_rbc_so
     conf = copy.deepcopy(model)
     c, k, z = conf.variables.variables
     delta = sp.Symbol("delta")

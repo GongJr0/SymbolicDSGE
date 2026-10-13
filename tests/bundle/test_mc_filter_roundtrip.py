@@ -12,7 +12,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.bundle import BundleBuilder, load_bundle
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
@@ -40,13 +39,6 @@ _REQUIRED = (
 _PRUNED = ("x1_pred", "x2_pred", "x1_filt", "x2_filt")
 #: Fields a linear or extended run leaves unpopulated, read through the guards.
 _OPTIONAL = ("eps_hat", "_x1_pred", "_x2_pred", "_x1_filt", "_x2_filt")
-
-
-@pytest.fixture(scope="module")
-def linear(post82_test_model_path) -> SolvedModel:
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    return solver.solve(solver.compile())
 
 
 def _pipeline(solved: SolvedModel, *filters: object) -> MCPipeline:
@@ -103,10 +95,10 @@ def _assert_same(before: MCFilterResult, after: MCFilterResult) -> None:
 
 @pytest.mark.parametrize("mode", ["linear", "extended"])
 def test_a_filter_round_trips_every_field_it_produced(
-    linear: SolvedModel, mode: str, tmp_path
+    solved_post82: SolvedModel, mode: str, tmp_path
 ) -> None:
     pipeline = _pipeline(
-        linear,
+        solved_post82,
         filter_step(
             "filt",
             target="reference",
@@ -116,18 +108,18 @@ def test_a_filter_round_trips_every_field_it_produced(
         ),
     )
 
-    before, after = _roundtrip(linear, pipeline, tmp_path)
+    before, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     _assert_same(before["filt"], after["filt"])
     assert after["filt"].filter_mode == mode
 
 
 def test_the_unscented_pruned_state_survives_the_bundle(
-    solved_rbc_second_order: SolvedModel, tmp_path
+    solved_rbc_so: SolvedModel, tmp_path
 ) -> None:
     """Only this mode opens those four buffers, and the mode is what says so."""
     pipeline = _pipeline(
-        solved_rbc_second_order,
+        solved_rbc_so,
         filter_step(
             "filt",
             target="reference",
@@ -137,7 +129,7 @@ def test_the_unscented_pruned_state_survives_the_bundle(
         ),
     )
 
-    before, after = _roundtrip(solved_rbc_second_order, pipeline, tmp_path)
+    before, after = _roundtrip(solved_rbc_so, pipeline, tmp_path)
 
     _assert_same(before["filt"], after["filt"])
     for name in _PRUNED:
@@ -147,11 +139,11 @@ def test_the_unscented_pruned_state_survives_the_bundle(
 
 
 def test_the_mode_is_read_back_rather_than_inferred(
-    linear: SolvedModel, tmp_path
+    solved_post82: SolvedModel, tmp_path
 ) -> None:
     """Linear and extended write identical field sets, so only the meta separates them."""
     pipeline = _pipeline(
-        linear,
+        solved_post82,
         filter_step(
             "filt",
             target="reference",
@@ -161,7 +153,7 @@ def test_the_mode_is_read_back_rather_than_inferred(
         ),
     )
 
-    _, after = _roundtrip(linear, pipeline, tmp_path)
+    _, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     assert after["filt"].filter_mode == "extended"
     # Nothing mode-specific was produced, so the optional block stays absent and
@@ -175,10 +167,10 @@ def test_the_mode_is_read_back_rather_than_inferred(
 
 
 def test_requested_shocks_come_back_and_absent_ones_stay_absent(
-    linear: SolvedModel, tmp_path
+    solved_post82: SolvedModel, tmp_path
 ) -> None:
     pipeline = _pipeline(
-        linear,
+        solved_post82,
         filter_step(
             "with_shocks",
             target="reference",
@@ -195,7 +187,7 @@ def test_requested_shocks_come_back_and_absent_ones_stay_absent(
         ),
     )
 
-    before, after = _roundtrip(linear, pipeline, tmp_path)
+    before, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     assert after["with_shocks"].eps_hat is not None
     np.testing.assert_array_equal(
@@ -206,17 +198,17 @@ def test_requested_shocks_come_back_and_absent_ones_stay_absent(
 
 @pytest.mark.parametrize("name", _PRUNED)
 def test_a_reloaded_linear_filter_still_refuses_the_pruned_state(
-    linear: SolvedModel, name: str, tmp_path
+    solved_post82: SolvedModel, name: str, tmp_path
 ) -> None:
     """A field with no member must come back absent, not as an empty array."""
     pipeline = _pipeline(
-        linear,
+        solved_post82,
         filter_step(
             "filt", target="reference", obs_source="data", obs_field="observables"
         ),
     )
 
-    _, after = _roundtrip(linear, pipeline, tmp_path)
+    _, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     with pytest.raises(AttributeError, match="only available for unscented"):
         getattr(after["filt"], name)
@@ -227,18 +219,20 @@ def test_a_reloaded_linear_filter_still_refuses_the_pruned_state(
 # --------------------------------------------------------------------------
 
 
-def test_the_covariance_blocks_keep_their_rank(linear: SolvedModel, tmp_path) -> None:
+def test_the_covariance_blocks_keep_their_rank(
+    solved_post82: SolvedModel, tmp_path
+) -> None:
     """Storage flattens to ``(-1, last)``, so 4-D has to come back off the meta."""
-    n_var = linear.compiled.n_var
-    n_obs = len(linear.compiled.observable_names)
+    n_var = solved_post82.compiled.n_var
+    n_obs = len(solved_post82.compiled.observable_names)
     pipeline = _pipeline(
-        linear,
+        solved_post82,
         filter_step(
             "filt", target="reference", obs_source="data", obs_field="observables"
         ),
     )
 
-    _, after = _roundtrip(linear, pipeline, tmp_path)
+    _, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     assert after["filt"].P_pred.shape == (N_REP, T, n_var, n_var)
     assert after["filt"].P_filt.shape == (N_REP, T, n_var, n_var)
@@ -246,17 +240,17 @@ def test_the_covariance_blocks_keep_their_rank(linear: SolvedModel, tmp_path) ->
 
 
 def test_a_per_replication_scalar_keeps_its_single_axis(
-    linear: SolvedModel, tmp_path
+    solved_post82: SolvedModel, tmp_path
 ) -> None:
     """``loglik`` must not pick up a trailing axis on the way through storage."""
     pipeline = _pipeline(
-        linear,
+        solved_post82,
         filter_step(
             "filt", target="reference", obs_source="data", obs_field="observables"
         ),
     )
 
-    _, after = _roundtrip(linear, pipeline, tmp_path)
+    _, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     loglik = after["filt"].loglik
     assert loglik.shape == (N_REP,)
@@ -265,12 +259,12 @@ def test_a_per_replication_scalar_keeps_its_single_axis(
 
 
 def test_retaining_nothing_still_restores_the_shapes(
-    linear: SolvedModel, tmp_path
+    solved_post82: SolvedModel, tmp_path
 ) -> None:
     """Retaining nothing means no trace members, and the axes come from the meta."""
-    n_var = linear.compiled.n_var
+    n_var = solved_post82.compiled.n_var
     pipeline = _pipeline(
-        linear,
+        solved_post82,
         filter_step(
             "filt",
             target="reference",
@@ -280,7 +274,7 @@ def test_retaining_nothing_still_restores_the_shapes(
         ),
     )
 
-    _, after = _roundtrip(linear, pipeline, tmp_path)
+    _, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     assert after["filt"].x_filt.shape == (0, T, n_var)
     assert after["filt"].P_pred.shape == (0, T, n_var, n_var)
@@ -292,9 +286,11 @@ def test_retaining_nothing_still_restores_the_shapes(
 # --------------------------------------------------------------------------
 
 
-def test_filters_round_trip_keyed_by_step_name(linear: SolvedModel, tmp_path) -> None:
+def test_filters_round_trip_keyed_by_step_name(
+    solved_post82: SolvedModel, tmp_path
+) -> None:
     pipeline = _pipeline(
-        linear,
+        solved_post82,
         filter_step(
             "kf",
             target="reference",
@@ -311,7 +307,7 @@ def test_filters_round_trip_keyed_by_step_name(linear: SolvedModel, tmp_path) ->
         ),
     )
 
-    before, after = _roundtrip(linear, pipeline, tmp_path)
+    before, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     assert set(after) == {"kf", "ekf"}
     assert after["kf"].filter_mode == "linear"
@@ -320,9 +316,11 @@ def test_filters_round_trip_keyed_by_step_name(linear: SolvedModel, tmp_path) ->
         _assert_same(before[name], after[name])
 
 
-def test_filters_round_trip_through_csv_members(linear: SolvedModel, tmp_path) -> None:
+def test_filters_round_trip_through_csv_members(
+    solved_post82: SolvedModel, tmp_path
+) -> None:
     pipeline = _pipeline(
-        linear,
+        solved_post82,
         filter_step(
             "filt",
             target="reference",
@@ -332,7 +330,7 @@ def test_filters_round_trip_through_csv_members(linear: SolvedModel, tmp_path) -
         ),
     )
 
-    before, after = _roundtrip(linear, pipeline, tmp_path, as_parquet=False)
+    before, after = _roundtrip(solved_post82, pipeline, tmp_path, as_parquet=False)
 
     for name in (*_REQUIRED, "eps_hat"):
         np.testing.assert_allclose(
@@ -341,11 +339,11 @@ def test_filters_round_trip_through_csv_members(linear: SolvedModel, tmp_path) -
 
 
 def test_a_step_that_retained_nothing_reloads_its_index_map_empty(
-    linear: SolvedModel, tmp_path
+    solved_post82: SolvedModel, tmp_path
 ) -> None:
     """Retaining nothing means no member for the index map, and that is not corruption."""
     pipeline = _pipeline(
-        linear,
+        solved_post82,
         filter_step(
             "filt",
             target="reference",
@@ -355,7 +353,7 @@ def test_a_step_that_retained_nothing_reloads_its_index_map_empty(
         ),
     )
 
-    before, after = _roundtrip(linear, pipeline, tmp_path)
+    before, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     assert after["filt"].n_retained == 0
     assert after["filt"].retained_reps.shape == (0,)
@@ -363,11 +361,11 @@ def test_a_step_that_retained_nothing_reloads_its_index_map_empty(
 
 
 def test_the_index_map_says_which_replication_each_entry_holds(
-    linear: SolvedModel, tmp_path
+    solved_post82: SolvedModel, tmp_path
 ) -> None:
     """Rows are compact under partial retention, so the mapping is the only link."""
     pipeline = _pipeline(
-        linear,
+        solved_post82,
         filter_step(
             "filt",
             target="reference",
@@ -377,7 +375,7 @@ def test_the_index_map_says_which_replication_each_entry_holds(
         ),
     )
 
-    before, after = _roundtrip(linear, pipeline, tmp_path)
+    before, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     assert after["filt"].retained_reps.dtype == np.int64
     np.testing.assert_array_equal(
@@ -388,11 +386,11 @@ def test_the_index_map_says_which_replication_each_entry_holds(
 
 
 def test_a_pipeline_without_filters_reloads_with_none(
-    linear: SolvedModel, tmp_path
+    solved_post82: SolvedModel, tmp_path
 ) -> None:
     """A kind with no steps writes no member, and absence has to read as empty."""
-    pipeline = _pipeline(linear)
+    pipeline = _pipeline(solved_post82)
 
-    _, after = _roundtrip(linear, pipeline, tmp_path)
+    _, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     assert after == {}

@@ -169,8 +169,8 @@ def test_printer_linearization_matches_reference(model_path):
     np.testing.assert_allclose(d_new, d_ref, rtol=1e-10, atol=1e-12)
 
 
-def test_build_cfunc_compiles_to_address(test_model_path):
-    compiled = _compiled(test_model_path)
+def test_build_cfunc_compiles_to_address(compiled_test):
+    compiled = compiled_test
     layout = ResidualLayout.from_compiled(compiled)
     cf = build_cfunc(compiled.objective_eqs, layout)
     assert isinstance(cf.address, int) and cf.address != 0

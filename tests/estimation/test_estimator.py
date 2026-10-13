@@ -230,37 +230,37 @@ def _stub_compiled_with_sparse_q_block():
     )
 
 
-def test_to_spec_captures_construction_state(post82):
+def test_to_spec_captures_construction_state(compiled_post82, solved_post82, y_post82):
     from SymbolicDSGE.estimation.spec import EstimatorSpec
 
     est = Estimator(
-        compiled=post82["compiled"],
-        y=post82["y"],
-        observables=post82["obs"],
+        compiled=compiled_post82,
+        y=y_post82,
+        observables=compiled_post82.observable_names,
         estimated_params=["psi_pi"],
-        ss_seed=post82["steady"],
+        ss_seed=solved_post82.policy.steady_state,
     )
 
     spec = est.to_spec()
 
     assert isinstance(spec, EstimatorSpec)
     assert spec.params["estimated_params"] == ["psi_pi"]
-    assert spec.params["observables"] == post82["obs"]
+    assert spec.params["observables"] == compiled_post82.observable_names
     assert spec.params["filter_mode"] == "linear"
     assert spec.params["priors"] is None
-    assert spec.y == post82["y"].to_numpy().tolist()
+    assert spec.y == y_post82.to_numpy().tolist()
     # the run is not construction state, so nothing about a method is here
     assert "method" not in spec.params
 
 
-def test_to_spec_reverses_live_scalar_priors(post82):
+def test_to_spec_reverses_live_scalar_priors(compiled_post82, solved_post82, y_post82):
     from SymbolicDSGE.bayesian.priors import make_prior
 
     est = Estimator(
-        compiled=post82["compiled"],
-        y=post82["y"],
-        observables=post82["obs"],
-        ss_seed=post82["steady"],
+        compiled=compiled_post82,
+        y=y_post82,
+        observables=compiled_post82.observable_names,
+        ss_seed=solved_post82.policy.steady_state,
         estimated_params={
             "psi_pi": make_prior(
                 distribution="normal",
@@ -701,13 +701,13 @@ def test_estimation_reports_warning_count_once(post82_estimator, capsys):
     assert len(lines) == 1
 
 
-def test_forward_map_applies_the_prior_transform(post82, role_context):
+def test_forward_map_applies_the_prior_transform(compiled_post82, role_context):
     prior = make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
     )
-    ctx = role_context(post82["compiled"], (3, 3), {"psi_pi": prior})
+    ctx = role_context(compiled_post82, (3, 3), {"psi_pi": prior})
 
     theta = theta_from_params(
         np.array([np.e], dtype=np.float64),
@@ -719,7 +719,7 @@ def test_forward_map_applies_the_prior_transform(post82, role_context):
 
 
 def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block(
-    post82, role_context
+    compiled_post82, role_context
 ):
     # Two observables leave R one pair, where the CPC map is exactly tanh and the
     # expected theta has a closed form. The full three-observable block is
@@ -729,7 +729,7 @@ def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block(
         transform=CholeskyCorrTransform(K=2),
     )
     ctx = role_context(
-        post82["compiled"], (4, 2), {"R_corr": prior}, observables=["Infl", "Rate"]
+        compiled_post82, (4, 2), {"R_corr": prior}, observables=["Infl", "Rate"]
     )
     est = ctx.est
 
@@ -748,17 +748,19 @@ def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block(
     assert block.K == 2
 
 
-def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform(post82):
+def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform(
+    compiled_post82, solved_post82, y_post82
+):
     prior = make_prior(
         distribution="lkj_chol",
         parameters={"eta": 2.0, "K": 3},
         transform="cholesky_corr",
     )
     est = Estimator(
-        compiled=post82["compiled"],
-        y=post82["y"],
-        observables=post82["obs"],
-        ss_seed=post82["steady"],
+        compiled=compiled_post82,
+        y=y_post82,
+        observables=compiled_post82.observable_names,
+        ss_seed=solved_post82.policy.steady_state,
         estimated_params={"R_corr": prior},
     )
 
@@ -769,12 +771,14 @@ def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform(post82
     assert est._matrix_blocks["R_corr"].K == 3
 
 
-def test_matrix_key_in_estimated_params_expands_to_member_names(post82):
+def test_matrix_key_in_estimated_params_expands_to_member_names(
+    compiled_post82, solved_post82, y_post82
+):
     est = Estimator(
-        compiled=post82["compiled"],
-        y=post82["y"],
-        observables=post82["obs"],
-        ss_seed=post82["steady"],
+        compiled=compiled_post82,
+        y=y_post82,
+        observables=compiled_post82.observable_names,
+        ss_seed=solved_post82.policy.steady_state,
         estimated_params={
             "R_corr": Prior(
                 dist=LKJChol(eta=2.0, K=3, random_state=None),
@@ -787,12 +791,14 @@ def test_matrix_key_in_estimated_params_expands_to_member_names(post82):
     assert list(est.priors.keys()) == ["R_corr"]
 
 
-def test_a_mapping_carries_the_priors_of_the_names_it_lists(post82):
+def test_a_mapping_carries_the_priors_of_the_names_it_lists(
+    compiled_post82, solved_post82, y_post82
+):
     est = Estimator(
-        compiled=post82["compiled"],
-        y=post82["y"],
-        observables=post82["obs"],
-        ss_seed=post82["steady"],
+        compiled=compiled_post82,
+        y=y_post82,
+        observables=compiled_post82.observable_names,
+        ss_seed=solved_post82.policy.steady_state,
         estimated_params={
             "R_corr": Prior(
                 dist=LKJChol(eta=2.0, K=3, random_state=None),
@@ -809,21 +815,23 @@ def test_a_mapping_carries_the_priors_of_the_names_it_lists(post82):
 
 
 def test_none_estimates_every_calibrated_parameter_without_priors(
-    post82, post82_estimator
+    compiled_post82, post82_estimator
 ):
     est = post82_estimator(estimated_params=None)
 
-    assert est.estimated_params == list(post82["compiled"].calib_params)
+    assert est.estimated_params == list(compiled_post82.calib_params)
     assert est.priors is None
 
 
-def test_matrix_prior_overlap_with_scalar_component_prior_raises(post82):
+def test_matrix_prior_overlap_with_scalar_component_prior_raises(
+    compiled_post82, solved_post82, y_post82
+):
     with pytest.raises(ValueError, match="meas_rho_ir"):
         Estimator(
-            compiled=post82["compiled"],
-            y=post82["y"],
-            observables=post82["obs"],
-            ss_seed=post82["steady"],
+            compiled=compiled_post82,
+            y=y_post82,
+            observables=compiled_post82.observable_names,
+            ss_seed=solved_post82.policy.steady_state,
             estimated_params={
                 "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=3, random_state=None),
@@ -905,22 +913,24 @@ def test_loglik_is_unchanged_by_the_parameter_transform(post82_estimator):
     assert transformed.loglik(at) == pytest.approx(identity.loglik(at), rel=1e-9)
 
 
-def test_estimator_constructor_and_lkj_prior_validation_error_branches(post82):
+def test_estimator_constructor_and_lkj_prior_validation_error_branches(
+    compiled_post82, solved_post82, y_post82
+):
     with pytest.raises(ValueError, match="is not found in the compiled model"):
         Estimator(
-            compiled=post82["compiled"],
-            y=post82["y"],
-            observables=post82["obs"],
-            ss_seed=post82["steady"],
+            compiled=compiled_post82,
+            y=y_post82,
+            observables=compiled_post82.observable_names,
+            ss_seed=solved_post82.policy.steady_state,
             estimated_params=["ghost"],
         )
 
     with pytest.raises(ValueError, match="Estimate the block or its members"):
         Estimator(
-            compiled=post82["compiled"],
-            y=post82["y"],
-            observables=post82["obs"],
-            ss_seed=post82["steady"],
+            compiled=compiled_post82,
+            y=y_post82,
+            observables=compiled_post82.observable_names,
+            ss_seed=solved_post82.policy.steady_state,
             estimated_params={
                 "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=3, random_state=None),
@@ -934,10 +944,10 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches(post82):
 
     with pytest.raises(ValueError, match="CholeskyCorrTransform"):
         Estimator(
-            compiled=post82["compiled"],
-            y=post82["y"],
-            observables=post82["obs"],
-            ss_seed=post82["steady"],
+            compiled=compiled_post82,
+            y=y_post82,
+            observables=compiled_post82.observable_names,
+            ss_seed=solved_post82.policy.steady_state,
             estimated_params={
                 # Support-valid but not a CholeskyCorrTransform: exercises the
                 # estimator's LKJ-transform check (AffineLogit(-1,1) matches the
@@ -951,10 +961,10 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches(post82):
 
     with pytest.raises(ValueError, match="matching K between"):
         Estimator(
-            compiled=post82["compiled"],
-            y=post82["y"],
-            observables=post82["obs"],
-            ss_seed=post82["steady"],
+            compiled=compiled_post82,
+            y=y_post82,
+            observables=compiled_post82.observable_names,
+            ss_seed=solved_post82.policy.steady_state,
             estimated_params={
                 "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=2, random_state=None),
@@ -965,27 +975,27 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches(post82):
 
     with pytest.raises(ValueError, match="requires a LKJChol distribution"):
         Estimator(
-            compiled=post82["compiled"],
-            y=post82["y"],
-            observables=post82["obs"],
-            ss_seed=post82["steady"],
+            compiled=compiled_post82,
+            y=y_post82,
+            observables=compiled_post82.observable_names,
+            ss_seed=solved_post82.policy.steady_state,
             estimated_params={
                 "R_corr": make_prior("normal", {"mean": 0.0, "std": 1.0}, "identity")
             },
         )
 
 
-def test_resolve_r_and_effective_observables_error_paths(post82, test_model_path):
+def test_resolve_r_and_effective_observables_error_paths(
+    compiled_post82, solved_post82, y_post82, compiled_test
+):
     # A model with no `kalman:` block parses to no config at all. Without one
     # there is nothing to build R from, so the estimator fails fast at
     # construction rather than lazily when the R block is resolved. P0 has a
     # default and is not part of the demand.
-    model, kalman = ModelParser(test_model_path).get_all()
-    compiled_no_kalman = DSGESolver(model, kalman).compile()
-    assert compiled_no_kalman.kalman is None
+    assert compiled_test.kalman is None
     with pytest.raises(ValueError, match="R must be provided"):
         Estimator(
-            compiled=compiled_no_kalman,
+            compiled=compiled_test,
             y=np.zeros((3, 2), dtype=np.float64),
             estimated_params=["beta"],
         )
@@ -1023,17 +1033,19 @@ def test_resolve_r_and_effective_observables_error_paths(post82, test_model_path
     # Unknown observables are now rejected at construction by the filter prep.
     with pytest.raises(ValueError, match="Unknown observables"):
         Estimator(
-            compiled=post82["compiled"],
-            y=post82["y"],
+            compiled=compiled_post82,
+            y=y_post82,
             observables=["ghost"],
             estimated_params=["psi_pi"],
-            ss_seed=post82["steady"],
+            ss_seed=solved_post82.policy.steady_state,
         )
 
 
-def test_forward_map_rejects_a_mismatched_parameter_vector(post82, role_context):
+def test_forward_map_rejects_a_mismatched_parameter_vector(
+    compiled_post82, role_context
+):
     ctx = role_context(
-        post82["compiled"],
+        compiled_post82,
         (3, 3),
         {"psi_pi": make_prior("normal", {"mean": 0.0, "std": 1.0}, "identity")},
     )
@@ -1056,7 +1068,9 @@ def test_evaluators_reject_a_bad_parameter_mapping(post82_estimator):
         est.loglik({"rho_r": 0.8})
 
 
-def test_mcmc_validation_branches(post82, post82_estimator):
+def test_mcmc_validation_branches(
+    compiled_post82, solved_post82, y_post82, post82_estimator
+):
     with pytest.raises(ValueError, match="requires priors"):
         post82_estimator().mcmc(n_draws=1)
 
@@ -1064,10 +1078,10 @@ def test_mcmc_validation_branches(post82, post82_estimator):
     # is refused, so mcmc's own emptiness guard is no longer reachable.
     with pytest.raises(ValueError, match="at least one parameter"):
         Estimator(
-            compiled=post82["compiled"],
-            y=post82["y"],
-            observables=post82["obs"],
-            ss_seed=post82["steady"],
+            compiled=compiled_post82,
+            y=y_post82,
+            observables=compiled_post82.observable_names,
+            ss_seed=solved_post82.policy.steady_state,
             estimated_params=[],
         )
 
@@ -1217,14 +1231,16 @@ def test_reserved_block_keys_reject_a_shared_member():
         )
 
 
-def test_lkj_prior_k_must_match_the_resolved_block(post82):
+def test_lkj_prior_k_must_match_the_resolved_block(
+    compiled_post82, solved_post82, y_post82
+):
     # POST82's R resolves to K=3, so the mismatch is a K=2 prior.
     with pytest.raises(ValueError, match="has K=2"):
         Estimator(
-            compiled=post82["compiled"],
-            y=post82["y"],
-            observables=post82["obs"],
-            ss_seed=post82["steady"],
+            compiled=compiled_post82,
+            y=y_post82,
+            observables=compiled_post82.observable_names,
+            ss_seed=solved_post82.policy.steady_state,
             estimated_params={"R_corr": _lkj(2)},
         )
 
@@ -1250,8 +1266,10 @@ def test_matrix_resolution_rejects_a_reused_correlation_name():
         )
 
 
-def test_mle_std_member_without_prior_gets_a_positivity_box(post82, role_context):
-    ctx = role_context(post82["compiled"], (4, 3), ["meas_infl"])
+def test_mle_std_member_without_prior_gets_a_positivity_box(
+    compiled_post82, role_context
+):
+    ctx = role_context(compiled_post82, (4, 3), ["meas_infl"])
     # A variance estimated prior-free is positivity-constrained by role, and
     # with no transform to carry that, the box is what holds the floor.
     assert ctx.codes["meas_infl"] is TransformCode.IDENTITY
@@ -1301,7 +1319,9 @@ def test_bounds_tighter_than_the_transform_bind_in_parameter_space(post82_estima
     assert float(bounded.theta["rho_gz"]) == pytest.approx(low, abs=1e-9)
 
 
-def test_spd_std_member_warns_on_conflicting_prior_transform(post82, role_context):
+def test_spd_std_member_warns_on_conflicting_prior_transform(
+    compiled_post82, role_context
+):
     # An Identity-transform prior on a variance would map onto R, not (0, inf),
     # so the role default is substituted, and the table build that resolves the
     # transform is what announces it.
@@ -1311,16 +1331,16 @@ def test_spd_std_member_warns_on_conflicting_prior_transform(post82, role_contex
         transform="identity",
     )
     with pytest.warns(UserWarning, match="replaced with `LogTransform`"):
-        ctx = role_context(post82["compiled"], (4, 3), {"meas_infl": prior})
+        ctx = role_context(compiled_post82, (4, 3), {"meas_infl": prior})
     assert ctx.codes["meas_infl"] is TransformCode.LOG
 
 
-def test_spd_member_without_prior_warns_nothing(post82, role_context):
+def test_spd_member_without_prior_warns_nothing(compiled_post82, role_context):
     # No prior means no density for a role transform to disagree with, and the
     # prior-free leg carries no transform to substitute, so nothing is said.
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        ctx = role_context(post82["compiled"], (4, 3), ["meas_infl"])
+        ctx = role_context(compiled_post82, (4, 3), ["meas_infl"])
     assert not [w for w in caught if "replaced with" in str(w.message)]
     assert ctx.codes["meas_infl"] is TransformCode.IDENTITY
 

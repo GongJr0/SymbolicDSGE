@@ -6,15 +6,9 @@ import copy
 import pytest
 
 from SymbolicDSGE.core import DSGESolver, ModelParser
-from SymbolicDSGE.core.compiled_model import CompiledModel
 from SymbolicDSGE.core.config import ModelConfig
 from SymbolicDSGE.core.model_parser import ParsedConfig
 from SymbolicDSGE.core.solved_model import SolvedModel
-
-
-@pytest.fixture(scope="module")
-def parsed_test(test_model_path) -> ParsedConfig:
-    return ModelParser(test_model_path).get_all()
 
 
 @pytest.fixture
@@ -22,53 +16,13 @@ def conf(parsed_test: ParsedConfig) -> ModelConfig:
     return copy.deepcopy(parsed_test.model)
 
 
-@pytest.fixture(scope="module")
-def parsed_post82(post82_test_model_path) -> ParsedConfig:
-    return ModelParser(post82_test_model_path).get_all()
+@pytest.fixture(scope="session")
+def solved_multishock(rbc_multishock_test_model_path) -> SolvedModel:
+    """The three-shock correlated RBC, solved to second order.
 
-
-@pytest.fixture(scope="module")
-def solver_test(parsed_test: ParsedConfig) -> DSGESolver:
-    model, kalman = parsed_test
-    return DSGESolver(model, kalman)
-
-
-@pytest.fixture(scope="module")
-def solver_post82(parsed_post82: ParsedConfig) -> DSGESolver:
-    model, kalman = parsed_post82
-    return DSGESolver(model, kalman)
-
-
-@pytest.fixture(scope="module")
-def compiled_test(solver_test: DSGESolver) -> CompiledModel:
-    return solver_test.compile()
-
-
-@pytest.fixture(scope="module")
-def compiled_post82(solver_post82: DSGESolver) -> CompiledModel:
-    return solver_post82.compile()
-
-
-@pytest.fixture(scope="module")
-def solved_test(solver_test: DSGESolver, compiled_test: CompiledModel) -> SolvedModel:
-    return solver_test.solve(compiled_test)
-
-
-@pytest.fixture(scope="module")
-def solved_post82(
-    solver_post82: DSGESolver, compiled_post82: CompiledModel
-) -> SolvedModel:
-    return solver_post82.solve(compiled_post82)
-
-
-@pytest.fixture(scope="module")
-def solved_rbc(rbc_second_order_test_model_path) -> SolvedModel:
-    """A first-order solve of a model whose steady state is far from zero.
-
-    ``solved_test`` and ``solved_post82`` both sit at a zero ``ss``.
-    Above fixtures cannot test behavir dependent on linearization around a non-zero fixed point.
-    KF/EKF parity is the specific case this fixture is intended to test.
+    Read-only: the parity tests take its policy and its calibration as they
+    are, so the whole package shares one solve. ``compiled`` comes off it.
     """
-    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
+    model, kalman = ModelParser(rbc_multishock_test_model_path).get_all()
     solver = DSGESolver(model, kalman)
-    return solver.solve(solver.compile(), order=1)
+    return solver.solve(solver.compile(), order=2)

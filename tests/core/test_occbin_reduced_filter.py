@@ -96,12 +96,9 @@ def test_estimation_likelihood_runs_on_a_constrained_model(
     # The two entry points do not carry the same filter defaults, so the run
     # settings are stated on both sides rather than inherited. An identity
     # between two configurations is not the claim being made here.
-    model, kalman = ModelParser(nk_zlb_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
 
     est = Estimator(
-        compiled=compiled,
+        compiled=solved.compiled,
         y=observations,
         filter_mode="linear",
         estimated_params=_ESTIMATED,
@@ -118,3 +115,4 @@ def test_estimation_likelihood_runs_on_a_constrained_model(
             joseph_cov=False,
         ).loglik
     )
+    assert est_loglik == kf_loglik

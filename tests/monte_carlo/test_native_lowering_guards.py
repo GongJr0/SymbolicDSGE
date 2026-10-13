@@ -8,7 +8,6 @@ from typing import cast
 import numpy as np
 import pytest
 
-from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.allocation import resolve_output_specs
@@ -28,13 +27,6 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 
 T = 12
 N_REP = 2
-
-
-@pytest.fixture(scope="module")
-def solved(post82_test_model_path) -> SolvedModel:
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    return solver.solve(solver.compile())
 
 
 def _two_column_data() -> np.ndarray:
@@ -213,10 +205,10 @@ def test_wald_targets_must_match_the_source_width(
 
 
 def test_filter_rejects_a_datagen_whose_width_it_cannot_match(
-    solved: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     """Unnamed raw observables must line up positionally, so the count must match."""
-    n_obs = len(solved.compiled.observable_names)
+    n_obs = len(solved_post82.compiled.observable_names)
     steps = [
         raw_model_data_step(
             "data", observables=np.zeros((N_REP, T, n_obs + 1), dtype=np.float64)
@@ -229,10 +221,10 @@ def test_filter_rejects_a_datagen_whose_width_it_cannot_match(
     with pytest.raises(
         ValueError, match="selects 4 observation columns but requires 3"
     ):
-        _lower(steps, reference=solved)
+        _lower(steps, reference=solved_post82)
 
 
-def test_unscented_filtering_cannot_return_shocks(solved: SolvedModel) -> None:
+def test_unscented_filtering_cannot_return_shocks(solved_post82: SolvedModel) -> None:
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
         filter_step(
@@ -246,10 +238,10 @@ def test_unscented_filtering_cannot_return_shocks(solved: SolvedModel) -> None:
     ]
 
     with pytest.raises(ValueError, match="does not support return_shocks"):
-        _lower(steps, reference=solved)
+        _lower(steps, reference=solved_post82)
 
 
-def test_an_unknown_filter_mode_is_rejected(solved: SolvedModel) -> None:
+def test_an_unknown_filter_mode_is_rejected(solved_post82: SolvedModel) -> None:
     """The interface resolves the mode before lowering picks a kernel for it."""
     step = filter_step(
         "filter", target="reference", obs_source="sim", obs_field="observables"
@@ -260,10 +252,12 @@ def test_an_unknown_filter_mode_is_rejected(solved: SolvedModel) -> None:
     ]
 
     with pytest.raises(ValueError, match="Unrecognized filter mode"):
-        _lower(steps, reference=solved)
+        _lower(steps, reference=solved_post82)
 
 
-def test_a_filter_on_dgp_simulated_data_needs_the_dgp(solved: SolvedModel) -> None:
+def test_a_filter_on_dgp_simulated_data_needs_the_dgp(
+    solved_post82: SolvedModel,
+) -> None:
     """Planning sizes the simulation first, so it is what misses the model."""
     pipeline = MCPipeline(
         [
@@ -277,11 +271,13 @@ def test_a_filter_on_dgp_simulated_data_needs_the_dgp(solved: SolvedModel) -> No
     with pytest.raises(
         ValueError, match="Step 'sim' has unrecognized target model 'dgp'"
     ):
-        lower_native_run(pipeline, models={"reference": solved}, n_rep=N_REP, n_jobs=1)
+        lower_native_run(
+            pipeline, models={"reference": solved_post82}, n_rep=N_REP, n_jobs=1
+        )
 
 
-def test_filter_observables_must_be_unique(solved: SolvedModel) -> None:
-    name = solved.compiled.observable_names[0]
+def test_filter_observables_must_be_unique(solved_post82: SolvedModel) -> None:
+    name = solved_post82.compiled.observable_names[0]
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
         filter_step(
@@ -295,10 +291,12 @@ def test_filter_observables_must_be_unique(solved: SolvedModel) -> None:
     ]
 
     with pytest.raises(ValueError, match="must be unique"):
-        _lower(steps, reference=solved)
+        _lower(steps, reference=solved_post82)
 
 
-def test_filter_observables_must_exist_on_the_reference(solved: SolvedModel) -> None:
+def test_filter_observables_must_exist_on_the_reference(
+    solved_post82: SolvedModel,
+) -> None:
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
         filter_step(
@@ -312,14 +310,14 @@ def test_filter_observables_must_exist_on_the_reference(solved: SolvedModel) -> 
     ]
 
     with pytest.raises(ValueError, match="Unknown reference observables"):
-        _lower(steps, reference=solved)
+        _lower(steps, reference=solved_post82)
 
 
 def test_filter_observable_names_must_match_selected_width(
-    solved: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     """Each selected data column needs exactly one supplied observable name."""
-    all_names = tuple(solved.compiled.observable_names)
+    all_names = tuple(solved_post82.compiled.observable_names)
     steps = [
         raw_model_data_step(
             "data",
@@ -338,11 +336,11 @@ def test_filter_observable_names_must_match_selected_width(
     with pytest.raises(
         ValueError, match="selects 1 observation columns but requires 2"
     ):
-        _lower(steps, reference=solved)
+        _lower(steps, reference=solved_post82)
 
 
-def test_filter_x0_must_cover_every_state(solved: SolvedModel) -> None:
-    n_var = len(solved.compiled.var_names)
+def test_filter_x0_must_cover_every_state(solved_post82: SolvedModel) -> None:
+    n_var = len(solved_post82.compiled.var_names)
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
         filter_step(
@@ -356,11 +354,11 @@ def test_filter_x0_must_cover_every_state(solved: SolvedModel) -> None:
 
     # The state resolver owns the length check now, so the message is its own.
     with pytest.raises(ValueError, match="must be a complete list/array"):
-        _lower(steps, reference=solved)
+        _lower(steps, reference=solved_post82)
 
 
 def test_missing_producer_field_is_rejected_during_planning(
-    solved: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
@@ -375,12 +373,14 @@ def test_missing_producer_field_is_rejected_during_planning(
         ValueError, match="Step 'filter' does not produce source field 'x_smooth'"
     ):
         resolve_output_specs(
-            pipeline.replication_steps, pipeline._source_indices, {"reference": solved}
+            pipeline.replication_steps,
+            pipeline._source_indices,
+            {"reference": solved_post82},
         )
 
 
 def test_a_readable_filter_field_still_authors_and_lowers(
-    solved: SolvedModel,
+    solved_post82: SolvedModel,
 ) -> None:
     """A field present in the producer layout can be staged for its consumer."""
     steps = [
@@ -391,4 +391,4 @@ def test_a_readable_filter_field_still_authors_and_lowers(
         passthrough_step("keep", source="filter", field="innov", columns=None),
     ]
 
-    _lower(steps, reference=solved)
+    _lower(steps, reference=solved_post82)

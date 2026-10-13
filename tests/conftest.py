@@ -118,12 +118,109 @@ def model_path(request) -> Path:
 
 
 @pytest.fixture(scope="session")
-def solved_rbc_second_order(rbc_second_order_test_model_path):
-    """Second-order RBC model with positive observation noise for filter tests."""
-    import numpy as np
+def post82_bundle(post82_test_model_path):
     from SymbolicDSGE import DSGESolver, ModelParser
-    from SymbolicDSGE.kalman.config import KalmanConfig
 
-    model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
-    solver = DSGESolver(model, KalmanConfig(R=np.array([[0.01]], dtype=np.float64)))
-    return solver.solve(solver.compile(), order=2)
+    parsed = ModelParser(post82_test_model_path).get_all()
+    solver = DSGESolver(*parsed)
+    compiled = solver.compile()
+    solved = solver.solve(compiled=compiled)
+    return {
+        "solver": solver,
+        "parsed": parsed,
+        "compiled": compiled,
+        "solved": solved,
+    }
+
+
+@pytest.fixture(scope="session")
+def solver_post82(post82_bundle):
+    return post82_bundle["solver"]
+
+
+@pytest.fixture(scope="session")
+def parsed_post82(post82_bundle):
+    return post82_bundle["parsed"]
+
+
+@pytest.fixture(scope="session")
+def compiled_post82(post82_bundle):
+    return post82_bundle["compiled"]
+
+
+@pytest.fixture(scope="session")
+def solved_post82(post82_bundle):
+    return post82_bundle["solved"]
+
+
+@pytest.fixture(scope="session")
+def test_bundle(test_model_path):
+    from SymbolicDSGE import DSGESolver, ModelParser
+
+    parsed = ModelParser(test_model_path).get_all()
+    solver = DSGESolver(*parsed)
+    compiled = solver.compile()
+    solved = solver.solve(compiled=compiled)
+    return {
+        "solver": solver,
+        "parsed": parsed,
+        "compiled": compiled,
+        "solved": solved,
+    }
+
+
+@pytest.fixture(scope="session")
+def solver_test(test_bundle):
+    return test_bundle["solver"]
+
+
+@pytest.fixture(scope="session")
+def parsed_test(test_bundle):
+    return test_bundle["parsed"]
+
+
+@pytest.fixture(scope="session")
+def compiled_test(test_bundle):
+    return test_bundle["compiled"]
+
+
+@pytest.fixture(scope="session")
+def solved_test(test_bundle):
+    """A solved model for the test fixture, for Monte Carlo tests."""
+    return test_bundle["solved"]
+
+
+@pytest.fixture(scope="session")
+def rbc_so_bundle(rbc_second_order_test_model_path):
+    from SymbolicDSGE import DSGESolver, ModelParser
+
+    parsed = ModelParser(rbc_second_order_test_model_path).get_all()
+    solver = DSGESolver(*parsed)
+    compiled = solver.compile()
+    solved = solver.solve(compiled=compiled, order=2)
+    return {
+        "solver": solver,
+        "parsed": parsed,
+        "compiled": compiled,
+        "solved": solved,
+    }
+
+
+@pytest.fixture(scope="session")
+def solver_rbc_so(rbc_so_bundle):
+    return rbc_so_bundle["solver"]
+
+
+@pytest.fixture(scope="session")
+def parsed_rbc_so(rbc_so_bundle):
+    return rbc_so_bundle["parsed"]
+
+
+@pytest.fixture(scope="session")
+def compiled_rbc_so(rbc_so_bundle):
+    return rbc_so_bundle["compiled"]
+
+
+@pytest.fixture(scope="session")
+def solved_rbc_so(rbc_so_bundle):
+    return rbc_so_bundle["solved"]

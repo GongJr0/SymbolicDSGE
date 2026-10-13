@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from SymbolicDSGE import DSGESolver, ModelParser, Shock
+from SymbolicDSGE import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
@@ -35,13 +35,6 @@ ARENA_NAMES = (
 
 #: More memory than any plan here sizes to.
 ABUNDANT_BYTES = 1 << 50
-
-
-@pytest.fixture(scope="module")
-def solved(test_model_path) -> SolvedModel:
-    model, kalman = ModelParser(test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    return solver.solve(solver.compile())
 
 
 def _pin_memory(
@@ -89,7 +82,7 @@ def _datagen_stub() -> MCStep:
     )
 
 
-def test_planned_bytes_match_the_allocation_exactly(solved: SolvedModel) -> None:
+def test_planned_bytes_match_the_allocation_exactly(solved_test: SolvedModel) -> None:
     pipeline = MCPipeline(
         [
             simulation_step(
@@ -98,17 +91,17 @@ def test_planned_bytes_match_the_allocation_exactly(solved: SolvedModel) -> None
                 T=6,
                 shocks={
                     name: Shock(dist="norm", seed=index)
-                    for index, name in enumerate(solved.compiled.shock_names)
+                    for index, name in enumerate(solved_test.compiled.shock_names)
                 },
                 observables=True,
             )
         ]
     )
     report = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=8, n_jobs=3
+        models={"reference": solved_test}, n_rep=8, n_jobs=3
     )
     lowered = lower_native_run(
-        pipeline, models={"reference": solved}, n_rep=8, n_jobs=3
+        pipeline, models={"reference": solved_test}, n_rep=8, n_jobs=3
     )
 
     assert report.shock_bytes == 0
@@ -121,7 +114,7 @@ def test_planned_bytes_match_the_allocation_exactly(solved: SolvedModel) -> None
     [(-1, 10), (0, 0), (4, 4)],
 )
 def test_retention_sentinel_resolves_against_n_rep(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
     n_retain: int,
     expected_reps: int,
 ) -> None:
@@ -135,7 +128,7 @@ def test_retention_sentinel_resolves_against_n_rep(
         )
     }
     report = MCMemoryProfiler(
-        plan, [_datagen_stub()], models={"reference": solved}, n_rep=10, n_jobs=2
+        plan, [_datagen_stub()], models={"reference": solved_test}, n_rep=10, n_jobs=2
     ).report()
 
     (step,) = report.steps
@@ -146,7 +139,9 @@ def test_retention_sentinel_resolves_against_n_rep(
     assert report.bookkeeping_bytes == (10 * len(plan) + expected_reps + 10) * 8
 
 
-def test_native_eligible_shocks_prematerialize_nothing(solved: SolvedModel) -> None:
+def test_native_eligible_shocks_prematerialize_nothing(
+    solved_test: SolvedModel,
+) -> None:
     pipeline = MCPipeline(
         [
             simulation_step(
@@ -155,20 +150,22 @@ def test_native_eligible_shocks_prematerialize_nothing(solved: SolvedModel) -> N
                 T=6,
                 shocks={
                     name: Shock(dist="norm", seed=index)
-                    for index, name in enumerate(solved.compiled.shock_names)
+                    for index, name in enumerate(solved_test.compiled.shock_names)
                 },
             )
         ]
     )
 
     report = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=32, n_jobs=1
+        models={"reference": solved_test}, n_rep=32, n_jobs=1
     )
 
     assert report.shock_bytes == 0
 
 
-def test_fallback_shocks_are_counted_outside_the_arenas(solved: SolvedModel) -> None:
+def test_fallback_shocks_are_counted_outside_the_arenas(
+    solved_test: SolvedModel,
+) -> None:
     T = 6
     pipeline = MCPipeline(
         [
@@ -178,33 +175,33 @@ def test_fallback_shocks_are_counted_outside_the_arenas(solved: SolvedModel) -> 
                 T=T,
                 shocks={
                     name: Shock(dist=t, seed=index, dist_kwargs={"df": 8})
-                    for index, name in enumerate(solved.compiled.shock_names)
+                    for index, name in enumerate(solved_test.compiled.shock_names)
                 },
             )
         ]
     )
 
     report = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=32, n_jobs=1
+        models={"reference": solved_test}, n_rep=32, n_jobs=1
     )
 
-    assert report.shock_bytes == 32 * T * solved.compiled.n_exog * 8
+    assert report.shock_bytes == 32 * T * solved_test.compiled.n_exog * 8
     assert report.planned_bytes > _allocated_bytes(
         lower_native_run(
-            pipeline, models={"reference": solved}, n_rep=32, n_jobs=1
+            pipeline, models={"reference": solved_test}, n_rep=32, n_jobs=1
         ).allocation
     )
 
 
 def test_the_reserve_is_a_floor_plus_a_fraction_not_a_multiple(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
 ) -> None:
     """A reserve proportional to the machine withholds far too much on a large host."""
     pipeline = MCPipeline(
         [simulation_step("sim", target="reference", T=6, observables=True)]
     )
     report = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=8, n_jobs=1
+        models={"reference": solved_test}, n_rep=8, n_jobs=1
     )
 
     assert report.reserve_bytes == int(
@@ -216,7 +213,7 @@ def test_the_reserve_is_a_floor_plus_a_fraction_not_a_multiple(
 
 
 def test_paging_warns_but_is_allowed_because_it_only_costs_throughput(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A run past physical memory completes, slowly, so it must not be refused."""
@@ -224,14 +221,14 @@ def test_paging_warns_but_is_allowed_because_it_only_costs_throughput(
         [simulation_step("sim", target="reference", T=6, observables=True)]
     )
     sized = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=64, n_jobs=1
+        models={"reference": solved_test}, n_rep=64, n_jobs=1
     )
     total = sized.total_bytes_w_margin
     _pin_memory(monkeypatch, available=total // 2, swap_free=total)
 
     with pytest.warns(UserWarning, match="slowdown from paging"):
         report = pipeline.validate_memory_requirements(
-            models={"reference": solved}, n_rep=64, n_jobs=1
+            models={"reference": solved_test}, n_rep=64, n_jobs=1
         )
 
     assert report.degrades
@@ -239,26 +236,26 @@ def test_paging_warns_but_is_allowed_because_it_only_costs_throughput(
 
 
 def test_validate_raises_only_once_swap_cannot_absorb_it_either(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pipeline = MCPipeline(
         [simulation_step("sim", target="reference", T=6, observables=True)]
     )
     sized = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=64, n_jobs=1
+        models={"reference": solved_test}, n_rep=64, n_jobs=1
     )
     total = sized.total_bytes_w_margin
     _pin_memory(monkeypatch, available=total // 4, swap_free=total // 4)
 
     with pytest.raises(MemoryError, match="free swap"):
         pipeline.validate_memory_requirements(
-            models={"reference": solved}, n_rep=64, n_jobs=1
+            models={"reference": solved_test}, n_rep=64, n_jobs=1
         )
 
 
 def test_the_ceiling_counts_swap_on_top_of_physical(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pipeline = MCPipeline(
@@ -268,7 +265,7 @@ def test_the_ceiling_counts_swap_on_top_of_physical(
     _pin_memory(monkeypatch, available=ABUNDANT_BYTES, swap_free=ABUNDANT_BYTES // 4)
 
     report = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=8, n_jobs=1
+        models={"reference": solved_test}, n_rep=8, n_jobs=1
     )
 
     assert report.available_bytes == ABUNDANT_BYTES
@@ -277,7 +274,7 @@ def test_the_ceiling_counts_swap_on_top_of_physical(
 
 
 def test_the_raised_message_is_one_line_and_the_table_is_printed(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -286,7 +283,7 @@ def test_the_raised_message_is_one_line_and_the_table_is_printed(
         [simulation_step("sim", target="reference", T=6, observables=True)]
     )
     sized = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=64, n_jobs=1
+        models={"reference": solved_test}, n_rep=64, n_jobs=1
     )
     _pin_memory(
         monkeypatch,
@@ -296,7 +293,7 @@ def test_the_raised_message_is_one_line_and_the_table_is_printed(
 
     with pytest.raises(MemoryError) as raised:
         pipeline.validate_memory_requirements(
-            models={"reference": solved}, n_rep=64, n_jobs=1
+            models={"reference": solved_test}, n_rep=64, n_jobs=1
         )
 
     message = str(raised.value)
@@ -309,7 +306,7 @@ def test_the_raised_message_is_one_line_and_the_table_is_printed(
 
 
 def test_a_rule_separates_the_step_rows_from_the_whole_run_totals(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
 ) -> None:
     pipeline = MCPipeline(
         [simulation_step("sim", target="reference", T=6, observables=True)]
@@ -317,7 +314,7 @@ def test_a_rule_separates_the_step_rows_from_the_whole_run_totals(
 
     lines = str(
         pipeline.validate_memory_requirements(
-            models={"reference": solved}, n_rep=8, n_jobs=1
+            models={"reference": solved_test}, n_rep=8, n_jobs=1
         )
     ).splitlines()
     rule_index = next(index for index, line in enumerate(lines) if set(line) == {"-"})
@@ -328,7 +325,7 @@ def test_a_rule_separates_the_step_rows_from_the_whole_run_totals(
 
 
 def test_the_warned_message_is_one_line_and_the_table_is_printed(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -337,7 +334,7 @@ def test_the_warned_message_is_one_line_and_the_table_is_printed(
         [simulation_step("sim", target="reference", T=6, observables=True)]
     )
     sized = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=64, n_jobs=1
+        models={"reference": solved_test}, n_rep=64, n_jobs=1
     )
     _pin_memory(
         monkeypatch,
@@ -347,7 +344,7 @@ def test_the_warned_message_is_one_line_and_the_table_is_printed(
 
     with pytest.warns(UserWarning) as caught:
         pipeline.validate_memory_requirements(
-            models={"reference": solved}, n_rep=64, n_jobs=1
+            models={"reference": solved_test}, n_rep=64, n_jobs=1
         )
 
     message = str(caught[0].message)
@@ -362,7 +359,7 @@ def test_the_warned_message_is_one_line_and_the_table_is_printed(
 
 @pytest.mark.parametrize("entry_point", ["validate_memory_requirements", "run"])
 def test_the_warning_blames_the_caller_not_the_library(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
     monkeypatch: pytest.MonkeyPatch,
     entry_point: str,
 ) -> None:
@@ -370,7 +367,7 @@ def test_the_warning_blames_the_caller_not_the_library(
     steps = [simulation_step("sim", target="reference", T=6, observables=True)]
     pipeline = MCPipeline(steps)
     sized = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=64, n_jobs=1
+        models={"reference": solved_test}, n_rep=64, n_jobs=1
     )
     _pin_memory(
         monkeypatch,
@@ -381,11 +378,11 @@ def test_the_warning_blames_the_caller_not_the_library(
     with pytest.warns(UserWarning) as caught:
         if entry_point == "validate_memory_requirements":
             pipeline.validate_memory_requirements(
-                models={"reference": solved}, n_rep=64, n_jobs=1
+                models={"reference": solved_test}, n_rep=64, n_jobs=1
             )
         else:
             MCPipeline.from_spec(pipeline.to_spec()).run(
-                models={"reference": solved},
+                models={"reference": solved_test},
                 n_rep=64,
                 fail_fast=True,
                 n_jobs=1,
@@ -396,7 +393,7 @@ def test_the_warning_blames_the_caller_not_the_library(
 
 
 def test_nothing_is_printed_when_the_plan_fits(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     pipeline = MCPipeline(
@@ -404,21 +401,21 @@ def test_nothing_is_printed_when_the_plan_fits(
     )
 
     pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=8, n_jobs=1
+        models={"reference": solved_test}, n_rep=8, n_jobs=1
     )
 
     assert capsys.readouterr().out == ""
 
 
 def test_run_refuses_an_oversized_plan_unless_the_check_is_disabled(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pipeline = MCPipeline(
         [simulation_step("sim", target="reference", T=6, observables=True)]
     )
     sized = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=64, n_jobs=1
+        models={"reference": solved_test}, n_rep=64, n_jobs=1
     )
     _pin_memory(
         monkeypatch,
@@ -427,10 +424,10 @@ def test_run_refuses_an_oversized_plan_unless_the_check_is_disabled(
     )
 
     with pytest.raises(MemoryError):
-        pipeline.run(models={"reference": solved}, n_rep=64, n_jobs=1, verbosity=0)
+        pipeline.run(models={"reference": solved_test}, n_rep=64, n_jobs=1, verbosity=0)
 
     result = pipeline.run(
-        models={"reference": solved},
+        models={"reference": solved_test},
         n_rep=64,
         n_jobs=1,
         verbosity=0,
@@ -441,7 +438,7 @@ def test_run_refuses_an_oversized_plan_unless_the_check_is_disabled(
 
 
 def test_report_renders_a_table_naming_no_reduction_target(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
 ) -> None:
     pipeline = MCPipeline(
         [simulation_step("sim", target="reference", T=6, observables=True)]
@@ -449,7 +446,7 @@ def test_report_renders_a_table_naming_no_reduction_target(
 
     rendered = str(
         pipeline.validate_memory_requirements(
-            models={"reference": solved}, n_rep=8, n_jobs=1
+            models={"reference": solved_test}, n_rep=8, n_jobs=1
         )
     )
 
@@ -460,13 +457,13 @@ def test_report_renders_a_table_naming_no_reduction_target(
 
 
 def test_report_renders_the_total_both_before_and_after_the_margin(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
 ) -> None:
     pipeline = MCPipeline(
         [simulation_step("sim", target="reference", T=6, observables=True)]
     )
     report = pipeline.validate_memory_requirements(
-        models={"reference": solved}, n_rep=8, n_jobs=1
+        models={"reference": solved_test}, n_rep=8, n_jobs=1
     )
 
     lines = {
@@ -481,9 +478,11 @@ def test_report_renders_the_total_both_before_and_after_the_margin(
     assert report.planned_bytes < report.total_bytes_w_margin
 
 
-def test_profiler_rejects_a_non_positive_n_rep(solved: SolvedModel) -> None:
+def test_profiler_rejects_a_non_positive_n_rep(solved_test: SolvedModel) -> None:
     with pytest.raises(ValueError, match="n_rep must be positive"):
-        MCMemoryProfiler({}, [_datagen_stub()], models={"reference": solved}, n_rep=0)
+        MCMemoryProfiler(
+            {}, [_datagen_stub()], models={"reference": solved_test}, n_rep=0
+        )
 
 
 def test_profiler_is_not_part_of_the_public_namespace() -> None:
@@ -494,7 +493,7 @@ def test_profiler_is_not_part_of_the_public_namespace() -> None:
 
 
 def test_unavailable_memory_reads_as_an_infinite_load(
-    solved: SolvedModel,
+    solved_test: SolvedModel,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _pin_memory(monkeypatch, available=0)
@@ -509,7 +508,7 @@ def test_unavailable_memory_reads_as_an_infinite_load(
             )
         },
         [_datagen_stub()],
-        models={"reference": solved},
+        models={"reference": solved_test},
         n_rep=4,
     )
 

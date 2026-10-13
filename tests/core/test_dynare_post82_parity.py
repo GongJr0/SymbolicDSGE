@@ -52,7 +52,6 @@ import numpy as np
 import pytest
 from scipy.linalg import solve_discrete_lyapunov
 
-from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.compiled_model import _shock_covariance
 from SymbolicDSGE.estimation import backend
 from SymbolicDSGE.kalman.filter import KalmanFilter
@@ -68,19 +67,11 @@ DYNARE_STATES = tuple(dyn.DECL_COLUMNS[i - 1] for i in dyn.STATE_VAR)
 
 
 @pytest.fixture(scope="module")
-def solved(post82_test_model_path):
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    return compiled, solver.solve(compiled=compiled, order=1)
-
-
-@pytest.fixture(scope="module")
-def blocks(solved):
+def blocks(solved_post82):
     """Our decision rule: the state rows stacked over the controls, and the impact."""
-    _, solution = solved
-    ghx = np.vstack([np.real(solution.policy.p), np.real(solution.policy.f)])
-    return ghx, np.real(solution.policy.B)
+    sol = solved_post82
+    ghx = np.vstack([np.real(sol.policy.p), np.real(sol.policy.f)])
+    return ghx, np.real(sol.policy.B)
 
 
 def _declared(compiled) -> list[int]:
@@ -112,15 +103,14 @@ def _measurement(compiled):
 # Nothing below means anything if the columns are not the same columns.
 
 
-def test_compiled_order_is_dynares_declaration_order(solved):
-    compiled, _ = solved
+def test_compiled_order_is_dynares_declaration_order(compiled_post82):
+    compiled = compiled_post82
     assert compiled.layout.canonical_names == dyn.DECL_COLUMNS
     assert compiled.layout.state_names == DYNARE_STATES
 
 
-def test_shock_columns_match_dynares_exogenous_order(solved):
-    compiled, _ = solved
-    assert compiled.shock_names == dyn.EXO_COLUMNS
+def test_shock_columns_match_dynares_exogenous_order(compiled_post82):
+    assert compiled_post82.shock_names == dyn.EXO_COLUMNS
 
 
 # --- the decision rule ------------------------------------------------------
@@ -136,9 +126,10 @@ def test_policy_shock_block_matches_ghu(blocks):
     assert np.abs(ghu - dyn.GHU_DECL).max() < TOL
 
 
-def test_impact_on_declared_variables_matches_ghu(solved):
+def test_impact_on_declared_variables_matches_ghu(solved_post82):
     # The headline. The r row is the fixed point issue #390 was opened over.
-    compiled, solution = solved
+    compiled = solved_post82.compiled
+    solution = solved_post82
     B = np.real(solution.policy.B)
 
     assert np.abs(B[_declared(compiled)] - dyn.GHU_DECL).max() < TOL
@@ -147,9 +138,8 @@ def test_impact_on_declared_variables_matches_ghu(solved):
     assert r_row[dyn.EXO_COLUMNS.index("e_g")] == pytest.approx(0.34702357, abs=1e-8)
 
 
-def test_shock_covariance_matches_dynare(solved):
-    compiled, _ = solved
-    Q, _, _ = _measurement(compiled)
+def test_shock_covariance_matches_dynare(compiled_post82):
+    Q, _, _ = _measurement(compiled_post82)
 
     assert np.abs(Q - dyn.SIGMA_E).max() < TOL
 
@@ -159,12 +149,12 @@ def test_shock_covariance_matches_dynare(solved):
 # exercises A. These state what A holds, which a path only implies.
 
 
-def test_transition_matches_dynares_A(solved):
+def test_transition_matches_dynares_A(solved_post82):
     # A maps y_{t-1} to y_t, so its state columns are the decision rule itself
     # and a control at t-1 reaches nothing.
-    compiled, solution = solved
+    solution = solved_post82
     A = np.real(solution.policy.A)
-    n_state = compiled.layout.n_state
+    n_state = solution.compiled.n_state
 
     assert np.abs(A - dyn.A_DECL).max() < TOL
     assert np.abs(A[:, :n_state] - dyn.GHX_DECL).max() < TOL
@@ -174,53 +164,54 @@ def test_transition_matches_dynares_A(solved):
 # --- simulation -------------------------------------------------------------
 
 
-def test_deterministic_path_matches_dynare(solved):
+def test_deterministic_path_matches_dynare(solved_post82):
     # Driven by the transition alone, so it also pins the row convention: row 0
     # is the first simulated period, not the initial condition.
-    compiled, solution = solved
+    compiled = solved_post82.compiled
+    solution = solved_post82
     out = solution.sim(T=len(dyn.DET), x0=_x0())
 
     assert np.abs(_path(compiled, out) - dyn.DET).max() < TOL
 
 
-def test_stochastic_path_matches_dynare(solved):
-    compiled, solution = solved
+def test_stochastic_path_matches_dynare(solved_post82):
+    solution = solved_post82
     out = solution.sim(
         T=len(dyn.STOCH),
         shocks=_shocks(dyn.SHOCK_BLOCK),
         x0=_x0(),
     )
 
-    assert np.abs(_path(compiled, out) - dyn.STOCH).max() < TOL
+    assert np.abs(_path(solution.compiled, out) - dyn.STOCH).max() < TOL
 
 
 @pytest.mark.parametrize("shock", dyn.EXO_COLUMNS)
-def test_unit_innovation_response_matches_dynare(solved, shock):
+def test_unit_innovation_response_matches_dynare(solved_post82, shock):
     # From the steady state, one unit innovation on the first simulated period,
     # which is the experiment the golden ran.
-    compiled, solution = solved
+    solution = solved_post82
     horizon = len(dyn.IRF[shock])
     block = np.zeros((horizon, len(dyn.EXO_COLUMNS)))
     block[0, dyn.EXO_COLUMNS.index(shock)] = 1.0
 
     out = solution.sim(T=horizon, shocks=_shocks(block))
 
-    assert np.abs(_path(compiled, out) - dyn.IRF[shock]).max() < TOL
+    assert np.abs(_path(solution.compiled, out) - dyn.IRF[shock]).max() < TOL
 
 
 # --- measurement and filter -------------------------------------------------
 
 
-def test_measurement_matrices_match_dynare(solved):
-    compiled, _ = solved
+def test_measurement_matrices_match_dynare(compiled_post82):
+    compiled = compiled_post82
     _, C, d = _measurement(compiled)
 
     assert np.abs(C[:, _declared(compiled)] - dyn.KF_Z).max() < TOL
     assert np.abs(d - dyn.KF_D).max() < TOL
 
 
-def _filter(compiled, solution, P0):
-    Q, C, d = _measurement(compiled)
+def _filter(solution, P0):
+    Q, C, d = _measurement(solution.compiled)
     return KalmanFilter.run(
         np.real(solution.policy.A),
         np.real(solution.policy.B),
@@ -230,66 +221,71 @@ def _filter(compiled, solution, P0):
         dyn.KF_H,
         solution.policy.steady_state,
         dyn.KF_DATA,
-        x0=np.zeros((compiled.n_var,), dtype=np.float64),
+        x0=np.zeros((solution.compiled.n_var,), dtype=np.float64),
         P0=P0,
     )
 
 
-def _unconditional_P0(solution, compiled):
+def _unconditional_P0(solution):
     A, B = np.real(solution.policy.A), np.real(solution.policy.B)
-    Q, _, _ = _measurement(compiled)
+    Q, _, _ = _measurement(solution.compiled)
     P0 = solve_discrete_lyapunov(A, B @ Q @ B.T)
     return 0.5 * (P0 + P0.T)
 
 
-def test_kalman_loglik_matches_dynare_from_the_unconditional_P0(solved):
+def test_kalman_loglik_matches_dynare_from_the_unconditional_P0(solved_post82):
     # Both filters start the model at its own stationary distribution, so this
     # comparison needs no coordinate change in either direction.
-    compiled, solution = solved
-    out = _filter(compiled, solution, _unconditional_P0(solution, compiled))
+    solution = solved_post82
+    out = _filter(solution, _unconditional_P0(solution))
 
     assert float(out.loglik) == pytest.approx(dyn.LOGLIK_UNCOND, abs=1e-9)
 
 
-def test_filtered_states_match_dynares_updated_variables(solved):
+def test_filtered_states_match_dynares_updated_variables(solved_post82):
     # a_{t|t} on both sides, dated the same way, so nothing to align.
-    compiled, solution = solved
-    out = _filter(compiled, solution, _unconditional_P0(solution, compiled))
+    solution = solved_post82
+    out = _filter(solution, _unconditional_P0(solution))
 
-    x_filt = np.asarray(out.x_filt)[:, _declared(compiled)]
+    x_filt = np.asarray(out.x_filt)[:, _declared(solution.compiled)]
     assert np.abs(x_filt - dyn.UPDATED).max() < TOL
 
 
-def test_predicted_states_match_dynares_filtered_variables_one_period_on(solved):
+def test_predicted_states_match_dynares_filtered_variables_one_period_on(solved_post82):
     # Dynare indexes a prediction by the information set behind it and we index
     # it by the period estimated, so the same quantity sits one row apart. The
     # overlap is every row but an endpoint each. Aligning the two without the
     # shift disagrees by 0.37 here, which the second assert holds the line on.
-    compiled, solution = solved
-    out = _filter(compiled, solution, _unconditional_P0(solution, compiled))
+    solution = solved_post82
+    out = _filter(solution, _unconditional_P0(solution))
 
-    x_pred = np.asarray(out.x_pred)[:, _declared(compiled)]
+    x_pred = np.asarray(out.x_pred)[:, _declared(solution.compiled)]
     assert np.abs(x_pred[1:] - dyn.FILTERED[: len(x_pred) - 1]).max() < TOL
     assert np.abs(x_pred - dyn.FILTERED[: len(x_pred)]).max() > 0.3
 
 
-def test_prediction_is_the_transition_applied_to_the_previous_update(solved):
+def test_prediction_is_the_transition_applied_to_the_previous_update(solved_post82):
     # x_pred[t] = A x_filt[t-1]: the shocks are mean zero, so a prediction is the
     # update behind it carried forward. The second assert reads that same
     # identity off Dynare's array, where the index is the information set date,
     # so it needs no shift and reaches the row past the end of the sample.
-    compiled, solution = solved
-    out = _filter(compiled, solution, _unconditional_P0(solution, compiled))
+    solution = solved_post82
+    out = _filter(solution, _unconditional_P0(solution))
     A = np.real(solution.policy.A)
 
     x_filt = np.asarray(out.x_filt)
     x_pred = np.asarray(out.x_pred)
     assert np.abs(x_pred[1:] - x_filt[:-1] @ A.T).max() < TOL
 
-    assert np.abs((x_filt @ A.T)[:, _declared(compiled)] - dyn.FILTERED).max() < TOL
+    assert (
+        np.abs((x_filt @ A.T)[:, _declared(solution.compiled)] - dyn.FILTERED).max()
+        < TOL
+    )
 
 
-def test_kalman_loglik_matches_dynare_from_a_unit_prior_on_dynares_states(solved):
+def test_kalman_loglik_matches_dynare_from_a_unit_prior_on_dynares_states(
+    solved_post82,
+):
     # Dynare's P0 is the identity on five variables, which is the same matrix in
     # our coordinates now, so nothing is carried across.
     #
@@ -297,8 +293,8 @@ def test_kalman_loglik_matches_dynare_from_a_unit_prior_on_dynares_states(solved
     # update, so P0 is the covariance of the same state on both sides and any
     # prior agrees. Under a predict-first loop only the unconditional covariance
     # did, being the one fixed point of the prediction map.
-    compiled, solution = solved
+    solution = solved_post82
 
-    out = _filter(compiled, solution, np.eye(len(compiled.var_names)))
+    out = _filter(solution, np.eye(solution.compiled.n_var))
 
     assert float(out.loglik) == pytest.approx(dyn.LOGLIK_FIXED_DYNARE, abs=1e-9)

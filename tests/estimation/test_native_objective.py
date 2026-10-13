@@ -11,12 +11,8 @@ so the resolved parameter vector is the base calibration.
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
-from sympy import Symbol
 
-from SymbolicDSGE import ModelParser, DSGESolver
-from SymbolicDSGE.kalman.config import KalmanConfig
 from SymbolicDSGE.estimation import Estimator
 
 
@@ -36,63 +32,22 @@ def _native_loglik(
     return est.loglik()
 
 
-@pytest.fixture(scope="module")
-def bundle(post82_test_model_path):
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    steady = np.zeros((compiled.n_declared,), dtype=np.float64)
-    solved = solver.solve(compiled=compiled, ss_seed=steady)
-
-    params = model.calibration.parameters
-    std_map = model.calibration.shock_std
-    sig = {s: float(params[std_map[Symbol(s)]]) for s in ("e_g", "e_z", "e_r")}
-
-    T = 24
-    rng = np.random.default_rng(20260303)
-    sim = solved.sim(
-        T=T,
-        shocks={
-            "e_g": rng.normal(0.0, sig["e_g"], size=T),
-            "e_z": rng.normal(0.0, sig["e_z"], size=T),
-            "e_r": rng.normal(0.0, sig["e_r"], size=T),
-        },
-        x0=np.zeros((compiled.n_var,), dtype=np.float64),
-        observables=True,
-    )
-    y = pd.DataFrame(
-        {
-            "OutGap": sim.observables["OutGap"][1:],
-            "Infl": sim.observables["Infl"][1:],
-            "Rate": sim.observables["Rate"][1:],
-        }
-    )
-    return {
-        "compiled": compiled,
-        "kalman": compiled.kalman,
-        "solver": solver,
-        "solved": solved,
-        "steady": steady,
-        "y": y,
-    }
-
-
 @pytest.mark.parametrize("filter_mode", ["linear", "extended"])
-def test_native_objective_matches_model_kalman(bundle, filter_mode):
+def test_native_objective_matches_model_kalman(
+    compiled_post82, solved_post82, y_post82, filter_mode
+):
     obs = ["Infl", "Rate"]
     ll = _native_loglik(
-        compiled=bundle["compiled"],
-        y=bundle["y"],
+        compiled=compiled_post82,
+        y=y_post82,
         observables=obs,
         filter_mode=filter_mode,
         estimated="psi_pi",
-        ss_seed=bundle["steady"],
+        ss_seed=solved_post82.policy.steady_state,
     )
-    ll_model = (
-        bundle["solved"]
-        .kalman(y=bundle["y"], filter_mode=filter_mode, observables=obs)
-        .loglik
-    )
+    ll_model = solved_post82.kalman(
+        y=y_post82, filter_mode=filter_mode, observables=obs
+    ).loglik
 
     # A Blanchard-Kahn failure returns -inf rather than a wrong number, so a
     # finite value is the observable form of the old bk == 0 assertion.
@@ -100,62 +55,42 @@ def test_native_objective_matches_model_kalman(bundle, filter_mode):
     np.testing.assert_allclose(ll, float(ll_model), rtol=1e-9, atol=1e-9)
 
 
-@pytest.fixture(scope="module")
-def rbc_bundle(rbc_second_order_test_model_path):
-    """Second-order RBC (levels model, nonzero steady state) for the unscented
-    parity. The fixture has no kalman section, so a scalar measurement-noise
-    configuration is supplied."""
-    model, _ = ModelParser(rbc_second_order_test_model_path).get_all()
-    R = np.array([[1e-4]], dtype=np.float64)
-    solver = DSGESolver(model, KalmanConfig(R=R))
-    compiled = solver.compile()
-
-    # The config's own ss_seed resolves Newton here, so the solve needs no help.
-    solved = solver.solve(compiled=compiled, order=2)
+def test_native_unscented_objective_matches_model_kalman(
+    compiled_rbc_so, solved_rbc_so
+):
+    """The second-order RBC is a levels model with a nonzero steady state, which
+    the gap model above cannot reach. Both sides read R off the model's own
+    kalman block, so neither is handed one."""
+    obs = ["c_obs"]
+    jitter, symmetrize = 1e-8, True
 
     T = 40
     rng = np.random.default_rng(20260303)
     # x0 defaults to the steady state.
-    sim = solved.sim(
+    sim = solved_rbc_so.sim(
         T=T,
         shocks={"e": rng.normal(0.0, 0.01, size=T)},
         observables=True,
     )
-    return {
-        "compiled": compiled,
-        "solver": solver,
-        "solved": solved,
-        "y": pd.DataFrame({"c_obs": sim.observables["c_obs"][1:]}),
-        "R": R,
-    }
+    y = sim.observables["c_obs"][1:].reshape(-1, 1)
 
-
-def test_native_unscented_objective_matches_model_kalman(rbc_bundle):
-
-    obs = ["c_obs"]
-    jitter, symmetrize = 1e-8, True
     ll = _native_loglik(
-        compiled=rbc_bundle["compiled"],
-        y=rbc_bundle["y"],
+        compiled=compiled_rbc_so,
+        y=y,
         observables=obs,
         filter_mode="unscented",
         estimated="rho",
         ss_seed=None,
-        R=rbc_bundle["R"],
         jitter=jitter,
         symmetrize=symmetrize,
     )
-    ll_model = (
-        rbc_bundle["solved"]
-        .kalman(
-            y=rbc_bundle["y"],
-            filter_mode="unscented",
-            observables=obs,
-            jitter=jitter,
-            symmetrize=symmetrize,
-        )
-        .loglik
-    )
+    ll_model = solved_rbc_so.kalman(
+        y=y,
+        filter_mode="unscented",
+        observables=obs,
+        jitter=jitter,
+        symmetrize=symmetrize,
+    ).loglik
 
     assert np.isfinite(ll)
     np.testing.assert_allclose(ll, float(ll_model), rtol=1e-9, atol=1e-9)

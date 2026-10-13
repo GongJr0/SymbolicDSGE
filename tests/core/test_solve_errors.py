@@ -101,11 +101,6 @@ def gali():
     return _compiled(MODELS / "gali_2015.yaml")
 
 
-@pytest.fixture(scope="module")
-def rbc():
-    return _compiled(MODELS / "rbc_second_order.yaml")
-
-
 def test_no_stable_solution_carries_the_partition_and_the_eigenvalues(gali):
     solver, compiled = gali
     with pytest.raises(DecisionRuleError) as exc:
@@ -129,10 +124,13 @@ def test_no_stable_solution_carries_the_partition_and_the_eigenvalues(gali):
     assert "occurring at both dates" not in message
 
 
-def test_a_variable_at_both_dates_is_counted_in_each_block(rbc):
-    solver, compiled = rbc
+def test_a_variable_at_both_dates_is_counted_in_each_block(
+    solver_rbc_so, compiled_rbc_so
+):
     with pytest.raises(DecisionRuleError) as exc:
-        solver.solve(compiled, parameters=_params(compiled, rho=1.8), order=2)
+        solver_rbc_so.solve(
+            compiled_rbc_so, parameters=_params(compiled_rbc_so, rho=1.8), order=2
+        )
 
     err = exc.value
     assert err.status is SolveStatus.NO_STABLE_SOLUTION
