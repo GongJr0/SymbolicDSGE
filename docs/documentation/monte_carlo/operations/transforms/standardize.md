@@ -14,7 +14,6 @@ standardize_step(
     field: str,
     columns: int | Sequence[int] | slice | ndarray | None = None,
     burn_in: int = 0,
-    drop_initial: bool = False,
     ddof: int = 0,
 ) -> MCStep
 ```
@@ -35,7 +34,6 @@ __Key Parameters:__
 | field | required | Producer field. Use `states` or `observables` for data steps, a filter output field for filter steps, or `payload` for transform steps. |
 | columns | `None` | Optional column subset. |
 | burn_in | `0` | Rows dropped before transformation. |
-| drop_initial | `False` | Start at row `1` when `burn_in=0`. |
 | ddof | `0` | Standard-deviation degrees-of-freedom correction. |
 | n_retain | `-1` | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |
 

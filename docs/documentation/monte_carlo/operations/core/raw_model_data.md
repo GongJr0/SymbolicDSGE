@@ -10,7 +10,10 @@ raw_model_data_step(
     n_retain: int = -1,
     *,
     states: ndarray | Sequence[float] | Sequence[Sequence[float]] | None = None,
+    shocks: ndarray | Sequence[float] | Sequence[Sequence[float]] | None = None,
     observables: ndarray | Sequence[float] | Sequence[Sequence[float]] | None = None,
+    state_names: Sequence[str] = (),
+    shock_names: Sequence[str] = (),
     observable_names: Sequence[str] = (),
 ) -> MCStep
 ```
@@ -22,6 +25,7 @@ __Accepted Shapes:__
 | __Field__ | __Accepted Shapes__ | __Description__ |
 |:----------|:--------------------:|----------------:|
 | states | `(T,)`, `(T, n_state)`, or `(n_rep, T, n_state)` | A 1D path is treated as `(T, 1)`. A 2D array feeds every replication. A 3D array selects `arr[rep_idx]`, so each replication gets its own slice. |
+| shocks | `(T, n_shock)` or `(n_rep, T, n_shock)` | Same convention as `states`. |
 | observables | `(T,)`, `(T, n_obs)`, or `(n_rep, T, n_obs)` | Same convention as `states`. |
 
 The array is bound to the native run once, before the loop, and the per-replication slice is read directly out of it.

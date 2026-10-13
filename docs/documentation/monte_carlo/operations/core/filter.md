@@ -15,7 +15,7 @@ filter_step(
     obs_columns: ColumnSelector = None,
     filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     observables: list[str] | None = None,
-    x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
+    x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
     P0: ndarray | None = None,
     R: ndarray | None = None,
     jitter: float | None = None,
