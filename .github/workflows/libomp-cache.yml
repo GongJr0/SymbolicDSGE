@@ -1,0 +1,41 @@
+name: libomp cache
+
+# Populates the libomp cache the macOS wheel builds read, so that a version
+# bump or an eviction does not land on several macOS wheel jobs at once, each
+# building the runtime from LLVM source.
+#
+# Dispatch this on `main` after changing `llvm-version`. Actions caches are
+# readable from the current branch and the default branch only, so an entry
+# warmed on a feature branch is invisible to every other branch and to pull
+# requests from them.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Unused caches are evicted after 7 days and nothing else runs macOS on a
+    # schedule, so refresh weekly to keep the entry alive. Scheduled runs only
+    # ever use the default branch, which is where the entry has to live anyway.
+    - cron: "0 0 * * 1"
+
+concurrency:
+  group: libomp-cache
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    name: Warm libomp cache
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Builds and saves on a miss, and is a no-op on a hit, so a re-dispatch
+      # costs nothing once the entry exists.
+      - name: Restore or build libomp
+        uses: ./.github/actions/libomp
+        with:
+          # Skips the Homebrew LLVM download; this job compiles nothing.
+          configure-compiler: "false"

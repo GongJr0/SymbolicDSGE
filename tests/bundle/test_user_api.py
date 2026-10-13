@@ -86,9 +86,12 @@ def test_save_sdsge_yaml_text_override_takes_precedence(
     assert archive.read_text(member_path) == override
 
 
-def test_save_sdsge_raises_without_source_yaml(tmp_path: Path, solved_test) -> None:
-    solved = solved_test
-    # Simulate a programmatically constructed config (no parse history).
-    solved.compiled.config.source_yaml = None
+def test_save_sdsge_raises_without_source_yaml(
+    tmp_path: Path, solved_test, monkeypatch
+) -> None:
+    # Simulate a programmatically constructed config (no parse history). The
+    # model is session-wide, so this is reverted at teardown rather than left
+    # for whatever runs next in the worker.
+    monkeypatch.setattr(solved_test.compiled.config, "source_yaml", None)
     with pytest.raises(ValueError, match="source YAML"):
-        solved.save_sdsge(tmp_path / "nope.sdsge")
+        solved_test.save_sdsge(tmp_path / "nope.sdsge")

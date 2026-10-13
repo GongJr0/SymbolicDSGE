@@ -1,0 +1,165 @@
+name: Set up macOS OpenMP toolchain
+description: >
+  Put a libomp at a stable prefix and point the compiler at it. Apple clang
+  ships no OpenMP runtime, so the extension is compiled by Homebrew's clang
+  against a libomp built from the LLVM release `llvm-version` names.
+
+  Both halves are pinned to that one input: the runtime from its full version,
+  the compiler from its major. A compiler ahead of its runtime is the skew that
+  breaks a build (clang emits `__kmpc_*` entry points an older libomp does not
+  export), and pinning only one side lets brew walk into it. Pinned together,
+  falling behind brew costs nothing but being behind.
+
+  Building that runtime is the expensive part (an LLVM source download plus a
+  cmake build), so it is cached by itself and skipped on a hit. The save is an
+  ordinary step placed straight after the build rather than a post step, so a
+  later wheel failure cannot discard a libomp that built correctly, and a failed
+  build skips the save on its own.
+
+  The key is exact, with no `restore-keys`. A near miss would hand back a libomp
+  built from a different LLVM release or under different cmake flags, which is
+  worse than rebuilding; hashing this file in makes a flag change invalidate the
+  key without anyone having to remember.
+
+inputs:
+  llvm-version:
+    description: >
+      LLVM release the `openmp` runtimes are built from. Its major also selects
+      the Homebrew LLVM that compiles the extension, so the two cannot drift.
+    required: false
+    default: "23.1.3"
+  configure-compiler:
+    description: >
+      Install Homebrew LLVM and export CC/CXX/CFLAGS/LDFLAGS for a build later
+      in this job. The cache warmer passes false to skip the install, which is
+      a large download it has no use for. Safe to skip only because the runtime
+      is built before any of this is set, so the compiler never reaches the
+      cached artifact.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    # One definition of the prefix and the key, so the restore and the save
+    # cannot drift apart (a mismatch never hits, silently).
+    - name: Resolve prefix and cache key
+      id: paths
+      shell: bash
+      env:
+        LLVM_VERSION: ${{ inputs.llvm-version }}
+        CACHE_KEY: libomp-${{ runner.os }}-${{ runner.arch }}-llvm${{ inputs.llvm-version }}-${{ hashFiles('.github/actions/libomp/action.yml') }}
+      run: |
+        set -euo pipefail
+        prefix="$HOME/libomp"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=$CACHE_KEY" >> "$GITHUB_OUTPUT"
+        echo "major=${LLVM_VERSION%%.*}" >> "$GITHUB_OUTPUT"
+        # Outside the workspace: cibuildwheel copies the project, and a stray
+        # directory in it would reach the sdist and the package-data globs.
+        echo "LIBOMP_PREFIX=$prefix" >> "$GITHUB_ENV"
+
+    - name: Restore libomp
+      id: cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.paths.outputs.prefix }}
+        key: ${{ steps.paths.outputs.key }}
+
+    - name: Build libomp
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        LLVM_VERSION: ${{ inputs.llvm-version }}
+      run: |
+        set -euo pipefail
+        # cmake is needed only to build; a cache hit skips it.
+        brew install cmake
+        source_dir="$RUNNER_TEMP/llvm-project-${LLVM_VERSION}.src"
+        curl --fail --location \
+          "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz" \
+          --output "$RUNNER_TEMP/llvm-project.tar.xz"
+        tar -xf "$RUNNER_TEMP/llvm-project.tar.xz" -C "$RUNNER_TEMP"
+        # The source tree and the build tree stay in RUNNER_TEMP and uncached:
+        # they are large and worthless once installed.
+        cmake -S "${source_dir}/runtimes" -B "$RUNNER_TEMP/libomp-build" \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX="$LIBOMP_PREFIX" \
+          -DCMAKE_OSX_ARCHITECTURES=arm64 \
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+          -DLIBOMP_INSTALL_ALIASES=OFF \
+          -DLLVM_ENABLE_RUNTIMES=openmp \
+          -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
+          -DOPENMP_ENABLE_OMPT_TOOLS=OFF
+        cmake --build "$RUNNER_TEMP/libomp-build" --parallel
+        cmake --install "$RUNNER_TEMP/libomp-build"
+
+    # `cmake --install` exiting zero is not the same claim as a usable runtime
+    # being there. A poisoned entry would be trusted by every macOS job until
+    # the key changes, so prove the artifact before it is saved.
+    - name: Verify libomp
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -f "$LIBOMP_PREFIX/lib/libomp.dylib"
+        test -f "$LIBOMP_PREFIX/include/omp.h"
+        otool -L "$LIBOMP_PREFIX/lib/libomp.dylib"
+        lipo -archs "$LIBOMP_PREFIX/lib/libomp.dylib" | tr ' ' '\n' | grep -qx arm64
+
+    # Two macOS jobs can miss on the same run, build, and save the same key.
+    # The loser of that race warns rather than fails, so a cold run stays green.
+    - name: Save libomp
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ steps.paths.outputs.prefix }}
+        key: ${{ steps.paths.outputs.key }}
+
+    # Advisory only, cannot fail: both halves are pinned, so
+    # brew moving ahead changes nothing until someone bumps `llvm-version`.
+    # The weekly warmer runs this too, a notice is broadcasted from there as well.
+    - name: Signal newer Homebrew LLVM
+      shell: bash
+      env:
+        LLVM_MAJOR: ${{ steps.paths.outputs.major }}
+      run: |
+        set -uo pipefail
+        stable="$(brew info --json=v2 llvm 2>/dev/null | jq -r '.formulae[0].versions.stable' || true)"
+        case "${stable%%.*}" in
+          ''|*[!0-9]*)
+            echo "Could not read Homebrew's LLVM version; nothing to report."
+            exit 0
+            ;;
+        esac
+        if [ "${stable%%.*}" -gt "$LLVM_MAJOR" ]; then
+          echo "::warning::Homebrew LLVM is at ${stable}; this pins ${LLVM_MAJOR}.x. Bump llvm-version when convenient."
+        fi
+
+    - name: Point the compiler at libomp
+      if: inputs.configure-compiler == 'true'
+      shell: bash
+      env:
+        LLVM_MAJOR: ${{ steps.paths.outputs.major }}
+      run: |
+        set -euo pipefail
+        # A versioned formula appears once brew moves past that major, so the
+        # current one may exist only as `llvm`. Either route has to land on the
+        # pinned major, and a mismatch is a failure rather than a silent skew.
+        if brew install "llvm@${LLVM_MAJOR}"; then
+          llvm_prefix="$(brew --prefix "llvm@${LLVM_MAJOR}")"
+        else
+          brew install llvm
+          llvm_prefix="$(brew --prefix llvm)"
+        fi
+        got="$("${llvm_prefix}/bin/clang" -dumpversion)"
+        got="${got%%.*}"
+        if [ "$got" != "$LLVM_MAJOR" ]; then
+          echo "::error::Homebrew clang is ${got}.x but llvm-version pins ${LLVM_MAJOR}.x."
+          exit 1
+        fi
+        echo "CC=${llvm_prefix}/bin/clang" >> "$GITHUB_ENV"
+        echo "CXX=${llvm_prefix}/bin/clang++" >> "$GITHUB_ENV"
+        echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+        echo "CFLAGS=-I${LIBOMP_PREFIX}/include" >> "$GITHUB_ENV"
+        echo "LDFLAGS=-L${LIBOMP_PREFIX}/lib -Wl,-rpath,${LIBOMP_PREFIX}/lib" >> "$GITHUB_ENV"
