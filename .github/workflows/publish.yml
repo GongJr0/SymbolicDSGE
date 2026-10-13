@@ -75,8 +75,10 @@ jobs:
         uses: ./.github/actions/libomp
 
       # Reads [tool.cibuildwheel] from pyproject; builds + per-platform tests.
+      # 4.2.0 took cp315 out of the `cpython-prerelease` enable group and 4.3.1
+      # ships the final 3.15.0, so the matrix needs no `enable` entry.
       - name: Build & test wheels
-        uses: pypa/cibuildwheel@v4.1.0
+        uses: pypa/cibuildwheel@v4.3.1
         env:
           CIBW_BUILD: ${{ matrix.shard.build }}
           CIBW_ENVIRONMENT_WINDOWS: SDSGE_TOOLCHAIN=clang-cl
