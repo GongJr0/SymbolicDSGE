@@ -10,16 +10,12 @@ The grid is uniform in ``z = Phi^-1(u)`` rather than in ``u``. Spacing the knots
 probit space resolves the tails a uniform grid truncates, and it makes the draw an
 index rather than a search: the kernel draws a standard normal, clamps it, and reads
 the knot it lands between.
-
-The table is the whole representation. Nothing here holds the distribution it came
-from, and :attr:`DistributionTable.provenance` is a label for a reader, never a recipe
-to rebuild from.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, TypedDict, Protocol
+from typing import Any, Callable, TypedDict, Protocol, runtime_checkable
 
 import numpy as np
 from numpy import asarray, float64
@@ -36,12 +32,13 @@ NDF = NDArray[float64]
 KNOTS = 1024
 ZMAX = 6.0
 
-#: A continuous quantile function gives one distinct knot per grid point; a staircase
-#: gives as many as its support has points. This only catches a ``discrete`` flag the
-#: knots contradict.
+#: A continuous quantile function gives one distinct knot per grid point; a discrete
+#: one gives as many as its support has points. This only catches a ``discrete``
+#: flag the knots contradict.
 _TIE_FRACTION = 8
 
 
+@runtime_checkable
 class QuantileDist(Protocol):
     def ppf(self, q: NDF, /, *args: Any, **kwds: Any) -> ArrayLike: ...
 
@@ -56,14 +53,11 @@ class DistributionTableParameters(TypedDict):
     zmax : float
         Probit-space half-width the knots span.
     discrete : bool
-        Whether the knots are a staircase read by nearest knot rather than interpolated.
+        Whether the distribution is discrete.
     source_mean : float
         Mean removed when standardizing.
     source_std : float
         Standard deviation divided out when standardizing.
-    provenance : str
-        What the table was built from, for a reader. Never read back as a recipe.
-
     """
 
     q: list[float]
@@ -71,7 +65,6 @@ class DistributionTableParameters(TypedDict):
     discrete: bool
     source_mean: float
     source_std: float
-    provenance: str
 
 
 def _knot_probabilities(zmax: float, knots: int) -> tuple[NDF, NDF]:
@@ -128,24 +121,64 @@ def _table_moments(z: NDF, u: NDF, q: NDF, discrete: bool) -> tuple[float, float
     return m1, m2 - m1 * m1
 
 
-def _is_discrete(dist: QuantileDist) -> bool:
-    """Whether a scipy distribution, frozen or not, is a discrete family."""
-    return isinstance(getattr(dist, "dist", dist), rv_discrete)
+def _from_ppf(
+    ppf: Callable[[NDF], ArrayLike],
+    *,
+    discrete: bool = False,
+) -> DistributionTable:
+    """Tabulate a quantile function and standardize it.
 
+    Parameters
+    ----------
+    ppf : Callable[[NDF], ArrayLike]
+        Quantile function over ``(0, 1)``, taking an array and returning one.
+    discrete : bool
+        Whether the function or distribution is discrete.
 
-def _scipy_provenance(dist: QuantileDist, kwargs: Mapping[str, Any]) -> str:
-    """A label naming the family and the parameters baked into the knots.
+    Returns
+    -------
+    DistributionTable
+        A table with mean zero and unit variance under the sampling measure.
 
-    A frozen distribution carries its own, so read them rather than reporting the
-    bare family a caller would have to guess the shape of.
+    Raises
+    ------
+    ValueError
+        When ``ppf`` does not return one value per probability, or when the knots
+        carry no spread to standardize by.
+
+    Notes
+    -----
+    The grid is bounded, so the knots have a finite variance whatever the
+    distribution behind them does: a Cauchy quantile function tabulates here
+    without complaint, standardized by the spread its outermost knots happen to
+    have. A caller on this route owns that question.
+    :meth:`from_scipy` does not, since it can ask.
+
     """
-    name = getattr(getattr(dist, "dist", dist), "name", None) or type(dist).__name__
-    shown = [repr(a) for a in getattr(dist, "args", ())]
-    merged = {**getattr(dist, "kwds", {}), **kwargs}
-    shown += [f"{k}={v!r}" for k, v in sorted(merged.items())]
-    if not shown:
-        return f"scipy.stats.{name}"
-    return f"scipy.stats.{name}({', '.join(shown)})"
+    z, u = _knot_probabilities(ZMAX, KNOTS)
+    raw = asarray(ppf(u), dtype=float64)
+    if raw.shape != u.shape:
+        raise ValueError(
+            f"The quantile function returned shape {tuple(raw.shape)} for "
+            f"{KNOTS} probabilities. It must take an array and return one value "
+            "per probability."
+        )
+
+    mean, var = _table_moments(z, u, raw, discrete)
+    if not np.isfinite(var) or var <= 0.0:
+        raise ValueError(
+            f"The tabulated quantile function has variance {var!r}, so it cannot "
+            "be standardized. A shock distribution needs a finite, positive "
+            "variance for the calibrated covariance to mean anything."
+        )
+    std = float(np.sqrt(var))
+    return DistributionTable(
+        q=(raw - mean) / std,
+        zmax=ZMAX,
+        discrete=discrete,
+        source_mean=mean,
+        source_std=std,
+    )
 
 
 @dataclass(frozen=True, eq=False)
@@ -170,9 +203,6 @@ class DistributionTable:
         Mean removed when standardizing.
     source_std : float
         Standard deviation divided out when standardizing.
-    provenance : str
-        What it was built from. Descriptive only.
-
     """
 
     q: NDF
@@ -180,7 +210,6 @@ class DistributionTable:
     discrete: bool = False
     source_mean: float = 0.0
     source_std: float = 1.0
-    provenance: str = ""
 
     def __post_init__(self) -> None:
         q = asarray(self.q, dtype=float64)
@@ -224,19 +253,19 @@ class DistributionTable:
                 )
 
     @property
-    def knots(self) -> int:
+    def n_knots(self) -> int:
         """Number of knots, which is what fixes the grid's resolution."""
         return int(self.q.shape[0])
 
     @property
     def dz(self) -> float:
         """Probit-space spacing between knots."""
-        return 2.0 * self.zmax / float(self.knots - 1)
+        return 2.0 * self.zmax / float(self.n_knots - 1)
 
     @property
     def z(self) -> NDF:
         """The grid the knots sit on, for inspection."""
-        return np.linspace(-self.zmax, self.zmax, self.knots, dtype=float64)
+        return np.linspace(-self.zmax, self.zmax, self.n_knots, dtype=float64)
 
     @property
     def inv_dz(self) -> float:
@@ -245,14 +274,14 @@ class DistributionTable:
         Mirrors the native kernel's pre-computed ``inv_dx`` to eliminate
         floating-point discrepancies between the two.
         """
-        return float(self.knots - 1) / (2.0 * self.zmax)
+        return float(self.n_knots - 1) / (2.0 * self.zmax)
 
     def evaluate(self, z: NDF | float) -> NDF:
         """The standardized variate a standard normal draw ``z`` selects.
 
         The reference for what the kernel computes: clamp to the grid, locate the knot,
         then interpolate between the bracketing knots (or take the nearest one when the
-        table is a staircase).
+        table is discrete).
 
         Parameters
         ----------
@@ -268,10 +297,10 @@ class DistributionTable:
         zz = np.clip(asarray(z, dtype=float64), -self.zmax, self.zmax)
         pos = (zz + self.zmax) * self.inv_dz
         if self.discrete:
-            idx = np.clip(np.floor(pos + 0.5).astype(np.int64), 0, self.knots - 1)
+            idx = np.clip(np.floor(pos + 0.5).astype(np.int64), 0, self.n_knots - 1)
             return self.q[idx]
         # One short of the end, since the interpolation reads the next knot.
-        idx = np.clip(np.floor(pos).astype(np.int64), 0, self.knots - 2)
+        idx = np.clip(np.floor(pos).astype(np.int64), 0, self.n_knots - 2)
         frac = pos - idx
         lo = self.q[idx]
         return lo + frac * (self.q[idx + 1] - lo)
@@ -282,7 +311,6 @@ class DistributionTable:
         ppf: Callable[[NDF], ArrayLike],
         *,
         discrete: bool = False,
-        provenance: str = "",
     ) -> DistributionTable:
         """Tabulate a quantile function and standardize it.
 
@@ -291,11 +319,7 @@ class DistributionTable:
         ppf : Callable[[NDF], ArrayLike]
             Quantile function over ``(0, 1)``, taking an array and returning one.
         discrete : bool
-            Whether the function is a staircase. Nothing about a bare callable says
-            so, which is why it is declared rather than detected; the knots are
-            checked against the declaration.
-        provenance : str
-            What this was built from, for a reader.
+            Whether the function is discrete.
 
         Returns
         -------
@@ -317,34 +341,12 @@ class DistributionTable:
         :meth:`from_scipy` does not, since it can ask.
 
         """
-        z, u = _knot_probabilities(ZMAX, KNOTS)
-        raw = asarray(ppf(u), dtype=float64)
-        if raw.shape != u.shape:
-            raise ValueError(
-                f"The quantile function returned shape {tuple(raw.shape)} for "
-                f"{KNOTS} probabilities. It must take an array and return one value "
-                "per probability."
-            )
-
-        mean, var = _table_moments(z, u, raw, discrete)
-        if not np.isfinite(var) or var <= 0.0:
-            raise ValueError(
-                f"The tabulated quantile function has variance {var!r}, so it cannot "
-                "be standardized. A shock distribution needs a finite, positive "
-                "variance for the calibrated covariance to mean anything."
-            )
-        std = float(np.sqrt(var))
-        return cls(
-            q=(raw - mean) / std,
-            zmax=ZMAX,
-            discrete=discrete,
-            source_mean=mean,
-            source_std=std,
-            provenance=provenance,
-        )
+        return _from_ppf(ppf, discrete=discrete)
 
     @classmethod
-    def from_scipy(cls, dist: QuantileDist, /, **kwargs: Any) -> DistributionTable:
+    def from_scipy(
+        cls, dist: QuantileDist, discrete: bool = False, /, **kwargs: Any
+    ) -> DistributionTable:
         """Tabulate a scipy distribution, frozen or parameterized by ``kwargs``.
 
         The one route that reads a distribution object. Discreteness is read off
@@ -354,6 +356,8 @@ class DistributionTable:
         ----------
         dist : Any
             A scipy distribution, or anything exposing a compatible ``ppf``.
+        discrete : bool
+            Whether the distribution is discrete.
         **kwargs : Any
             Shape parameters, baked into the knots. They do not survive as live
             parameters: a table is not re-parameterizable.
@@ -387,19 +391,14 @@ class DistributionTable:
             declared = float(np.asarray(stats_fn(moments="v", **kwargs), dtype=float64))
             if not np.isfinite(declared):
                 raise ValueError(
-                    f"{_scipy_provenance(dist, kwargs)} has variance {declared}. The "
-                    "shock covariance specification cannot be satisfied by a "
-                    "distribution with no finite variance."
+                    "Distribution has undefined or non-finite variance."
+                    "The shock covariance specification cannot be satisfied."
                 )
 
         def _ppf(u: NDF) -> ArrayLike:
             return ppf(u, **kwargs)
 
-        return cls.from_callable(
-            _ppf,
-            discrete=_is_discrete(dist),
-            provenance=_scipy_provenance(dist, kwargs),
-        )
+        return _from_ppf(_ppf, discrete=discrete)
 
     def to_dict(self) -> DistributionTableParameters:
         """Serialize the table to the stored layout."""
@@ -409,7 +408,6 @@ class DistributionTable:
             discrete=bool(self.discrete),
             source_mean=float(self.source_mean),
             source_std=float(self.source_std),
-            provenance=str(self.provenance),
         )
 
     @classmethod
@@ -421,10 +419,8 @@ class DistributionTable:
             discrete=bool(data["discrete"]),
             source_mean=float(data["source_mean"]),
             source_std=float(data["source_std"]),
-            provenance=str(data.get("provenance", "")),
         )
 
     def __repr__(self) -> str:
-        what = self.provenance or "callable"
         kind = "discrete" if self.discrete else "continuous"
-        return f"DistributionTable({what}, {kind}, knots={self.knots})"
+        return f"DistributionTable({kind}, n_knots={self.n_knots})"

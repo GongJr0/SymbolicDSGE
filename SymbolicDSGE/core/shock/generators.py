@@ -1,13 +1,20 @@
 """Shock generator and Array-shock handlers for DSGE simulations."""
 
-from scipy.stats._distn_infrastructure import rv_generic
-from scipy.stats._multivariate import multi_rv_generic
+from __future__ import annotations
+
+from .table import DistributionTable, QuantileDist
+
 import numpy as np
-from numpy import asarray, ndarray, float64, random, generic
+from numpy import asarray, ndarray, float64, generic
 from numpy.linalg import cholesky, eigh, LinAlgError
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
+
 from typing import Any, Callable, Literal, Mapping, TypedDict, Sequence, cast, get_args
 import copy
+
+#: A quantile function: probabilities in, quantiles out. ``table.py`` states
+#: the same shape on :meth:`DistributionTable.from_callable`.
+QuantileFn = Callable[[NDArray[float64]], ArrayLike]
 
 #: The built-in families a spec may name.
 ShockDistribution = Literal["norm", "t", "uni", "exp", "gamma", "beta"]
@@ -62,37 +69,6 @@ class ShockPathParameters(TypedDict):
 
     target: tuple[str, ...]
     path: NDArray[float64]
-
-
-def abstract_shock_array(
-    T: int,
-    seed: int | None,
-    dist: rv_generic | multi_rv_generic,
-    **dist_kwargs: object,
-) -> ndarray:
-    """
-    Generate an array of shocks based on a specified distribution.
-
-    Parameters
-    ----------
-    T (int): The number of time periods.
-    dist: A scipy.stats distribution object (e.g., norm, t, uniform).
-    **dist_kwargs: Keyword arguments for the distribution.
-
-    Returns
-    -------
-    np.ndarray: An array of shocks of length T.
-    """
-    # `RandomState` seeds from 32-bit words.
-    # Both deterministic bitops fix the low and high 32 bits
-    # of a 64-bit seed, producung 2 words for the 32-bit engine.
-    state = random.RandomState(
-        None
-        if seed is None
-        else np.array([seed & 0xFFFFFFFF, seed >> 32], dtype=np.uint32)
-    )
-    shocks = dist.rvs(size=T, random_state=state, **dist_kwargs)  # type: ignore
-    return asarray(shocks, dtype=float64)
 
 
 # --- numpy Generator fast paths --------------------------------------------
@@ -156,10 +132,12 @@ def _validate_dist(dist: object, dist_kwargs: Mapping[str, Any]) -> None:
                 f"Unknown shock distribution family: {dist!r}. "
                 f"Valid families: {list(get_args(ShockDistribution))}."
             )
-    elif not isinstance(dist, rv_generic | multi_rv_generic):
+    elif not isinstance(dist, DistributionTable):
         raise TypeError(
-            f"dist must be one of {list(get_args(ShockDistribution))} or a "
-            f"scipy.stats distribution object; got {type(dist).__name__}."
+            f"dist must be one of {list(get_args(ShockDistribution))}; got "
+            f"{type(dist).__name__}. A distribution object, or any quantile "
+            "function, is tabulated through `Shock.from_ppf`, which is also "
+            "where a discrete family is declared."
         )
     if "scale" in dist_kwargs:
         raise ValueError(
@@ -182,8 +160,10 @@ def validate_shock_family(
 ) -> None:
     """Check a spec against what its family requires at the width it drives.
 
-    Runs at bind. Scipy distributions are not checked since their parameterization
-    requirements are not known to the library.
+    Runs at bind, and only the named families have anything to check here: a
+    tabulated distribution settled its parameters when its knots were built, and
+    carries no width requirement, since one marginal serves every column of a
+    grouped entry.
     """
     _validate_dist(dist, dist_kwargs)
     match dist:
@@ -236,10 +216,13 @@ class Shock:
 
     Parameters
     ----------
-    dist : ShockDistribution | rv_generic | multi_rv_generic | None
-        Distribution to draw shocks from. Can be a family name ("norm", "t",
-        "uni", "exp", "gamma", "beta") or a scipy.stats distribution object.
-        Alternatively, a custom class implementing ``rvs`` can be passed in.
+    dist : ShockDistribution | DistributionTable | rv_generic | multi_rv_generic
+        Distribution to draw shocks from. A family name ("norm", "t", "uni",
+        "exp", "gamma", "beta") is drawn analytically by the kernel. A
+        scipy.stats distribution is tabulated at construction. Anything else
+        exposing a quantile function is tabulated by the caller through
+        :meth:`DistributionTable.from_callable` and passed as the table, since
+        only its author can say whether it is discrete.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
     dist_kwargs : dict | None
@@ -247,8 +230,11 @@ class Shock:
 
     Attributes
     ----------
-    dist : ShockDistribution | rv_generic | multi_rv_generic | None
-        The configured distribution.
+    dist : ShockDistribution | DistributionTable
+        The resolved distribution, which is not always what was passed: a
+        scipy object arrives here as the table it was tabulated into, and the
+        object itself is not kept. A table cannot be re-parameterized, so
+        changing ``dist_kwargs`` afterwards moves ``loc`` and nothing else.
     seed : int | None
         The configured random seed.
     dist_kwargs : dict | None
@@ -273,20 +259,66 @@ class Shock:
 
     def __init__(
         self,
-        dist: ShockDistribution | rv_generic | multi_rv_generic,
+        dist: ShockDistribution | DistributionTable,
         seed: int | None = 0,
-        dist_kwargs: dict | None = None,
+        **dist_kwargs: ArrayLike,
     ) -> None:
         # A Shock is a horizon-independent distribution spec: the number of
         # periods ``T`` is supplied by the caller at generation time, not baked
         # in here. The simulation is the single authority on its own horizon.
         self.dist = dist
         self.seed = seed
-        self.dist_kwargs = dict(dist_kwargs) if dist_kwargs is not None else {}
-        _validate_dist(self.dist, self.dist_kwargs)
+        self.dist_kwargs = dict(dist_kwargs)
+        _validate_dist(dist, self.dist_kwargs)
 
         # Binding Slot (post-construction)
         self._target: tuple[str, ...] | None = None
+
+    @classmethod
+    def from_ppf(
+        cls,
+        dist: QuantileFn | QuantileDist,
+        seed: int | None = 0,
+        *,
+        discrete: bool = False,
+        **dist_kwargs: ArrayLike,
+    ) -> Shock:
+        """A spec over a distribution the kernel has no family for.
+
+        Anything that can produce quantiles is tabulated here and the object is
+        then dropped: the table is the whole representation, so keeping both
+        would leave two, only one of which survives a round trip. Shape
+        parameters are baked into the knots, which is why a tabulated spec
+        cannot be re-parameterized afterwards.
+
+        Parameters
+        ----------
+        dist : QuantileFn | QuantileDist
+            A quantile function with array input and output,
+            or a class exposing one as ``.ppf``.
+        seed : int | None
+            Random seed for reproducibility. If None, a random seed is used.
+        discrete : bool
+            Whether the distribution is discrete.
+        **dist_kwargs : ArrayLike
+            Shape parameters, passed to the quantile function. ``loc`` is kept
+            rather than baked in: standardizing removes the shift the knots
+            carry, and the resolved entry applies it once afterwards.
+
+        Returns
+        -------
+        Shock
+            An unbound spec over the tabulated distribution.
+
+        """
+        fn: Callable[[ndarray], ArrayLike] = (
+            (lambda u: dist.ppf(u, **dist_kwargs))
+            if isinstance(dist, QuantileDist)
+            else dist
+        )
+
+        table = DistributionTable.from_callable(fn, discrete=discrete)
+        return cls(table, seed, **dist_kwargs)
 
     @property
     def target(self) -> tuple[str, ...]:
@@ -305,7 +337,7 @@ class Shock:
         """Whether this spec has been bound to any shock variables."""
         return self._target is not None
 
-    def _bind(self, keys: tuple[str, ...]) -> "Shock":
+    def _bind(self, keys: tuple[str, ...]) -> Shock:
         """A copy of this spec bound to ``keys``.
 
         Binding copies rather than mutating, which is what lets one template be
@@ -329,7 +361,7 @@ class Shock:
         bound._target = keys
         return bound
 
-    def joint(self, *keys: str) -> "Shock":
+    def joint(self, *keys: str) -> Shock:
         """Bind this spec to several shock variables, drawn together.
 
         The resolved entry spans every named target and draws through the factor
@@ -357,7 +389,7 @@ class Shock:
             raise ValueError("``joint`` needs at least one shock variable.")
         return self._bind(tuple(keys))
 
-    def independent(self, *keys: str, offset_seeds: bool = True) -> "list[Shock]":
+    def independent(self, *keys: str, offset_seeds: bool = True) -> list[Shock]:
         """Bind this spec to several shock variables, drawn separately.
 
         One copy per target, each resolving to a width-1 entry that draws
@@ -395,47 +427,6 @@ class Shock:
             out.append(bound)
         return out
 
-    def draw_fn(self, T: int, multivar: bool) -> ShockDrawFn:
-        """Resolve the distribution family once for a ``T``-period horizon.
-
-        ``multivar`` is the arity of the entry being resolved. It's required
-        for the scipy route while native handles both arities uniformly.
-
-        The returned callable is ``f(loc, factor, seed)``, returning ``(T, width)``.
-        ``factor`` is the entry's scale with standard deviations represented as a
-        1x1.
-        """
-        kwargs = self.dist_kwargs.copy()
-
-        # A grouped object is handed its covariance under the keyword
-        # ``multivariate_normal`` declares. An object that names it otherwise
-        # (``multivariate_t`` calls it ``shape``) is not supported here and says
-        # so through scipy rather than silently drawing something else.
-        scale_key = "cov" if multivar else "scale"
-        dist = cast(rv_generic | multi_rv_generic, self.dist)
-
-        def _scipy_draw(
-            loc: NDArray[float64],
-            factor: NDArray[float64],
-            seed: int | None,
-        ) -> NDArray[float64]:
-            # scipy owns its own factorization and is parameterized by the
-            # second moment, so hand back what the factor came from. The location
-            # rides in ``kwargs`` on this route, which is where scipy wants it.
-            del loc
-            s: float | NDArray[float64] = (
-                factor @ factor.T if multivar else float(factor[0, 0])
-            )
-            drawn = abstract_shock_array(
-                T,
-                seed,
-                dist,
-                **{**kwargs, scale_key: s},
-            )
-            return drawn.reshape(T, -1)
-
-        return _scipy_draw
-
     def to_dict(self) -> ShockParameters:
         """Serialize a generator-style Shock to a JSON-able dict.
 
@@ -458,7 +449,7 @@ class Shock:
         )
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "Shock":
+    def from_dict(cls, data: Mapping[str, Any]) -> Shock:
         """Rebuild a generator-style Shock from :meth:`to_dict` output.
 
         A ``multivar`` or ``dist_args`` written by an older release is ignored.
@@ -474,9 +465,9 @@ class Shock:
             )
         seed = data.get("seed")
         return cls(
-            dist=cast(ShockDistribution, dist),
-            seed=None if seed is None else int(seed),
-            dist_kwargs=dict(data.get("dist_kwargs") or {}),
+            cast(ShockDistribution, dist),
+            None if seed is None else int(seed),
+            **dict(data.get("dist_kwargs") or {}),
         ).joint(*data["target"])
 
     def __repr__(self) -> str:
@@ -527,7 +518,7 @@ class ShockPath:
         )
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "ShockPath":
+    def from_dict(cls, data: Mapping[str, Any]) -> ShockPath:
         """Rebuild a ShockPath from :meth:`to_dict` output."""
         path = asarray(data["path"], dtype=float64)
         keys = tuple(data["target"])

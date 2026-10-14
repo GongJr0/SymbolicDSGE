@@ -214,7 +214,7 @@ def resolve_shock_plan(
                 indices=indices,
                 family=family,
                 draw=(
-                    shock.draw_fn(_require_horizon(T, key), len(indices) > 1)
+                    shock.draw_fn(_require_horizon(T, key), len(indices) > 1)  # type: ignore
                     if family is None
                     else None
                 ),
