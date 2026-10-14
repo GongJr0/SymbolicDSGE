@@ -143,16 +143,9 @@ def _fill_binding(
 def _static_binding(
     values: NDF,
     target_offset: int,
-    *,
-    batched: bool = False,
 ) -> FloatInputBinding:
     array = np.ascontiguousarray(values, dtype=np.float64)
-    if batched:
-        if array.ndim < 2 or array.shape[0] == 0:
-            raise ValueError("Batched native input requires a non-empty leading axis.")
-        row_size = int(np.prod(array.shape[1:], dtype=np.intp))
-    else:
-        row_size = array.size
+    row_size = array.size
     if row_size == 0:
         raise ValueError("Native static input bindings cannot be empty.")
     flattened = np.ascontiguousarray(array.reshape(-1), dtype=np.float64)
@@ -166,8 +159,6 @@ def _static_binding(
         target_offset=target_offset,
         target_row_stride=row_size,
         static_values=flattened,
-        static_rep_stride=row_size if batched else 0,
-        static_batched=batched,
     )
 
 

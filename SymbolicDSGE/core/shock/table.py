@@ -21,7 +21,6 @@ import numpy as np
 from numpy import asarray, float64
 from numpy.typing import ArrayLike, NDArray
 from scipy.special import ndtr
-from scipy.stats._distn_infrastructure import rv_discrete
 
 NDF = NDArray[float64]
 

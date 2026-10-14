@@ -20,17 +20,6 @@ QuantileFn = Callable[[NDArray[float64]], ArrayLike]
 ShockDistribution = Literal["norm", "t", "uni", "exp", "gamma", "beta"]
 
 
-# A family-resolved draw: ``(loc, factor, seed) -> (T, width)``, computing
-# ``loc + factor @ v`` over the family's standardized variate. Both spec numbers
-# are arguments rather than closed-over state, so the resolver is the only place
-# that reads a spec and the two draw routes cannot disagree about it. See
-# :meth:`Shock.draw_fn` for the contract each argument carries.
-ShockDrawFn = Callable[
-    [NDArray[float64], NDArray[float64], int | None],
-    NDArray[float64],
-]
-
-
 class ShockParameters(TypedDict):
     """Parameters for a shock generator specification.
 
@@ -69,13 +58,6 @@ class ShockPathParameters(TypedDict):
 
     target: tuple[str, ...]
     path: NDArray[float64]
-
-
-# --- numpy Generator fast paths --------------------------------------------
-# scipy's generic ``.rvs`` is ~9x slower than ``np.random.Generator`` here (and
-# ``multivariate_normal.rvs`` re-factorizes the covariance every call). These
-# draw the known shock families directly off a Generator; ``abstract_shock_array``
-# above stays as the fallback for arbitrary scipy distribution objects.
 
 
 def _gaussian_factor(cov: ndarray) -> ndarray:

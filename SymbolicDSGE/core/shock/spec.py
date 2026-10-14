@@ -17,6 +17,7 @@ from ..compiled_model import CompiledModel
 from ..config import make_Q
 
 from .plan import draw_shock_matrix, native_code
+from .table import DistributionTable
 from .generators import (
     Shock,
     ShockParameters,
@@ -213,11 +214,7 @@ def resolve_shock_plan(
                 key=key,
                 indices=indices,
                 family=family,
-                draw=(
-                    shock.draw_fn(_require_horizon(T, key), len(indices) > 1)  # type: ignore
-                    if family is None
-                    else None
-                ),
+                table=shock.dist if isinstance(shock.dist, DistributionTable) else None,
                 loc=resolve_loc(shock.dist_kwargs, len(indices)),
                 factor=factor,
                 base_seed=None if shock.seed is None else int(shock.seed),

@@ -1,8 +1,7 @@
 """Resolved shock specifications, separated from the draws they produce.
 
-A :class:`ShockPlan` is the first half of resolution. Callers that redraw the
-same spec under many seeds (the Monte Carlo lowering materializes one path per
-replication) resolve a plan and then call :meth:`ShockPlan.fill` per draw.
+A :class:`ShockPlan` is the resolved DTO carrying shock information to
+native draw kernels.
 """
 
 from __future__ import annotations
@@ -15,7 +14,9 @@ import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
-from .generators import Shock, ShockPath, ShockDrawFn
+
+from .generators import Shock, ShockPath
+from .table import DistributionTable
 from ..._ckernels.core._shocks import (
     NativeShockPlan,
     ShockCode,
@@ -46,7 +47,7 @@ class ShockEntry:
     family: ShockCode | None
     loc: NDF
     factor: NDF
-    draw: ShockDrawFn | None = None
+    table: DistributionTable | None = None
     base_seed: int | None = None
     kwargs: dict | None = None
 
@@ -54,55 +55,6 @@ class ShockEntry:
     def width(self) -> int:
         """Number of columns this entry targets."""
         return len(self.indices)
-
-    def unpack(self, rep_idx: int = 0) -> list[tuple[int, NDF]]:
-        """Draw this entry and pair each column with its exogenous index.
-
-        ``rep_idx`` selects which replication of the spec to draw, which is what
-        keeps the replications of one Monte Carlo run on different paths. An
-        unseeded entry has no seed to key and redraws freshly whatever it is
-        given.
-        """
-        if self.draw is None:
-            raise ValueError(
-                f"Entry {self.key!r} has no draw function; it is native and "
-                "cannot be drawn in Python."
-            )
-        drawn = self.draw(
-            self.loc,
-            self.factor,
-            self._seed(rep_idx),
-        )
-
-        if drawn.ndim != 2 or drawn.shape[1] != self.width:
-            raise ValueError(
-                f"Draw for {self.key!r} must return shape (T, {self.width}); "
-                f"got {tuple(drawn.shape)}."
-            )
-        return list(zip(self.indices, (drawn[:, i] for i in range(self.width))))
-
-    def _seed(self, rep_idx: int = 0) -> int | None:
-        """The seed for one replication of this entry, or None when unseeded.
-
-        ``rep_idx`` takes 0 for any non-MC draw, where replications do not apply.
-        ``indices[0]`` is the minimum canonical shock index in the entry, which
-        separates entries uniquely because no two can share a shock index (#507).
-
-        Mixing the three inputs is what makes a draw a function of the entry and
-        the replication alone. Adding them cannot: a declared seed is unbounded
-        and user-chosen, so any additive qualifier is congruent to some other
-        entry's seed, which is how two entries used to land on one stream.
-
-        ``SeedSequence`` serves as the mixing function rather than as an RNG
-        state, so the result is a plain 64-bit integer.
-        """
-        if self.base_seed is None:
-            return None
-        return int(
-            np.random.SeedSequence(
-                entropy=self.base_seed, spawn_key=(self.indices[0], rep_idx)
-            ).generate_state(1, dtype=np.uint64)[0]
-        )
 
     @property
     def _native_seed_key(self) -> int:
@@ -157,50 +109,6 @@ class ShockPlan:
     entries: tuple[ShockEntry | ArrayEntry, ...]
     n_exog: int
 
-    def unpack(self, rep_idx: int = 0) -> list[tuple[int, NDF]]:
-        """Draw every entry as ``(exogenous index, column)`` pairs."""
-        out: list[tuple[int, NDF]] = []
-        for entry in self.entries:
-            out.extend(entry.unpack(rep_idx))
-        return out
-
-    def fill(
-        self,
-        out: NDF,
-        T: int,
-        shock_scale: float = 1.0,
-        rep_idx: int = 0,
-    ) -> None:
-        """Draw into a preallocated ``(T, n_exog)`` view.
-
-        Writing through a caller-owned view lets the Monte Carlo lowering target
-        a row of its ``(n_rep, T, n_exog)`` slab directly, with no per-draw
-        temporary. Columns no entry targets are left untouched, so the caller
-        owns zeroing.
-        """
-        for idx, values in self.unpack(rep_idx):
-            if values.shape[0] != T:
-                raise ValueError(
-                    f"Shock array for variable index {idx} must have length {T}."
-                )
-            out[:, idx] = shock_scale * values
-
-    def matrix(self, T: int, shock_scale: float = 1.0, rep_idx: int = 0) -> NDF:
-        """Draw a fresh ``(T, n_exog)`` shock matrix."""
-        out = np.zeros((T, self.n_exog), dtype=float64)
-        self.fill(out, T, shock_scale, rep_idx)
-        return out
-
-    @cached_property
-    def native(self) -> ShockPlan:
-        native_entries = tuple(e for e in self.entries if native_code(e) is not None)
-        return ShockPlan(native_entries, self.n_exog)
-
-    @cached_property
-    def python(self) -> ShockPlan:
-        python_entries = tuple(e for e in self.entries if native_code(e) is None)
-        return ShockPlan(python_entries, self.n_exog)
-
 
 def validate_shock_targets(
     shocks: Sequence[Shock | ShockPath],
@@ -246,6 +154,12 @@ def native_code(
     if isinstance(shock, ShockPath):
         return ShockCode.PATH
     if isinstance(shock, Shock):
+        if isinstance(shock.dist, DistributionTable):
+            return (
+                ShockCode.TABLE_DISCRETE
+                if shock.dist.discrete
+                else ShockCode.TABLE_CONTINUOUS
+            )
         return ShockCode.for_dist(shock.dist)
     return shock.family
 
@@ -256,10 +170,8 @@ def get_native_shock_plan(
     shock_scale: float,
 ) -> NativeShockPlan | None:
     """The native plan over a plan's kernel-drawable entries, or None if none."""
-    if len(plan.native.entries) == 0:
-        return None
     return native_shock_plan(
-        plan.native.entries,
+        plan.entries,
         T,
         plan.n_exog,
         shock_scale,
@@ -274,7 +186,7 @@ def draw_shock_matrix(
     The Python route allocates and zeroes the block; the native draw overlays
     the columns it owns in place.
     """
-    out = plan.python.matrix(T, shock_scale, rep_idx)
+    out = np.zeros((T, plan.n_exog), dtype=float64)
     if (nplan := get_native_shock_plan(plan, T, shock_scale)) is not None:
         nplan.fill(out, rep_idx)
     return out
