@@ -37,8 +37,8 @@ KNOTS = 1024
 ZMAX = 6.0
 
 #: A continuous quantile function gives one distinct knot per grid point; a staircase
-#: gives as many as its support has points. Everything between is slack, so this only
-#: catches a ``discrete`` flag the knots contradict.
+#: gives as many as its support has points. This only catches a ``discrete`` flag the
+#: knots contradict.
 _TIE_FRACTION = 8
 
 
@@ -56,7 +56,7 @@ class DistributionTableParameters(TypedDict):
     zmax : float
         Probit-space half-width the knots span.
     discrete : bool
-        Whether the knots are a staircase read by left knot rather than interpolated.
+        Whether the knots are a staircase read by nearest knot rather than interpolated.
     source_mean : float
         Mean removed when standardizing.
     source_std : float
@@ -80,33 +80,51 @@ def _knot_probabilities(zmax: float, knots: int) -> tuple[NDF, NDF]:
     return z, asarray(ndtr(z), dtype=float64)
 
 
-def _table_moments(u: NDF, q: NDF, discrete: bool) -> tuple[float, float]:
+def _cell_weights(z: NDF) -> NDF:
+    """Probability a nearest-knot read assigns each knot.
+
+    Knot ``i`` is returned for ``z`` within half a step of ``z[i]``, so its weight is
+    the normal measure of that cell. The end knots absorb the clamped tails, which is
+    what makes these sum to one.
+    """
+    half = (z[1] - z[0]) / 2.0
+    edges = asarray(ndtr(z + half), dtype=float64)
+    w = np.empty_like(edges)
+    w[0] = edges[0]
+    w[1:] = np.diff(edges)
+    w[-1] += 1.0 - edges[-1]
+    return w
+
+
+def _table_moments(z: NDF, u: NDF, q: NDF, discrete: bool) -> tuple[float, float]:
     """Mean and variance of the table under a clamped standard normal.
 
     The moments of the object actually sampled, not of the distribution it was drawn
     from. Standardizing by these is what makes the table exactly unit-variance as the
     kernel sees it, rather than within an error that shrinks in the knot count.
-
-    The rule has to be the one :meth:`DistributionTable.evaluate` reads with:
-    trapezoidal where it interpolates between knots, and a step where it takes the
-    left knot. Averaging over the knots instead would weight them equally, which the
-    probit grid does not: the same knots give a variance of 12.0 for a standard
-    normal.
     """
-    du = np.diff(u)
-    # The draw clamps outside the grid, so the end knots carry the tail mass.
-    mass_lo, mass_hi = float(u[0]), float(1.0 - u[-1])
-    ends1 = mass_lo * q[0] + mass_hi * q[-1]
-    ends2 = mass_lo * q[0] ** 2 + mass_hi * q[-1] ** 2
+    # The rule has to be the one `DistributionTable.evaluate` reads with:
+    # trapezoidal between knots where it interpolates, and the nearest knot's own cell
+    # where it does not. Averaging over the knots instead would weight them equally,
+    # which the probit grid does not: the same knots give a variance of 12.0 for a
+    # standard normal.
 
     if discrete:
-        left = q[:-1]
-        m1 = float(np.sum(du * left) + ends1)
-        m2 = float(np.sum(du * left * left) + ends2)
-    else:
-        lo, hi = q[:-1], q[1:]
-        m1 = float(np.sum(du * (lo + hi) / 2.0) + ends1)
-        m2 = float(np.sum(du * (lo * lo + lo * hi + hi * hi) / 3.0) + ends2)
+        w = _cell_weights(z)
+        m1 = float(np.sum(w * q))
+        m2 = float(np.sum(w * q * q))
+        return m1, m2 - m1 * m1
+
+    du = np.diff(u)
+    lo, hi = q[:-1], q[1:]
+    # The draw clamps outside the grid, so the end knots carry the tail mass.
+    mass_lo, mass_hi = float(u[0]), float(1.0 - u[-1])
+    m1 = float(np.sum(du * (lo + hi) / 2.0) + mass_lo * q[0] + mass_hi * q[-1])
+    m2 = float(
+        np.sum(du * (lo * lo + lo * hi + hi * hi) / 3.0)
+        + mass_lo * q[0] ** 2
+        + mass_hi * q[-1] ** 2
+    )
     return m1, m2 - m1 * m1
 
 
@@ -135,9 +153,7 @@ class DistributionTable:
     """A standardized inverse CDF, sampled on a probit-space grid.
 
     Construct one from a quantile function with :meth:`from_callable`, or from a scipy
-    distribution with :meth:`from_scipy`. The generated constructor takes the stored
-    fields and is what :meth:`from_dict` rebuilds through, so a loaded table is the
-    same object an authored one is.
+    distribution with :meth:`from_scipy`.
 
     Immutable, and shared by reference: one table serves every bind of a ``Shock``
     template.
@@ -149,7 +165,7 @@ class DistributionTable:
     zmax : float
         Probit-space half-width the knots span.
     discrete : bool
-        Read the left knot instead of interpolating between knots.
+        Read the nearest knot instead of interpolating between knots.
     source_mean : float
         Mean removed when standardizing.
     source_std : float
@@ -178,7 +194,7 @@ class DistributionTable:
             raise ValueError(
                 f"Knot {bad} of {q.shape[0]} is not finite. A quantile function must "
                 "be finite across the grid; a distribution with unbounded quantiles "
-                "at these probabilities cannot be tabulated."
+                "cannot be tabulated accurately."
             )
         if not np.all(np.diff(q) >= 0.0):
             bad = int(np.flatnonzero(np.diff(q) < 0.0)[0])
@@ -200,10 +216,10 @@ class DistributionTable:
             distinct = int(np.unique(q).size)
             if distinct * _TIE_FRACTION < q.shape[0]:
                 raise ValueError(
-                    "Given distribution appears to be discrete, but discrete=False was passed. "
+                    "Given distribution appears to be discrete, but `discrete=False` was passed. "
                     f"Only {distinct} of {q.shape[0]} knots are distinct, where a continuous "
                     "quantile function implies all knots to be distinct. Pass discrete=True, which "
-                    "reads the left knot instead of interpolating between knots, or use a coninuous "
+                    "reads the nearest knot instead of interpolating between knots, or use a coninuous "
                     "quantile function."
                 )
 
@@ -222,12 +238,21 @@ class DistributionTable:
         """The grid the knots sit on, for inspection."""
         return np.linspace(-self.zmax, self.zmax, self.knots, dtype=float64)
 
+    @property
+    def inv_dz(self) -> float:
+        """Knots per unit of ``z``, the factor a lookup multiplies by.
+
+        Mirrors the native kernel's pre-computed ``inv_dx`` to eliminate
+        floating-point discrepancies between the two.
+        """
+        return float(self.knots - 1) / (2.0 * self.zmax)
+
     def evaluate(self, z: NDF | float) -> NDF:
         """The standardized variate a standard normal draw ``z`` selects.
 
-        The reference for what the kernel computes: clamp to the grid, locate the knot
-        by arithmetic rather than by search, and interpolate unless the table is a
-        staircase. A parity test drives this rather than restating the interpolation.
+        The reference for what the kernel computes: clamp to the grid, locate the knot,
+        then interpolate between the bracketing knots (or take the nearest one when the
+        table is a staircase).
 
         Parameters
         ----------
@@ -241,10 +266,11 @@ class DistributionTable:
 
         """
         zz = np.clip(asarray(z, dtype=float64), -self.zmax, self.zmax)
-        pos = (zz + self.zmax) / self.dz
+        pos = (zz + self.zmax) * self.inv_dz
         if self.discrete:
-            idx = np.clip(np.floor(pos).astype(np.int64), 0, self.knots - 1)
+            idx = np.clip(np.floor(pos + 0.5).astype(np.int64), 0, self.knots - 1)
             return self.q[idx]
+        # One short of the end, since the interpolation reads the next knot.
         idx = np.clip(np.floor(pos).astype(np.int64), 0, self.knots - 2)
         frac = pos - idx
         lo = self.q[idx]
@@ -291,7 +317,7 @@ class DistributionTable:
         :meth:`from_scipy` does not, since it can ask.
 
         """
-        _, u = _knot_probabilities(ZMAX, KNOTS)
+        z, u = _knot_probabilities(ZMAX, KNOTS)
         raw = asarray(ppf(u), dtype=float64)
         if raw.shape != u.shape:
             raise ValueError(
@@ -300,7 +326,7 @@ class DistributionTable:
                 "per probability."
             )
 
-        mean, var = _table_moments(u, raw, discrete)
+        mean, var = _table_moments(z, u, raw, discrete)
         if not np.isfinite(var) or var <= 0.0:
             raise ValueError(
                 f"The tabulated quantile function has variance {var!r}, so it cannot "
@@ -321,9 +347,8 @@ class DistributionTable:
     def from_scipy(cls, dist: QuantileDist, /, **kwargs: Any) -> DistributionTable:
         """Tabulate a scipy distribution, frozen or parameterized by ``kwargs``.
 
-        The one route that reads a distribution object. Whether the family is discrete
-        is read off the object rather than declared, so a caller taking this path
-        never sets the flag.
+        The one route that reads a distribution object. Discreteness is read off
+        the object.
 
         Parameters
         ----------
@@ -377,12 +402,7 @@ class DistributionTable:
         )
 
     def to_dict(self) -> DistributionTableParameters:
-        """Serialize to the stored layout.
-
-        The table travels as itself. A spec it could be rebuilt from would not
-        survive a quantile function that is only a callable, and would redraw against
-        whatever the installed scipy does today.
-        """
+        """Serialize the table to the stored layout."""
         return DistributionTableParameters(
             q=[float(x) for x in self.q],
             zmax=float(self.zmax),
@@ -394,11 +414,7 @@ class DistributionTable:
 
     @classmethod
     def from_dict(cls, data: DistributionTableParameters) -> DistributionTable:
-        """Rebuild from :meth:`to_dict` output.
-
-        Goes through the generated constructor, so a loaded table is validated the
-        same way an authored one is.
-        """
+        """Rebuild from :meth:`to_dict` output."""
         return cls(
             q=asarray(data["q"], dtype=float64),
             zmax=float(data["zmax"]),

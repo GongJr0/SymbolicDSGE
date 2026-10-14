@@ -21,6 +21,8 @@ class ShockCode(IntEnum):
     EXPONENTIAL = native_shock.SDSGE_SHOCK_EXPONENTIAL
     GAMMA = native_shock.SDSGE_SHOCK_GAMMA
     BETA = native_shock.SDSGE_SHOCK_BETA
+    TABLE_CONTINUOUS = native_shock.SDSGE_SHOCK_TABLE_CONTINUOUS
+    TABLE_DISCRETE = native_shock.SDSGE_SHOCK_TABLE_DISCRETE
 
     @classmethod
     def for_dist(cls, dist):

@@ -170,6 +170,92 @@ static void sdsge_shock_draw_beta(const sdsge_shock_plan *plan,
   sdsge_shock_apply_affine(plan, entry, v, out);
 }
 
+/* Knots are uniform in `z`, so the cell is arithmetic and `q` is never
+ * searched. `z` is clamped before the position is formed, not after: clamping
+ * the index instead leaves the interpolation weight negative past the first
+ * knot, extrapolating where it should saturate.
+ *
+ * `inv_dz` is formed as the knot count over the span, matching
+ * `DistributionTable.inv_dz` expression for expression. Dividing by a spacing
+ * instead rounds differently, and the disagreement lands on a cell boundary,
+ * where a discrete read moves by a whole step. */
+static inline f64 sdsge_shock_table_inv_dz(const sdsge_shock_table *t) {
+  return (f64)(t->n_knots - 1) / (2.0 * t->zmax);
+}
+
+static inline f64 sdsge_shock_table_pos(const sdsge_shock_table *t, const f64 z,
+                                        const f64 inv_dz) {
+  const f64 clamped = (z < -t->zmax) ? -t->zmax : ((z > t->zmax) ? t->zmax : z);
+  return (clamped + t->zmax) * inv_dz;
+}
+
+/* The knot a staircase read selects: the nearest one, which centers an error
+ * that taking the left knot accumulates downward. */
+static inline f64 sdsge_shock_table_lookup(const sdsge_shock_table *t,
+                                           const f64 z, const f64 inv_dz) {
+  const f64 pos = sdsge_shock_table_pos(t, z, inv_dz);
+  /* pos is non-negative after the clamp, so the cast floors. */
+  i64 i = (i64)(pos + 0.5);
+  if (i > t->n_knots - 1) {
+    i = t->n_knots - 1;
+  }
+  return t->q[i];
+}
+
+/* The value a continuous read selects, interpolated between the two knots the
+ * draw falls between. The index stops one short, since it reads `i + 1`. */
+static inline f64
+sdsge_shock_table_lookup_interpolate(const sdsge_shock_table *t, const f64 z,
+                                     const f64 inv_dz) {
+  const f64 pos = sdsge_shock_table_pos(t, z, inv_dz);
+  i64 i = (i64)pos;
+  if (i > t->n_knots - 2) {
+    i = t->n_knots - 2;
+  }
+  const f64 lo = t->q[i];
+  return lo + (pos - (f64)i) * (t->q[i + 1] - lo);
+}
+
+static void sdsge_shock_draw_table_continuous(const sdsge_shock_plan *plan,
+                                              const sdsge_shock_entry *entry,
+                                              const i64 rep_idx,
+                                              f64 *SDSGE_RESTRICT scratch,
+                                              f64 *SDSGE_RESTRICT out) {
+  const sdsge_shock_table *t = &entry->table;
+  const f64 inv_dz = sdsge_shock_table_inv_dz(t);
+  const i64 n = plan->T * entry->width;
+  f64 *SDSGE_RESTRICT v = scratch;
+  sdsge_philox_state st;
+
+  sdsge_shock_seed(&st, entry, rep_idx, 0);
+  sdsge_philox_standard_normal_fill(&st, n, v);
+  /* Elementwise: each standardized component goes through the shared marginal
+   * on its own, and `factor` is what correlates them afterwards. */
+  for (i64 i = 0; i < n; ++i) {
+    v[i] = sdsge_shock_table_lookup_interpolate(t, v[i], inv_dz);
+  }
+  sdsge_shock_apply_affine(plan, entry, v, out);
+}
+
+static void sdsge_shock_draw_table_discrete(const sdsge_shock_plan *plan,
+                                            const sdsge_shock_entry *entry,
+                                            const i64 rep_idx,
+                                            f64 *SDSGE_RESTRICT scratch,
+                                            f64 *SDSGE_RESTRICT out) {
+  const sdsge_shock_table *t = &entry->table;
+  const f64 inv_dz = sdsge_shock_table_inv_dz(t);
+  const i64 n = plan->T * entry->width;
+  f64 *SDSGE_RESTRICT v = scratch;
+  sdsge_philox_state st;
+
+  sdsge_shock_seed(&st, entry, rep_idx, 0);
+  sdsge_philox_standard_normal_fill(&st, n, v);
+  for (i64 i = 0; i < n; ++i) {
+    v[i] = sdsge_shock_table_lookup(t, v[i], inv_dz);
+  }
+  sdsge_shock_apply_affine(plan, entry, v, out);
+}
+
 /* Indexed by `native_shock`, in enum order. Draws only: what a family spends is
  * stated in `sdsge_shock_entry_arena_size`, which no caller of this table reads
  * and which runs once per entry at plan time rather than per replication. */
@@ -180,6 +266,8 @@ static const sdsge_shock_draw_fn SDSGE_SHOCK_DRAW[] = {
     [SDSGE_SHOCK_EXPONENTIAL] = sdsge_shock_draw_exponential,
     [SDSGE_SHOCK_GAMMA] = sdsge_shock_draw_gamma,
     [SDSGE_SHOCK_BETA] = sdsge_shock_draw_beta,
+    [SDSGE_SHOCK_TABLE_CONTINUOUS] = sdsge_shock_draw_table_continuous,
+    [SDSGE_SHOCK_TABLE_DISCRETE] = sdsge_shock_draw_table_discrete,
 };
 
 static void sdsge_shock_apply_path(const sdsge_shock_plan *plan,
@@ -206,6 +294,9 @@ arena_size sdsge_shock_entry_arena_size(const native_shock family,
     /* A path is read from `path` and needs no scratch. */
     return make_sizer(0, 0);
   case SDSGE_SHOCK_NORMAL:
+  /* Tables go through the Gaussion core, scratch reserved as needed for it */
+  case SDSGE_SHOCK_TABLE_CONTINUOUS:
+  case SDSGE_SHOCK_TABLE_DISCRETE:
     return make_sizer(T * width, 0);
   case SDSGE_SHOCK_UNIFORM:
     /* Transformed one draw at a time into `out`, staging nothing. */
