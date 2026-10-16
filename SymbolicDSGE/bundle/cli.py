@@ -4,10 +4,13 @@
 ``manifest.json`` beside them so the layout stays self-describing::
 
     my-bundle/
-    ├── manifest.json                       # the index, and the simulation prefill
-    ├── reference.yaml                      # model_config, at the root here
-    ├── dgp.yaml                            # optional second role
+    ├── manifest.json                       # the index
+    ├── {model_name}.yaml                   # model config, one per model
+    ├── simulation.json                     # simulation prefills
     ├── data/*.parquet|.csv                 # raw observable files
+    ├── shock/
+    │   ├── path/{id}.parquet|.csv          # supplied paths, pooled by content id
+    │   └── table/{id}.parquet|.csv         # tabulated distributions, same
     ├── estimation/
     │   ├── spec.json
     │   ├── result.json                     # optional
@@ -194,10 +197,6 @@ def compile_directory(
             member_path.read_bytes(),
         )
 
-    if manifest.simulation is not None:
-        for role, spec in manifest.simulation.items():
-            builder.set_simulation(role, **spec.to_sim_kwargs())
-
     return builder.write(out_path)
 
 
@@ -266,7 +265,6 @@ def decompile_bundle(
         sdsge_version=manifest.sdsge_version,
         last_breaking_version=manifest.last_breaking_version,
         members=rewritten,
-        simulation=manifest.simulation,
         # Checksums are sha256(bytes); skip on decompile — recompile recomputes.
         checksums={},
     )

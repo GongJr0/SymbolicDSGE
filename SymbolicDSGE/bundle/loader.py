@@ -14,14 +14,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
+from SymbolicDSGE.core.shock.spec import deserialize_shocks
+
 from ..core.model_parser import ModelParser
 from ..core.solved_model import SolvedModel
 from ..core.solver import DSGESolver
+from ..core.shock import Shock, ShockPath
 from ..estimation.estimator import Estimator
 from ..estimation.results import MCMCResult, MLEResult, MAPResult
 from ..estimation.spec import (
@@ -55,7 +58,7 @@ from ..monte_carlo.mc_constructs import (
     failed_step_counts,
 )
 from .container import BundleArchive
-from .manifest import Manifest, Member
+from .manifest import Manifest, Member, SimSpec
 from .parquet import collapse_columns, columns_from_parquet, csv_to_columns
 
 if TYPE_CHECKING:
@@ -63,6 +66,38 @@ if TYPE_CHECKING:
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
+
+
+class SimulationPrefill(TypedDict):
+    """Argument set for :meth:`SolvedModel.sim`.
+
+    Attributes
+    ----------
+    T : int
+        Periods to simulate.
+    shocks : Mapping[str | Sequence[str], Shock | NDF] | Sequence[Shock | ShockPath] | None
+        Shock specification for the simulation.
+    shock_scale : float
+        Scaling factor to apply to shocks, independent of their distribution.
+        Shocks are multiplied by this factor after they are drawn.
+    x0 : Mapping[str, float] | Sequence[float] | NDF | None
+        Initial state for the simulation.
+    observables : bool
+        Whether to include the observables in the simulation output.
+        Defaults to false.
+
+    Notes
+    -----
+    See `SolvedModel.sim` for details on each simulation parameter. All parameters
+    except the model name and `as_parquet` behave exactly as they would in a live simulation call.
+
+    """
+
+    T: int
+    x0: Mapping[str, float] | list[float] | np.ndarray | None
+    observables: bool
+    shock_scale: float
+    shocks: list[Shock | ShockPath] | None
 
 
 @dataclass
@@ -101,8 +136,8 @@ class LoadedBundle:
     models: Mapping[str, SolvedModel] | None = None
     estimation: LoadedEstimation | None = None
     mc: LoadedMC | None = None
-    #: ``SolvedModel.sim`` keywords per role, ready to unpack into a run.
-    simulation: dict[str, dict[str, Any]] | None = None
+    #: ``SolvedModel.sim`` keywords per model, ready to unpack into a run.
+    simulation: dict[str, SimulationPrefill] | None = None
 
 
 def load_bundle(path: str | Path) -> LoadedBundle:
@@ -110,12 +145,14 @@ def load_bundle(path: str | Path) -> LoadedBundle:
     archive = BundleArchive.open(path)
     manifest = archive.manifest
     models = _load_models(archive, manifest)
+    paths = _load_shock_pool(archive, manifest, "shock_path")
+    tables = _load_shock_pool(archive, manifest, "shock_table")
     return LoadedBundle(
         manifest=manifest,
         models=models,
         estimation=_load_estimation(archive, manifest, models),
-        mc=_load_mc(archive, manifest),
-        simulation=_load_simulation(manifest),
+        mc=_load_mc(archive, manifest, paths, tables),
+        simulation=_load_simulation(archive, manifest, paths, tables),
     )
 
 
@@ -143,16 +180,51 @@ def _load_models(
     return out
 
 
-def _load_simulation(manifest: Manifest) -> dict[str, dict[str, Any]] | None:
-    """Each role's prefill as the ``sim`` keywords it replays through.
+def _load_shock_pool(
+    archive: BundleArchive, manifest: Manifest, kind: str
+) -> dict[str, NDF]:
+    """One pool of shock arrays, keyed by the content id it is stored under.
 
-    The stored :class:`SimSpec` is the manifest's own carrier; a caller receives
-    the materialized keywords, so ``model.sim(**loaded.simulation[role])`` is the
-    whole of replaying one.
+    Read whole rather than per consumer: a pool belongs to the bundle, so a
+    prefill and a Monte-Carlo step over one table read it once between them.
     """
-    if not manifest.simulation:
+    return {
+        str(member.options["name"]): _load_columns(archive, member)["value"]
+        for member in manifest.members_by_kind(kind)
+    }
+
+
+def _load_simulation(
+    archive: BundleArchive,
+    manifest: Manifest,
+    paths: Mapping[str, NDF],
+    tables: Mapping[str, NDF],
+) -> dict[str, SimulationPrefill] | None:
+    """Each model's prefill as the ``sim`` keywords it replays through.
+
+    A stored :class:`SimSpec` references its shock arrays by content id. The
+    pools stop here and are not carried any further, so what a caller receives
+    stands on its own and ``model.sim(**loaded.simulation[name])`` is the whole
+    of replaying one.
+    """
+    members = manifest.members_by_kind("simulation")
+    if not members:
         return None
-    return {role: spec.to_sim_kwargs() for role, spec in manifest.simulation.items()}
+    stored = cast(dict[str, SimSpec], json.loads(archive.read_text(members[0].path)))
+    return {
+        name: SimulationPrefill(
+            T=int(spec["T"]),
+            x0=spec["x0"],
+            observables=bool(spec["observables"]),
+            shock_scale=float(spec["shock_scale"]),
+            shocks=(
+                deserialize_shocks(spec["shocks"], paths, tables)
+                if spec["shocks"]
+                else None
+            ),
+        )
+        for name, spec in stored.items()
+    }
 
 
 def _load_columns(archive: BundleArchive, member: Member) -> dict[str, NDArray[Any]]:
@@ -298,7 +370,12 @@ def _rebuild_mcmc_result(
     return MCMCResult.from_spec(spec)
 
 
-def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
+def _load_mc(
+    archive: BundleArchive,
+    manifest: Manifest,
+    paths: Mapping[str, NDF],
+    tables: Mapping[str, NDF],
+) -> LoadedMC | None:
     """Rebuild the pipeline a bundle recorded, side-channels reattached.
 
     The spec member holds the steps as data; the arrays and callables each step
@@ -316,6 +393,11 @@ def _load_mc(archive: BundleArchive, manifest: Manifest) -> LoadedMC | None:
 
     def step_spec(meta: StepMeta) -> StepSpec:
         name = meta["name"]
+        shocks = meta["kwargs"].get("shocks")
+        # `raw_model_data` carries bulk arrays under the same kwarg name, so the
+        # step kind selects here rather than the key.
+        if meta["step_type"] == "simulation" and shocks:
+            meta["kwargs"]["shocks"] = deserialize_shocks(shocks, paths, tables)
         return StepSpec(meta=meta, func=funcs.get(name), arrays=arrays.get(name, {}))
 
     spec = PipelineSpec(

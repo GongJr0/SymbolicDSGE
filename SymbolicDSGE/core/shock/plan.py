@@ -168,7 +168,7 @@ def get_native_shock_plan(
     plan: ShockPlan,
     T: int,
     shock_scale: float,
-) -> NativeShockPlan | None:
+) -> NativeShockPlan:
     """The native plan over a plan's kernel-drawable entries, or None if none."""
     return native_shock_plan(
         plan.entries,
@@ -176,17 +176,3 @@ def get_native_shock_plan(
         plan.n_exog,
         shock_scale,
     )
-
-
-def draw_shock_matrix(
-    plan: ShockPlan, T: int, shock_scale: float = 1.0, rep_idx: int = 0
-) -> NDF:
-    """A ``(T, n_exog)`` block with every entry of a plan drawn into it.
-
-    The Python route allocates and zeroes the block; the native draw overlays
-    the columns it owns in place.
-    """
-    out = np.zeros((T, plan.n_exog), dtype=float64)
-    if (nplan := get_native_shock_plan(plan, T, shock_scale)) is not None:
-        nplan.fill(out, rep_idx)
-    return out

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from .table import DistributionTable, QuantileDist
+from .table import DistributionTable, DistributionTableParameters, QuantileDist
 
 import numpy as np
-from numpy import asarray, ndarray, float64, generic
+from numpy import asarray, ndarray, float64
 from numpy.linalg import cholesky, eigh, LinAlgError
 from numpy.typing import ArrayLike, NDArray
 
 from typing import Any, Callable, Literal, Mapping, TypedDict, Sequence, cast, get_args
 import copy
+
+NDF = NDArray[float64]
 
 #: A quantile function: probabilities in, quantiles out. ``table.py`` states
 #: the same shape on :meth:`DistributionTable.from_callable`.
@@ -27,8 +29,8 @@ class ShockParameters(TypedDict):
     ----------
     target : tuple[str, ...]
         Names of the shock variables this spec drives.
-    dist : ShockDistribution
-        Name of the family the shocks are drawn from.
+    dist : ShockDistribution | DistributionTable
+        Name of the family the shocks are drawn from, or a tabulated distribution.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
     dist_kwargs : dict[str, Any]
@@ -37,7 +39,8 @@ class ShockParameters(TypedDict):
     """
 
     target: tuple[str, ...]
-    dist: ShockDistribution
+    dist: ShockDistribution | None
+    table: DistributionTableParameters | None
     seed: int | None
     dist_kwargs: dict[str, Any]
 
@@ -49,15 +52,15 @@ class ShockPathParameters(TypedDict):
     ----------
     target : tuple[str, ...]
         Names of the shock variables this spec drives.
-    path : NDArray[float64]
-        Pre-generated shock array to use instead of drawing from a distribution.
-        The shape must be (T, width), where T is the number of time periods and
-        width is the number of shock variables.
+    path_id : str
+        Identifier for the shock path. Hash-based over the data,
+        Shocks with paths resolving to the same path_id restore their
+        draws from the same array in a bundle.
 
     """
 
     target: tuple[str, ...]
-    path: NDArray[float64]
+    path_id: str
 
 
 def _gaussian_factor(cov: ndarray) -> ndarray:
@@ -198,13 +201,12 @@ class Shock:
 
     Parameters
     ----------
-    dist : ShockDistribution | DistributionTable | rv_generic | multi_rv_generic
+    dist : ShockDistribution | DistributionTable
         Distribution to draw shocks from. A family name ("norm", "t", "uni",
-        "exp", "gamma", "beta") is drawn analytically by the kernel. A
-        scipy.stats distribution is tabulated at construction. Anything else
-        exposing a quantile function is tabulated by the caller through
-        :meth:`DistributionTable.from_callable` and passed as the table, since
-        only its author can say whether it is discrete.
+        "exp", "gamma", "beta") is drawn analytically by the kernel. Any callable
+        `ppf`, or a class with `.ppf` (including a scipy distribution) can be tabulated
+        with :meth:`from_ppf`, `DistributionTable.from_callable`, or
+        `DistributionTable.from_scipy`.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
     dist_kwargs : dict | None
@@ -260,9 +262,9 @@ class Shock:
     def from_ppf(
         cls,
         dist: QuantileFn | QuantileDist,
-        seed: int | None = 0,
-        *,
+        n_knots: int = 1024,
         discrete: bool = False,
+        seed: int | None = 0,
         **dist_kwargs: ArrayLike,
     ) -> Shock:
         """A spec over a distribution the kernel has no family for.
@@ -278,10 +280,12 @@ class Shock:
         dist : QuantileFn | QuantileDist
             A quantile function with array input and output,
             or a class exposing one as ``.ppf``.
-        seed : int | None
-            Random seed for reproducibility. If None, a random seed is used.
+        n_knots : int
+            Number of knots to tabulate. 1024 saturates most continuous distributions.
         discrete : bool
             Whether the distribution is discrete.
+        seed : int | None
+            Random seed for reproducibility. If None, a random seed is used.
         **dist_kwargs : ArrayLike
             Shape parameters, passed to the quantile function. ``loc`` is kept
             rather than baked in: standardizing removes the shift the knots
@@ -409,49 +413,6 @@ class Shock:
             out.append(bound)
         return out
 
-    def to_dict(self) -> ShockParameters:
-        """Serialize a generator-style Shock to a JSON-able dict.
-
-        Only the generator form is representable: a string ``dist`` identifier
-        and no materialized ``path``. A live scipy distribution object cannot be
-        faithfully reproduced from JSON, and a placed shock array is bulk data
-        that belongs with the parquet members, not the pipeline spec.
-        """
-        if not isinstance(self.dist, str):
-            raise TypeError(
-                "Only string-identified distributions "
-                f"({list(get_args(ShockDistribution))}) are serializable; got a "
-                "live scipy distribution object."
-            )
-        return ShockParameters(
-            target=self.target,
-            dist=self.dist,  # pyright: ignore
-            seed=None if self.seed is None else int(self.seed),
-            dist_kwargs={k: _jsonable(v) for k, v in self.dist_kwargs.items()},
-        )
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> Shock:
-        """Rebuild a generator-style Shock from :meth:`to_dict` output.
-
-        A ``multivar`` or ``dist_args`` written by an older release is ignored.
-        Arity is fixed by the entry's own ``target``, and every scipy family
-        takes its parameters by keyword; a positional list carries nothing a
-        keyword does not.
-        """
-        dist = data["dist"]
-        if dist not in get_args(ShockDistribution):
-            raise ValueError(
-                f"Shock.from_dict expects one of "
-                f"{list(get_args(ShockDistribution))}, got {dist!r}."
-            )
-        seed = data.get("seed")
-        return cls(
-            cast(ShockDistribution, dist),
-            None if seed is None else int(seed),
-            **dict(data.get("dist_kwargs") or {}),
-        ).joint(*data["target"])
-
     def __repr__(self) -> str:
         return f"Shock({','.join(self.target)!r}, dist={self.dist!r})"
 
@@ -492,32 +453,5 @@ class ShockPath:
                 f"Expected {len(keys)} columns, but got {self.path.shape[1]}."
             )
 
-    def to_dict(self) -> ShockPathParameters:
-        """Serialize a ShockPath to a JSON-able dict."""
-        return ShockPathParameters(
-            target=self.target,
-            path=_jsonable(self.path),
-        )
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> ShockPath:
-        """Rebuild a ShockPath from :meth:`to_dict` output."""
-        path = asarray(data["path"], dtype=float64)
-        keys = tuple(data["target"])
-        return cls(path, *keys)
-
     def __repr__(self) -> str:
         return f"ShockPath({','.join(self.target)!r}, T={self.path.shape[0]})"
-
-
-def _jsonable(value: Any) -> Any:
-    """Coerce shock arg/kwarg values into JSON-serializable form."""
-    if isinstance(value, ndarray):
-        return value.tolist()
-    if isinstance(value, generic):
-        return value.item()
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in value]
-    if isinstance(value, Mapping):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    return value

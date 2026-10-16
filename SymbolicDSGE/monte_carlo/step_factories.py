@@ -7,7 +7,8 @@ from typing import Any, Callable, Literal, Mapping, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from ..core.shock.generators import Shock, ShockPath
+from ..core.shock import Shock, ShockPath
+from ..core.shock.spec import _normalized_spec
 from .custom_op import NumbaCustomFunc
 from .mc_constructs import ColumnSelector, MCStep, OpType, _compile_source_args
 from .postproc import run_kde
@@ -61,7 +62,7 @@ def simulation_step(
         kwargs={
             "target": target,
             "T": T,
-            "shocks": shocks,
+            "shocks": _normalized_spec(shocks),
             "shock_scale": shock_scale,
             "x0": x0,
             "observables": observables,
