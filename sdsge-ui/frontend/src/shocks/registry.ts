@@ -17,6 +17,7 @@ import type {
   PathShock,
   ShockEntry,
   ShockRegistryEntry,
+  ShockTable,
 } from "../types";
 
 // One registry entry becomes one shock, joint when it selects more than one
@@ -34,6 +35,12 @@ function shockFor(entry: DrawnRegistryEntry): DrawnShock {
   const target = entry.target.map(String);
   const n = target.length;
   const loc = (entry.loc ?? []).map(Number);
+  if (entry.dist === null && entry.table === null) {
+    throw new Error(
+      `Shock entry '${target.join(", ")}' names neither a distribution family ` +
+        `nor a table.`,
+    );
+  }
   if (loc.length !== n) {
     throw new Error(
       `Shock entry '${target.join(", ")}' needs one location per innovation; ` +
@@ -43,9 +50,12 @@ function shockFor(entry: DrawnRegistryEntry): DrawnShock {
   if (loc.some((value) => !Number.isFinite(value))) {
     throw new Error(`Shock entry '${target.join(", ")}' has a non-numeric location.`);
   }
+  // A table names no family, so the two never travel together: the spec reads
+  // whichever is set and the panel is what dropped the other.
   return {
     target,
-    dist: entry.dist,
+    dist: entry.table === null ? entry.dist : null,
+    table: entry.table,
     seed: entry.seed ?? null,
     dist_kwargs: { ...entry.params, loc },
   };
@@ -118,10 +128,13 @@ function entryFromSpec(dict: Record<string, unknown>): ShockRegistryEntry {
   if ("path" in dict) {
     return { kind: "path", target, path: pathMatrix(dict.path) };
   }
+  // A table is read before the family, since a tabulated entry carries a null
+  // `dist` that would otherwise fall to the default below and lose its knots.
+  const table = tableFrom(dict.table);
   // Carried through as written rather than narrowed to a family the panel knows.
   // A family it does not recognize still has to survive the round trip, and the
   // library is what decides whether it is one.
-  const dist = typeof dict.dist === "string" ? dict.dist : "norm";
+  const dist = typeof dict.dist === "string" ? dict.dist : table === null ? "norm" : null;
   const kwargs = (dict.dist_kwargs ?? {}) as Record<string, unknown>;
   // The library reads `mean` and `loc` identically and prefers `mean` when a
   // spec carries both, so this reads them in that order and keeps the whole
@@ -133,9 +146,24 @@ function entryFromSpec(dict: Record<string, unknown>): ShockRegistryEntry {
     kind: "drawn",
     target,
     dist,
+    table,
     loc: locVector(declared, target.length),
     params: paramsFrom(kwargs),
     seed: dict.seed === null || dict.seed === undefined ? null : Number(dict.seed),
+  };
+}
+
+// A serialized table, or null when the entry names a family instead. The knots
+// are the one field with no default: a table that arrives without them is not a
+// table, and reading it as one would hand the library an empty grid.
+function tableFrom(value: unknown): ShockTable | null {
+  if (value === null || typeof value !== "object") return null;
+  const dict = value as Record<string, unknown>;
+  if (!Array.isArray(dict.q) || dict.q.length === 0) return null;
+  return {
+    q: dict.q.map(Number),
+    zmax: Number(dict.zmax),
+    discrete: Boolean(dict.discrete),
   };
 }
 

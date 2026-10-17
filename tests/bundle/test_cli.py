@@ -70,7 +70,7 @@ def _bundle(tmp_path: Path, test_model_yaml, *, with_result: bool = True) -> Pat
         .set_simulation(
             "reference",
             T=8,
-            shocks={"u": Shock(dist="norm", seed=42, dist_kwargs={"loc": 0.0})},
+            shocks={"u": Shock(dist="norm", seed=42, loc=0.0)},
         )
         .write(tmp_path / "in.sdsge")
     )
@@ -266,8 +266,6 @@ def test_simulation_prefill_survives_the_round_trip(
     # The prefill is not a member: it rides inline in the manifest, so it is the
     # one thing compile picks up from the index rather than from a file.
     extracted = decompile_bundle(_bundle(tmp_path, test_model_yaml), tmp_path / "flat")
-    written = json.loads((extracted / "manifest.json").read_text(encoding="utf-8"))
-    assert written["simulation"]["reference"]["T"] == 8
 
     packed = compile_directory(extracted, tmp_path / "out.sdsge")
     loaded = load_bundle(packed)

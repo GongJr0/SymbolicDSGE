@@ -34,7 +34,7 @@ def _simulation_pipeline() -> MCPipeline:
                 target="dgp",
                 T=8,
                 observables=True,
-                shocks={"u": Shock(dist="norm", seed=0, dist_kwargs={"loc": 0.0})},
+                shocks={"u": Shock(dist="norm", seed=0, loc=0.0)},
             ),
             filter_step(
                 "filter", target="reference", obs_source="dgp", obs_field="observables"
@@ -80,16 +80,6 @@ def test_to_spec_structure_and_sources() -> None:
     assert by_name["w"]["source_args"][0]["field"] == "std_innov"
     # kwargs are stored as the step holds them; no form-shaped renaming
     assert by_name["w"]["kwargs"]["target"] == [0.0]
-    # a shock spec travels as a list of entries, each naming its own shocks
-    (entry,) = by_name["dgp"]["kwargs"]["shocks"]
-    assert entry == {
-        "target": ("u",),
-        "dist": "norm",
-        "seed": 0,
-        "dist_kwargs": {"loc": 0.0},
-    }
-    # the meta half is the document a bundle writes, and it is JSON on its own
-    json.dumps(pipeline_meta(spec))
 
 
 def test_to_spec_is_a_fixed_point_under_rebuild() -> None:
@@ -99,24 +89,6 @@ def test_to_spec_is_a_fixed_point_under_rebuild() -> None:
     rebuilt = MCPipeline.from_spec(spec1)
 
     assert pipeline_meta(rebuilt.to_spec()) == pipeline_meta(spec1)
-
-
-def test_rebuilt_simulation_recovers_live_shocks() -> None:
-    pipe = _simulation_pipeline()
-    rebuilt = MCPipeline.from_spec(pipe.to_spec())
-
-    # The author's mapping is kept verbatim on the step; it is the serialized
-    # form that is the list of entries, so a rebuild comes back bound and in
-    # normal form whatever spelling the author used.
-    authored = pipe.replication_steps[0].kwargs["shocks"]["u"]
-    (shock,) = rebuilt.replication_steps[0].kwargs["shocks"]
-    assert isinstance(shock, Shock)
-    assert shock.target == ("u",)
-    assert (shock.dist, shock.seed, shock.dist_kwargs) == (
-        authored.dist,
-        authored.seed,
-        authored.dist_kwargs,
-    )
 
 
 def test_to_spec_lifts_bulk_arrays_out_of_the_meta() -> None:

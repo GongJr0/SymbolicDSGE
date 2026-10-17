@@ -73,7 +73,7 @@ def test_full_bundle_round_trip(tmp_path: Path, test_model_yaml, compiled_test) 
         .set_simulation(
             "reference",
             T=8,
-            shocks={"u": Shock(dist="norm", seed=42, dist_kwargs={"loc": 0.0})},
+            shocks={"u": Shock(dist="norm", seed=42, loc=0.0)},
         )
     )
     target = builder.write(tmp_path / "model.sdsge")

@@ -10,12 +10,12 @@ from fastapi.responses import JSONResponse
 
 from ..core.shock.generators import ShockDistribution
 from ..core.solved_model import SolvedModel
-from ..monte_carlo.spec import pipeline_meta
 
 from .mc import (
     build_pipeline,
     mc_available_traces,
     mc_custom_op_template,
+    pipeline_spec_wire,
     run_pipeline,
     serialize_pipeline_result,
     validate_custom_op,
@@ -142,9 +142,7 @@ def create_app(
             verbosity=int(request.get("verbosity", 0)),
         )
         payload = serialize_pipeline_result(result)
-        # Off the built pipeline, not the body that described it: the slot is what
-        # a bundle stores, and only `to_spec` produces that.
-        ui_session.workspace.mc.spec = dict(pipeline_meta(pipeline.to_spec()))
+        ui_session.workspace.mc.spec = pipeline_spec_wire(pipeline)
         ui_session.workspace.mc.result = payload
         return payload
 

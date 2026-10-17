@@ -33,27 +33,27 @@ OUT_OF_DOMAIN = [0.0, -1.0, np.nan, np.inf, -np.inf]
 
 @pytest.mark.parametrize("dist", list(VALID_KWARGS))
 def test_every_family_binds_at_width_one(dist) -> None:
-    shock = Shock(dist, seed=0, dist_kwargs=VALID_KWARGS[dist]).joint("e_u")
+    shock = Shock(dist, seed=0, **VALID_KWARGS[dist]).joint("e_u")
     assert shock.target == ("e_u",)
 
 
 @pytest.mark.parametrize("dist", ["norm", "t"])
 def test_the_multivariate_capable_families_bind_to_a_group(dist) -> None:
-    shock = Shock(dist, dist_kwargs=VALID_KWARGS[dist]).joint("e_u", "e_v")
+    shock = Shock(dist, **VALID_KWARGS[dist]).joint("e_u", "e_v")
     assert shock.target == ("e_u", "e_v")
 
 
 def test_independent_binding_keeps_a_univariate_family_legal() -> None:
     # Width is per entry, not per spec: a family with no multivariate form still
     # drives several shocks, one width-1 entry each.
-    copies = Shock("beta", dist_kwargs=VALID_KWARGS["beta"]).independent("e_u", "e_v")
+    copies = Shock("beta", **VALID_KWARGS["beta"]).independent("e_u", "e_v")
     assert [shock.target for shock in copies] == [("e_u",), ("e_v",)]
 
 
 def test_a_scipy_distribution_skips_the_family_checks() -> None:
     # Scipy owns its own parameterization, so neither df <= 2 nor the group is
     # refused here although the "t" family would refuse the first.
-    shock = Shock(scipy_t, dist_kwargs={"df": 1.0}).joint("e_u", "e_v")
+    shock = Shock.from_ppf(scipy_t, df=1.0).joint("e_u", "e_v")
     assert shock.target == ("e_u", "e_v")
 
 
@@ -66,7 +66,7 @@ def test_a_univariate_only_family_refuses_a_group(dist) -> None:
         NotImplementedError,
         match=rf"Multivariate '{dist}' shocks are not implemented",
     ):
-        Shock(dist, dist_kwargs=VALID_KWARGS[dist]).joint("e_u", "e_v")
+        Shock(dist, **VALID_KWARGS[dist]).joint("e_u", "e_v")
 
 
 # --- parameters -------------------------------------------------------------
@@ -92,7 +92,7 @@ def test_family_parameters_are_checked_at_bind_not_construction() -> None:
 )
 def test_a_missing_shape_parameter_names_what_it_wants(dist, kwargs, message) -> None:
     with pytest.raises(ValueError, match=message):
-        Shock(dist, dist_kwargs=kwargs).joint("e_u")
+        Shock(dist, **kwargs).joint("e_u")
 
 
 @pytest.mark.parametrize(
@@ -104,7 +104,7 @@ def test_a_shape_parameter_must_be_finite_and_positive(
 ) -> None:
     kwargs = {**VALID_KWARGS[dist], parameter: invalid}
     with pytest.raises(ValueError, match="finite and positive"):
-        Shock(dist, dist_kwargs=kwargs).joint("e_u")
+        Shock(dist, **kwargs).joint("e_u")
 
 
 @pytest.mark.parametrize("df", [2.0, 1.5, *OUT_OF_DOMAIN])
@@ -112,7 +112,7 @@ def test_student_t_needs_a_finite_df_above_two(df) -> None:
     # The standardization divides by sqrt(df - 2), so df <= 2 is not a wide
     # shock but an undefined one.
     with pytest.raises(ValueError, match="df > 2 for finite variance"):
-        Shock("t", dist_kwargs={"df": df}).joint("e_u")
+        Shock("t", df=df).joint("e_u")
 
 
 # --- the family name itself -------------------------------------------------
@@ -124,7 +124,7 @@ def test_an_unknown_family_name_is_rejected() -> None:
 
 
 def test_something_that_is_not_a_distribution_is_rejected() -> None:
-    with pytest.raises(TypeError, match="scipy.stats distribution object"):
+    with pytest.raises(TypeError, match="dist must be one of"):
         Shock(7)  # type: ignore[arg-type]
 
 

@@ -104,7 +104,6 @@ def test_planned_bytes_match_the_allocation_exactly(solved_test: SolvedModel) ->
         pipeline, models={"reference": solved_test}, n_rep=8, n_jobs=3
     )
 
-    assert report.shock_bytes == 0
     assert report.planned_bytes == _allocated_bytes(lowered.allocation)
     assert report.total_bytes_w_margin == report.planned_bytes + report.reserve_bytes
 
@@ -137,60 +136,6 @@ def test_retention_sentinel_resolves_against_n_rep(
     assert step.worker_bytes == 2 * (5 + 1 + 3 + 2) * 8
     # One status per step per replication, plus this step's retention indices.
     assert report.bookkeeping_bytes == (10 * len(plan) + expected_reps + 10) * 8
-
-
-def test_native_eligible_shocks_prematerialize_nothing(
-    solved_test: SolvedModel,
-) -> None:
-    pipeline = MCPipeline(
-        [
-            simulation_step(
-                "sim",
-                target="reference",
-                T=6,
-                shocks={
-                    name: Shock(dist="norm", seed=index)
-                    for index, name in enumerate(solved_test.compiled.shock_names)
-                },
-            )
-        ]
-    )
-
-    report = pipeline.validate_memory_requirements(
-        models={"reference": solved_test}, n_rep=32, n_jobs=1
-    )
-
-    assert report.shock_bytes == 0
-
-
-def test_fallback_shocks_are_counted_outside_the_arenas(
-    solved_test: SolvedModel,
-) -> None:
-    T = 6
-    pipeline = MCPipeline(
-        [
-            simulation_step(
-                "sim",
-                target="reference",
-                T=T,
-                shocks={
-                    name: Shock(dist=t, seed=index, dist_kwargs={"df": 8})
-                    for index, name in enumerate(solved_test.compiled.shock_names)
-                },
-            )
-        ]
-    )
-
-    report = pipeline.validate_memory_requirements(
-        models={"reference": solved_test}, n_rep=32, n_jobs=1
-    )
-
-    assert report.shock_bytes == 32 * T * solved_test.compiled.n_exog * 8
-    assert report.planned_bytes > _allocated_bytes(
-        lower_native_run(
-            pipeline, models={"reference": solved_test}, n_rep=32, n_jobs=1
-        ).allocation
-    )
 
 
 def test_the_reserve_is_a_floor_plus_a_fraction_not_a_multiple(

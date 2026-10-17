@@ -40,25 +40,7 @@ def _entries(solved_test, shocks):
 
 
 def test_a_spec_with_no_entries_lowers_to_no_plan(solved_test) -> None:
-    assert _plan(solved_test, {}) is None
-
-
-def test_a_mixed_spec_splits_by_family(solved_test) -> None:
-    resolved = resolve_shock_plan(
-        solved_test.compiled,
-        {
-            ("e_u",): Shock("norm", seed=0),
-            ("e_v",): Shock(t, seed=1, dist_kwargs={"df": 5}),
-        },
-        T,
-    )
-    native = {entry.key for entry in resolved.native.entries}
-    python = {entry.key for entry in resolved.python.entries}
-
-    assert native == {("e_u",)}
-    assert python == {("e_v",)}
-    assert native.isdisjoint(python)
-    assert native | python == {entry.key for entry in resolved.entries}
+    assert _plan(solved_test, {}).n_entries == 0
 
 
 # --- the draw itself --------------------------------------------------------
@@ -96,7 +78,7 @@ def test_multivariate_normal_draw_applies_the_covariance_factor(
 
 
 def test_normal_draw_applies_the_location_shift(solved_test) -> None:
-    shocks = {("e_u",): Shock("norm", seed=7, dist_kwargs={"loc": 2.5})}
+    shocks = {("e_u",): Shock("norm", seed=7, loc=2.5)}
     (entry,) = _entries(solved_test, shocks)
     block = _plan(solved_test, shocks).draw(0)
 
@@ -196,7 +178,7 @@ SINGLE_STREAM_FAMILIES = [
 def test_a_standardized_family_is_its_centered_stream(
     solved_test, dist, kwargs, loc, shock_scale
 ) -> None:
-    shocks = {("e_u",): Shock(dist, seed=7, dist_kwargs={**kwargs, "loc": loc})}
+    shocks = {("e_u",): Shock(dist, seed=7, loc=loc, **kwargs)}
     (entry,) = _entries(solved_test, shocks)
     block = _plan(solved_test, shocks, shock_scale=shock_scale).draw(3)
 
@@ -216,7 +198,7 @@ def test_a_standardized_family_is_its_centered_stream(
 def test_student_t_scales_a_gaussian_by_its_own_chi_square(
     solved_test, targets, df
 ) -> None:
-    shocks = {targets: Shock("t", seed=11, dist_kwargs={"df": df})}
+    shocks = {targets: Shock("t", seed=11, df=df)}
     (entry,) = _entries(solved_test, shocks)
     block = _plan(solved_test, shocks).draw(3)
 
@@ -487,14 +469,13 @@ def test_a_path_whose_length_is_not_the_horizon_is_rejected(
         _plan(solved_test, {("e_u",): np.zeros(n_periods)})
 
 
-# --- entry invariance, on both routes (#507) --------------------------------
+# --- entry invariance (#507) ------------------------------------------------
 #
-# An entry's stream must be a function of the entry alone. The two routes key
-# differently -- Philox on ``(seed, columns[0], rep_idx)`` in C, a mixed
-# ``SeedSequence`` on the same triple in Python -- so they never produce equal
-# numbers, but they owe the same invariances. Parameterizing on the family is
-# what selects the route: ``norm`` lowers to the kernel, ``t`` does not, and
-# ``_native_draw`` asserts the lowering actually happened rather than trusting it.
+# An entry's stream must be a function of the entry alone: where it sits in the
+# spec, what else the spec holds, and whether a neighbour shares or neighbours
+# its seed must none of them move it. Both families parameterized here lower to
+# the kernel, which keys on ``(seed, columns[0], rep_idx)``, and ``_draw``
+# asserts the lowering happened rather than trusting it.
 
 
 def _draw(solved_test, spec, rep_idx):
@@ -511,7 +492,7 @@ ROUTES = [
 
 def _entry(family, seed, target):
     kwargs = {"df": 5} if family == "t" else {}
-    return Shock(family, seed=seed, dist_kwargs=kwargs).independent(target)[0]
+    return Shock(family, seed=seed, **kwargs).independent(target)[0]
 
 
 @pytest.mark.parametrize("family, draw", ROUTES)
@@ -564,9 +545,7 @@ def test_identically_seeded_copies_are_not_degenerate(
     so this reads the same on either route.
     """
     kwargs = {"df": 5} if family == "t" else {}
-    spec = Shock(family, seed=5, dist_kwargs=kwargs).independent(
-        "e_u", "e_v", offset_seeds=False
-    )
+    spec = Shock(family, seed=5, **kwargs).independent("e_u", "e_v", offset_seeds=False)
     assert [shock.seed for shock in spec] == [5, 5]
 
     assert np.linalg.matrix_rank(draw(solved_test, spec, 0)) == len(spec)

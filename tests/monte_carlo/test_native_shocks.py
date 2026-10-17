@@ -56,7 +56,7 @@ def _run_states(solved_test, shocks, n_rep, n_jobs):
         {("e_u", "e_v"): Shock("norm", seed=1)},
         {("e_u",): Shock("norm", seed=1), ("e_v",): Shock("uni", seed=2)},
         # The Python fallback route.
-        {("e_u",): Shock("t", seed=3, dist_kwargs={"df": 5})},
+        {("e_u",): Shock("t", seed=3, df=5)},
     ],
 )
 @pytest.mark.parametrize("n_jobs", [1, 2])
@@ -81,13 +81,14 @@ def test_replication_shocks_rejects_a_deterministic_step(solved_test) -> None:
 # --- the fallback route ------------------------------------------------------
 
 
-def test_unported_spec_still_runs_off_the_python_slab(solved_test) -> None:
-    shocks = {("e_u",): Shock(t, seed=3, dist_kwargs={"df": 5})}
-    assert _plan(solved_test, shocks) is None
+def test_table_spec_runs_natively(solved_test) -> None:
+    shocks = [Shock.from_ppf(t, seed=3, df=5).joint("e_u")]
 
     states = _run_states(solved_test, shocks, 3, 1)
-    resolved = resolve_shock_plan(solved_test.compiled, shocks, T)
+    resolved = get_native_shock_plan(
+        resolve_shock_plan(solved_test.compiled, shocks, T), T, shock_scale=1.0
+    )
     for rep_idx in range(3):
-        drawn = resolved.matrix(T, 1.0, rep_idx)
+        drawn = resolved.draw(rep_idx)
         expected = solved_test.sim(T, shocks={("e_u",): drawn[:, 0]}).X
         np.testing.assert_allclose(states[rep_idx], expected, rtol=1e-12, atol=1e-12)

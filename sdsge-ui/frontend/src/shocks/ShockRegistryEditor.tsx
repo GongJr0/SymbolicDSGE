@@ -11,7 +11,12 @@
 
 import { Check, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ShockCatalog, ShockDistribution, ShockRegistryEntry } from "../types";
+import type {
+    ShockCatalog,
+    ShockDistribution,
+    ShockRegistryEntry,
+    ShockTable,
+} from "../types";
 import { getShockCatalog } from "../api";
 import { formatPathText, parsePathText } from "./registry";
 
@@ -27,7 +32,12 @@ const DIST_LABEL: Record<string, string> = {
     beta: "Beta",
 };
 
-function distLabel(dist: string): string {
+// The family selector's stand-in while an entry holds a table. It never leaves
+// the form: an entry says it holds one by carrying the knots, not by naming this.
+const TABLE_OPTION = "(tabulated)";
+
+function distLabel(dist: string | null): string {
+    if (dist === null) return TABLE_OPTION;
     return DIST_LABEL[dist] ?? dist;
 }
 
@@ -44,9 +54,9 @@ const DIST_PARAMS: Record<string, { key: string; label: string; value: string }[
     ],
 };
 
-function paramDefaults(dist: string): Record<string, string> {
+function paramDefaults(dist: string | null): Record<string, string> {
     return Object.fromEntries(
-        (DIST_PARAMS[dist] ?? []).map((field) => [field.key, field.value]),
+        (DIST_PARAMS[dist ?? ""] ?? []).map((field) => [field.key, field.value]),
     );
 }
 
@@ -75,6 +85,9 @@ export function ShockRegistryEditor({
     const [kind, setKind] = useState<EntryKind>("drawn");
     const [selected, setSelected] = useState<string[]>([]);
     const [dist, setDist] = useState<ShockDistribution>("norm");
+    // Held opaquely and never built here: a table comes off a spec Python wrote.
+    // Non-null is what makes the entry under edit a tabulated one.
+    const [table, setTable] = useState<ShockTable | null>(null);
     const [families, setFamilies] = useState<string[]>([]);
     // Keyed by innovation, not positional: `commitEntry` reorders the selection
     // into the model's own order, and a positional list would hand each location
@@ -124,6 +137,7 @@ export function ShockRegistryEditor({
         setKind("drawn");
         setSelected([]);
         setDist("norm");
+        setTable(null);
         setLocs({});
         setParams(paramDefaults("norm"));
         setSeed("");
@@ -151,7 +165,8 @@ export function ShockRegistryEditor({
             setPathText(formatPathText(entry.path));
             return;
         }
-        setDist(entry.dist);
+        setDist(entry.dist ?? "norm");
+        setTable(entry.table);
         setLocs(
             Object.fromEntries(
                 entry.target.map((name, position) => [name, String(entry.loc[position] ?? 0)]),
@@ -219,7 +234,8 @@ export function ShockRegistryEditor({
         return {
             kind: "drawn",
             target,
-            dist,
+            dist: table === null ? dist : null,
+            table,
             loc,
             params: numeric,
             seed: seed.trim() === "" ? null : Number(seed),
@@ -283,6 +299,9 @@ export function ShockRegistryEditor({
                                         )}
                                         {entry.kind === "path" && (
                                             <span className="mc-shock-badge">path</span>
+                                        )}
+                                        {entry.kind === "drawn" && entry.table !== null && (
+                                            <span className="mc-shock-badge">table</span>
                                         )}
                                     </strong>
                                     <span>{describeEntry(entry)}</span>
@@ -348,9 +367,13 @@ export function ShockRegistryEditor({
                                 <label>
                                     Distribution
                                     <select
-                                        value={dist}
+                                        value={table === null ? dist : TABLE_OPTION}
                                         onChange={(event) => {
                                             const next = event.target.value;
+                                            if (next === TABLE_OPTION) return;
+                                            // Naming a family is what replaces a table, and the
+                                            // knots are gone once it does.
+                                            setTable(null);
                                             setDist(next);
                                             // The previous family's parameters do not carry over; a
                                             // stale `df` on a gamma would travel to the library.
@@ -358,6 +381,9 @@ export function ShockRegistryEditor({
                                             setError("");
                                         }}
                                     >
+                                        {table !== null && (
+                                            <option value={TABLE_OPTION}>{TABLE_OPTION}</option>
+                                        )}
                                         {distOptions.map((family) => (
                                             <option key={family} value={family}>
                                                 {distLabel(family)}
@@ -382,21 +408,22 @@ export function ShockRegistryEditor({
                                             />
                                         </label>
                                     ))}
-                                {(DIST_PARAMS[dist] ?? []).map((field) => (
-                                    <label key={`param:${field.key}`}>
-                                        {field.label}
-                                        <input
-                                            type="number"
-                                            value={params[field.key] ?? ""}
-                                            onChange={(event) =>
-                                                setParams((current) => ({
-                                                    ...current,
-                                                    [field.key]: event.target.value,
-                                                }))
-                                            }
-                                        />
-                                    </label>
-                                ))}
+                                {table === null &&
+                                    (DIST_PARAMS[dist] ?? []).map((field) => (
+                                        <label key={`param:${field.key}`}>
+                                            {field.label}
+                                            <input
+                                                type="number"
+                                                value={params[field.key] ?? ""}
+                                                onChange={(event) =>
+                                                    setParams((current) => ({
+                                                        ...current,
+                                                        [field.key]: event.target.value,
+                                                    }))
+                                                }
+                                            />
+                                        </label>
+                                    ))}
                                 <label>
                                     Seed
                                     <input
@@ -427,6 +454,14 @@ export function ShockRegistryEditor({
                         <span className="mc-shock-hint">
                             One period per line, one value per selected innovation. The run
                             refuses a path that does not cover its horizon.
+                        </span>
+                    )}
+                    {kind === "drawn" && table !== null && (
+                        <span className="mc-shock-hint">
+                            This shock draws from a tabulated distribution of{" "}
+                            {table.q.length} knots, built in Python and not editable here.
+                            Choosing a family above replaces it. Location and seed are not
+                            part of the table and can be changed without replacing it.
                         </span>
                     )}
                     {multivarJoint && (
@@ -463,7 +498,12 @@ function describeEntry(entry: ShockRegistryEntry): string {
         const periods = entry.path.length;
         return `Supplied over ${periods} ${periods === 1 ? "period" : "periods"}`;
     }
-    const parts = [distLabel(entry.dist), `loc ${entry.loc.join(", ")}`];
+    const parts = [
+        entry.table !== null
+            ? `Tabulated, ${entry.table.q.length} knots`
+            : distLabel(entry.dist),
+        `loc ${entry.loc.join(", ")}`,
+    ];
     for (const [key, value] of Object.entries(entry.params)) {
         parts.push(`${key} ${value}`);
     }

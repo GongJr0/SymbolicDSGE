@@ -8,7 +8,6 @@ from SymbolicDSGE.bundle.manifest import (
     SDSGE_MIN_READABLE_VERSION,
     Manifest,
     Member,
-    SimSpec,
     format_for_path,
 )
 
@@ -60,7 +59,6 @@ def test_manifest_round_trip() -> None:
                 columns=["Infl", "Rate"],
             ),
         ],
-        simulation={"reference": SimSpec(T=10, shocks=[_SHOCK])},
         checksums={"model/reference.yaml": "abc"},
     )
     restored = Manifest.from_json(manifest.to_json())
@@ -68,8 +66,6 @@ def test_manifest_round_trip() -> None:
     assert restored.model_member("reference") is not None
     assert restored.model_member("dgp") is None
     assert restored.members_by_kind("estimation_data")[0].columns == ["Infl", "Rate"]
-    assert restored.simulation is not None
-    assert restored.simulation["reference"].shocks[0]["seed"] == 42
 
 
 def test_manifest_reads_a_newer_bundle_that_broke_nothing() -> None:
