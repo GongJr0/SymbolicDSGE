@@ -295,7 +295,7 @@ class DistributionTable:
         have. A caller on this route owns that question.
         :meth:`from_scipy` does not, since it can ask.
         """
-        return _from_ppf(ppf, discrete=discrete)
+        return _from_ppf(ppf, n_knots=n_knots, discrete=discrete)
 
     @classmethod
     def from_scipy(
@@ -357,7 +357,7 @@ class DistributionTable:
         def _ppf(u: NDF) -> ArrayLike:
             return ppf(u, **kwargs)
 
-        return _from_ppf(_ppf, discrete=discrete)
+        return _from_ppf(_ppf, n_knots=n_knots, discrete=discrete)
 
     def to_params(self) -> DistributionTableParameters:
         """Serialize the table to the stored layout."""

@@ -31,7 +31,6 @@ from .schemas import (
     FunctionKind,
     WorkspaceTab,
 )
-from ..bundle.manifest import SimSpec
 from ..estimation.spec import EstimatorParams, EstimatorSpec
 
 from .estimation import (
@@ -39,6 +38,7 @@ from .estimation import (
     estimator_spec_wire,
     serialize_estimation_result,
 )
+from .simulation import sim_run_kwargs, sim_spec_wire
 from .serializers import (
     empty_model_summary,
     encode_named_arrays,
@@ -73,8 +73,10 @@ class TabState:
     ``spec`` and ``result`` are the pair a ``.sdsge`` bundle stores, written
     here by the server when a run completes. ``view`` is the tab's form state,
     written only by the client. The split is what keeps GUI state out of a
-    bundle: a bundle write takes ``spec``/``result`` as they stand, and the
-    client cannot reach them because ``view`` is the only slot it PUTs.
+    bundle: only ``spec``/``result`` describe a run, and the client cannot reach
+    them because ``view`` is the only slot it PUTs. A ``spec`` holds its shock
+    arrays inline where a bundle pools them, so what a bundle write takes from
+    here is the run, not the bytes.
     """
 
     spec: dict[str, Any] | None = None
@@ -318,28 +320,32 @@ class UISession:
             try:
                 if self._slot(model_name).solved is None:
                     continue
-                tab.result = self.run_simulation_spec(
-                    model_name, SimSpec.from_dict(tab.spec)
-                )
+                tab.result = self.run_simulation_spec(model_name, tab.spec)
             except Exception as exc:  # noqa: BLE001 - reported, never fatal
                 print(
                     f"sdsge-ui: could not replay the '{model_name}' simulation: {exc}"
                 )
 
-    def run_simulation_spec(self, model_name: str, spec: SimSpec) -> dict[str, Any]:
-        """Run a stored spec verbatim, materialized into ``sim``'s keywords."""
+    def run_simulation_spec(
+        self, model_name: str, spec: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Run a spec the tab posted or a bundle stored, verbatim.
+
+        The slot is rewritten off the keywords the run was made with rather than
+        off the body that described them, so a replay re-posts what ran.
+        """
         slot = self._slot(model_name)
         if slot.solved is None:
             raise ValueError(f"{model_name!r} is not a solved model.")
-        kwargs = spec.to_sim_kwargs()
+        kwargs = sim_run_kwargs(spec)
         result = self._record_sim_run(
             model_name=model_name,
             sim=slot.solved.sim(**kwargs),
-            T=int(kwargs["T"]),
-            observables=bool(kwargs["observables"]),
+            T=kwargs["T"],
+            observables=kwargs["observables"],
         )
         state = self.workspace.simulation.setdefault(model_name, TabState())
-        state.spec = spec.to_dict()
+        state.spec = dict(sim_spec_wire(kwargs))
         state.result = result
         return result
 

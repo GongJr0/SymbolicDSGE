@@ -6,10 +6,9 @@ from .table import DistributionTable, DistributionTableParameters, QuantileDist
 
 import numpy as np
 from numpy import asarray, ndarray, float64
-from numpy.linalg import cholesky, eigh, LinAlgError
 from numpy.typing import ArrayLike, NDArray
 
-from typing import Any, Callable, Literal, Mapping, TypedDict, Sequence, cast, get_args
+from typing import Any, Callable, Literal, Mapping, TypedDict, Sequence, get_args
 import copy
 
 NDF = NDArray[float64]
@@ -20,180 +19,6 @@ QuantileFn = Callable[[NDArray[float64]], ArrayLike]
 
 #: The built-in families a spec may name.
 ShockDistribution = Literal["norm", "t", "uni", "exp", "gamma", "beta"]
-
-
-class ShockParameters(TypedDict):
-    """Parameters for a shock generator specification.
-
-    Attributes
-    ----------
-    target : tuple[str, ...]
-        Names of the shock variables this spec drives.
-    dist : ShockDistribution | DistributionTable
-        Name of the family the shocks are drawn from, or a tabulated distribution.
-    seed : int | None
-        Random seed for reproducibility. If None, a random seed is used.
-    dist_kwargs : dict[str, Any]
-        Keyword arguments for the distribution.
-
-    """
-
-    target: tuple[str, ...]
-    dist: ShockDistribution | None
-    table: DistributionTableParameters | None
-    seed: int | None
-    dist_kwargs: dict[str, Any]
-
-
-class ShockPathParameters(TypedDict):
-    """Parameters for a pre-generated shock array.
-
-    Attributes
-    ----------
-    target : tuple[str, ...]
-        Names of the shock variables this spec drives.
-    path_id : str
-        Identifier for the shock path. Hash-based over the data,
-        Shocks with paths resolving to the same path_id restore their
-        draws from the same array in a bundle.
-
-    """
-
-    target: tuple[str, ...]
-    path_id: str
-
-
-def _gaussian_factor(cov: ndarray) -> ndarray:
-    """A factor ``F`` with ``F @ F.T == cov``.
-
-    Cholesky on the common positive-definite path, with an eigh-based fallback so
-    positive-semidefinite (but not strictly PD) covariances still sample -- the
-    robustness scipy's ``_PSD`` gives us, without scipy.
-    """
-    try:
-        return cholesky(cov)
-    except LinAlgError:
-        w, V = eigh(cov)
-        return cast(ndarray, V * np.sqrt(np.clip(w, 0.0, None)))
-
-
-def resolve_loc(kwargs: Mapping[str, Any], width: int) -> ndarray:
-    """The location one spec declares, as a ``width``-long vector.
-
-    The split draw paths read two names for one parameter, ``mean`` on the
-    multivariate families and ``loc`` on the univariate ones, because each
-    mirrored the scipy call it wrapped. One expression now covers both widths, so
-    both spellings resolve here and ``mean`` wins when a spec carries both.
-
-    The resolver calls this once per entry and the result travels on the entry,
-    which is what keeps the Python draw and the native lowering from reading the
-    same keyword arguments under two different rules.
-
-    Any shape holding one value per variable is taken, since a location read out
-    of a matrix calculation arrives as a row or a column as readily as flat.
-    """
-    name = "mean" if "mean" in kwargs else "loc"
-    loc = asarray(kwargs.get(name, np.zeros(width)), dtype=float64)
-    if loc.size != width:
-        raise ValueError(
-            f"`{name}` needs one value per variable in the entry. "
-            f"Expected {width}, got {loc.size}. "
-            "Omit the keyword for a zero default."
-        )
-    return loc.reshape(width)
-
-
-def _validate_dist(dist: object, dist_kwargs: Mapping[str, Any]) -> None:
-    """Validate distribution and parameters before binding."""
-    if dist is None:
-        raise ValueError(
-            "A distribution must be specified to draw shocks. "
-            "Use `ShockPath` if you intend to supply a pre-generated "
-            "shock array instead of drawing from a distribution."
-        )
-    if isinstance(dist, str):
-        if dist not in get_args(ShockDistribution):
-            raise ValueError(
-                f"Unknown shock distribution family: {dist!r}. "
-                f"Valid families: {list(get_args(ShockDistribution))}."
-            )
-    elif not isinstance(dist, DistributionTable):
-        raise TypeError(
-            f"dist must be one of {list(get_args(ShockDistribution))}; got "
-            f"{type(dist).__name__}. A distribution object, or any quantile "
-            "function, is tabulated through `Shock.from_ppf`, which is also "
-            "where a discrete family is declared."
-        )
-    if "scale" in dist_kwargs:
-        raise ValueError(
-            "Shock scale comes from the model, not from dist_kwargs: adjust the "
-            "shock std/corr variables in the config, or pass shock_scale to the "
-            "simulation and irf functions, which multiply the drawn shocks directly."
-        )
-
-
-def _require_univariate(dist: str, width: int) -> None:
-    """Raise if a family is not univariate at the width it drives."""
-    if width > 1:
-        raise NotImplementedError(f"Multivariate {dist!r} shocks are not implemented.")
-
-
-def validate_shock_family(
-    dist: object,
-    width: int,
-    dist_kwargs: Mapping[str, Any],
-) -> None:
-    """Check a spec against what its family requires at the width it drives.
-
-    Runs at bind, and only the named families have anything to check here: a
-    tabulated distribution settled its parameters when its knots were built, and
-    carries no width requirement, since one marginal serves every column of a
-    grouped entry.
-    """
-    _validate_dist(dist, dist_kwargs)
-    match dist:
-        case "t":
-            if "df" not in dist_kwargs:
-                raise ValueError("Student-t shocks require 'df' in dist_kwargs.")
-
-            if dist_kwargs["df"] <= 2.0 or not np.isfinite(dist_kwargs["df"]):
-                raise ValueError(
-                    "Student-t requires df > 2 for finite variance. "
-                    "The shock covariance specification cannot be satisfied with "
-                    f"df={dist_kwargs['df']}."
-                )
-        case "uni":
-            _require_univariate(dist, width)  # pyright: ignore
-        case "exp":
-            _require_univariate(dist, width)  # pyright: ignore
-        case "gamma":
-            _require_univariate(dist, width)  # pyright: ignore
-            if "a" not in dist_kwargs:
-                raise ValueError(
-                    "Gamma shocks require the shape parameter ('a') in dist_kwargs."
-                )
-            if dist_kwargs["a"] <= 0 or not np.isfinite(dist_kwargs["a"]):
-                raise ValueError(
-                    "Gamma shocks require finite and positive `a`. The shock covariance "
-                    f"specification cannot be satisfied with `a={dist_kwargs['a']}`."
-                )
-        case "beta":
-            _require_univariate(dist, width)  # pyright: ignore
-            if "a" not in dist_kwargs or "b" not in dist_kwargs:
-                raise ValueError(
-                    "Beta shocks require the shape parameters ('a' and 'b') in dist_kwargs."
-                )
-            if (
-                dist_kwargs["a"] <= 0
-                or dist_kwargs["b"] <= 0
-                or not np.isfinite(dist_kwargs["a"])
-                or not np.isfinite(dist_kwargs["b"])
-            ):
-                raise ValueError(
-                    "Beta shocks require finite and positive `a` and `b`. The shock "
-                    f"covariance specification cannot be satisfied with `a={dist_kwargs['a']}` "
-                    f"and `b={dist_kwargs['b']}`."
-                )
 
 
 class Shock:
@@ -303,7 +128,7 @@ class Shock:
             else dist
         )
 
-        table = DistributionTable.from_callable(fn, discrete=discrete)
+        table = DistributionTable.from_callable(fn, n_knots=n_knots, discrete=discrete)
         return cls(table, seed, **dist_kwargs)
 
     @property
@@ -341,7 +166,7 @@ class Shock:
                 "Maybe you passed a bound `Shock` in a mapping-style shock specification? "
                 "If so, use a sequence-style spec or pass the unbound templates as values."
             )
-        validate_shock_family(self.dist, len(keys), self.dist_kwargs)
+        _validate_shock_family(self.dist, len(keys), self.dist_kwargs)
         bound = copy.copy(self)
         bound.dist_kwargs = dict(self.dist_kwargs)
         bound._target = keys
@@ -455,3 +280,137 @@ class ShockPath:
 
     def __repr__(self) -> str:
         return f"ShockPath({','.join(self.target)!r}, T={self.path.shape[0]})"
+
+
+class ShockParameters(TypedDict):
+    """Parameters for a shock generator specification.
+
+    Attributes
+    ----------
+    target : tuple[str, ...]
+        Names of the shock variables this spec drives.
+    dist : ShockDistribution | DistributionTable
+        Name of the family the shocks are drawn from, or a tabulated distribution.
+    seed : int | None
+        Random seed for reproducibility. If None, a random seed is used.
+    dist_kwargs : dict[str, Any]
+        Keyword arguments for the distribution.
+
+    """
+
+    target: tuple[str, ...]
+    dist: ShockDistribution | None
+    table: DistributionTableParameters | None
+    seed: int | None
+    dist_kwargs: dict[str, Any]
+
+
+class ShockPathParameters(TypedDict):
+    """Parameters for a pre-generated shock array.
+
+    Attributes
+    ----------
+    target : tuple[str, ...]
+        Names of the shock variables this spec drives.
+    path_id : str
+        Identifier for the shock path. Hash-based over the data,
+        Shocks with paths resolving to the same path_id restore their
+        draws from the same array in a bundle.
+
+    """
+
+    target: tuple[str, ...]
+    path_id: str
+
+
+def _validate_dist(dist: object, dist_kwargs: Mapping[str, Any]) -> None:
+    """Validate distribution and parameters before binding."""
+    if dist is None:
+        raise ValueError(
+            "A distribution must be specified to draw shocks. "
+            "Use `ShockPath` if you intend to supply a pre-generated "
+            "shock array instead of drawing from a distribution."
+        )
+    if isinstance(dist, str):
+        if dist not in get_args(ShockDistribution):
+            raise ValueError(
+                f"Unknown shock distribution family: {dist!r}. "
+                f"Valid families: {list(get_args(ShockDistribution))}."
+            )
+    elif not isinstance(dist, DistributionTable):
+        raise TypeError(
+            f"dist must be one of {list(get_args(ShockDistribution))}; got "
+            f"{type(dist).__name__}. A distribution object, or any quantile "
+            "function, is tabulated through `Shock.from_ppf`, which is also "
+            "where a discrete family is declared."
+        )
+    if "scale" in dist_kwargs:
+        raise ValueError(
+            "Shock scale comes from the model, not from dist_kwargs: adjust the "
+            "shock std/corr variables in the config, or pass shock_scale to the "
+            "simulation and irf functions, which multiply the drawn shocks directly."
+        )
+
+
+def _require_univariate(dist: str, width: int) -> None:
+    """Raise if a family is not univariate at the width it drives."""
+    if width > 1:
+        raise NotImplementedError(f"Multivariate {dist!r} shocks are not implemented.")
+
+
+def _validate_shock_family(
+    dist: object,
+    width: int,
+    dist_kwargs: Mapping[str, Any],
+) -> None:
+    """Check a spec against what its family requires at the width it drives.
+
+    Runs at bind, and only the named families have anything to check here: a
+    tabulated distribution settled its parameters when its knots were built, and
+    carries no width requirement, since one marginal serves every column of a
+    grouped entry.
+    """
+    _validate_dist(dist, dist_kwargs)
+    match dist:
+        case "t":
+            if "df" not in dist_kwargs:
+                raise ValueError("Student-t shocks require 'df' in dist_kwargs.")
+
+            if dist_kwargs["df"] <= 2.0 or not np.isfinite(dist_kwargs["df"]):
+                raise ValueError(
+                    "Student-t requires df > 2 for finite variance. "
+                    "The shock covariance specification cannot be satisfied with "
+                    f"df={dist_kwargs['df']}."
+                )
+        case "uni":
+            _require_univariate(dist, width)  # pyright: ignore
+        case "exp":
+            _require_univariate(dist, width)  # pyright: ignore
+        case "gamma":
+            _require_univariate(dist, width)  # pyright: ignore
+            if "a" not in dist_kwargs:
+                raise ValueError(
+                    "Gamma shocks require the shape parameter ('a') in dist_kwargs."
+                )
+            if dist_kwargs["a"] <= 0 or not np.isfinite(dist_kwargs["a"]):
+                raise ValueError(
+                    "Gamma shocks require finite and positive `a`. The shock covariance "
+                    f"specification cannot be satisfied with `a={dist_kwargs['a']}`."
+                )
+        case "beta":
+            _require_univariate(dist, width)  # pyright: ignore
+            if "a" not in dist_kwargs or "b" not in dist_kwargs:
+                raise ValueError(
+                    "Beta shocks require the shape parameters ('a' and 'b') in dist_kwargs."
+                )
+            if (
+                dist_kwargs["a"] <= 0
+                or dist_kwargs["b"] <= 0
+                or not np.isfinite(dist_kwargs["a"])
+                or not np.isfinite(dist_kwargs["b"])
+            ):
+                raise ValueError(
+                    "Beta shocks require finite and positive `a` and `b`. The shock "
+                    f"covariance specification cannot be satisfied with `a={dist_kwargs['a']}` "
+                    f"and `b={dist_kwargs['b']}`."
+                )

@@ -1,7 +1,9 @@
 """Second-order solved model."""
 
 from __future__ import annotations
-from numpy import ndarray, float64
+from typing import Mapping
+
+from numpy import ndarray
 
 from .base import SolvedModel
 from ..shock.spec import ShockSpec, simulation_shock_matrix
@@ -30,7 +32,7 @@ class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
         T: int,
         shocks: ShockSpec | None = None,
         shock_scale: float = 1,
-        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
+        x0: Mapping[str, float] | list[float] | ndarray | None = None,
     ) -> StatePath:
         n_state = self.compiled.n_state
 

@@ -287,13 +287,6 @@ class MCStep:
 
 
 def _jsonable(value: Any) -> Any:
-    """One kwarg value as data.
-
-    Anything carrying a ``to_dict`` is asked for it, so a value only has to
-    declare how it serializes once to travel in any step's kwargs.
-    """
-    if hasattr(value, "to_dict"):
-        return value.to_dict()
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):

@@ -12,6 +12,7 @@ from hashlib import blake2b
 
 import numpy as np
 from numpy import asarray, float64, ndarray, generic
+from numpy.linalg import cholesky, LinAlgError, eigh
 from numpy.typing import NDArray
 
 from ..compiled_model import CompiledModel
@@ -25,8 +26,6 @@ from .generators import (
     ShockParameters,
     ShockPath,
     ShockPathParameters,
-    _gaussian_factor,
-    resolve_loc,
 )
 from .plan import (
     ArrayEntry,
@@ -153,6 +152,46 @@ def _array_entry(shock: ShockPath, shock_col: Mapping[str, int]) -> ArrayEntry:
     )
 
 
+def _resolve_loc(kwargs: Mapping[str, Any], width: int) -> ndarray:
+    """The location one spec declares, as a ``width``-long vector.
+
+    The split draw paths read two names for one parameter, ``mean`` on the
+    multivariate families and ``loc`` on the univariate ones, because each
+    mirrored the scipy call it wrapped. One expression now covers both widths, so
+    both spellings resolve here and ``mean`` wins when a spec carries both.
+
+    The resolver calls this once per entry and the result travels on the entry,
+    which is what keeps the Python draw and the native lowering from reading the
+    same keyword arguments under two different rules.
+
+    Any shape holding one value per variable is taken, since a location read out
+    of a matrix calculation arrives as a row or a column as readily as flat.
+    """
+    name = "mean" if "mean" in kwargs else "loc"
+    loc = asarray(kwargs.get(name, np.zeros(width)), dtype=float64)
+    if loc.size != width:
+        raise ValueError(
+            f"`{name}` needs one value per variable in the entry. "
+            f"Expected {width}, got {loc.size}. "
+            "Omit the keyword for a zero default."
+        )
+    return loc.reshape(width)
+
+
+def _gaussian_factor(cov: ndarray) -> ndarray:
+    """A factor ``F`` with ``F @ F.T == cov``.
+
+    Cholesky on the common positive-definite path, with an eigh-based fallback so
+    positive-semidefinite (but not strictly PD) covariances still sample -- the
+    robustness scipy's ``_PSD`` gives us, without scipy.
+    """
+    try:
+        return cholesky(cov)
+    except LinAlgError:
+        w, V = eigh(cov)
+        return cast(ndarray, V * np.sqrt(np.clip(w, 0.0, None)))
+
+
 def resolve_shock_plan(
     compiled: CompiledModel,
     shocks: ShockSpec,
@@ -217,7 +256,7 @@ def resolve_shock_plan(
                 indices=indices,
                 family=family,
                 table=shock.dist if isinstance(shock.dist, DistributionTable) else None,
-                loc=resolve_loc(shock.dist_kwargs, len(indices)),
+                loc=_resolve_loc(shock.dist_kwargs, len(indices)),
                 factor=factor,
                 base_seed=None if shock.seed is None else int(shock.seed),
                 kwargs=dict(shock.dist_kwargs),

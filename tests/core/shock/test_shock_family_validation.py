@@ -1,6 +1,6 @@
 """What each family requires of ``dist_kwargs`` at the width it drives.
 
-``validate_shock_family`` is the only place a family's parameters are checked.
+``_validate_shock_family`` is the only place a family's parameters are checked.
 The kernel reads them off a union whose members overlap, so a missing shape is
 indistinguishable from a zero one by the time a plan is built. Targets here need
 not be model shocks; whether they are is ``validate_shock_targets``.
@@ -126,3 +126,15 @@ def test_an_unknown_family_name_is_rejected() -> None:
 def test_something_that_is_not_a_distribution_is_rejected() -> None:
     with pytest.raises(TypeError, match="scipy.stats distribution object"):
         Shock(7)  # type: ignore[arg-type]
+
+
+def test_no_distribution_at_all_points_at_the_path_form() -> None:
+    with pytest.raises(ValueError, match="A distribution must be specified"):
+        Shock(None)  # type: ignore[arg-type]
+
+
+def test_scale_is_refused_because_it_comes_off_the_model() -> None:
+    # The entry's factor carries the scale, so a spec that sets one would be
+    # scaled twice.
+    with pytest.raises(ValueError, match="Shock scale comes from the model"):
+        Shock("norm", scale=1.0)

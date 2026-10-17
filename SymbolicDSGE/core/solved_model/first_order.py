@@ -1,6 +1,8 @@
 """First-order (Klein) solved model."""
 
 from __future__ import annotations
+from typing import Mapping
+
 from numpy import float64, ndarray
 import numpy as np
 
@@ -32,7 +34,7 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
         T: int,
         shocks: ShockSpec | None = None,
         shock_scale: float = 1,
-        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
+        x0: Mapping[str, float] | list[float] | ndarray | None = None,
     ) -> StatePath:
         x0_arr = self._initial_state(x0)
         shock_mat = simulation_shock_matrix(

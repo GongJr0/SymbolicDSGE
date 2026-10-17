@@ -36,7 +36,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         T: int,
         shocks: ShockSpec | None = None,
         shock_scale: float = 1,
-        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
+        x0: Mapping[str, float] | list[float] | ndarray | None = None,
         *,
         check_ahead_periods: int = 200,
         max_check_ahead_periods: int = -1,
@@ -99,7 +99,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             | None
         ) = None,
         shock_scale: float = 1.0,
-        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
+        x0: Mapping[str, float] | list[float] | ndarray | None = None,
         observables: bool = False,
         *,
         check_ahead_periods: int = 200,
@@ -142,7 +142,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             proportional to it here, since the regime a path realizes depends on
             how far the shock pushes the model.
 
-        x0 : dict[str, float] | list[float] | ndarray, optional
+        x0 : Mapping[str, float] | list[float] | ndarray, optional
             Initial state at ``t - 1``, in levels. A sequence covers every
             compiled variable in declaration order, minted lags included; a
             mapping names only the variables it sets. What it leaves out, and
@@ -218,7 +218,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             | None
         ) = None,
         shock_scale: float = 1.0,
-        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
+        x0: Mapping[str, float] | list[float] | ndarray | None = None,
         observables: bool = False,
     ) -> SimResult:
         return FirstOrderSolvedModel(self.compiled, self.policy.ref).sim(

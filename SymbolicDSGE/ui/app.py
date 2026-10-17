@@ -11,7 +11,6 @@ from fastapi.responses import JSONResponse
 from ..core.shock.generators import ShockDistribution
 from ..core.solved_model import SolvedModel
 from ..monte_carlo.spec import pipeline_meta
-from ..bundle.manifest import SimSpec
 
 from .mc import (
     build_pipeline,
@@ -24,6 +23,7 @@ from .mc import (
 from .estimation import estimation_catalog
 from .schemas import (
     EstimationRunRequest,
+    SimRunRequest,
     WorkspaceViewUpdate,
     LoadYamlRequest,
     SolveModelRequest,
@@ -168,9 +168,8 @@ def create_app(
 
     @app.post("/api/run/sim")
     def run_simulation(request: dict[str, Any]) -> dict[str, Any]:
-        model_name = request["model_name"]
-        spec = SimSpec.from_dict(request["spec"])
-        return ui_session.run_simulation_spec(model_name, spec)
+        body = cast(SimRunRequest, request)
+        return ui_session.run_simulation_spec(body["model_name"], body["spec"])
 
     @app.post("/api/code/submit")
     def submit_function(request: dict[str, Any]) -> dict[str, Any]:
