@@ -599,7 +599,7 @@ class DSGESolver:
 
     @staticmethod
     def _resolve_ss_seed(
-        ss_seed: list[float | float64] | ndarray | dict[str, float | float64] | None,
+        ss_seed: list[float] | ndarray | dict[str, float] | None,
         compiled: CompiledModel,
     ) -> NDF:
         """Newton seed for the steady state, in canonical variable order.
@@ -688,7 +688,7 @@ class DSGESolver:
         ss_seed: list[float] | NDArray | dict[str, float] | None = None,
         x0: NDArray | None = None,
         P0: NDArray | None = None,
-        jitter: float | float64 | None = None,
+        jitter: float | None = None,
         symmetrize: bool = True,
         R: NDArray | None = None,
     ) -> "Estimator":
@@ -734,7 +734,7 @@ class DSGESolver:
         estimated_params: list[str] | Mapping[str, Prior] | None = None,
         ss_seed: list[float] | NDArray | dict[str, float] | None = None,
         P0: NDArray | None = None,
-        jitter: float | float64 | None = None,
+        jitter: float | None = None,
         symmetrize: bool = True,
         R: NDArray | None = None,
         **method_kwargs: Any,
@@ -763,7 +763,7 @@ class DSGESolver:
             mapping of {name: guess} for the model's declared variables.
         P0 : NDArray | None
             Initial state covariance matrix for the Kalman filter. If None, the stationary state covariance is used.
-        jitter : float | float64 | None
+        jitter : float | None
             Jitter to add in the Kalman kernels when a cholesky decomposition fails. If None, no jitter is added.
         symmetrize : bool
             Whether to symmetrize the covariance matrices in the Kalman filter.
@@ -818,7 +818,7 @@ class DSGESolver:
         estimated_params: list[str] | Mapping[str, Prior] | None = None,
         ss_seed: list[float] | NDArray | dict[str, float] | None = None,
         P0: NDArray | None = None,
-        jitter: float | float64 | None = None,
+        jitter: float | None = None,
         symmetrize: bool = True,
         R: NDArray | None = None,
         **method_kwargs: Any,
@@ -854,7 +854,7 @@ class DSGESolver:
             mapping of {name: guess} for the model's declared variables.
         P0 : NDArray | None
             Initial state covariance matrix for the Kalman filter. If None, the stationary state covariance is used.
-        jitter : float | float64 | None
+        jitter : float | None
             Jitter to add in the Kalman kernels when a cholesky decomposition fails. If None, no jitter is added.
         symmetrize : bool
             Whether to symmetrize the covariance matrices in the Kalman filter.

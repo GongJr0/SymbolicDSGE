@@ -54,7 +54,7 @@ class Estimator:
         MAP and MCMC require priors; MLE ignores any provided priors. `None` uses all parameters and no priors.
     ss_seed : Sequence[float] | NDF | Mapping[str, float] | None
         Initial guess for the Newton steady state solver.
-    jitter : float | float64 | None
+    jitter : float | None
         Jitter to add when a cholesky decomposition fails in the Kalman filter. If none, no jitter is added.
     symmetrize : bool
         Whether to symmetrize the covariance matrices in the Kalman filter.
@@ -98,7 +98,7 @@ class Estimator:
         filter_mode: str = "linear",
         estimated_params: Sequence[str] | Mapping[str, Prior] | None = None,
         ss_seed: Sequence[float] | NDF | Mapping[str, float] | None = None,
-        jitter: float | float64 | None = None,
+        jitter: float | None = None,
         symmetrize: bool = True,
         joseph_cov: bool = False,
         R: NDF | None = None,
