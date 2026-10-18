@@ -27,15 +27,7 @@ import io
 import numpy as np
 import pandas as pd
 
-from SymbolicDSGE import BundleBuilder, DSGESolver, Estimator, ModelParser, Shock
-from SymbolicDSGE.bayesian import make_prior
-from SymbolicDSGE.bundle import SimSpec
-
-from SymbolicDSGE.monte_carlo import MCPipeline
-from SymbolicDSGE.monte_carlo.step_factories import (
-    jarque_bera_test_step,
-    simulation_step,
-)
+from SymbolicDSGE import BundleBuilder, DSGESolver, ModelParser
 
 bundle = BundleBuilder(created_by="experiment-1")  # (1)!
 
@@ -86,6 +78,9 @@ We define a small MCMC run estimating `psi_pi` and `psi_x` against synthetic obs
 You can refer to the [Estimation Guide](estimation_guide.md) and [API Reference](../documentation/Estimator.md) for details on the `Estimator` API usage.
 
 ```python
+from SymbolicDSGE import Estimator
+from SymbolicDSGE.estimation import make_prior
+
 estimated = {
     "psi_pi": make_prior(
         distribution="normal",
@@ -137,9 +132,10 @@ from SymbolicDSGE.monte_carlo.step_factories import (  # (1)!
     jarque_bera_test_step,
     simulation_step,
 )
+from scipy.stats import laplace
 
 gz_shock = Shock(seed=0, dist="norm").joint("e_g", "e_z")
-r_shock = Shock(seed=1, dist="t", dist_kwargs={"df": 3}).joint("e_r")
+r_shock = Shock.from_ppf(laplace, seed=1, loc=1.0).joint("e_r")
 
 mc_pipeline = MCPipeline(
     [
@@ -188,7 +184,7 @@ bundle.set_simulation(
     observables=True,
     shock_scale=1.0,
     shocks=[
-        Shock(seed=42, dist="norm").joint("e_r"), # (1)!
+        Shock(seed=42, dist="t", df=3).joint("e_r"), # (1)!
     ],
 )
 ```
@@ -240,21 +236,23 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     3787  12-10-2026 04:20   manifest.json
-     2099  12-10-2026 04:20   model/reference.yaml
-     2099  12-10-2026 04:20   model/dgp.yaml
-      643  12-10-2026 04:20   estimation/spec.json
-     1891  12-10-2026 04:20   estimation/observed.parquet
-    18922  12-10-2026 04:20   estimation/posterior.parquet
-      585  12-10-2026 04:20   estimation/result.json
-     1148  12-10-2026 04:20   montecarlo/pipeline.json
-      562  12-10-2026 04:20   montecarlo/result/meta.json
-      538  12-10-2026 04:20   montecarlo/result/datagen/datagen_steps.json
-      175  12-10-2026 04:20   montecarlo/result/tests/test_steps.json
-     2270  12-10-2026 04:20   montecarlo/result/tests/test_traces.parquet
-     1282  12-10-2026 04:20   data/auxiliary_series.parquet
+     3962  17-10-2026 16:50   manifest.json
+     2099  17-10-2026 16:50   model/reference.yaml
+     2099  17-10-2026 16:50   model/dgp.yaml
+      643  17-10-2026 16:50   estimation/spec.json
+     1891  17-10-2026 16:50   estimation/observed.parquet
+    18922  17-10-2026 16:50   estimation/posterior.parquet
+      585  17-10-2026 16:50   estimation/result.json
+     7131  17-10-2026 16:50   shock/table/aadb84934fad3b59.parquet
+     1322  17-10-2026 16:50   montecarlo/pipeline.json
+      563  17-10-2026 16:50   montecarlo/result/meta.json
+      538  17-10-2026 16:50   montecarlo/result/datagen/datagen_steps.json
+      175  17-10-2026 16:50   montecarlo/result/tests/test_steps.json
+     2276  17-10-2026 16:50   montecarlo/result/tests/test_traces.parquet
+      305  17-10-2026 16:50   simulation.json
+     1282  17-10-2026 16:50   data/auxiliary_series.parquet
 ---------                     -------
-    36001                     13 files
+    43793                     15 files
 ```
 
 For a structured view, decompile it:

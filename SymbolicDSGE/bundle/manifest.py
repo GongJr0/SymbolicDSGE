@@ -20,24 +20,26 @@ from numpy import ndarray
 from ..core.shock.generators import ShockParameters, ShockPathParameters
 
 # --- LAST BREAK ---
-# V11: Breakage from a bound specification format change in estimation (#554).
-# Bounds are in `Mapping[str, tuple[float | None, float | None]]` when specified.
-# Current readers (notably the UI wire) misinterpret the V10 bounds of shape
-# `Sequence[tuple[float | None, float | None]]` via a valid but wrong `dict()` wrap.
+# V12: Breakage from adding custom shock serialization (#571).
+# Custom shocks used to remain python objects and unserializable.
+# The scipy handling refactor introduces quantile tabulation to approximate
+# any distribution through a ppf function. Tables are serializable and are encoded
+# as array members. Therefore the old shock format (inlined in manifest) is no longer
+# available.
 #
-# Note: Parameter ordering and resolution in estimation changed between V10 and V11.
-# It is not possible to reliably map back the `Sequence` bounds to named mappings.
+# The change breaks forward and backward compatibility, both through the on-disk format
+# and the refactored shock handling code.
 # ------
 
 #: Bundle format version. Bump on every manifest or member change.
-SDSGE_FORMAT_VERSION = 11
+SDSGE_FORMAT_VERSION = 12
 
 #: Oldest bundle format this reader can reconstruct.
-SDSGE_MIN_READABLE_VERSION = 11
+SDSGE_MIN_READABLE_VERSION = 12
 
 #: Most recent format change requiring a newer reader. Written into the
 #: manifest so older readers reject bundles they cannot interpret.
-SDSGE_LAST_BREAKING_VERSION = 11
+SDSGE_LAST_BREAKING_VERSION = 12
 
 MemberKind = Literal[
     "model_config",
