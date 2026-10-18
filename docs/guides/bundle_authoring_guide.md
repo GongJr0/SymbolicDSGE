@@ -174,7 +174,7 @@ bundle.add_mc(pipeline=mc_pipeline, result=mc_res)
 
 ## Specify a simulation prefill
 
-Simulation prefills ride inline in the manifest, keyed by role. `BundleBuilder.set_simulation` takes a role and the kwargs for `SolvedModel.sim`. The bundle stores the arguments and the shock parameters, but not the simulation outputs. The receiver can replay the simulation deterministically by calling `sim` with the same arguments.
+Simulation prefills store the arguments required to produce a given simulation run. `BundleBuilder.set_simulation` takes a model name and the kwargs for `SolvedModel.sim`. The bundle stores the arguments and the shock parameters, but not the simulation outputs. The receiver can replay the simulation deterministically by calling `sim` with the same arguments.
 
 ```python
 

@@ -167,10 +167,10 @@ See the [Monte Carlo Guide](monte_carlo_guide.md) for the pipeline grammar and t
 
 ## Reach the simulation prefill
 
-Simulation prefills ride inline in the manifest, so they are reachable from `loaded.simulation` directly (no separate member). It is a `{role: SimSpec}` map, and each `SimSpec` unpacks straight into `SolvedModel.sim`.
+Simulation prefills are reachable from `loaded.simulation` directly. It is a `{role: SimulationPrefill}` map, and each `SimulationPrefill` unpacks straight into `SolvedModel.sim` and anything that accepts simulation arguments.
 
 ```python
-prefills = loaded.simulation  # dict[str, SimSpec] | None
+prefills = loaded.simulation  # dict[str, SimulationPrefill] | None
 assert prefills, "No simulation tab found in the bundle."
 
 
@@ -181,7 +181,8 @@ reference.sim(**prefills["reference"]).states["r"][:5]
 ```
 
 ???+ note "Determinism"
-    Replaying a prefill against its model reproduces the author's intended simulation exactly. The bundle stores no simulation outputs and no live `Shock` objects. It stores only each shock's `Shock.to_dict()` parameters.
+    Replaying a prefill against its model reproduces the author's intended simulation exactly. The bundle stores no simulation outputs and no live `Shock` objects.
+    It stores metadata, distribution tables (for custom shocks), or shock paths (for array shocks) exactly as produced by the author.
 
 ## Round-trip safety
 

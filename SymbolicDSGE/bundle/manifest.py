@@ -4,8 +4,7 @@ Stdlib dataclasses only; the bundle layer lives in the core library, with no
 ``[ui]`` extra. The manifest is stored as ``manifest.json`` at
 the archive root and enumerates every member with its ``kind`` and ``format`` so a
 reader can dispatch each one (format-agnostic: a hand-zipped CSV bundle and a
-CLI-built Parquet bundle both validate). The simulation prefill (#141) rides inline
-here rather than as its own member.
+CLI-built Parquet bundle both validate).
 """
 
 from __future__ import annotations
@@ -25,7 +24,8 @@ from ..core.shock.generators import ShockParameters, ShockPathParameters
 # The scipy handling refactor introduces quantile tabulation to approximate
 # any distribution through a ppf function. Tables are serializable and are encoded
 # as array members. Therefore the old shock format (inlined in manifest) is no longer
-# available.
+# available. Distribution tables and shock paths are now members and are pooled across
+# all scopes that can procude them.
 #
 # The change breaks forward and backward compatibility, both through the on-disk format
 # and the refactored shock handling code.
@@ -117,26 +117,6 @@ class SimSpec(TypedDict):
     observables: bool
     shock_scale: float
     shocks: list[ShockParameters | ShockPathParameters] | None
-
-
-def default_sim_spec() -> SimSpec:
-    """Return a SimSpec with defaults written in."""
-    return SimSpec(
-        T=0,
-        x0=None,
-        observables=False,
-        shock_scale=1.0,
-        shocks=None,
-    )
-
-
-def _x0_to_json(x0: Mapping[str, float] | list[float] | ndarray | None) -> Any:
-    """``x0`` in JSON form, keeping the name-keyed and positional shapes apart."""
-    if x0 is None:
-        return None
-    if isinstance(x0, Mapping):
-        return {str(name): float(value) for name, value in x0.items()}
-    return [float(value) for value in x0]
 
 
 @dataclass

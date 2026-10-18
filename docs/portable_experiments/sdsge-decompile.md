@@ -50,9 +50,6 @@ The extractor writes each member at its compile-input authoring path, not at its
 ???+ info "Options sidecars"
     Model `Member.options` (e.g. `compile_kwargs`/`solve_kwargs`) are extracted to `<role>.options.json` at the directory root. The compile entry point reads these sidecars on recompile, so the round-trip preserves them.
 
-???+ note "Inline simulation prefill"
-    Simulation prefills ride inline in the manifest as a `{role: SimSpec}` map (they have no member of their own). On decompile the map is written to `simulation.json` at the root so the recompile picks it up via the standard directory layout.
-
 ## `--csv` re-encoding
 
 With `--csv`, every Parquet member is decoded to CSV. The extension and `manifest.json` `format` field are rewritten to reflect the new layout.
