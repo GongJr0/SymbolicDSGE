@@ -15,15 +15,14 @@ __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| manifest | `#!python Manifest` | The full bundle manifest, including member inventory, checksums, and inline `SimSpec`. |
-| reference | `#!python SolvedModel | None` | Re-solved reference model, or `None` if the bundle has no `reference.yaml`. |
-| dgp | `#!python SolvedModel | None` | Re-solved DGP model, or `None` if absent. |
+| manifest | `#!python Manifest` | The full bundle manifest, including member inventory and checksums. |
+| models | `#!python Mapping[str, SolvedModel] | None` | Name-model mappings, or None. Any model named here can be referred to by members of the bundle. |
 | estimation | `#!python LoadedEstimation | None` | Estimation artifacts, or `None` if `estimation/` was not in the bundle. |
 | mc | `#!python LoadedMC | None` | Monte Carlo artifacts, or `None` if `montecarlo/` was not in the bundle. |
-| simulation | `#!python dict[str, dict[str, Any]] | None` | Simulation prefills keyed by role, or `None` if none set. |
+| simulation | `#!python dict[str, SimulationPrefill] | None` | Simulation prefills keyed by role, or `None` if none set. The prefills are typed dicts that unpack directly into `SolvedModel.sim` The prefills are typed dicts that unpack directly into `SolvedModel.sim`. |
 
 ???+ info "Re-solving on load"
-    `reference` and `dgp` are reconstructed by re-parsing the embedded YAML and re-running `DSGESolver.compile(**compile_kwargs).solve(**solve_kwargs)` with the kwargs recorded at compile time. The receiver does not need the original parser state.
+    Models are stored as configs and re-solved on load. The solve operations use `solve_kwargs` and `compile_kwargs` per model. 
 
 ## `LoadedEstimation`
 
