@@ -48,7 +48,7 @@ ui = [
 
 [dependency-groups]
 dev = [
-    "black[jupyter]>=26.10.0",
+    "black[jupyter]>=26.10.1",
     "cython>=3.2.6",
     "mypy>=2.4.0",
     "pre-commit>=4.6.2",
