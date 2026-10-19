@@ -48,14 +48,13 @@ bundle.add_model(
     solve_kwargs={"ss_seed": [0.0, 0.0, 0.0, 0.0, 0.0]},
 )
 
-# The `dgp` passed to `mc_pipeline.run(...)` is a runtime-only argument; it is
-# NOT persisted by `add_mc`. To make `loaded.dgp` resolve, the DGP model must be
-# bundled explicitly under role "dgp". Here the experiment uses the same model as
-# its DGP, so we ship the same YAML (in a misspecification study this would be a
-# different model's source).
+# The MC experiment uses a second model. add_mc(...) does not bind 
+# models to a bundle, we must register all models referenced in a member.
+# You can register the model after the MC pipeline, presence is required
+# at build/write time.
 bundle.add_model(
     "dgp",
-    model.source_yaml,
+    model.source_yaml,  # same model as "reference" here , but could be any model
     compile_kwargs={"linearize": False},
     solve_kwargs={"ss_seed": [0.0, 0.0, 0.0, 0.0, 0.0]},
 )

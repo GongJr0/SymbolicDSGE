@@ -5,6 +5,7 @@ from .model_parser import ModelParser
 from .solver import DSGESolver
 from .solved_model import SolvedModel
 from .shock.generators import Shock, ShockPath
+from .shock.table import DistributionTable
 from .linearization import linearize_model
 
 __all__ = [
@@ -14,5 +15,6 @@ __all__ = [
     "SolvedModel",
     "Shock",
     "ShockPath",
+    "DistributionTable",
     "linearize_model",
 ]

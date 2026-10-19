@@ -124,7 +124,7 @@ Add the Monte Carlo tab. A live `MCPipeline` is the normal in-code input. The bu
 | as_parquet |                                                 When `False` the trace members are written as CSV. |
 
 ???+ note "MC resources"
-    `raw_model_data` datagen arrays are written as `mc_raw_model_data` members, and bundle-safe custom operations are written as `mc_custom_op` pickle members.
+    `raw_model_data` datagen arrays are written as `mc_data` members, and bundle-safe custom operations are written as `mc_func` pickle members.
 
 &nbsp;
 
@@ -132,10 +132,11 @@ Add the Monte Carlo tab. A live `MCPipeline` is the normal in-code input. The bu
 
 ```python
 BundleBuilder.set_simulation(
-    role: str,
+    model: str,
+    as_parquet: bool = True,
     *,
     T: int,
-    shocks: Mapping[str, Shock | ndarray | None] | None = None,
+    shocks: Mapping[str, Shock | ndarray | None] | Sequence[Shock | ShockPath] | None = None,
     shock_scale: float = 1.0,
     x0: Mapping[str, float] | Sequence[float] | ndarray | None = None,
     observables: bool = False,
@@ -143,7 +144,7 @@ BundleBuilder.set_simulation(
 ) -> BundleBuilder
 ```
 
-Attach a simulation prefill under `role`. Prefills ride inline in the manifest as a `{role: SimSpec}` map rather than as their own members; call it once per role to ship several (for example `"reference"`, `"dgp"`, or an arbitrary `"exp1"`).
+Attach a simulation prefill under `model`. Prefills are bundle members stored as a `{model: SimSpec}` map; call it once per model to ship several (for example `"reference"`, `"dgp"`, or an arbitrary `"example1"`). `as_parquet` controls how paths and distribution tables are stored. `False` stores them as CSVs. The parmaeter has no effect for Shock objects using a built-in native distribution.
 
 &nbsp;
 

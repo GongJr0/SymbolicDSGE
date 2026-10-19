@@ -20,12 +20,12 @@ from ..core.shock.generators import ShockParameters, ShockPathParameters
 
 # --- LAST BREAK ---
 # V12: Breakage from adding custom shock serialization (#571).
-# Custom shocks used to remain python objects and unserializable.
+# Custom shocks used to remain Python objects and unserializable.
 # The scipy handling refactor introduces quantile tabulation to approximate
 # any distribution through a ppf function. Tables are serializable and are encoded
 # as array members. Therefore the old shock format (inlined in manifest) is no longer
-# available. Distribution tables and shock paths are now members and are pooled across
-# all scopes that can procude them.
+# available. Simulation prefills are now members and tables/paths are stored as data
+# instead of being inlined.
 #
 # The change breaks forward and backward compatibility, both through the on-disk format
 # and the refactored shock handling code.

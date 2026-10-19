@@ -22,13 +22,13 @@ sdsge-decompile <bundle> [-o OUTPUT] [--csv] [--force]
 
 ## Examples
 
-Extract verbatim — Parquet members stay Parquet:
+Extract as is, Parquet members stay Parquet:
 
 ```bash
 sdsge-decompile my-experiment.sdsge
 ```
 
-Decompile for editing — Parquet members are re-encoded as CSV:
+Decompile for editing, Parquet members are re-encoded as CSV:
 
 ```bash
 sdsge-decompile my-experiment.sdsge --csv -o my-experiment/
@@ -46,6 +46,9 @@ The extractor writes each member at its compile-input authoring path, not at its
 | `mc_pipeline`, `mc_custom_op`, `mc_raw_model_data` | `montecarlo/...` | `montecarlo/...` |
 | `mc_result_meta`, `mc_*_steps`, `mc_*_traces`, `mc_transform_trace`, `mc_postproc_raw` | `montecarlo/result/...` | `montecarlo/result/...` |
 | `raw_data` | `data/...` | `data/...` |
+| `simulation` | `simulation.json` | `simulation.json` |
+| `shock_table` | `shock/table/...` | `shock/table/...` |
+| `shock_path` | `shock/path/...` | `shock/path/...` |
 
 ???+ info "Options sidecars"
     Model `Member.options` (e.g. `compile_kwargs`/`solve_kwargs`) are extracted to `<role>.options.json` at the directory root. The compile entry point reads these sidecars on recompile, so the round-trip preserves them.
@@ -63,7 +66,7 @@ With `--csv`, every Parquet member is decoded to CSV. The extension and `manifes
 | `mc_raw_model_data`, `raw_data` | Existing column names from the Parquet schema. |
 
 ???+ warning "Checksum field on decompile"
-    The `manifest.json` written by `sdsge-decompile` omits checksums. They were SHA-256 over the archive bytes; after extraction (and especially after `--csv` re-encoding) those bytes change. A subsequent `sdsge-compile` recomputes them. Treat the decompiled `manifest.json` as informational, not as a re-compile input — the compile pass auto-detects the layout.
+    The `manifest.json` written by `sdsge-decompile` omits checksums. They are SHA-256 over the archive bytes; after extraction (and especially after `--csv` re-encoding) those bytes change. A subsequent `sdsge-compile` recomputes them. Treat the decompiled `manifest.json` as informational.
 
 ## Round-trip
 
@@ -81,6 +84,6 @@ sdsge-compile my-experiment/                  # → updated my-experiment.sdsge
 
 ## See also
 
-- [`sdsge-compile`](sdsge-compile.md) — the inverse operation.
-- [Bundle Loading Guide](../guides/bundle_loading_guide.md) — read a `.sdsge` from code instead.
-- [`load_bundle`](../documentation/bundle/load_bundle.md) — the in-code equivalent of this CLI.
+- [`sdsge-compile`](sdsge-compile.md): the inverse operation.
+- [Bundle Loading Guide](../guides/bundle_loading_guide.md): read a `.sdsge` from code instead.
+- [`load_bundle`](../documentation/bundle/load_bundle.md): the in-code equivalent of this CLI.
