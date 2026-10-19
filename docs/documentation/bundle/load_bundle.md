@@ -47,38 +47,10 @@ if loaded.models is not None:
     print(loaded.models["reference"].is_determinate)
 ```
 
-## In-code authoring counterpart
+## In-code authoring from a `SolvedModel`
 
-```python
-SolvedModel.save_sdsge(
-    path: str | Path,
-    *,
-    yaml_text: str | None = None, # (1)!
-    role: str = "reference",
-    compile_kwargs: Mapping[str, Any] | None = None,
-    solve_kwargs: Mapping[str, Any] | None = None,
-) -> Path
-```
-
-1. Override the YAML embedded in the bundle. Defaults to `compiled.config.source_yaml` (populated by `ModelParser`).
-
-Convenience wrapper around [`SolvedModel.to_bundle_builder`](../SolvedModel.md) for the model-only case. For bundles that include estimation / MC / sim members, call `to_bundle_builder` and chain the additions.
-
-```python
-SolvedModel.to_bundle_builder(
-    *,
-    yaml_text: str | None = None,
-    role: str = "reference",
-    compile_kwargs: Mapping[str, Any] | None = None,
-    solve_kwargs: Mapping[str, Any] | None = None,
-    created_by: str | None = None,
-) -> BundleBuilder
-```
-
-Return a `BundleBuilder` pre-seeded with the model's YAML. Chain estimation / MC / simulation members, then call `.write()` to materialize the archive.
-
-???+ warning "Source YAML required"
-    `to_bundle_builder` raises `ValueError` if `compiled.config.source_yaml` is `None` and no `yaml_text=` override is given. `ModelParser(path)` and `ModelParser.from_string(text)` both populate `source_yaml` automatically; programmatically constructed `ModelConfig` instances do not.
+- [`SolvedModel.save_sdsge`](../SolvedModel.md#solvedModelSaveSdsge)
+- [`SolvedModel.to_bundle_builder`](../SolvedModel.md#solvedModelToBundleBuilder)
 
 ## See also
 

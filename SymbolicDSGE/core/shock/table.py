@@ -150,9 +150,7 @@ def _from_ppf(
 class DistributionTable:
     """A standardized inverse CDF, sampled on a probit-space grid.
 
-    Construct one from a quantile function with :meth:`from_callable`, or from a scipy
-    distribution with :meth:`from_scipy`.
-
+    Construct one from a quantile function with :meth:`from_callable`.
     Immutable, and shared by reference: one table serves every bind of a ``Shock``
     template.
 
@@ -201,8 +199,8 @@ class DistributionTable:
                     "Given distribution appears to be discrete, but `discrete=False` was passed. "
                     f"Only {distinct} of {q.shape[0]} knots are distinct, where a continuous "
                     "quantile function implies all knots to be distinct. Pass discrete=True, which "
-                    "reads the nearest knot instead of interpolating between knots, or use a coninuous "
-                    "quantile function."
+                    "reads the nearest knot instead of interpolating between knots, or use a "
+                    "continuous quantile function."
                 )
 
     @property
@@ -293,71 +291,8 @@ class DistributionTable:
         distribution behind them does: a Cauchy quantile function tabulates here
         without complaint, standardized by the spread its outermost knots happen to
         have. A caller on this route owns that question.
-        :meth:`from_scipy` does not, since it can ask.
         """
         return _from_ppf(ppf, n_knots=n_knots, discrete=discrete)
-
-    @classmethod
-    def from_scipy(
-        cls,
-        dist: QuantileDist,
-        n_knots: int = 1024,
-        discrete: bool = False,
-        **kwargs: Any,
-    ) -> DistributionTable:
-        """Tabulate a quantile function and standardize it.
-
-        Parameters
-        ----------
-        dist : QuantileDist
-            A scipy distribution, or anything exposing a compatible ``ppf``.
-        n_knots : int
-            Number of knots to tabulate. 1024 saturates most continuous distributions.
-        discrete : bool
-            Whether the function or distribution is discrete.
-
-        Returns
-        -------
-        DistributionTable
-            A table with mean zero and unit variance under the sampling measure.
-
-        Raises
-        ------
-        ValueError
-            When ``ppf`` does not return one value per probability, or when the knots
-            carry no spread to standardize by.
-
-        Notes
-        -----
-        The grid is bounded, so the knots have a finite variance whatever the
-        distribution behind them does: a Cauchy quantile function tabulates here
-        without complaint, standardized by the spread its outermost knots happen to
-        have. A caller on this route owns that question.
-        :meth:`from_scipy` does not, since it can ask.
-        """
-        ppf: Callable[[NDF], ArrayLike] | None = getattr(dist, "ppf", None)
-        if not callable(ppf):
-            raise TypeError(
-                f"{type(dist).__name__} has no callable 'ppf'. A shock distribution "
-                "is tabulated through its quantile function, which is the only "
-                "method it needs to provide."
-            )
-
-        # The bounded grid cannot see an infinite variance, so take the family's own
-        # word for it while there is an object to ask.
-        stats_fn = getattr(dist, "stats", None)
-        if callable(stats_fn):
-            declared = float(np.asarray(stats_fn(moments="v", **kwargs), dtype=float64))
-            if not np.isfinite(declared):
-                raise ValueError(
-                    "Distribution has undefined or non-finite variance."
-                    "The shock covariance specification cannot be satisfied."
-                )
-
-        def _ppf(u: NDF) -> ArrayLike:
-            return ppf(u, **kwargs)
-
-        return _from_ppf(_ppf, n_knots=n_knots, discrete=discrete)
 
     def to_params(self) -> DistributionTableParameters:
         """Serialize the table to the stored layout."""

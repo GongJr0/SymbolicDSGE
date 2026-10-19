@@ -155,23 +155,13 @@ def _array_entry(shock: ShockPath, shock_col: Mapping[str, int]) -> ArrayEntry:
 def _resolve_loc(kwargs: Mapping[str, Any], width: int) -> ndarray:
     """The location one spec declares, as a ``width``-long vector.
 
-    The split draw paths read two names for one parameter, ``mean`` on the
-    multivariate families and ``loc`` on the univariate ones, because each
-    mirrored the scipy call it wrapped. One expression now covers both widths, so
-    both spellings resolve here and ``mean`` wins when a spec carries both.
-
-    The resolver calls this once per entry and the result travels on the entry,
-    which is what keeps the Python draw and the native lowering from reading the
-    same keyword arguments under two different rules.
-
     Any shape holding one value per variable is taken, since a location read out
     of a matrix calculation arrives as a row or a column as readily as flat.
     """
-    name = "mean" if "mean" in kwargs else "loc"
-    loc = asarray(kwargs.get(name, np.zeros(width)), dtype=float64)
+    loc = asarray(kwargs.get("loc", np.zeros(width)), dtype=float64)
     if loc.size != width:
         raise ValueError(
-            f"`{name}` needs one value per variable in the entry. "
+            f"`loc` needs one value per variable in the entry. "
             f"Expected {width}, got {loc.size}. "
             "Omit the keyword for a zero default."
         )

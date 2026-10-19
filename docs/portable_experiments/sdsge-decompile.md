@@ -49,9 +49,6 @@ The extractor writes each member at its compile-input authoring path, not at its
 | `shock_table` | `shock/table/...` | `shock/table/...` |
 | `shock_path` | `shock/path/...` | `shock/path/...` |
 
-???+ info "Options sidecars"
-    Model `Member.options` (e.g. `compile_kwargs`/`solve_kwargs`) are extracted to `<role>.options.json` at the directory root. The compile entry point reads these sidecars on recompile, so the round-trip preserves them.
-
 ## `--csv` re-encoding
 
 With `--csv`, every Parquet member is decoded to CSV. The extension and `manifest.json` `format` field are rewritten to reflect the new layout.

@@ -30,16 +30,13 @@ __Inputs:__
 
     | __Distribution__ |     __Supported kwargs__    |
     |:-----------------|:----------------------------|
-    | `"norm"`         | `loc | mean`                |
-    | `"t"`            | `loc | mean, df`            |
-    | `"uni"`          | `loc | mean`                |
-    | `"exp"`          | `loc | mean`                |
-    | `"gamma"`        | `loc | mean, a`             |
-    | `"beta"`         | `loc | mean, a, b`          |
+    | `"norm"`         | `loc`                       |
+    | `"t"`            | `loc, df`                   |
+    | `"uni"`          | `loc`                       |
+    | `"exp"`          | `loc`                       |
+    | `"gamma"`        | `loc, a`                    |
+    | `"beta"`         | `loc, a, b`                 |
     
-    `loc` and `mean` are interchangeable and multivariate distributions must specify it as a dense vector.
-    A mean of zero is only assumed when `loc` is omitted as a keyword argument. 
-
 ???+ info "Distribution tables"
     Distribution tables are exported from `SymbolicDSGE.core` and can be constructed directly.
     However this requires a pre-built inverse CDF table. This argument type
@@ -71,7 +68,7 @@ __Inputs:__
 | dist_kwargs | Keyword arguments passed to the distribution draw method. Do not pass `scale`; simulation supplies the model scale. |
 
 ???+ note "`QuantileFn` and `QuantileDist`"
-    A `QuantileFn` is a callable that accepts an array of quantiles and returns the corresponding values. It is `Callable[[ndarray], ArrayLike]` so functions that only take a single float are not suitable. (A scipy distribution's ppf satisfies this signature.) A `QuantileFn` input ignores all `dist_kwargs` except `loc`/`mean`.
+    A `QuantileFn` is a callable that accepts an array of quantiles and returns the corresponding values. It is `Callable[[ndarray], ArrayLike]` so functions that only take a single float are not suitable. (A scipy distribution's ppf satisfies this signature.) A `QuantileFn` input ignores all `dist_kwargs` except `loc`.
     For scipy distributions, shape parameters should be passed when constructing the distribution object.
 
     A `QuantileDist` is any object that implements a `ppf` method. The library constructs a `QuantileFn` from the `ppf` as `lambda q: dist.ppf(q, **dist_kwargs)`. Since `kwargs` are unpacked into the `ppf` call, `QuantileDist` can be unfrozen scipy distributions, e.g. `scipy.stats.laplace` can be passed directly.

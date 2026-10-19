@@ -16,6 +16,7 @@ from SymbolicDSGE.bundle.loader import (
     LoadedMC,
     load_bundle,
 )
+from SymbolicDSGE.core.shock import DistributionTable
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation.results import MCMCResult, MAPResult, OptimizationResult
 
@@ -37,6 +38,28 @@ def test_load_bundle_fixture_end_to_end():
     # monte carlo: runnable pipeline + document + traces
     assert isinstance(loaded.mc, LoadedMC)
     assert loaded.mc.pipeline is not None
+    # shock pool: the tabulated entry lifts back into a table, the native one
+    # beside it still rides inline
+    (datagen,) = [
+        step
+        for step in loaded.mc.pipeline.to_spec().replication_steps
+        if step.meta["step_type"] == "simulation"
+    ]
+    native, tabulated = datagen.meta["kwargs"]["shocks"]
+    assert native.target == ("e_g", "e_z")
+    assert native.dist == "norm"
+    assert tabulated.target == ("e_r",)
+    assert isinstance(tabulated.dist, DistributionTable)
+    assert tabulated.dist.q.shape == (1024,)
+    assert tabulated.dist_kwargs == {"loc": 1.0}
+    # simulation prefill: sim kwargs, its shock entry rebuilt beside the pool's
+    assert loaded.simulation is not None
+    prefill = loaded.simulation["reference"]
+    assert prefill["T"] == 200
+    (prefill_shock,) = prefill["shocks"]
+    assert prefill_shock.target == ("e_r",)
+    assert prefill_shock.dist == "t"
+    assert prefill_shock.dist_kwargs == {"df": 3}
 
 
 _OPT_META = {

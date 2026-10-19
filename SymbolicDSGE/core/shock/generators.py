@@ -8,10 +8,19 @@ import numpy as np
 from numpy import asarray, ndarray, float64
 from numpy.typing import ArrayLike, NDArray
 
-from typing import Any, Callable, Literal, Mapping, TypedDict, Sequence, get_args
+from typing import Any, Callable, Literal, Mapping, TypedDict, Sequence, cast, get_args
 import copy
 
 NDF = NDArray[float64]
+
+_DIST_PARAMS_MV: dict[str, tuple[set, bool]] = {
+    "norm": (set(), True),
+    "uni": (set(), False),
+    "t": ({"df"}, True),
+    "gamma": ({"a"}, False),
+    "beta": ({"a", "b"}, False),
+    "exp": (set(), False),
+}
 
 #: A quantile function: probabilities in, quantiles out. ``table.py`` states
 #: the same shape on :meth:`DistributionTable.from_callable`.
@@ -30,8 +39,7 @@ class Shock:
         Distribution to draw shocks from. A family name ("norm", "t", "uni",
         "exp", "gamma", "beta") is drawn analytically by the kernel. Any callable
         `ppf`, or a class with `.ppf` (including a scipy distribution) can be tabulated
-        with :meth:`from_ppf`, `DistributionTable.from_callable`, or
-        `DistributionTable.from_scipy`.
+        with :meth:`from_ppf`, `DistributionTable.from_callable`.
     seed : int | None
         Random seed for reproducibility. If None, a random seed is used.
     dist_kwargs : dict | None
@@ -122,11 +130,20 @@ class Shock:
             An unbound spec over the tabulated distribution.
 
         """
-        fn: Callable[[ndarray], ArrayLike] = (
-            (lambda u: dist.ppf(u, **dist_kwargs))
-            if isinstance(dist, QuantileDist)
-            else dist
-        )
+        fn: Callable[[ndarray], ArrayLike]
+        if isinstance(dist, QuantileDist):
+            fn = lambda u: dist.ppf(u, **dist_kwargs)
+        else:
+            if not callable(dist):
+                raise TypeError(
+                    f"dist must be a callable quantile function or a QuantileDist; got {type(dist).__name__!r}."
+                )
+            if set(dist_kwargs) - {"loc"}:
+                raise ValueError(
+                    "dist_kwargs can only contain 'loc' for a callable quantile function. "
+                    f"Got {sorted(dist_kwargs)!r}."
+                )
+            fn = dist
 
         table = DistributionTable.from_callable(fn, n_knots=n_knots, discrete=discrete)
         return cls(table, seed, **dist_kwargs)
@@ -371,46 +388,35 @@ def _validate_shock_family(
     grouped entry.
     """
     _validate_dist(dist, dist_kwargs)
-    match dist:
-        case "t":
-            if "df" not in dist_kwargs:
-                raise ValueError("Student-t shocks require 'df' in dist_kwargs.")
+    if not isinstance(dist, str):
+        return
 
-            if dist_kwargs["df"] <= 2.0 or not np.isfinite(dist_kwargs["df"]):
-                raise ValueError(
-                    "Student-t requires df > 2 for finite variance. "
-                    "The shock covariance specification cannot be satisfied with "
-                    f"df={dist_kwargs['df']}."
-                )
-        case "uni":
-            _require_univariate(dist, width)  # pyright: ignore
-        case "exp":
-            _require_univariate(dist, width)  # pyright: ignore
-        case "gamma":
-            _require_univariate(dist, width)  # pyright: ignore
-            if "a" not in dist_kwargs:
-                raise ValueError(
-                    "Gamma shocks require the shape parameter ('a') in dist_kwargs."
-                )
-            if dist_kwargs["a"] <= 0 or not np.isfinite(dist_kwargs["a"]):
-                raise ValueError(
-                    "Gamma shocks require finite and positive `a`. The shock covariance "
-                    f"specification cannot be satisfied with `a={dist_kwargs['a']}`."
-                )
-        case "beta":
-            _require_univariate(dist, width)  # pyright: ignore
-            if "a" not in dist_kwargs or "b" not in dist_kwargs:
-                raise ValueError(
-                    "Beta shocks require the shape parameters ('a' and 'b') in dist_kwargs."
-                )
-            if (
-                dist_kwargs["a"] <= 0
-                or dist_kwargs["b"] <= 0
-                or not np.isfinite(dist_kwargs["a"])
-                or not np.isfinite(dist_kwargs["b"])
-            ):
-                raise ValueError(
-                    "Beta shocks require finite and positive `a` and `b`. The shock "
-                    f"covariance specification cannot be satisfied with `a={dist_kwargs['a']}` "
-                    f"and `b={dist_kwargs['b']}`."
-                )
+    params, is_mv = _DIST_PARAMS_MV[dist]
+    _require_univariate(dist, width) if not is_mv else None
+
+    if unk := (set(dist_kwargs) - (params | {"loc"})):
+        raise ValueError(
+            f"Unknown parameters in {dist!r} shock: {sorted(unk)!r}. "
+            f"Valid parameters: {sorted(params | {'loc'})}."
+        )
+    if missing := (params - set(dist_kwargs)):
+        raise ValueError(
+            f"Missing parameters in {dist!r} shock: {sorted(missing)!r}. "
+            f"Required parameters: {sorted(params)}."
+        )
+
+    if negnonfinite := set(
+        k for k in params if not np.isfinite(dist_kwargs[k]) or dist_kwargs[k] <= 0
+    ):
+        raise ValueError(
+            f"Non-positive or non-finite parameters in {dist!r} shock: {sorted(negnonfinite)!r}. "
+            "All parameters must be positive and finite."
+        )
+
+    if dist == "t":
+        if dist_kwargs["df"] <= 2.0:
+            raise ValueError(
+                "Student-t requires df > 2 for finite variance. "
+                "The shock covariance specification cannot be satisfied with "
+                f"df={dist_kwargs['df']}."
+            )

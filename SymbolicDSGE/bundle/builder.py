@@ -199,7 +199,7 @@ class BundleBuilder:
     def add_estimation(
         self,
         source: Estimator,
-        model_name: str | None = None,
+        model: str | None = None,
         *,
         result: MLEResult | MAPResult | MCMCResult | None = None,
         as_parquet: bool = True,
@@ -231,9 +231,7 @@ class BundleBuilder:
             return _observed_to_csv(y, observable_names)
 
         self._add(
-            Member(
-                path=_ESTIMATION_SPEC, kind="estimation_spec", model_name=model_name
-            ),
+            Member(path=_ESTIMATION_SPEC, kind="estimation_spec", model_name=model),
             json.dumps(spec.params, indent=2).encode("utf-8"),
         )
         self._add(
@@ -727,7 +725,7 @@ class BundleBuilder:
         return Path(path)
 
     def _validate_model_targets(self) -> None:
-        """Require estimation targets to name models before emitting the bundle."""
+        """Require estimation and simulation targets to name models before emitting the bundle."""
         model_names = {
             member.model_name
             for member in self._members
@@ -742,6 +740,14 @@ class BundleBuilder:
                     f"Estimation member {member.path!r} targets model "
                     f"{model_name!r}, which is not present in the bundle's models."
                 )
+
+        if missing := sorted(set(self._simulation) - model_names):
+            raise ValueError(
+                f"Simulation prefills target missing models: {missing!r}. "
+                f"Valid models in the bundle: {sorted(model_names)!r}. "
+                "All models referenced in simulation prefills must be added "
+                "before finalizing the bundle."
+            )
 
     def _add(self, member: Member, data: bytes) -> None:
         """Place one member, replacing whatever already sits at its path.

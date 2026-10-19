@@ -33,7 +33,7 @@ __Methods:__
 
 ```python
 BundleBuilder.add_model(
-    role: str,
+    name: str,
     yaml_text: str,
     *,
     compile_kwargs: Mapping[str, Any] | None = None, # (1)!
@@ -48,7 +48,7 @@ Add a model configuration to the bundle. `role` is `"reference"` or `"dgp"`. `ya
 
 | __Name__       |                                                                __Description__ |
 |:---------------|-------------------------------------------------------------------------------:|
-| role           |   `"reference"` or `"dgp"`. At least one model is required for a valid bundle. |
+| name           |           Name of the added model, other members refer to a model by its name. |
 | yaml_text      | Source YAML text. Available on a parsed `ModelConfig` at `config.source_yaml`. |
 | compile_kwargs |                      Compile kwargs the loader passes to `DSGESolver.compile`. |
 | solve_kwargs   |                          Solve kwargs the loader passes to `DSGESolver.solve`. |
@@ -83,6 +83,7 @@ Add a raw observable file. CSV input is re-encoded as Parquet by default.
 ```python
 BundleBuilder.add_estimation(
     source: Estimator,
+    model: str | None = None,
     *,
     result: (
         MLEResult
@@ -99,6 +100,7 @@ An `Estimator` instance can be directly passed to derive the spec. Any raw data 
 | __Name__   |                                                      __Description__ |
 |:-----------|---------------------------------------------------------------------:|
 | source     |                                               `Estimator` to bundle. |
+| model      |       Optional name of the model to which the estimator is attached. |
 | result     |                         Any result object returned by the estimator. |
 | as_parquet | When `False` the bulk members are written as CSV instead of Parquet. |
 

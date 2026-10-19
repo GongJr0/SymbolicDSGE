@@ -241,7 +241,7 @@ def test_ui_backend_loads_solves_and_simulates_model(test_model_path) -> None:
                         "target": ["e_u", "e_v"],
                         "dist": "norm",
                         "seed": 10,
-                        "dist_kwargs": {"mean": [0.0, 0.0]},
+                        "dist_kwargs": {"loc": [0.0, 0.0]},
                     }
                 ],
                 "shock_scale": 1.0,
@@ -540,7 +540,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline(test_model_path) -> 
                             "multivar": True,
                             "seed": 10,
                             "dist_args": [],
-                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                            "dist_kwargs": {"loc": [0.0, 0.0]},
                         }
                     ],
                 },
@@ -608,7 +608,7 @@ _POSTPROC_PIPELINE = {
                         "target": ["e_u", "e_v"],
                         "dist": "norm",
                         "seed": 0,
-                        "dist_kwargs": {"mean": [0.0, 0.0]},
+                        "dist_kwargs": {"loc": [0.0, 0.0]},
                     }
                 ],
             },
@@ -855,7 +855,7 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step(test_model_path) -> None
                             "multivar": True,
                             "seed": 0,
                             "dist_args": [],
-                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                            "dist_kwargs": {"loc": [0.0, 0.0]},
                         }
                     ],
                 },
@@ -929,7 +929,7 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step(test_model_path) -> No
                             "multivar": True,
                             "seed": 0,
                             "dist_args": [],
-                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                            "dist_kwargs": {"loc": [0.0, 0.0]},
                         }
                     ],
                 },
@@ -1003,7 +1003,7 @@ def test_ui_backend_runs_cusum_monte_carlo_step(test_model_path) -> None:
                             "multivar": True,
                             "seed": 0,
                             "dist_args": [],
-                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                            "dist_kwargs": {"loc": [0.0, 0.0]},
                         }
                     ],
                 },
@@ -1075,7 +1075,7 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step(test_model_path) -> None:
                             "multivar": True,
                             "seed": 0,
                             "dist_args": [],
-                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                            "dist_kwargs": {"loc": [0.0, 0.0]},
                         }
                     ],
                 },
@@ -1147,7 +1147,7 @@ def test_ui_backend_runs_chow_monte_carlo_step(test_model_path) -> None:
                             "multivar": True,
                             "seed": 0,
                             "dist_args": [],
-                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                            "dist_kwargs": {"loc": [0.0, 0.0]},
                         }
                     ],
                 },
@@ -1388,7 +1388,7 @@ def test_ui_backend_runs_custom_op_pipeline(test_model_path) -> None:
                             "multivar": True,
                             "seed": 1,
                             "dist_args": [],
-                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                            "dist_kwargs": {"loc": [0.0, 0.0]},
                         }
                     ],
                 },
@@ -1463,7 +1463,7 @@ def test_ui_backend_rejects_invalid_custom_op_on_run(test_model_path) -> None:
                             "multivar": True,
                             "seed": 1,
                             "dist_args": [],
-                            "dist_kwargs": {"mean": [0.0, 0.0]},
+                            "dist_kwargs": {"loc": [0.0, 0.0]},
                         }
                     ],
                 },

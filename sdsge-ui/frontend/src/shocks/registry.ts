@@ -23,9 +23,7 @@ import type {
 // One registry entry becomes one shock, joint when it selects more than one
 // innovation.
 //
-// `loc` travels as the vector the entry holds. The library resolves `mean` and
-// `loc` identically at every width and requires one value per target, so there
-// is no spelling to pick and nothing to broadcast: a short vector is incomplete
+// `loc` travels as the vector the entry holds. A short vector is incomplete
 // input and is refused here rather than filled in.
 //
 // Neither the family nor the width it may be drawn at is checked. The library
@@ -136,18 +134,12 @@ function entryFromSpec(dict: Record<string, unknown>): ShockRegistryEntry {
   // library is what decides whether it is one.
   const dist = typeof dict.dist === "string" ? dict.dist : table === null ? "norm" : null;
   const kwargs = (dict.dist_kwargs ?? {}) as Record<string, unknown>;
-  // The library reads `mean` and `loc` identically and prefers `mean` when a
-  // spec carries both, so this reads them in that order and keeps the whole
-  // vector. A bundle-authored entry may name a different location per
-  // innovation, and collapsing that to one number would silently rewrite the
-  // spec on the next edit.
-  const declared = "mean" in kwargs ? kwargs.mean : kwargs.loc;
   return {
     kind: "drawn",
     target,
     dist,
     table,
-    loc: locVector(declared, target.length),
+    loc: locVector(kwargs.loc, target.length),
     params: paramsFrom(kwargs),
     seed: dict.seed === null || dict.seed === undefined ? null : Number(dict.seed),
   };
@@ -172,7 +164,7 @@ function tableFrom(value: unknown): ShockTable | null {
 function paramsFrom(kwargs: Record<string, unknown>): Record<string, number> {
   const params: Record<string, number> = {};
   for (const [key, value] of Object.entries(kwargs)) {
-    if (key === "loc" || key === "mean") continue;
+    if (key === "loc") continue;
     params[key] = Number(value);
   }
   return params;

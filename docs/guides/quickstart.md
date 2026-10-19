@@ -149,7 +149,8 @@ Shock specifications can take two forms.
 - A `#!python ShockPath` containing an array of shocks and the targeted shock symbols.
 
 Shocks are specified as a sequence, where `#!python Shock` and `#!python ShockPath` can be mixed.
-`Shock` takes a distribution name or a scipy distribution implementing `rvs(...)`; `dist_kwargs` serve the parameters and `seed` handles reproducibility.
+`Shock` takes a distribution name, a distribution object implementing `ppf(...)`, or a `ppf(...)` function.
+The latter two are produced via `Shock.from_ppf(...)` and they resolve to inverse CDF tables with `n_knots` points, defaulting to 1024.
 `{"norm", "t", "uni", "exp", "gamma", "beta"}` are built in distributions that `dist` can take as a string. `"norm"` and `"t"` support multivariate draws with clear dependence structure while the others (not having a clear and unambiguous multivariate definition) do not resort to copulas or alternative definitions/parameterizations.
 Standard deviations and correlations come from the model configuration, and any `scale` or equivalent `dist_kwargs` are not accepted.
 A `Shock` is bound to target variable(s) after construction via the `.joint(*keys)` and `.independent(*keys)` methods.
@@ -182,8 +183,8 @@ __Simulation Call:__
 
 ```python
 shocks = [
-    Shock("norm", dist_kwargs={"mean": 0.0}, seed=42).joint("e_g", "e_z"),
-    Shock("norm", dist_kwargs={"mean": 0.0}, seed=43).joint("e_r"),
+    Shock("norm", loc=[0.0, 0.0], seed=42).joint("e_g", "e_z"),
+    Shock("norm", loc=0.0, seed=43).joint("e_r"),
 ]
 sim_data = sol.sim(
     T=200,

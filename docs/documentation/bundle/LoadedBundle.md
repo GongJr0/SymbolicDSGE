@@ -19,7 +19,7 @@ __Fields:__
 | models | `#!python Mapping[str, SolvedModel] | None` | Name-model mappings, or None. Any model named here can be referred to by members of the bundle. |
 | estimation | `#!python LoadedEstimation | None` | Estimation artifacts, or `None` if `estimation/` was not in the bundle. |
 | mc | `#!python LoadedMC | None` | Monte Carlo artifacts, or `None` if `montecarlo/` was not in the bundle. |
-| simulation | `#!python dict[str, SimulationPrefill] | None` | Simulation prefills keyed by role, or `None` if none set. The prefills are typed dicts that unpack directly into `SolvedModel.sim`. |
+| simulation | `#!python dict[str, SimulationPrefill] | None` | Simulation prefills keyed by model name, or `None` if none was set. Prefills are typed dicts that unpack directly into `SolvedModel.sim`. |
 
 ???+ info "Re-solving on load"
     Models are stored as configs and re-solved on load. The solve operations use `solve_kwargs` and `compile_kwargs` per model. 
