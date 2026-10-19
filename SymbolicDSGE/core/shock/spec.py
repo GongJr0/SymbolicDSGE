@@ -172,8 +172,7 @@ def _gaussian_factor(cov: ndarray) -> ndarray:
     """A factor ``F`` with ``F @ F.T == cov``.
 
     Cholesky on the common positive-definite path, with an eigh-based fallback so
-    positive-semidefinite (but not strictly PD) covariances still sample -- the
-    robustness scipy's ``_PSD`` gives us, without scipy.
+    positive-semidefinite (but not strictly PD) covariances still sample.
     """
     try:
         return cholesky(cov)
