@@ -19,7 +19,19 @@ typedef enum {
   SDSGE_SHOCK_EXPONENTIAL = 3,
   SDSGE_SHOCK_GAMMA = 4,
   SDSGE_SHOCK_BETA = 5,
+  SDSGE_SHOCK_TABLE_CONTINUOUS = 6,
+  SDSGE_SHOCK_TABLE_DISCRETE = 7,
 } native_shock;
+
+/* A standardized quantile function, sampled on a grid uniform in `z`. A draw
+ * is a standard normal clamped to +-zmax and read off `q` by arithmetic, so
+ * nothing here is searched. Members are non-const: the lowering fills an entry
+ * field by field, and a const member makes that assignment ill-formed. */
+typedef struct {
+  const f64 *q; /* n_knots, non-decreasing; NULL unless a TABLE family */
+  i64 n_knots;
+  f64 zmax; /* the grid spans +-zmax in z, not the drawn variate's range */
+} sdsge_shock_table;
 
 /* One resolved entry of a shock spec. A univariate entry is the width-1 case,
  * its `factor` the 1x1 standard deviation. */
@@ -27,6 +39,8 @@ typedef struct {
   native_shock family;
   /* (T, width) row-major, set for SDSGE_SHOCK_PATH and NULL otherwise. */
   const f64 *path;
+  /* Approximated sampling tables for non-built-in distributions. */
+  sdsge_shock_table table;
   i64 width;
   /* width-long, the exogenous columns this entry drives, in factor order. */
   const i64 *columns;

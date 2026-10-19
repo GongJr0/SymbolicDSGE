@@ -95,4 +95,3 @@ __Additional Fields and Properties:__
 
 ???+ note "Path Output"
     Path fields are populated by `lasso_gs(...)`. Direct `lasso(...)` calls return only the selected coefficient vector and scalar L1 diagnostics.
-

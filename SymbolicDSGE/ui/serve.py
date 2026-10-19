@@ -21,13 +21,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..monte_carlo.serialize import serialize_pipeline_result
-from ..monte_carlo.spec import pipeline_meta
 from .estimation import (
     build_estimation_prefill,
     emit_estimation_wire,
     estimator_spec_wire,
 )
+from .mc import pipeline_spec_wire
 from .session import TabState, Workspace
+from .simulation import sim_spec_wire
 
 if TYPE_CHECKING:
     from SymbolicDSGE.bundle.loader import LoadedBundle
@@ -85,8 +86,10 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
     The estimation/MC tabs land as ``{spec, result, view}``: the bundle's own
     two members carried over as they stand, plus the view the GUI repaints
     from, which for estimation is the spec and result projected into the shape
-    its form posts back. The simulation prefill rides as the SimSpec dict so
-    the Outputs tab pre-fills the seed/T/shock controls.
+    its form posts back. The simulation prefill rides as the spec the tab posts
+    back, which is what pre-fills its seed/T/shock controls; the loader has
+    already resolved its shock arrays out of the bundle's pool, and they cross
+    inline from here.
     """
     eout: dict[str, TabState] = {}
     estimation = TabState()
@@ -109,15 +112,15 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
 
     mc = TabState()
     if loaded.mc is not None:
-        mc.spec = dict(pipeline_meta(loaded.mc.pipeline.to_spec()))
+        mc.spec = pipeline_spec_wire(loaded.mc.pipeline)
         if loaded.mc.result is not None:
             mc.result = serialize_pipeline_result(loaded.mc.result)
 
     # Spec only: the session replays it against the model once both are
     # installed, which is what fills the result.
     simulation = {
-        name: TabState(spec=spec.to_dict())
-        for name, spec in (loaded.manifest.simulation or {}).items()
+        name: TabState(spec=dict(sim_spec_wire(prefill)))
+        for name, prefill in (loaded.simulation or {}).items()
     }
 
     return Workspace(

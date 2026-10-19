@@ -9,7 +9,7 @@ The Outputs tab simulates the active solved model and displays the resulting ser
 
 ## Running a Simulation
 
-1. Select the model role in the sidebar.
+1. Select the model in the sidebar.
 2. Load and solve the model.
 3. Configure shocks in the Spec tab.
 4. Set the number of periods, `T`.

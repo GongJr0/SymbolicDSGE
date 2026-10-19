@@ -25,19 +25,16 @@ solved.serve()
 
 ## Shared Controls
 
-The sidebar controls the active model role and is available from every tab.
+The sidebar controls the active model and is available from every tab.
 
 | Control | Description |
 | --- | --- |
-| Role | Select the `reference` or `dgp` model slot. |
+| Model | Select which model slot is active. |
 | YAML Path | Path to a model configuration file. |
 | Load | Parse the selected YAML file into the active model slot. |
 | Sync | Refresh the displayed backend session state. |
 | Linearize | Pass `linearize=True` when compiling the model. |
 | Solve | Compile and solve the loaded model in the active slot. |
-
-???+ note "Reference and DGP Roles"
-    Most single-model workflows use the reference slot. The Monte Carlo builder requires solved reference and DGP models.
 
 ## Tabs
 

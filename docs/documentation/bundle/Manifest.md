@@ -9,10 +9,10 @@ tags:
 class Manifest()
 ```
 
-`Manifest` is the schema for `manifest.json` at the root of every `.sdsge` archive. It indexes the included members, records provenance, and (optionally) carries the simulation prefill inline.
+`Manifest` is the schema for `manifest.json` at the root of every `.sdsge` archive. It indexes the included members and records provenance.
 
 You will never need to construct a `Manifest` or write one to disk manually. Writers generate it and loaders parse it.
-However, it is available for inspection and cerries top-level metadata. The fields are documented here for reference.
+However, it is available for inspection and carries top-level metadata. The fields are documented here for reference.
 
 __Fields:__
 
@@ -23,12 +23,7 @@ __Fields:__
 | sdsge_version | `#!python int` | Format version the bundle was written at. Bumped on every manifest change. |
 | last_breaking_version | `#!python int` | Version at which the format last broke, as of writing. A reader needs to be at least this version. |
 | members | `#!python list[Member]` | Member inventory. Every archive entry has one. |
-| simulation | `#!python dict[str, SimSpec] | None` | Inline simulation prefills keyed by role (no separate member). |
 | checksums | `#!python dict[str, str]` | SHA-256 hex digests keyed by member path. |
-
-???+ note "Simulation prefills"
-    Prefills are keyed by name and a bundle can include multiple.
-    The values unpack directly as `SolvedModel.sim(**prefill)`.
 
 ???+ warning "Forward / backward compatibility"
     Each bundle on disk carries two version numbers, and validation during a read relies on them plus an additional constant.

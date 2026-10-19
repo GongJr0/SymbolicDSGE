@@ -28,9 +28,9 @@ __Fields:__
 | loglik | `#!python float` | log likelihood ($\boldsymbol{\ell}$) of measurements. |
 
 ???+ info "State Units"
-    `SolvedModel.kalman(...)` returns state paths in levels. The solved steady-state vector is added to `x_pred` and `x_filt` before reporting outputs. Measurements are in levels during the recursion, as required for comparing to observed data. 
+    `SolvedModel.kalman(...)` returns state paths in levels. The solved steady-state vector is added to `x_pred` and `x_filt` before reporting outputs. Measurements are in levels during the recursion, as required for comparing to observed data.
 
-    Unscented filtering forms levels inside its kernel by construction; its recursion also necessitates `x_pred` and `x_filt` to be in levels. 
+    Unscented filtering forms levels inside its kernel by construction; its recursion also necessitates `x_pred` and `x_filt` to be in levels.
 
 ???+ info "Initial State Timing"
     Linear and extended filtering read `x0` and `P0` as the prior mean and covariance for the first observed state. Unscented filtering reads them as the state and covariance before the first observation.

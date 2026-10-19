@@ -34,13 +34,8 @@ from ..estimation.spec import (
     MAPResultSpec,
     MCMCResultMeta,
 )
-from ..core.shock.generators import (
-    Shock,
-    ShockPath,
-    ShockParameters,
-    ShockPathParameters,
-)
-from ..core.shock.spec import ShockSpec, _normalized_spec
+from ..core.shock.generators import Shock, ShockPath
+from ..core.shock.spec import _normalized_spec, serialize_shocks
 from ..estimation.results import MLEResult, MAPResult
 
 from ..monte_carlo.core import MCPipeline
@@ -67,8 +62,18 @@ from .parquet import (
 
 NDF = NDArray[np.float64]
 
-# Ref/DGP top level models
+# Models
 _MODEL_PATH = "model/{name}.yaml"
+
+# Shock path and distribution table arrays. The member name is the array's
+# content id, which is what a spec references it by, so no map stands between
+# the two.
+_SHOCK_PATH = "shock/path/{name}.{ext}"
+_SHOCK_TABLE = "shock/table/{name}.{ext}"
+_SHOCK_KINDS = frozenset({"shock_path", "shock_table"})
+
+# Simulation prefill
+_SIMULATION = "simulation.json"
 
 # MLE, MAP, MCMC estimation tab members
 _ESTIMATION_SPEC = "estimation/spec.json"
@@ -120,55 +125,6 @@ class _Encoding(NamedTuple):
     encode: Callable[[Mapping[str, Any]], bytes]
 
 
-def _encoding(as_parquet: bool) -> _Encoding:
-    """The encoding one ``as_parquet`` flag selects."""
-    if as_parquet:
-        return _Encoding("parquet", columns_to_parquet)
-    return _Encoding("csv", lambda columns: trace_to_csv(dict(columns)))
-
-
-def _fold(arr: NDArray[Any]) -> NDArray[Any]:
-    """One array as the ``(n,)`` or ``(n, k)`` a column block holds.
-
-    Padding is a row operation, so an array has to be folded before it can be
-    padded against its neighbours; the writer would fold it anyway.
-    """
-    return arr if arr.ndim <= 1 else arr.reshape(-1, arr.shape[-1])
-
-
-def _pad_columns(
-    columns: Mapping[str, NDArray[Any]],
-    fill: float = _PAD,
-) -> dict[str, NDArray[Any]]:
-    """Bring every column up to the tallest one's height, filling with ``fill``.
-
-    A column block is rectangular, but ``n_retain`` is per step, so two steps in
-    one kind can retain different numbers of replications. A float block can fill
-    with NaN instead, which no reader can mistake for a value.
-    """
-    if not columns:
-        return {}
-    height = max(int(arr.shape[0]) for arr in columns.values())
-    if height == 0:
-        return {}
-    out: dict[str, NDArray[Any]] = {}
-    for name, arr in columns.items():
-        rows = int(arr.shape[0])
-        if rows == height:
-            out[name] = arr
-            continue
-        pad = np.full((height - rows, *arr.shape[1:]), fill, dtype=arr.dtype)
-        out[name] = np.concatenate([arr, pad])
-    return out
-
-
-def _library_version() -> str:
-    try:
-        return f"SymbolicDSGE {version('symbolicdsge')}"
-    except PackageNotFoundError:  # pragma: no cover - source checkout without install
-        return "SymbolicDSGE (unknown)"
-
-
 class BundleBuilder:
     """Collect bundle members, then :meth:`write` (or :meth:`build`) the archive.
 
@@ -183,6 +139,7 @@ class BundleBuilder:
         self._created_by = created_by or _library_version()
         self._members: list[Member] = []
         self._files: dict[str, bytes] = {}
+        self._pool: set[tuple[str, str]] = set()
         self._simulation: dict[str, SimSpec] = {}
 
     # Models
@@ -242,7 +199,7 @@ class BundleBuilder:
     def add_estimation(
         self,
         source: Estimator,
-        model_name: str | None = None,
+        model: str | None = None,
         *,
         result: MLEResult | MAPResult | MCMCResult | None = None,
         as_parquet: bool = True,
@@ -274,9 +231,7 @@ class BundleBuilder:
             return _observed_to_csv(y, observable_names)
 
         self._add(
-            Member(
-                path=_ESTIMATION_SPEC, kind="estimation_spec", model_name=model_name
-            ),
+            Member(path=_ESTIMATION_SPEC, kind="estimation_spec", model_name=model),
             json.dumps(spec.params, indent=2).encode("utf-8"),
         )
         self._add(
@@ -339,6 +294,10 @@ class BundleBuilder:
         enforced/wrapped as a :class:`NumpyCustomFunc` so its source travels for
         receiver audit).
 
+        A simulation step's shocks lower to their stored form on the way, with
+        their arrays pooled under ``shock/`` beside whatever the simulation
+        prefills put there.
+
         Optionally records a run ``result``. Its run-level config and each step
         kind's metas ride their own JSON members; the bulk traces ride separate
         members, as Parquet or, with ``as_parquet=False``, as CSV. The loader
@@ -346,6 +305,7 @@ class BundleBuilder:
         """
         encoding = _encoding(as_parquet)
         ps = pipeline.to_spec()
+        self._lower_mc_shocks(ps, encoding)
         self._add_mc_manifest(ps)
         self._add_mc_pipeline_traces(ps, encoding)
         self._add_mc_funcs(ps)
@@ -470,6 +430,69 @@ class BundleBuilder:
             encoding.encode(columns),
         )
 
+    def _add_shock_arrays(
+        self,
+        paths: Mapping[str, NDF],
+        tables: Mapping[str, NDF],
+        encoding: _Encoding,
+    ) -> None:
+        """Pool the bulk arrays one shock spec carries, one member per unique array.
+
+        The skip keys on the content id rather than the member path, so a second
+        call under the other encoding finds the array already pooled instead of
+        writing its twin. Readers enumerate the pool by kind and bind
+        ``options["name"]``, leaving the extension cosmetic.
+        """
+        for template, kind, arrays in (
+            (_SHOCK_PATH, "shock_path", paths),
+            (_SHOCK_TABLE, "shock_table", tables),
+        ):
+            for name, array in arrays.items():
+                if (kind, name) in self._pool:
+                    continue
+                self._add(
+                    Member(
+                        path=template.format(name=name, ext=encoding.ext),
+                        kind=kind,
+                        options={"name": name},
+                    ),
+                    encoding.encode({"value": array}),
+                )
+
+    def _lower_mc_shocks(self, spec: PipelineSpec, encoding: _Encoding) -> None:
+        """Replace each simulation step's shocks with the stored form, arrays pooled.
+
+        A step carries concrete entries, which only their spec dicts can travel
+        as. ``raw_model_data`` holds bulk arrays under the same kwarg name, so
+        the step kind selects here rather than the key; a hand-built step that
+        skipped the factory is what the stray check is for. Rewriting is safe:
+        ``to_spec`` already handed over its own ``meta`` and kwargs.
+        """
+        paths: dict[str, NDF] = {}
+        tables: dict[str, NDF] = {}
+        for step in spec.replication_steps:
+            if step.meta["step_type"] != "simulation":
+                continue
+            shocks = step.meta["kwargs"].get("shocks")
+            if not shocks:
+                continue
+            entries = shocks if isinstance(shocks, Sequence) else [shocks]
+            stray = next(
+                (e for e in entries if not isinstance(e, (Shock, ShockPath))), None
+            )
+            if stray is not None:
+                raise TypeError(
+                    f"Simulation step {step.meta['name']!r} carries "
+                    f"{type(stray).__name__} in its 'shocks' kwarg, where a bound "
+                    "Shock or ShockPath is expected. Build the step through "
+                    "simulation_step, which normalizes the spec it is given."
+                )
+            specs, step_paths, step_tables = serialize_shocks(entries)
+            step.meta["kwargs"]["shocks"] = list(specs)
+            paths.update(step_paths)
+            tables.update(step_tables)
+        self._add_shock_arrays(paths, tables, encoding)
+
     def _add_mc_pipeline_traces(self, spec: PipelineSpec, encoding: _Encoding) -> None:
         """Ship every step's lifted array kwargs, one member per step."""
         for step in (*spec.replication_steps, *spec.postproc_steps):
@@ -570,7 +593,8 @@ class BundleBuilder:
 
     def set_simulation(
         self,
-        role: str,
+        model: str,
+        as_parquet: bool = True,
         *,
         T: int,
         shocks: (
@@ -582,20 +606,58 @@ class BundleBuilder:
         x0: Mapping[str, float] | Sequence[float] | NDF | None = None,
         observables: bool = False,
     ) -> BundleBuilder:
-        """Attach a simulation prefill under ``role``, taking ``SolvedModel.sim``'s
-        keywords and lowering them to the stored form.
+        """Fill in a simulation specification for a model in the bundle.
 
-        Each shock is a live :class:`Shock` or a raw path array, the two shapes
-        ``sim`` draws from; the parameters are read off the object rather than
-        hand-written. A callable cannot be stored, since only its result would
-        travel and the receiver could not redraw it.
+
+        Parameters
+        ----------
+        model : str
+            Name of the model to prefill a simulation for.
+            Must exist in the bundle at the time of writing to disk.
+        as_parquet : bool
+            Whether to store shock arrays or distribution tables as
+            Parquet or CSV. Defaults to True (Parquet). Does not have
+            any effect on simulations without array or tabulated shocks.
+        T : int
+            Periods to simulate.
+        shocks : Mapping[str | Sequence[str], Shock | NDF] | Sequence[Shock | ShockPath] | None
+            Shock specification for the simulation.
+        shock_scale : float
+            Scaling factor to apply to shocks, independent of their distribution.
+            Shocks are multiplied by this factor after they are drawn.
+        x0 : Mapping[str, float] | Sequence[float] | NDF | None
+            Initial state for the simulation.
+        observables : bool
+            Whether to include the observables in the simulation output.
+            Defaults to false.
+
+        Returns
+        -------
+        BundleBuilder
+            The current instance, returned to allow method chaining.
+
+        Notes
+        -----
+        See `SolvedModel.sim` for details on each simulation parameter. All parameters
+        except the model name and `as_parquet` behave exactly as they would in a live simulation call.
+
         """
-        self._simulation[role] = SimSpec(
+        specs, paths, tables = serialize_shocks(_normalized_spec(shocks))
+        self._simulation[model] = SimSpec(
             T=int(T),
             x0=_prefill_x0(x0),
             observables=bool(observables),
             shock_scale=float(shock_scale),
-            shocks=_prefill_shocks(shocks),
+            shocks=list(specs) or None,
+        )
+        self._add_shock_arrays(paths, tables, _encoding(as_parquet))
+        self._add(
+            Member(
+                path=_SIMULATION,
+                kind="simulation",
+                model_name=None,
+            ),
+            json.dumps(dict(self._simulation), indent=2).encode("utf-8"),
         )
         return self
 
@@ -626,7 +688,6 @@ class BundleBuilder:
             created_by=self._created_by,
             created_at=datetime.now(timezone.utc).isoformat(),
             members=list(self._members),
-            simulation=self._simulation or None,
             checksums={
                 path: hashlib.sha256(data).hexdigest()
                 for path, data in self._files.items()
@@ -664,7 +725,7 @@ class BundleBuilder:
         return Path(path)
 
     def _validate_model_targets(self) -> None:
-        """Require estimation targets to name models before emitting the bundle."""
+        """Require estimation and simulation targets to name models before emitting the bundle."""
         model_names = {
             member.model_name
             for member in self._members
@@ -680,11 +741,81 @@ class BundleBuilder:
                     f"{model_name!r}, which is not present in the bundle's models."
                 )
 
+        if missing := sorted(set(self._simulation) - model_names):
+            raise ValueError(
+                f"Simulation prefills target missing models: {missing!r}. "
+                f"Valid models in the bundle: {sorted(model_names)!r}. "
+                "All models referenced in simulation prefills must be added "
+                "before finalizing the bundle."
+            )
+
     def _add(self, member: Member, data: bytes) -> None:
-        if member.path in self._files:
-            raise ValueError(f"Duplicate bundle member path {member.path!r}.")
-        self._members.append(member)
+        """Place one member, replacing whatever already sits at its path.
+
+        A repeat is a setter called twice, which is an override, or the shock
+        pool restating bytes its content id guarantees are the same. The row is
+        replaced where it stands rather than appended: readers reach for
+        ``members_by_kind(...)[0]``, which a stale row left in front would
+        answer with the old member's options.
+        """
+        for i, present in enumerate(self._members):
+            if present.path == member.path:
+                self._members[i] = member
+                break
+        else:
+            self._members.append(member)
         self._files[member.path] = data
+        if member.kind in _SHOCK_KINDS and (name := member.options.get("name")):
+            self._pool.add((member.kind, str(name)))
+
+
+def _encoding(as_parquet: bool) -> _Encoding:
+    """The encoding one ``as_parquet`` flag selects."""
+    if as_parquet:
+        return _Encoding("parquet", columns_to_parquet)
+    return _Encoding("csv", lambda columns: trace_to_csv(dict(columns)))
+
+
+def _fold(arr: NDArray[Any]) -> NDArray[Any]:
+    """One array as the ``(n,)`` or ``(n, k)`` a column block holds.
+
+    Padding is a row operation, so an array has to be folded before it can be
+    padded against its neighbours; the writer would fold it anyway.
+    """
+    return arr if arr.ndim <= 1 else arr.reshape(-1, arr.shape[-1])
+
+
+def _pad_columns(
+    columns: Mapping[str, NDArray[Any]],
+    fill: float = _PAD,
+) -> dict[str, NDArray[Any]]:
+    """Bring every column up to the tallest one's height, filling with ``fill``.
+
+    A column block is rectangular, but ``n_retain`` is per step, so two steps in
+    one kind can retain different numbers of replications. A float block can fill
+    with NaN instead, which no reader can mistake for a value.
+    """
+    if not columns:
+        return {}
+    height = max(int(arr.shape[0]) for arr in columns.values())
+    if height == 0:
+        return {}
+    out: dict[str, NDArray[Any]] = {}
+    for name, arr in columns.items():
+        rows = int(arr.shape[0])
+        if rows == height:
+            out[name] = arr
+            continue
+        pad = np.full((height - rows, *arr.shape[1:]), fill, dtype=arr.dtype)
+        out[name] = np.concatenate([arr, pad])
+    return out
+
+
+def _library_version() -> str:
+    try:
+        return f"SymbolicDSGE {version('symbolicdsge')}"
+    except PackageNotFoundError:  # pragma: no cover - source checkout without install
+        return "SymbolicDSGE (unknown)"
 
 
 def _prefill_x0(
@@ -701,24 +832,6 @@ def _prefill_x0(
         f"x0 must be a mapping of variable names to values, a sequence in "
         f"declaration order, or an ndarray; got {type(x0).__name__}."
     )
-
-
-def _prefill_shocks(
-    shocks: ShockSpec | None,
-) -> list[ShockParameters | ShockPathParameters] | None:
-    """Lower each shock to its stored shape: parameters, or a raw path.
-
-    A :class:`Shock` travels as its parameters so the receiver redraws it under
-    the author's seed. An array travels as itself. A callable is rejected: only
-    the path it returned would survive, which is not the same run.
-
-    The spec travels as a list because a grouped key names several shocks, which
-    a JSON object cannot be keyed by; each entry carries its own ``key``. This is
-    the form a replication step's ``shocks`` kwarg is stored in too.
-    """
-    if shocks is None:
-        return None
-    return [shock.to_dict() for shock in _normalized_spec(shocks)]
 
 
 def _observed_to_csv(

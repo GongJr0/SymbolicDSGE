@@ -86,7 +86,7 @@ class SolvedModel(ABC, Generic[Policy]):
         T: int,
         shocks: ShockSpec | None = None,
         shock_scale: float = 1.0,
-        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
+        x0: Mapping[str, float] | list[float] | ndarray | None = None,
     ) -> StatePath: ...
 
     def sim(
@@ -98,7 +98,7 @@ class SolvedModel(ABC, Generic[Policy]):
             | None
         ) = None,
         shock_scale: float = 1.0,
-        x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
+        x0: Mapping[str, float] | list[float] | NDF | None = None,
         observables: bool = False,
     ) -> SimResult:
         """
@@ -120,7 +120,7 @@ class SolvedModel(ABC, Generic[Policy]):
         shock_scale : float, optional
             A scaling factor applied to all shocks.
 
-        x0 : dict[str, float] | list[float] | ndarray, optional
+        x0 : Mapping[str, float] | list[float] | ndarray, optional
             Initial state at ``t - 1``, in levels. ``None`` initiates
             the simulation at the model's steady state. A sequence covers
             every compiled variable in declaration order, including
@@ -153,7 +153,7 @@ class SolvedModel(ABC, Generic[Policy]):
             | None
         ) = None,
         shock_scale: float = 1.0,
-        x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
+        x0: Mapping[str, float] | list[float] | NDF | None = None,
         observables: bool = False,
     ) -> SimResult:
         """Simulate the reference regime over T periods, with nothing binding.
@@ -179,7 +179,7 @@ class SolvedModel(ABC, Generic[Policy]):
         shock_scale : float, optional
             A scaling factor applied to all shocks.
 
-        x0 : dict[str, float] | list[float] | ndarray, optional
+        x0 : Mapping[str, float] | list[float] | ndarray, optional
             Initial state at ``t - 1``, in levels. A sequence covers every
             compiled variable in declaration order, minted lags included; a
             mapping names only the variables it sets. What it leaves out, and
@@ -218,8 +218,8 @@ class SolvedModel(ABC, Generic[Policy]):
 
         Returns
         -------
-        dict[str, ndarray]
-            A dictionary mapping variable names to their impulse response time series.
+        SimResult
+            The impulse response functions in levels.
         """
         if not shocks:
             raise ValueError("At least one shock must be specified for IRF.")
@@ -357,7 +357,7 @@ class SolvedModel(ABC, Generic[Policy]):
         self,
         *,
         yaml_text: str | None = None,
-        role: str = "reference",
+        name: str = "reference",
         compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,
         created_by: str | None = None,
@@ -376,7 +376,7 @@ class SolvedModel(ABC, Generic[Policy]):
         return export.to_bundle_builder(
             self.compiled,
             yaml_text=yaml_text,
-            role=role,
+            name=name,
             compile_kwargs=compile_kwargs,
             solve_kwargs=solve_kwargs,
             created_by=created_by,
@@ -387,7 +387,7 @@ class SolvedModel(ABC, Generic[Policy]):
         path: "str | Any",
         *,
         yaml_text: str | None = None,
-        role: str = "reference",
+        name: str = "reference",
         compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,
     ) -> "Any":
@@ -399,14 +399,14 @@ class SolvedModel(ABC, Generic[Policy]):
         """
         return self.to_bundle_builder(
             yaml_text=yaml_text,
-            role=role,
+            name=name,
             compile_kwargs=compile_kwargs,
             solve_kwargs=solve_kwargs,
         ).write(path)
 
     def _initial_state(
         self,
-        x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
+        x0: Mapping[str, float] | list[float] | ndarray | None = None,
     ) -> NDF:
         """Level ``x0`` in declaration order, converted to deviations in canonical order.
 
@@ -425,7 +425,7 @@ class SolvedModel(ABC, Generic[Policy]):
         declared = [*layout.declared_names, *layout.generated_names]
 
         x0_arr = np.zeros((n,), dtype=float64)
-        if isinstance(x0, dict):
+        if isinstance(x0, Mapping):
             if unk := set(x0) - set(declared):
                 raise ValueError(
                     f"x0 contains unknown variable names: {unk}. "
@@ -519,8 +519,8 @@ class SolvedModel(ABC, Generic[Policy]):
         filter_mode: Literal["linear", "extended", "unscented"] = "linear",
         *,
         observables: list[str] | None = None,
-        x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
-        jitter: float | float64 | None = None,
+        x0: Mapping[str, float] | list[float] | NDF | None = None,
+        jitter: float | None = None,
         symmetrize: bool = False,
         joseph_cov: bool = False,
         return_shocks: bool = False,
@@ -537,13 +537,13 @@ class SolvedModel(ABC, Generic[Policy]):
             Type of the filter to run. "linear" is the standard Kalman filter, "extended" is the allows non-linear measurement equations while the state space is linear. "unscented" is the Unscented Kalman filter which allows for second-order non-linearities in the state space and any parsable non-linear measurement.
         observables : list[str] | None
             List of observable variable names to use in the filter. If None, all observables are used.
-        x0 : dict[str, float | float64] | list[float | float64] | NDF | None
+        x0 : Mapping[str, float] | list[float] | NDF | None
             Initial state at ``t - 1``, in levels. ``None`` initiates
             the simulation at the model's steady state. A sequence covers
             every compiled variable in declaration order, including
             generated lags. A mapping sets variables by name, omitted
             variables start at their steady state.
-        jitter : float | float64 | None
+        jitter : float | None
             Amount of jitter to add to a covariance matrix when cholesky decomposition fails. If None, no jitter is added.
         symmetrize : bool
             Whether to symmetrize the covariance matrix after each update step. This can help maintain numerical stability.

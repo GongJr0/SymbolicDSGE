@@ -21,6 +21,8 @@ class ShockCode(IntEnum):
     EXPONENTIAL = native_shock.SDSGE_SHOCK_EXPONENTIAL
     GAMMA = native_shock.SDSGE_SHOCK_GAMMA
     BETA = native_shock.SDSGE_SHOCK_BETA
+    TABLE_CONTINUOUS = native_shock.SDSGE_SHOCK_TABLE_CONTINUOUS
+    TABLE_DISCRETE = native_shock.SDSGE_SHOCK_TABLE_DISCRETE
 
     @classmethod
     def for_dist(cls, dist):
@@ -133,6 +135,7 @@ def native_shock_plan(
     cdef double[:, ::1] factor_mv
     cdef double[::1] loc_mv
     cdef double[:, ::1] path_mv
+    cdef double[::1] q_mv
     cdef sdsge_beta_params bparams
     plan._entries = <sdsge_shock_entry *>PyMem_Malloc(
         <size_t>n * sizeof(sdsge_shock_entry)
@@ -162,6 +165,22 @@ def native_shock_plan(
             plan._entries[i].loc = NULL
             plan._entries[i].key = 0
             continue
+
+        if e.family in (
+                native_shock.SDSGE_SHOCK_TABLE_CONTINUOUS,
+                native_shock.SDSGE_SHOCK_TABLE_DISCRETE
+        ):
+            q = np.ascontiguousarray(e.table.q, dtype=np.float64)
+            plan._backing.append(q)
+            q_mv = q
+
+            plan._entries[i].table.q = &q_mv[0]
+            plan._entries[i].table.n_knots = <int64_t>e.table.n_knots
+            plan._entries[i].table.zmax = <double>e.table.zmax
+        else:
+            plan._entries[i].table.q = NULL
+            plan._entries[i].table.n_knots = 0
+            plan._entries[i].table.zmax = 0.0
 
         factor_mv = np.ascontiguousarray(e.factor, dtype=np.float64)
         plan._backing.append(factor_mv)

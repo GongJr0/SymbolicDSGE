@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal, NotRequired, TypedDict
 
 from ..estimation.spec import PriorSpec
+from .shock import InlineShockEntry
 
 FunctionKind = Literal["array", "figure"]
 EstimationMethod = Literal["mle", "map", "mcmc"]
@@ -45,6 +46,27 @@ class SubmitFunctionRequest(TypedDict):
     model_name: str
     code: str
     kind: FunctionKind
+
+
+class SimSpecWire(TypedDict):
+    """A simulation prefill as the Outputs tab posts it and repaints from it.
+
+    The stored :class:`~SymbolicDSGE.bundle.manifest.SimSpec` is the same five
+    fields with its shock arrays pooled by content id. Here they ride inline: a
+    session has no pool to reference, and an id would dangle the moment the form
+    edited the array it names.
+    """
+
+    T: int
+    x0: dict[str, float] | list[float] | None
+    observables: bool
+    shock_scale: float
+    shocks: list[InlineShockEntry] | None
+
+
+class SimRunRequest(TypedDict):
+    model_name: str
+    spec: SimSpecWire
 
 
 class EstimationParameterSpec(TypedDict):

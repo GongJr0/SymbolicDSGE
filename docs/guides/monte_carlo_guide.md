@@ -120,7 +120,7 @@ datagen_step = simulation_step(
 
     A seeded specification replays bit for bit across runs, and the result does not depend on `n_rep` or `n_jobs`. A specification with `seed=None` draws from a fresh key each run.
 
-`simulation_step` forwards `T`, `shocks`, `shock_scale`, `x0`, and `observables` identical to `SolvedModel.sim(...)`. It adds `target`, which selects the model role.
+`simulation_step` forwards `T`, `shocks`, `shock_scale`, `x0`, and `observables` identical to `SolvedModel.sim(...)`. It adds `target`, which selects the model name.
 
 The `shocks` argument follows the same convention as `SolvedModel.sim(...)`. Each MC iteration runs the selected model with this specification and passes the output data downstream.
 
@@ -407,7 +407,7 @@ Regression results are accessed similarly in `MCPipelineResult.regression_summar
         available                    9.55 GiB
         ceiling (+ swap free)       24.03 GiB
 
-    MemoryError: This run requires 59.09 GiB, which does not fit in 9.55 GiB free RAM 
+    MemoryError: This run requires 59.09 GiB, which does not fit in 9.55 GiB free RAM
     + 14.48 GiB free swap. Lower n_retain or n_rep, or pass check_memory_availability=False to run anyway.
 
     ```

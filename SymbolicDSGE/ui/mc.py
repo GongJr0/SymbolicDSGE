@@ -15,7 +15,12 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo.core import MCPipeline
 from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult, MCStep
 from SymbolicDSGE.monte_carlo.postproc import builtin_postproc
-from SymbolicDSGE.monte_carlo.spec import PipelineMeta, StepMeta, StepSpec
+from SymbolicDSGE.monte_carlo.spec import (
+    PipelineMeta,
+    StepMeta,
+    StepSpec,
+    pipeline_meta,
+)
 from SymbolicDSGE.monte_carlo.traces import _trace_keys
 from SymbolicDSGE.monte_carlo.custom_op import (
     CustomFunc,
@@ -26,6 +31,8 @@ from SymbolicDSGE.monte_carlo.custom_op import (
 from SymbolicDSGE.monte_carlo.serialize import (
     serialize_pipeline_result as serialize_pipeline_result,
 )
+
+from .shock import deserialize_shocks_inline, serialize_shocks_inline
 
 #: Pre-fill for the custom-op Monaco editor. numpy is available as ``np`` inside
 #: the safe namespace, so no imports are needed (and the validator rejects them).
@@ -99,16 +106,30 @@ def _step_func(step: StepMeta, code: str = "") -> Any | None:
         raise ValueError(f"Custom step {step['name']}: {exc}") from exc
 
 
+def _lift_shocks(meta: StepMeta) -> None:
+    """Read a simulation step's shock entries back into the objects they name.
+
+    ``raw_model_data`` carries bulk arrays under the same kwarg name, so the
+    step kind selects here rather than the key.
+    """
+    if meta["step_type"] != "simulation":
+        return
+    shocks = meta["kwargs"].get("shocks")
+    if not shocks:
+        return
+    meta["kwargs"]["shocks"] = deserialize_shocks_inline(shocks)
+
+
 def _step(entry: Mapping[str, Any]) -> MCStep:
     """One authored step as a live :class:`MCStep`, its source compiled in place.
 
     The entry dies here. A step's code arrives on the step that owns it, so
     there is no name-keyed rejoin to do and nothing downstream needs the
-    document. :meth:`MCStep.from_spec` is what reads ``kwargs["shocks"]`` back
-    into live entries, which is why the meta goes through a :class:`StepSpec`
-    rather than into the constructor.
+    document. The meta goes through a :class:`StepSpec` rather than into the
+    constructor because a compiled custom op rides there.
     """
     meta = _step_meta(entry)
+    _lift_shocks(meta)
     return MCStep.from_spec(
         StepSpec(meta=meta, func=_step_func(meta, entry.get("code") or ""))
     )
@@ -125,6 +146,27 @@ def build_pipeline(doc: Mapping[str, Any]) -> MCPipeline:
         replication_steps=[_step(entry) for entry in doc["replication_steps"]],
         postproc_steps=[_step(entry) for entry in doc.get("postproc_steps", [])],
     )
+
+
+def pipeline_spec_wire(pipeline: MCPipeline) -> dict[str, Any]:
+    """A built pipeline as the slot the Monte-Carlo tab repaints from.
+
+    Taken off the pipeline rather than off the body that described it, so the
+    slot holds what a bundle would store. A simulation step's shocks lower to
+    their entries on the way, since a live step carries concrete objects and
+    only the entries can travel as JSON. Rewriting is safe: ``to_spec`` hands
+    over its own meta and kwargs, and the entries reaching here are normalized
+    already, a run or a bundle load being the only two ways to hold one.
+    """
+    spec = pipeline.to_spec()
+    for step in spec.replication_steps:
+        if step.meta["step_type"] != "simulation":
+            continue
+        shocks = step.meta["kwargs"].get("shocks")
+        if not shocks:
+            continue
+        step.meta["kwargs"]["shocks"] = serialize_shocks_inline(shocks)
+    return dict(pipeline_meta(spec))
 
 
 def mc_available_traces(doc: Mapping[str, Any]) -> dict[str, list[str]]:

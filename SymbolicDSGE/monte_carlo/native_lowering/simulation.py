@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Sequence, Mapping, cast
 
-import numpy as np
-
 from ..._ckernels.monte_carlo import _offsets
 from ..._ckernels.monte_carlo._runner import (
     NativeStep,
@@ -14,11 +12,10 @@ from ..._ckernels.monte_carlo._runner import (
 )
 from ...core.solved_model import SolvedModel
 from ...core.solver_backend import SecondOrderSolution
-from ...core.shock.plan import ShockPlan, get_native_shock_plan
+from ...core.shock.plan import get_native_shock_plan
 from ...core.shock.spec import (
     ShockSpec,
     resolve_shock_plan,
-    simulation_shock_matrix,
 )
 from ..defaults import (
     DEFAULT_SHOCK_SCALE,
@@ -69,7 +66,6 @@ def lower_simulation_step(
         T,
     )
     native_plan = get_native_shock_plan(plan, T, shock_scale)
-    shocks, shocks_batched = _simulation_shocks(model, plan, T, n_rep, shock_scale)
     order = model.policy.order
 
     if order == 1:
@@ -78,9 +74,7 @@ def lower_simulation_step(
         )
         steady_state = _flat_f64(model.policy.steady_state)
         x0 = model._initial_state(step.kwargs.get("x0"))
-        return native_step, _order1_bindings(
-            model, steady_state, x0, shocks, shocks_batched, params, T
-        )
+        return native_step, _order1_bindings(model, steady_state, x0, params, T)
     if order == 2:
         native_step = simulate2_step(
             step.name,
@@ -99,8 +93,6 @@ def lower_simulation_step(
             model,
             steady_state,
             x0_arr[:n_state],
-            shocks,
-            shocks_batched,
             params,
             T,
         )
@@ -111,8 +103,6 @@ def _order1_bindings(
     model: SolvedModel,
     steady_state: NDF,
     x0: NDF,
-    shocks: NDF,
-    shocks_batched: bool,
     params: NDF,
     T: int,
 ) -> tuple[FloatInputBinding, ...]:
@@ -126,15 +116,13 @@ def _order1_bindings(
         _flat_f64(steady_state),
         _flat_f64(x0),
     )
-    return _packed_bindings(constants, offsets, shocks, shocks_batched, params)
+    return _packed_bindings(constants, offsets, params)
 
 
 def _order2_bindings(
     model: SolvedModel,
     steady_state: NDF,
     x0_deviation: NDF,
-    shocks: NDF,
-    shocks_batched: bool,
     params: NDF,
     T: int,
 ) -> tuple[FloatInputBinding, ...]:
@@ -162,14 +150,12 @@ def _order2_bindings(
         _flat_f64(steady_state),
         _flat_f64(x0_deviation),
     )
-    return _packed_bindings(constants, offsets, shocks, shocks_batched, params)
+    return _packed_bindings(constants, offsets, params)
 
 
 def _packed_bindings(
     constants: tuple[NDF, ...],
     offsets: Sequence[int],
-    shocks: NDF,
-    shocks_batched: bool,
     params: NDF,
 ) -> tuple[FloatInputBinding, ...]:
     """Bind each staged input onto the buffer the native layout opened for it.
@@ -184,44 +170,6 @@ def _packed_bindings(
         for values, offset in zip(constants, offsets)
         if values.size
     ]
-    if shocks.size:
-        bindings.append(
-            _static_binding(shocks, offsets[len(constants)], batched=shocks_batched)
-        )
     if params.size:
         bindings.append(_static_binding(params, offsets[len(constants) + 1]))
     return tuple(bindings)
-
-
-def _simulation_shocks(
-    model: SolvedModel,
-    plan: ShockPlan,
-    T: int,
-    n_rep: int,
-    shock_scale: float,
-) -> tuple[NDF, bool]:
-    """Materialize the ``(n_rep, T, n_exog)`` shock slab the native loop reads.
-
-    Holds the fallback entries alone; the kernel draws the rest itself. Only the
-    seed varies per replication, so the loop below reseeds and draws straight
-    into its own row of the slab; the calibration lookups, the covariance
-    assembly, and its Cholesky are not repeated. An entry is seeded off its own
-    spec member and the replication index.
-    """
-    if not plan.entries:
-        return _array_shocks(model, T, shock_scale), False
-    if not plan.python.entries:
-        # Every column is drawn in the kernel, so nothing is bound in.
-        return np.zeros((0, plan.n_exog), dtype=np.float64), False
-
-    values = np.zeros((n_rep, T, plan.n_exog), dtype=np.float64)
-    for rep_idx in range(n_rep):
-        plan.python.fill(values[rep_idx], T, shock_scale, rep_idx)
-    return values, True
-
-
-def _array_shocks(model: SolvedModel, T: int, shock_scale: float) -> NDF:
-    return np.ascontiguousarray(
-        simulation_shock_matrix(model.compiled, T, shock_scale=shock_scale),
-        dtype=np.float64,
-    )

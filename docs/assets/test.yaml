@@ -20,11 +20,11 @@ equations:
     g_process: g(t) = rho_g*g(t-1) + e_g
 
     z_process: z(t) = rho_z*z(t-1) + e_z
-  
+
   constraint:
     ZLB:
       bind: r_shadow(t) < 0
-      relax: r_shadow(t) >= 0 
+      relax: r_shadow(t) >= 0
 
   regime:
     ZLB:

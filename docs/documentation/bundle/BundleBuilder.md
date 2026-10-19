@@ -33,7 +33,7 @@ __Methods:__
 
 ```python
 BundleBuilder.add_model(
-    role: str,
+    name: str,
     yaml_text: str,
     *,
     compile_kwargs: Mapping[str, Any] | None = None, # (1)!
@@ -44,11 +44,11 @@ BundleBuilder.add_model(
 1. Forwarded to `DSGESolver.compile(...)` when the loader rebuilds the `SolvedModel`.
 2. Forwarded to `DSGESolver.solve(...)` at the same step.
 
-Add a model configuration to the bundle. `role` is `"reference"` or `"dgp"`. `yaml_text` is the source YAML the loader will re-parse.
+Add a model configuration to the bundle. `yaml_text` is the source YAML the loader will re-parse.
 
 | __Name__       |                                                                __Description__ |
 |:---------------|-------------------------------------------------------------------------------:|
-| role           |   `"reference"` or `"dgp"`. At least one model is required for a valid bundle. |
+| name           |           Name of the added model, other members refer to a model by its name. |
 | yaml_text      | Source YAML text. Available on a parsed `ModelConfig` at `config.source_yaml`. |
 | compile_kwargs |                      Compile kwargs the loader passes to `DSGESolver.compile`. |
 | solve_kwargs   |                          Solve kwargs the loader passes to `DSGESolver.solve`. |
@@ -83,6 +83,7 @@ Add a raw observable file. CSV input is re-encoded as Parquet by default.
 ```python
 BundleBuilder.add_estimation(
     source: Estimator,
+    model: str | None = None,
     *,
     result: (
         MLEResult
@@ -99,6 +100,7 @@ An `Estimator` instance can be directly passed to derive the spec. Any raw data 
 | __Name__   |                                                      __Description__ |
 |:-----------|---------------------------------------------------------------------:|
 | source     |                                               `Estimator` to bundle. |
+| model      |       Optional name of the model to which the estimator is attached. |
 | result     |                         Any result object returned by the estimator. |
 | as_parquet | When `False` the bulk members are written as CSV instead of Parquet. |
 
@@ -124,7 +126,7 @@ Add the Monte Carlo tab. A live `MCPipeline` is the normal in-code input. The bu
 | as_parquet |                                                 When `False` the trace members are written as CSV. |
 
 ???+ note "MC resources"
-    `raw_model_data` datagen arrays are written as `mc_raw_model_data` members, and bundle-safe custom operations are written as `mc_custom_op` pickle members.
+    `raw_model_data` datagen arrays are written as `mc_data` members, and bundle-safe custom operations are written as `mc_func` pickle members.
 
 &nbsp;
 
@@ -132,10 +134,11 @@ Add the Monte Carlo tab. A live `MCPipeline` is the normal in-code input. The bu
 
 ```python
 BundleBuilder.set_simulation(
-    role: str,
+    model: str,
+    as_parquet: bool = True,
     *,
     T: int,
-    shocks: Mapping[str, Shock | ndarray | None] | None = None,
+    shocks: Mapping[str | Sequence[str], Shock | ndarray] | Sequence[Shock | ShockPath] | None = None,
     shock_scale: float = 1.0,
     x0: Mapping[str, float] | Sequence[float] | ndarray | None = None,
     observables: bool = False,
@@ -143,7 +146,9 @@ BundleBuilder.set_simulation(
 ) -> BundleBuilder
 ```
 
-Attach a simulation prefill under `role`. Prefills ride inline in the manifest as a `{role: SimSpec}` map rather than as their own members; call it once per role to ship several (for example `"reference"`, `"dgp"`, or an arbitrary `"exp1"`).
+Attach a simulation prefill under `model`. Prefills are bundle members stored as a `{model: SimSpec}` map; call it once per model to ship several.
+`as_parquet` controls how paths and distribution tables are stored. `False` stores them as CSVs.
+The parameter has no effect for Shock objects using a built-in native distribution.
 
 &nbsp;
 

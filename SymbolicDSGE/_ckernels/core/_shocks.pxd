@@ -24,10 +24,18 @@ cdef extern from "shocks.h":
         SDSGE_SHOCK_EXPONENTIAL = 3
         SDSGE_SHOCK_GAMMA = 4
         SDSGE_SHOCK_BETA = 5
+        SDSGE_SHOCK_TABLE_CONTINUOUS = 6
+        SDSGE_SHOCK_TABLE_DISCRETE = 7
+
+    ctypedef struct sdsge_shock_table:
+        const double *q
+        int64_t n_knots
+        double zmax
 
     ctypedef struct sdsge_shock_entry:
         native_shock family
         const double *path
+        sdsge_shock_table table
         int64_t width
         const int64_t *columns
         const double *factor

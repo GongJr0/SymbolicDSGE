@@ -22,13 +22,13 @@ sdsge-decompile <bundle> [-o OUTPUT] [--csv] [--force]
 
 ## Examples
 
-Extract verbatim — Parquet members stay Parquet:
+Extract as is, Parquet members stay Parquet:
 
 ```bash
 sdsge-decompile my-experiment.sdsge
 ```
 
-Decompile for editing — Parquet members are re-encoded as CSV:
+Decompile for editing, Parquet members are re-encoded as CSV:
 
 ```bash
 sdsge-decompile my-experiment.sdsge --csv -o my-experiment/
@@ -40,18 +40,14 @@ The extractor writes each member at its compile-input authoring path, not at its
 
 | Member kind | Archive path | Extracted path |
 | --- | --- | --- |
-| `model_config` (role=reference) | `model/reference.yaml` | `reference.yaml` |
-| `model_config` (role=dgp) | `model/dgp.yaml` | `dgp.yaml` |
+| `model_config` | `model/{model_name}.yaml` | `{model_name}.yaml` |
 | `estimation_*` | `estimation/...` | `estimation/...` |
-| `mc_pipeline`, `mc_custom_op`, `mc_raw_model_data` | `montecarlo/...` | `montecarlo/...` |
+| `mc_pipeline`, `mc_func`, `mc_data` | `montecarlo/...` | `montecarlo/...` |
 | `mc_result_meta`, `mc_*_steps`, `mc_*_traces`, `mc_transform_trace`, `mc_postproc_raw` | `montecarlo/result/...` | `montecarlo/result/...` |
 | `raw_data` | `data/...` | `data/...` |
-
-???+ info "Options sidecars"
-    Model `Member.options` (e.g. `compile_kwargs`/`solve_kwargs`) are extracted to `<role>.options.json` at the directory root. The compile entry point reads these sidecars on recompile, so the round-trip preserves them.
-
-???+ note "Inline simulation prefill"
-    Simulation prefills ride inline in the manifest as a `{role: SimSpec}` map (they have no member of their own). On decompile the map is written to `simulation.json` at the root so the recompile picks it up via the standard directory layout.
+| `simulation` | `simulation.json` | `simulation.json` |
+| `shock_table` | `shock/table/...` | `shock/table/...` |
+| `shock_path` | `shock/path/...` | `shock/path/...` |
 
 ## `--csv` re-encoding
 
@@ -59,14 +55,14 @@ With `--csv`, every Parquet member is decoded to CSV. The extension and `manifes
 
 | Member | CSV header strategy |
 | --- | --- |
-| `estimation_data` | Observable names from `Member.columns` (semantic headers — user-friendly). |
+| `estimation_data` | Observable names from `Member.columns` (semantic headers, user-friendly). |
 | `estimation_trace` | Mechanical `{name}.{j}` expansion from `trace_to_csv`. |
 | `mc_test_traces`, `mc_regression_traces` | Step-qualified `{step}.{field}`, extended to `{step}.{field}.{idx}` for a 2-D column. |
 | `mc_transform_trace`, `mc_postproc_raw` | The same qualifier for the member's single array. |
-| `mc_raw_model_data`, `raw_data` | Existing column names from the Parquet schema. |
+| `mc_data`, `raw_data` | Existing column names from the Parquet schema. |
 
 ???+ warning "Checksum field on decompile"
-    The `manifest.json` written by `sdsge-decompile` omits checksums. They were SHA-256 over the archive bytes; after extraction (and especially after `--csv` re-encoding) those bytes change. A subsequent `sdsge-compile` recomputes them. Treat the decompiled `manifest.json` as informational, not as a re-compile input — the compile pass auto-detects the layout.
+    The `manifest.json` written by `sdsge-decompile` omits checksums. They are SHA-256 over the archive bytes; after extraction (and especially after `--csv` re-encoding) those bytes change. A subsequent `sdsge-compile` recomputes them. Treat the decompiled `manifest.json` as informational.
 
 ## Round-trip
 
@@ -84,6 +80,6 @@ sdsge-compile my-experiment/                  # → updated my-experiment.sdsge
 
 ## See also
 
-- [`sdsge-compile`](sdsge-compile.md) — the inverse operation.
-- [Bundle Loading Guide](../guides/bundle_loading_guide.md) — read a `.sdsge` from code instead.
-- [`load_bundle`](../documentation/bundle/load_bundle.md) — the in-code equivalent of this CLI.
+- [`sdsge-compile`](sdsge-compile.md): the inverse operation.
+- [Bundle Loading Guide](../guides/bundle_loading_guide.md): read a `.sdsge` from code instead.
+- [`load_bundle`](../documentation/bundle/load_bundle.md): the in-code equivalent of this CLI.

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from numpy import float64
 from numpy.typing import NDArray
 
-from ..core.shock.plan import draw_shock_matrix
+from ..core.shock.plan import get_native_shock_plan
 from ..core.shock.spec import resolve_shock_plan, _normalized_spec
 from .defaults import DEFAULT_SHOCK_SCALE
 
@@ -40,7 +40,7 @@ def replication_shocks(
         raise ValueError("The simulation step draws no shocks.")
 
     plan = resolve_shock_plan(model.compiled, shocks, T)
-    drawn = draw_shock_matrix(plan, T, scale, rep_idx)
+    drawn = get_native_shock_plan(plan, T, scale).draw(rep_idx)
 
     out = {}
     for entry in plan.entries:

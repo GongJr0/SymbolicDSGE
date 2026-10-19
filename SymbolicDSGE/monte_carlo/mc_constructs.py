@@ -23,7 +23,6 @@ from ..core.sim_result import SimResult, OccBinDiagnostics
 from ..kalman.filter import FilterResult, UnscentedFilterResult
 from .._diag_tests.result import MCTestResult
 from .._diag_tests.status import TestStatus
-from ..core.shock.spec import _normalized_spec, shock_from_json
 from ..regression.enums import RegressionStatus
 from .postproc import Artifact
 from ..regression.result import MCRegressionResult
@@ -242,12 +241,7 @@ class MCStep:
         for key, value in self.kwargs.items():
             name = str(key)
 
-            if name == "shocks" and self.step_type == "simulation":
-                # The kwarg holds the spec as authored, which may be a mapping
-                # keyed from the outside and carrying unbound shocks. Only the
-                # normal form can serialize: every entry names its own targets.
-                kwargs[name] = [shock.to_dict() for shock in _normalized_spec(value)]
-            elif isinstance(value, np.ndarray):
+            if isinstance(value, np.ndarray):
                 if value.size <= 50:  # ~1kB if float64 with UTF-8 JSON
                     kwargs[name] = _jsonable(value)
                 else:
@@ -278,9 +272,6 @@ class MCStep:
         """
         meta = spec.meta
         kwargs: dict[str, Any] = {**meta["kwargs"], **spec.arrays}
-        if meta["step_type"] == "simulation" and "shocks" in kwargs:
-            if kwargs["shocks"]:
-                kwargs["shocks"] = [shock_from_json(s) for s in kwargs["shocks"]]
 
         return cls(
             name=meta["name"],
@@ -296,13 +287,6 @@ class MCStep:
 
 
 def _jsonable(value: Any) -> Any:
-    """One kwarg value as data.
-
-    Anything carrying a ``to_dict`` is asked for it, so a value only has to
-    declare how it serializes once to travel in any step's kwargs.
-    """
-    if hasattr(value, "to_dict"):
-        return value.to_dict()
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):

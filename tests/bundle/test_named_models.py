@@ -49,7 +49,7 @@ def _add_estimation(builder, name):
             params={"observables": ["y"]}, y=np.arange(4.0).reshape(4, 1)
         )
     )
-    builder.add_estimation(source, model_name=name)
+    builder.add_estimation(source, model=name)
 
 
 @pytest.mark.parametrize("estimation_first", [False, True])

@@ -81,7 +81,7 @@ def _hydrated_bundle(tmp_path: Path, test_model_yaml, compiled_test) -> Path:
         .set_simulation(
             "reference",
             T=8,
-            shocks={"e_u": Shock(dist="norm", seed=42, dist_kwargs={"loc": 0.0})},
+            shocks={"e_u": Shock(dist="norm", seed=42, loc=0.0)},
             observables=True,
         )
         .write(tmp_path / "hydrate.sdsge")

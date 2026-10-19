@@ -24,7 +24,7 @@ __Inputs:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| target | Name of the model to simulate. Must be supplied to `MCPipeline.run(...)`. | 
+| target | Name of the model to simulate. Must be supplied to `MCPipeline.run(...)`. |
 | n_retain | Number of replications to retain in the output. If `-1`, all replications are retained. |
 | T | Number of simulated periods, excluding the initial state. |
 | shocks | Shock spec resolved once and redrawn per replication. Mirrors `SolvedModel.sim(...)`: a sequence of bound `Shock` or `ShockPath` entries, or a mapping keyed by innovation symbol or tuple of symbols. With `None`, the simulation is deterministic. |
@@ -57,4 +57,4 @@ shocks = replication_shocks(dgp, datagen_step, rep_idx=417)
 sample = dgp.sim(T=200, shocks=[ShockPath(p, *k) for k, p in shocks.items()], shock_scale=1.0)
 ```
 
-Scaling is applied to the returned paths; `sim` is therefore called with `shock_scale=1.0`. `model` must be the role the step targeted, and `step` the step the run used. Only seeded specifications are reproducible: a `seed=None` entry was drawn from a key the run discarded, and comes back as a fresh path.
+Scaling is applied to the returned paths; `sim` is therefore called with `shock_scale=1.0`. Only seeded specifications are reproducible: a `seed=None` entry was drawn from a key the run discarded, and comes back as a fresh path.

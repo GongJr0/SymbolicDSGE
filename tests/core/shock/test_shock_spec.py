@@ -12,8 +12,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from numpy.linalg import LinAlgError
+
 from SymbolicDSGE.core.shock.generators import Shock, ShockPath
-from SymbolicDSGE.core.shock.spec import _normalized_spec
+from SymbolicDSGE.core.shock.spec import (
+    _gaussian_factor,
+    _jsonable,
+    _normalized_spec,
+)
 
 # --- the two authored shapes ------------------------------------------------
 
@@ -98,3 +104,23 @@ def test_an_unbound_shock_in_a_sequence_names_the_binders() -> None:
 def test_a_spec_must_be_a_mapping_or_a_sequence() -> None:
     with pytest.raises(TypeError, match="must be a mapping or sequence"):
         _normalized_spec(7)
+
+
+# --- the helpers resolution reads a spec with ------------------------------
+
+
+def test_a_psd_covariance_factors_through_the_eigh_fallback() -> None:
+    # [[1,1],[1,1]] is positive semidefinite but singular, so Cholesky raises
+    # and the eigh branch is what produces a factor at all.
+    cov = np.array([[1.0, 1.0], [1.0, 1.0]])
+    with pytest.raises(LinAlgError):
+        np.linalg.cholesky(cov)
+
+    factor = _gaussian_factor(cov)
+    assert np.array_equal(factor @ factor.T, cov)
+
+
+def test_numpy_scalars_and_containers_become_json() -> None:
+    assert _jsonable(np.float64(2.0)) == pytest.approx(2.0)
+    assert _jsonable([np.float64(1.0), 2]) == [pytest.approx(1.0), 2]
+    assert _jsonable({"a": np.int64(3)}) == {"a": 3}

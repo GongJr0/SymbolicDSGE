@@ -7,23 +7,25 @@ assembled covariance and its factor all depend on the model and the spec alone.
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence, Any
+from typing import Mapping, Sequence, Any, cast
+from hashlib import blake2b
 
 import numpy as np
-from numpy import asarray, float64, ndarray
+from numpy import asarray, float64, ndarray, generic
+from numpy.linalg import cholesky, LinAlgError, eigh
 from numpy.typing import NDArray
 
 from ..compiled_model import CompiledModel
 from ..config import make_Q
 
-from .plan import draw_shock_matrix, native_code
+from .plan import get_native_shock_plan, native_code
+from .table import DistributionTable
 from .generators import (
     Shock,
+    ShockDistribution,
     ShockParameters,
     ShockPath,
     ShockPathParameters,
-    _gaussian_factor,
-    resolve_loc,
 )
 from .plan import (
     ArrayEntry,
@@ -150,6 +152,35 @@ def _array_entry(shock: ShockPath, shock_col: Mapping[str, int]) -> ArrayEntry:
     )
 
 
+def _resolve_loc(kwargs: Mapping[str, Any], width: int) -> ndarray:
+    """The location one spec declares, as a ``width``-long vector.
+
+    Any shape holding one value per variable is taken, since a location read out
+    of a matrix calculation arrives as a row or a column as readily as flat.
+    """
+    loc = asarray(kwargs.get("loc", np.zeros(width)), dtype=float64)
+    if loc.size != width:
+        raise ValueError(
+            f"`loc` needs one value per variable in the entry. "
+            f"Expected {width}, got {loc.size}. "
+            "Omit the keyword for a zero default."
+        )
+    return loc.reshape(width)
+
+
+def _gaussian_factor(cov: ndarray) -> ndarray:
+    """A factor ``F`` with ``F @ F.T == cov``.
+
+    Cholesky on the common positive-definite path, with an eigh-based fallback so
+    positive-semidefinite (but not strictly PD) covariances still sample.
+    """
+    try:
+        return cholesky(cov)
+    except LinAlgError:
+        w, V = eigh(cov)
+        return cast(ndarray, V * np.sqrt(np.clip(w, 0.0, None)))
+
+
 def resolve_shock_plan(
     compiled: CompiledModel,
     shocks: ShockSpec,
@@ -213,12 +244,8 @@ def resolve_shock_plan(
                 key=key,
                 indices=indices,
                 family=family,
-                draw=(
-                    shock.draw_fn(_require_horizon(T, key), len(indices) > 1)
-                    if family is None
-                    else None
-                ),
-                loc=resolve_loc(shock.dist_kwargs, len(indices)),
+                table=shock.dist if isinstance(shock.dist, DistributionTable) else None,
+                loc=_resolve_loc(shock.dist_kwargs, len(indices)),
                 factor=factor,
                 base_seed=None if shock.seed is None else int(shock.seed),
                 kwargs=dict(shock.dist_kwargs),
@@ -241,13 +268,187 @@ def simulation_shock_matrix(
     if shocks is None:
         return np.zeros((T, compiled.n_exog), dtype=float64)
     plan = resolve_shock_plan(compiled, shocks, T)
-    return draw_shock_matrix(plan, T, shock_scale, 0)
+    return get_native_shock_plan(plan, T, shock_scale).draw(0)
 
 
-def shock_from_json(
-    entry: ShockParameters | ShockPathParameters,
-) -> Shock | ShockPath:
-    if "path" in entry:
-        return ShockPath.from_dict(entry)
-    else:
-        return Shock.from_dict(entry)
+# --- Serialization/Deserialization ---
+
+
+def _jsonable(value: Any) -> Any:
+    """Coerce shock arg/kwarg values into JSON-serializable form."""
+    if isinstance(value, ndarray):
+        return value.tolist()
+    if isinstance(value, generic):
+        return value.item()
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, Mapping):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    return value
+
+
+def _serialize_path(shock_path: ShockPath) -> tuple[NDF, ShockPathParameters]:
+    path = shock_path.path.reshape(-1)
+    path_id = blake2b(path.tobytes(), digest_size=8).hexdigest()
+    return path, ShockPathParameters(target=shock_path.target, path_id=path_id)
+
+
+def _serialize_table(shock: Shock) -> tuple[NDF, ShockParameters]:
+    table = shock.dist if isinstance(shock.dist, DistributionTable) else None
+    if table is None:
+        raise TypeError(
+            "Expected a tabulated distribution to serialize, but got "
+            f"{type(shock.dist).__name__}."
+        )
+
+    return table.q, ShockParameters(
+        target=shock.target,
+        dist=None,
+        table=table.to_params(),
+        seed=shock.seed,
+        dist_kwargs={str(k): _jsonable(v) for k, v in shock.dist_kwargs.items()},
+    )
+
+
+def serialize_shocks(
+    shocks: Sequence[Shock | ShockPath],
+) -> tuple[
+    Sequence[ShockParameters | ShockPathParameters],
+    Mapping[str, NDF],
+    Mapping[str, NDF],
+]:
+    """Convert a shock specification to JSON-serializable parameters.
+
+    Arrays ride separately through parquet/CSV bundle members.
+
+    Parameters
+    ----------
+    shocks : Sequence[Shock | ShockPath]
+        Normalized shock specification.
+
+    Returns
+    -------
+    tuple[
+        Sequence[ShockParameters | ShockPathParameters],
+        Mapping[str, NDF],
+        Mapping[str, NDF],
+    ]
+        {list(parameters), dict(path_id -> path), dict(table_id -> table)}.
+    """
+    specs: list[ShockParameters | ShockPathParameters] = []
+    paths: dict[str, NDF] = {}
+    tables: dict[str, NDF] = {}
+
+    spec: ShockParameters | ShockPathParameters
+    for shock in shocks:
+        if isinstance(shock, ShockPath):
+            path, spec = _serialize_path(shock)
+            specs.append(spec)
+            paths[spec["path_id"]] = path
+            continue
+        if isinstance(shock.dist, DistributionTable):
+            table, spec = _serialize_table(shock)
+            specs.append(spec)
+            if spec["table"] is not None:
+                tables[spec["table"]["table_id"]] = table
+            continue
+
+        specs.append(
+            ShockParameters(
+                target=shock.target,
+                dist=shock.dist,  # pyright: ignore
+                table=None,
+                seed=int(shock.seed) if shock.seed is not None else None,
+                dist_kwargs={
+                    str(k): _jsonable(v) for k, v in shock.dist_kwargs.items()
+                },
+            )
+        )
+    return specs, paths, tables
+
+
+def _deserialize_path(path: NDF, params: ShockPathParameters) -> ShockPath:
+    return ShockPath(path, *params["target"])
+
+
+def _deserialize_table(table: NDF, params: ShockParameters) -> DistributionTable:
+    if params["table"] is None:
+        raise ValueError(
+            "Cannot deserialize a tabulated distribution without table parameters."
+        )
+    return DistributionTable(
+        table, params["table"]["zmax"], params["table"]["discrete"]
+    )
+
+
+def deserialize_shocks(
+    specs: Sequence[ShockParameters | ShockPathParameters],
+    paths: Mapping[str, NDF],
+    tables: Mapping[str, NDF],
+) -> list[Shock | ShockPath]:
+    """Deserialize an incoming bundled shock specification.
+
+    Parameters
+    ----------
+    specs : Sequence[ShockParameters | ShockPathParameters]
+        Parameter spec from the JSON manifest.
+    paths : Mapping[str, NDF]
+        Arrays feeding `ShockPath` entries.
+    tables : Mapping[str, NDF]
+        Arrays feeding `DistributionTable` entries that approximate
+        a custom distribution.
+
+    Returns
+    -------
+    list[Shock | ShockPath]
+        Normalized shock specification with bound entries,
+        ready to pass into any shock-accepting library function.
+
+    """
+    shocks: list[Shock | ShockPath] = []
+    for spec in specs:
+        if "path_id" in spec:
+            spec = cast(ShockPathParameters, spec)
+            path_id = spec["path_id"]
+            if path_id not in paths:
+                raise ValueError(
+                    f"Missing shock path for path_id {path_id!r}. "
+                    f"Available paths: {list(paths.keys())}."
+                )
+
+            # Two paths with the same data but different shapes hash identically
+            # to save disk space. A row-count permitting (-1, n_targets) reshape
+            # restores the original shape. Bytes of the arrays are interpreted as
+            # C-contiguous, therefore column order does change the hash, a reshaped
+            # array cannot have swapped columns.
+            p = len(spec["target"])
+            arr = paths[path_id].copy().reshape(-1, p)
+
+            shocks.append(_deserialize_path(arr, spec))
+
+        else:
+            dist: ShockDistribution | DistributionTable | None
+            if "table" in spec and (tb := spec["table"]) is not None:
+                table_id = tb["table_id"]
+                if table_id not in tables:
+                    raise ValueError(
+                        f"Missing shock table for table_id {table_id!r}. "
+                        f"Available tables: {list(tables.keys())}."
+                    )
+                dist = _deserialize_table(tables[table_id], spec)
+            else:
+                dist = spec["dist"]
+
+            if dist is None:
+                raise ValueError(
+                    "Cannot deserialize a shock without a distribution or table."
+                )
+
+            shocks.append(
+                Shock(
+                    dist,
+                    seed=spec["seed"],
+                    **spec["dist_kwargs"],
+                ).joint(*spec["target"])
+            )
+    return shocks

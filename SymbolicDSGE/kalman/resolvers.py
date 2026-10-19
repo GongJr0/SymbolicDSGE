@@ -11,7 +11,7 @@ individual resolvers and stages the arrays itself.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Sequence, TypedDict
+from typing import TYPE_CHECKING, Sequence, TypedDict, Mapping
 
 import numpy as np
 import pandas as pd
@@ -114,7 +114,7 @@ def resolve_linear_args(
     y: NDF | pd.DataFrame,
     observables: Sequence[str] | None = None,
     *,
-    x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
+    x0: Mapping[str, float] | list[float] | NDF | None = None,
     P0: NDF | None = None,
     R: NDF | None = None,
     jitter: Float64Like | None = None,
@@ -149,7 +149,7 @@ def resolve_extended_args(
     y: NDF | pd.DataFrame,
     observables: Sequence[str] | None = None,
     *,
-    x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
+    x0: Mapping[str, float] | list[float] | NDF | None = None,
     P0: NDF | None = None,
     R: NDF | None = None,
     jitter: Float64Like | None = None,
@@ -184,7 +184,7 @@ def resolve_unscented_args(
     y: NDF | pd.DataFrame,
     observables: Sequence[str] | None = None,
     *,
-    x0: dict[str, float | float64] | list[float | float64] | NDF | None = None,
+    x0: Mapping[str, float] | list[float] | NDF | None = None,
     P0: NDF | None = None,
     R: NDF | None = None,
     jitter: Float64Like | None = None,
@@ -404,7 +404,7 @@ def _build_P0(model: SolvedModel, filter_mode: FilterMode | str, P0: NDF | None)
 
 def _build_unscented_z0(
     model: SolvedModel,
-    x0: dict[str, float | float64] | list[float | float64] | NDF | None,
+    x0: Mapping[str, float] | list[float] | NDF | None,
 ) -> NDF:
     n_state = model.compiled.n_state
     # ``_initial_state`` validates the input and always returns the full

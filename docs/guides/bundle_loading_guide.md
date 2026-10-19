@@ -35,7 +35,7 @@ from typing import cast
 loaded = load_bundle("experiment-1.sdsge")  # (1)!
 ```
 
-1. `load_bundle` is available in top-level `SymbolicDSGE` and `SymbolicDSGE.bundle`. 
+1. `load_bundle` is available in top-level `SymbolicDSGE` and `SymbolicDSGE.bundle`.
 
 `loaded` is a [`LoadedBundle`](../documentation/bundle/LoadedBundle.md). Every component is reachable through a typed field.
 
@@ -73,7 +73,7 @@ dgp = loaded.models["dgp"]
 estimation = loaded.estimation
 
 # Type checkers cannot infer that `estimation` is not `None`.
-# Asserting (alternative to casting) here silences the errors 
+# Asserting (alternative to casting) here silences the errors
 # by forcing the type to narrow.
 assert estimation, "No estimation tab found in the bundle."
 
@@ -133,7 +133,7 @@ print(stat_ci, pval_ci, sep="\n")
 
 ### Reproduce a Monte Carlo run
 
-`MCPipeline.run`'s `models` argument is a `{name: SolvedModel} | None` exactly like `LoadedBundle.models`, the bundles models directly pass into the pipeline.
+`MCPipeline.run`'s `models` argument is typed to match `LoadedBundle.models` (`{name: SolvedModel} | None`), the bundle's models directly pass into the pipeline.
 Additionally, the `run_config` on the result can be used to produce the deterministic pipeline result by parameterizing the run as the author did.
 
 ```python
@@ -167,21 +167,22 @@ See the [Monte Carlo Guide](monte_carlo_guide.md) for the pipeline grammar and t
 
 ## Reach the simulation prefill
 
-Simulation prefills ride inline in the manifest, so they are reachable from `loaded.simulation` directly (no separate member). It is a `{role: SimSpec}` map, and each `SimSpec` unpacks straight into `SolvedModel.sim`.
+Simulation prefills are reachable from `loaded.simulation` directly. It is a `{name: SimulationPrefill}` map, and each `SimulationPrefill` unpacks straight into `SolvedModel.sim` and anything that accepts simulation arguments.
 
 ```python
-prefills = loaded.simulation  # dict[str, SimSpec] | None
+prefills = loaded.simulation  # dict[str, SimulationPrefill] | None
 assert prefills, "No simulation tab found in the bundle."
 
 
-for role, prefill in prefills.items():
-    print(role, "\n", prefill)
+for name, prefill in prefills.items():
+    print(name, "\n", prefill)
 
 reference.sim(**prefills["reference"]).states["r"][:5]
 ```
 
 ???+ note "Determinism"
-    Replaying a prefill against its model reproduces the author's intended simulation exactly. The bundle stores no simulation outputs and no live `Shock` objects. It stores only each shock's `Shock.to_dict()` parameters.
+    Replaying a prefill against its model reproduces the author's intended simulation exactly. The bundle stores no simulation outputs and no live `Shock` objects.
+    It stores metadata, distribution tables (for custom shocks), or shock paths (for array shocks) exactly as produced by the author.
 
 ## Round-trip safety
 

@@ -4,46 +4,51 @@ Stdlib dataclasses only; the bundle layer lives in the core library, with no
 ``[ui]`` extra. The manifest is stored as ``manifest.json`` at
 the archive root and enumerates every member with its ``kind`` and ``format`` so a
 reader can dispatch each one (format-agnostic: a hand-zipped CSV bundle and a
-CLI-built Parquet bundle both validate). The simulation prefill (#141) rides inline
-here rather than as its own member.
+CLI-built Parquet bundle both validate).
 """
 
 from __future__ import annotations
 
 import json
 import posixpath
-from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, get_args
+from typing import Any, Literal, Mapping, TypedDict, get_args
 
 from numpy import ndarray
 
 from ..core.shock.generators import ShockParameters, ShockPathParameters
-from ..core.shock.spec import shock_from_json
 
 # --- LAST BREAK ---
-# V11: Breakage from a bound specification format change in estimation (#554).
-# Bounds are in `Mapping[str, tuple[float | None, float | None]]` when specified.
-# Current readers (notably the UI wire) misinterpret the V10 bounds of shape
-# `Sequence[tuple[float | None, float | None]]` via a valid but wrong `dict()` wrap.
+# V12: Breakage from adding custom shock serialization (#571).
+# Custom shocks used to remain Python objects and unserializable.
+# The scipy handling refactor introduces quantile tabulation to approximate
+# any distribution through a ppf function. Tables are serializable and are encoded
+# as array members. Therefore the old shock format (inlined in manifest) is no longer
+# available. Simulation prefills are now members and tables/paths are stored as data
+# instead of being inlined.
 #
-# Note: Parameter ordering and resolution in estimation changed between V10 and V11.
-# It is not possible to reliably map back the `Sequence` bounds to named mappings.
+# The change breaks forward and backward compatibility, both through the on-disk format
+# and the refactored shock handling code.
 # ------
 
 #: Bundle format version. Bump on every manifest or member change.
-SDSGE_FORMAT_VERSION = 11
+SDSGE_FORMAT_VERSION = 12
 
 #: Oldest bundle format this reader can reconstruct.
-SDSGE_MIN_READABLE_VERSION = 11
+SDSGE_MIN_READABLE_VERSION = 12
 
 #: Most recent format change requiring a newer reader. Written into the
 #: manifest so older readers reject bundles they cannot interpret.
-SDSGE_LAST_BREAKING_VERSION = 11
+SDSGE_LAST_BREAKING_VERSION = 12
 
 MemberKind = Literal[
     "model_config",
     "raw_data",
+    # Shock arrays, pooled across every scope that carries one
+    "shock_path",
+    "shock_table",
+    # Simulation prefill
+    "simulation",
     # Estimation
     "estimation_spec",
     "estimation_result",
@@ -93,84 +98,25 @@ def format_for_path(path: str) -> str:
         ) from exc
 
 
-@dataclass
-class SimSpec:
+class SimSpec(TypedDict):
     """Simulation/output-tab prefill (#141).
 
     The internal carrier between :meth:`BundleBuilder.set_simulation`, the
     manifest, and the loader. No public signature names it: the builder takes
     the ``sim`` keywords and lowers them here, and the loader materializes it
-    back through :meth:`to_sim_kwargs` before handing anything to a caller.
+    into a :class:`SimulationPrefill`.
 
     No simulation results are stored. Replaying these specs against the
     preloaded model reproduces the intended run (numpy PCG64 + fixed seed).
-    Raw shock paths, when present, are carried inline (they are small).
+    The arrays a shock spec carries are not inline: they pool as their own
+    members, named by the id the entry references them by.
     """
 
-    T: int = 0
-    x0: Mapping[str, float] | list[float] | ndarray | None = None
-    observables: bool = False
-    shock_scale: float = 1.0
-    #: The shock spec as a list of self-describing entries: each carries its own
-    #: ``target``, plus either a ``Shock.to_dict()``'s fields or a raw path under
-    #: ``path``. A list rather than an object because one entry may name several
-    #: shocks, which a JSON object cannot be keyed by.
-    shocks: list[ShockParameters | ShockPathParameters] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """The JSON-serializable form: shocks stay as parameters or raw paths."""
-        return {
-            "T": int(self.T),
-            "x0": _x0_to_json(self.x0),
-            "observables": bool(self.observables),
-            "shock_scale": float(self.shock_scale),
-            "shocks": self.shocks,
-        }
-
-    def to_sim_kwargs(self) -> dict[str, Any]:
-        """The ``SolvedModel.sim`` keyword form: ``model.sim(**spec.to_sim_kwargs())``.
-
-        An entry without ``path`` becomes a bound :class:`Shock`, which ``sim``
-        materializes into its horizon-bound draw; one with ``path`` becomes a
-        :class:`ShockPath` holding the array ``sim`` passes through unchanged.
-        """
-        out = self.to_dict()
-        out["shocks"] = (
-            [shock_from_json(entry) for entry in self.shocks] if self.shocks else None
-        )
-        return out
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> SimSpec:
-        """Construct a :class:`SimSpec` from the manifest's JSON form.
-
-        Parameters
-        ----------
-        data : Mapping[str, Any]
-            dict-form representation of a :class:`SimSpec` as stored in the manifest.
-
-        Returns
-        -------
-        SimSpec
-            A new :class:`SimSpec` instance populated with the data from the manifest.
-
-        """
-        return cls(
-            T=int(data.get("T", 0)),
-            x0=data.get("x0", None),
-            observables=bool(data.get("observables", False)),
-            shock_scale=float(data.get("shock_scale", 1.0)),
-            shocks=data.get("shocks", None),
-        )
-
-
-def _x0_to_json(x0: Mapping[str, float] | list[float] | ndarray | None) -> Any:
-    """``x0`` in JSON form, keeping the name-keyed and positional shapes apart."""
-    if x0 is None:
-        return None
-    if isinstance(x0, Mapping):
-        return {str(name): float(value) for name, value in x0.items()}
-    return [float(value) for value in x0]
+    T: int
+    x0: Mapping[str, float] | list[float] | ndarray | None
+    observables: bool
+    shock_scale: float
+    shocks: list[ShockParameters | ShockPathParameters] | None
 
 
 @dataclass
@@ -261,7 +207,6 @@ class Manifest:
     sdsge_version: int = SDSGE_FORMAT_VERSION
     last_breaking_version: int = SDSGE_LAST_BREAKING_VERSION
     members: list[Member] = field(default_factory=list)
-    simulation: dict[str, SimSpec] | None = None
     checksums: dict[str, str] = field(default_factory=dict)
 
     def members_by_kind(self, kind: str) -> list[Member]:
@@ -318,8 +263,6 @@ class Manifest:
         }
         if self.created_at is not None:
             out["created_at"] = self.created_at
-        if self.simulation is not None:
-            out["simulation"] = {k: v.to_dict() for k, v in self.simulation.items()}
         if self.checksums:
             out["checksums"] = dict(self.checksums)
         return out
@@ -355,7 +298,6 @@ class Manifest:
                 f"change at {last_break}, which this library ({SDSGE_FORMAT_VERSION}) "
                 f"predates; upgrade SymbolicDSGE."
             )
-        sim = data.get("simulation")
         return cls(
             created_by=str(data.get("created_by", "")),
             created_at=(
@@ -364,11 +306,6 @@ class Manifest:
             sdsge_version=version,
             last_breaking_version=last_break,
             members=[Member.from_dict(m) for m in data.get("members", [])],
-            simulation=(
-                {k: SimSpec.from_dict(v) for k, v in sim.items()}
-                if sim is not None
-                else None
-            ),
             checksums={
                 str(k): str(v) for k, v in dict(data.get("checksums", {})).items()
             },

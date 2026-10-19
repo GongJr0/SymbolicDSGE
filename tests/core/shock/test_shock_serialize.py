@@ -2,45 +2,31 @@ from __future__ import annotations
 
 import json
 
-import numpy as np
 import pytest
-from scipy.stats import norm
 
 from SymbolicDSGE.core.shock.generators import Shock
+from SymbolicDSGE.core.shock.spec import serialize_shocks, deserialize_shocks
 
 
 def test_norm_univariate_round_trips() -> None:
-    shock = Shock(dist="norm", seed=3, dist_kwargs={"loc": 0.5}).joint("u")
-    payload = shock.to_dict()
+    shock = Shock(dist="norm", seed=3, loc=0.5).joint("u")
+    payload = serialize_shocks([shock])[0]
     json.dumps(payload)  # must be JSON-safe
 
-    # The horizon is no longer part of the serialized shock.
-    assert "T" not in payload
-    restored = Shock.from_dict(payload)
-    assert restored.to_dict() == payload
+    restored = deserialize_shocks(specs=payload, paths={}, tables={})[0]
+    assert serialize_shocks([restored])[0] == payload
     assert (restored.dist, restored.seed, restored.target) == ("norm", 3, ("u",))
     assert restored.dist_kwargs == {"loc": 0.5}
 
 
 def test_t_distribution_carries_df() -> None:
-    shock = Shock(dist="t", seed=None, dist_kwargs={"loc": 0.0, "df": 5.0}).joint("u")
-    restored = Shock.from_dict(shock.to_dict())
+    shock = Shock(dist="t", seed=None, loc=0.0, df=5.0).joint("u")
+    restored = deserialize_shocks(*serialize_shocks([shock]))[0]
     assert restored.seed is None
     assert restored.dist_kwargs == {"loc": 0.0, "df": 5.0}
 
 
-def test_numpy_kwargs_are_coerced_to_lists() -> None:
-    shock = Shock(
-        dist="norm",
-        seed=0,
-        dist_kwargs={"mean": np.array([0.0, 1.0])},
-    ).joint("u")
-    payload = shock.to_dict()
-    assert payload["dist_kwargs"]["mean"] == [0.0, 1.0]
-    json.dumps(payload)
-
-
-def test_from_dict_ignores_a_stored_multivar() -> None:
+def test_deserialization_ignores_a_stored_multivar_and_T() -> None:
     # Arity belongs to the entry's own target, which is why a flag written by
     # an older release is read past rather than honored.
     payload = {
@@ -48,27 +34,19 @@ def test_from_dict_ignores_a_stored_multivar() -> None:
         "dist": "norm",
         "seed": 1,
         "multivar": True,
-        "dist_kwargs": {},
+        "T": 10,
+        "dist_kwargs": {"loc": 0.0},
     }
-    restored = Shock.from_dict(payload)
+    restored = deserialize_shocks(specs=[payload], paths={}, tables={})[0]
     assert not hasattr(restored, "multivar")
-    assert "multivar" not in restored.to_dict()
-
-
-def test_to_dict_rejects_live_scipy_distribution() -> None:
-    shock = Shock(dist=norm, seed=0)
-    with pytest.raises(TypeError, match="string-identified"):
-        shock.to_dict()
-
-
-def test_from_dict_rejects_unknown_dist() -> None:
-    with pytest.raises(ValueError, match=r"expects one of"):
-        Shock.from_dict({"dist": "cauchy"})
-
-
-def test_from_dict_ignores_legacy_T_key() -> None:
-    # Bundles authored before the horizon moved to generation time carry a "T";
-    # it is silently ignored rather than rejected.
-    restored = Shock.from_dict({"T": 9, "target": ["u"], "dist": "norm", "seed": 1})
     assert not hasattr(restored, "T")
-    assert (restored.dist, restored.seed) == ("norm", 1)
+    assert not any(k in serialize_shocks([restored])[0] for k in ("multivar", "T"))
+
+
+def test_deserialize_rejects_unknown_dist() -> None:
+    with pytest.raises(ValueError, match=r"Unknown shock distribution family:"):
+        deserialize_shocks(
+            specs=[{"target": ["u"], "dist": "laplace", "seed": 1, "dist_kwargs": {}}],
+            paths={},
+            tables={},
+        )

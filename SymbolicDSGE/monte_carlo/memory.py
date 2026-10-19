@@ -16,10 +16,8 @@ from typing import TYPE_CHECKING, Callable, NamedTuple, Sequence, Mapping
 import psutil
 
 from .._ckernels.monte_carlo._arenas import resolve_n_workers
-from .allocation import BufferPlan, get_target_model
-from .mc_constructs import MCStep, OpType
-from ..core.shock.spec import _normalized_spec
-from ..core.shock.plan import native_code
+from .allocation import BufferPlan
+from .mc_constructs import MCStep
 
 if TYPE_CHECKING:
     from ..core.solved_model import SolvedModel
@@ -85,9 +83,6 @@ class MCMemoryReport:
 
     steps: tuple[StepMemory, ...]
 
-    #: The shock slab the Python fallback route materializes at lowering time.
-    shock_bytes: int
-
     #: Retention indices and the per-step, per-replication status record.
     bookkeeping_bytes: int
 
@@ -113,12 +108,7 @@ class MCMemoryReport:
     @property
     def planned_bytes(self) -> int:
         """Everything the run allocates, exactly, before the reserve."""
-        return (
-            self.retained_bytes
-            + self.worker_bytes
-            + self.bookkeeping_bytes
-            + self.shock_bytes
-        )
+        return self.retained_bytes + self.worker_bytes + self.bookkeeping_bytes
 
     @property
     def reserve_bytes(self) -> int:
@@ -188,8 +178,6 @@ class MCMemoryReport:
             (f"worker lanes (x{self.n_workers})", self.worker_bytes),
             ("run metadata", self.bookkeeping_bytes),
         ]
-        if self.shock_bytes:
-            trailer.append(("prematerialized shocks", self.shock_bytes))
         trailer.append(("allocated", self.planned_bytes))
         trailer.append(
             (
@@ -271,7 +259,6 @@ class MCMemoryProfiler:
 
         return MCMemoryReport(
             steps=tuple(steps),
-            shock_bytes=self._shock_bytes(),
             bookkeeping_bytes=bookkeeping,
             available_bytes=int(psutil.virtual_memory().available),
             swap_free_bytes=int(psutil.swap_memory().free),
@@ -309,27 +296,6 @@ class MCMemoryProfiler:
                 stacklevel=_caller_stacklevel(),
             )
         return report
-
-    def _shock_bytes(self) -> int:
-        """Bytes the fallback shock route materializes outside the arenas.
-
-        A spec the native draw cannot reproduce is built in Python instead, as one
-        ``(n_rep, T, n_exog)`` slab. Eligibility is read off the raw spec, the same
-        way the arena planner and lowering read it.
-        """
-        total_bytes = 0
-        for step in self._steps:
-            if step.op_type is not OpType.DATAGEN or step.step_type != "simulation":
-                continue
-            shocks = _normalized_spec(step.kwargs.get("shocks"))
-            if not shocks:
-                continue  # A single (T, n_exog) matrix, shared by every replication.
-            if all(native_code(s) is not None for s in shocks):
-                continue
-            model = get_target_model(step, self._models)
-            T = int(step.kwargs["T"])
-            total_bytes += self._n_rep * T * model.compiled.n_exog * BYTES_PER_ELEMENT
-        return total_bytes
 
 
 def _format_bytes(n_bytes: int) -> str:

@@ -10,13 +10,12 @@ from fastapi.responses import JSONResponse
 
 from ..core.shock.generators import ShockDistribution
 from ..core.solved_model import SolvedModel
-from ..monte_carlo.spec import pipeline_meta
-from ..bundle.manifest import SimSpec
 
 from .mc import (
     build_pipeline,
     mc_available_traces,
     mc_custom_op_template,
+    pipeline_spec_wire,
     run_pipeline,
     serialize_pipeline_result,
     validate_custom_op,
@@ -24,6 +23,7 @@ from .mc import (
 from .estimation import estimation_catalog
 from .schemas import (
     EstimationRunRequest,
+    SimRunRequest,
     WorkspaceViewUpdate,
     LoadYamlRequest,
     SolveModelRequest,
@@ -142,9 +142,7 @@ def create_app(
             verbosity=int(request.get("verbosity", 0)),
         )
         payload = serialize_pipeline_result(result)
-        # Off the built pipeline, not the body that described it: the slot is what
-        # a bundle stores, and only `to_spec` produces that.
-        ui_session.workspace.mc.spec = dict(pipeline_meta(pipeline.to_spec()))
+        ui_session.workspace.mc.spec = pipeline_spec_wire(pipeline)
         ui_session.workspace.mc.result = payload
         return payload
 
@@ -168,9 +166,8 @@ def create_app(
 
     @app.post("/api/run/sim")
     def run_simulation(request: dict[str, Any]) -> dict[str, Any]:
-        model_name = request["model_name"]
-        spec = SimSpec.from_dict(request["spec"])
-        return ui_session.run_simulation_spec(model_name, spec)
+        body = cast(SimRunRequest, request)
+        return ui_session.run_simulation_spec(body["model_name"], body["spec"])
 
     @app.post("/api/code/submit")
     def submit_function(request: dict[str, Any]) -> dict[str, Any]:

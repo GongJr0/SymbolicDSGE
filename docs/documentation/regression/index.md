@@ -46,4 +46,3 @@ __RegressionStatus Values:__
 
 ???+ note "Intercept Convention"
     Regression functions use `intercept=True` by default. When enabled, the returned design matrix contains an `Intercept` column as the first variable. Penalized methods do not penalize this intercept term.
-

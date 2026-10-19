@@ -10,7 +10,7 @@ def load_bundle(
 ) -> LoadedBundle
 ```
 
-Open a `.sdsge` archive and reconstruct its components. 
+Open a `.sdsge` archive and reconstruct its components.
 `load_bundle` is re-exported at `SymbolicDSGE` root.
 
 __Inputs:__
@@ -23,17 +23,17 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python LoadedBundle` | Container with `manifest`, `reference`/`dgp` (re-solved models), `estimation` artifacts, `mc` artifacts, and `simulation` prefills. See [`LoadedBundle`](LoadedBundle.md). |
+| `#!python LoadedBundle` | Container with `manifest`, `models`, `estimation` artifacts, `mc` artifacts, and `simulation` prefills. See [`LoadedBundle`](LoadedBundle.md). |
 
 __Behavior:__
 
 1. Read `manifest.json` and validate `sdsge_version`.
 2. Walk every member declared in the manifest:
     - YAML models are re-parsed, re-compiled, and solved using stored `compile_kwargs` / `solve_kwargs`.
-    - Estimation specs are parsed back into dataclasses, and bundled results are reconstructed as live `OptimizationResult` or `MCMCResult` objects.
+    - Estimation specs are parsed back into dataclasses, and bundled results are reconstructed as live `MLEResult`, `MAPResult`, or `MCMCResult` objects.
     - Monte Carlo pipeline specs are parsed, resources are restored, and `LoadedMC.pipeline` is rebuilt as a live `MCPipeline`.
     - CSV / Parquet members are dispatched by `Member.format` and decoded into numpy arrays.
-3. Inline `{role: SimSpec}` prefills are read from the manifest itself.
+3. Prefills populate `LoadedBundle.simulation` as a `{model: SimulationPrefill}` map.
 
 ## Example
 
@@ -43,42 +43,14 @@ from SymbolicDSGE import load_bundle
 loaded = load_bundle("experiment-1.sdsge")
 
 print(loaded.manifest.created_by)
-if loaded.reference is not None:
-    print(loaded.reference.policy.stab == 0)
+if loaded.models is not None:
+    print(loaded.models["reference"].is_determinate)
 ```
 
-## In-code authoring counterpart
+## In-code authoring from a `SolvedModel`
 
-```python
-SolvedModel.save_sdsge(
-    path: str | Path,
-    *,
-    yaml_text: str | None = None, # (1)!
-    role: str = "reference",
-    compile_kwargs: Mapping[str, Any] | None = None,
-    solve_kwargs: Mapping[str, Any] | None = None,
-) -> Path
-```
-
-1. Override the YAML embedded in the bundle. Defaults to `compiled.config.source_yaml` (populated by `ModelParser`).
-
-Convenience wrapper around [`SolvedModel.to_bundle_builder`](../SolvedModel.md) for the model-only case. For bundles that include estimation / MC / sim members, call `to_bundle_builder` and chain the additions.
-
-```python
-SolvedModel.to_bundle_builder(
-    *,
-    yaml_text: str | None = None,
-    role: str = "reference",
-    compile_kwargs: Mapping[str, Any] | None = None,
-    solve_kwargs: Mapping[str, Any] | None = None,
-    created_by: str | None = None,
-) -> BundleBuilder
-```
-
-Return a `BundleBuilder` pre-seeded with the model's YAML. Chain estimation / MC / simulation members, then call `.write()` to materialize the archive.
-
-???+ warning "Source YAML required"
-    `to_bundle_builder` raises `ValueError` if `compiled.config.source_yaml` is `None` and no `yaml_text=` override is given. `ModelParser(path)` and `ModelParser.from_string(text)` both populate `source_yaml` automatically; programmatically constructed `ModelConfig` instances do not.
+- [`SolvedModel.save_sdsge`](../SolvedModel.md#solvedModelSaveSdsge)
+- [`SolvedModel.to_bundle_builder`](../SolvedModel.md#solvedModelToBundleBuilder)
 
 ## See also
 

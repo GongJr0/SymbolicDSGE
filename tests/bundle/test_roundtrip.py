@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import cache
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,7 +13,6 @@ from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.loader import load_bundle
 from SymbolicDSGE.core.shock.generators import Shock
 from SymbolicDSGE.bundle.parquet import collapse_columns, from_parquet_columns
-from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult
@@ -73,7 +71,7 @@ def test_full_bundle_round_trip(tmp_path: Path, test_model_yaml, compiled_test) 
         .set_simulation(
             "reference",
             T=8,
-            shocks={"u": Shock(dist="norm", seed=42, dist_kwargs={"loc": 0.0})},
+            shocks={"u": Shock(dist="norm", seed=42, loc=0.0)},
         )
     )
     target = builder.write(tmp_path / "model.sdsge")

@@ -178,13 +178,26 @@ export interface FigureResult {
     error?: string;
 }
 
-/* One drawn shock family: `ShockParameters` as the library spells it. */
+/* A tabulated distribution's knots, carried rather than referenced.
+ *
+ * A table is built in Python from a quantile function and cannot be authored
+ * here, so the panel holds one opaquely and round-trips it. There is no id: the
+ * knots are the table, and a bundle derives the id it pools them under. */
+export interface ShockTable {
+    q: number[];
+    zmax: number;
+    discrete: boolean;
+}
+
+/* One drawn shock: `ShockParameters` as the library spells it. Exactly one of
+ * `dist` and `table` is set, a named family or a tabulated one. */
 export interface DrawnShock {
     // The shocks this entry drives. An entry names one or more of them, which a
     // JSON object cannot be keyed by, so each entry carries its own targets and a
     // spec travels as a list.
     target: string[];
-    dist: string;
+    dist: string | null;
+    table: ShockTable | null;
     seed: number | null;
     dist_kwargs: Record<string, unknown>;
 }
@@ -366,7 +379,11 @@ export type MCFieldType =
 export interface DrawnRegistryEntry {
     kind: "drawn";
     target: string[];
-    dist: ShockDistribution;
+    // Null exactly when `table` holds one, which is the same split the spec
+    // carries. A tabulated entry names no family: its knots are its whole
+    // definition, and picking a family here replaces them.
+    dist: ShockDistribution | null;
+    table: ShockTable | null;
     loc: number[];
     // Whatever the family takes beyond its location, by the name the library
     // reads it under: `df` for t, `a` for gamma, `a` and `b` for beta. Held

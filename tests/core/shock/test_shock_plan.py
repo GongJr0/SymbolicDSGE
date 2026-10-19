@@ -40,13 +40,13 @@ T = 12
 #: which is what pins the dispatch for the families nothing else reaches.
 FAMILY_SPECS = [
     {("e_u",): Shock(dist="norm", seed=3)},
-    {("e_u",): Shock(dist="t", seed=5, dist_kwargs={"df": 4})},
+    {("e_u",): Shock(dist="t", seed=5, df=4)},
     {("e_u",): Shock(dist="uni", seed=7)},
     {("e_u",): Shock(dist="exp", seed=17)},
-    {("e_u",): Shock(dist="gamma", seed=19, dist_kwargs={"a": 2.5})},
-    {("e_u",): Shock(dist="beta", seed=23, dist_kwargs={"a": 2.0, "b": 5.0})},
+    {("e_u",): Shock(dist="gamma", seed=19, a=2.5)},
+    {("e_u",): Shock(dist="beta", seed=23, a=2.0, b=5.0)},
     {("e_u", "e_v"): Shock(dist="norm", seed=11)},
-    {("e_u", "e_v"): Shock(dist="t", seed=13, dist_kwargs={"df": 6})},
+    {("e_u", "e_v"): Shock(dist="t", seed=13, df=6)},
 ]
 
 
@@ -145,7 +145,7 @@ def _cols(model):
 
 def _t_shock(seed, target):
     """A Student-t entry, which keeps the spec on the Python draw route."""
-    return Shock(dist="t", seed=seed, dist_kwargs={"df": 5}).independent(target)[0]
+    return Shock(dist="t", seed=seed, df=5).independent(target)[0]
 
 
 def test_entry_draw_does_not_depend_on_its_position_in_the_spec(solved_post82):
@@ -227,12 +227,13 @@ def test_every_entry_and_replication_pair_draws_its_own_stream(solved_post82):
             seen[drawn] = (name, rep_idx)
 
 
-# ---- the seed derivation (#507) ------------------------------------------
+# ---- the native seed key (#507) ------------------------------------------
 #
-# Both routes key off the triple (declared seed, canonical column, replication),
-# and every draw test reads the result back off the entry, so only a literal can
-# fail when the derivation moves. ``_seed`` mixes through numpy's
-# ``SeedSequence``, which puts these values inside the drift surface of #527.
+# The kernel addresses a draw by the triple (declared seed, canonical column,
+# replication), and that address is pinned literally in ``test_native_shocks``,
+# where nothing reads the key back off the entry. What the entry owes is the key
+# itself: the fold a declared seed goes through, and the draw an unseeded one
+# gets instead.
 
 
 def _seed_entry(base_seed, column):
@@ -265,23 +266,8 @@ def test_native_seed_key_is_the_declared_seed_masked_to_64_bits(base_seed, key):
     assert _seed_entry(base_seed, 0)._native_seed_key == key
 
 
-@pytest.mark.parametrize(
-    "base_seed, column, rep_idx, seed",
-    [
-        (7, 0, 0, 13432090166537452992),
-        (7, 0, 1, 15529291740490724314),
-        (7, 1, 0, 23751027488930731),
-        (0, 0, 0, 2635072618980576772),
-        (5, 3, 41, 10328991043790977369),
-    ],
-)
-def test_replication_seed_is_the_mixed_triple(base_seed, column, rep_idx, seed):
-    assert _seed_entry(base_seed, column)._seed(rep_idx) == seed
-
-
-def test_an_unseeded_entry_has_no_replication_seed_and_a_fresh_key():
+def test_an_unseeded_entry_draws_a_fresh_key_per_access():
     # The key is drawn per access, which is why a plan reads it once at build and
     # a draw is reproducible within that plan but not across two of them.
     entry = _seed_entry(None, 0)
-    assert entry._seed(0) is None
     assert len({entry._native_seed_key for _ in range(4)}) == 4

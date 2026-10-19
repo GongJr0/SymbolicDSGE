@@ -6,19 +6,19 @@ tags:
 
 ```python
 class Shock(
-    dist: Literal["norm", "t", "uni", "exp", "gamma", "beta"] | rv_generic | multi_rv_generic, 
+    dist: Literal["norm", "t", "uni", "exp", "gamma", "beta"] | DistributionTable,
     seed: int | None = 0,
-    dist_kwargs: dict | None = None,
+    **dist_kwargs,
 )
 ```
 
-`Shock` is a horizon independent shock specification. Pass it directly inside `SolvedModel.sim(..., shocks={...})`; the simulation supplies the horizon and the calibration.
+`Shock` is a horizon independent shock specification. Pass it directly inside `SolvedModel.sim(..., shocks=[...])`; the simulation supplies the horizon and the calibration.
 
 __Inputs:__
 
 | __Name__    |                                                                                                     __Description__ |
 |:------------|--------------------------------------------------------------------------------------------------------------------:|
-| dist        |                                      Distribution family (`"norm"`, `"t"`, `"uni"`, `"exp"`, `"gamma"`, `"beta"`) or a scipy distribution object. |
+| dist        |                                      Distribution family (`"norm"`, `"t"`, `"uni"`, `"exp"`, `"gamma"`, `"beta"`) or a pre-built distribution table. |
 | seed        |                                                                        Random seed. Pass `None` for unseeded draws. |
 | dist_kwargs | Keyword arguments passed to the distribution draw method. Do not pass `scale`; simulation supplies the model scale. |
 
@@ -30,16 +30,49 @@ __Inputs:__
 
     | __Distribution__ |     __Supported kwargs__    |
     |:-----------------|:----------------------------|
-    | `"norm"`         | `loc | mean`                |
-    | `"t"`            | `loc | mean, df`            |
-    | `"uni"`          | `loc | mean`                |
-    | `"exp"`          | `loc | mean`                |
-    | `"gamma"`        | `loc | mean, a`             |
-    | `"beta"`         | `loc | mean, a, b`          |
-    
-    `loc` and `mean` are interchangeable and multivariate distributions must specify it as a dense vector.
-    A mean of zero is only assumed when `loc` is omitted as a keyword argument. 
-    
+    | `"norm"`         | `loc`                       |
+    | `"t"`            | `loc, df`                   |
+    | `"uni"`          | `loc`                       |
+    | `"exp"`          | `loc`                       |
+    | `"gamma"`        | `loc, a`                    |
+    | `"beta"`         | `loc, a, b`                 |
+
+???+ info "Distribution tables"
+    Distribution tables are exported from `SymbolicDSGE.core` and can be constructed directly.
+    However this requires a pre-built inverse CDF table. This argument type
+    is intended for building a `Shock` from another's `Shock.dist` attribute.
+    To create a `Shock` from a quantile function or distribution object, use `Shock.from_ppf(...)` instead.
+
+&nbsp;
+
+```python
+Shock.from_ppf(
+    dist: QuantileFn | QuantileDist,
+    n_knots: int = 1024,
+    discrete: bool = False,
+    seed: int | None = 0,
+    **dist_kwargs
+) -> Shock
+```
+
+`from_ppf` constructs a distribution table from a quantile function or a distribution object implementing a `ppf` method.
+
+__Inputs:__
+
+| __Name__ |                                           __Description__ |
+|:---------|----------------------------------------------------------:|
+| dist     | A ppf function or a distribution object implementing one. |
+| n_knots  | Number of knots to use for the distribution table. |
+| discrete | Whether to treat the distribution as discrete. |
+| seed     | Random seed. Pass `None` for unseeded draws. |
+| dist_kwargs | Keyword arguments passed to the distribution draw method. Do not pass `scale`; simulation supplies the model scale. |
+
+???+ note "`QuantileFn` and `QuantileDist`"
+    A `QuantileFn` is a callable that accepts an array of quantiles and returns the corresponding values. It is `Callable[[ndarray], ArrayLike]` so functions that only take a single float are not suitable. (A scipy distribution's ppf satisfies this signature.) A `QuantileFn` input rejects all `dist_kwargs` except `loc`.
+    For scipy distributions, shape parameters should be passed when constructing the distribution object.
+
+    A `QuantileDist` is any object that implements a `ppf` method. The library constructs a `QuantileFn` from the `ppf` as `lambda q: dist.ppf(q, **dist_kwargs)`. Since `kwargs` are unpacked into the `ppf` call, `QuantileDist` can be unfrozen scipy distributions, e.g. `scipy.stats.laplace` can be passed directly.
+
 &nbsp;
 
 ```python
@@ -82,10 +115,10 @@ A pre-materialized `ndarray` path bound to `*keys` specified at the constructor.
 
 A simulation takes a sequence of entries that name their own targets. Two forms are accepted, and both leave the horizon to the simulation:
 
-| __Form__              |                                                                         __Meaning__ |
-|:----------------------|------------------------------------------------------------------------------------:|
-| `#!python Shock(...)` | Draw this family, reseeded per Monte Carlo replication, using the calibrated scale. |
-| `#!python ShockPath(...)`    |  Use  `ShockPath.path` verbatim, shaped `(T,)`/`(T, 1)` for one shock or `(T, k)` for a grouped key. |
+| __Form__                  |                                                                                        __Meaning__ |
+|:--------------------------|---------------------------------------------------------------------------------------------------:|
+| `#!python Shock(...)`     |                Draw this family, reseeded per Monte Carlo replication, using the calibrated scale. |
+| `#!python ShockPath(...)` | Use `ShockPath.path` verbatim, shaped `(T,)`/`(T, 1)` for one shock or `(T, k)` for a grouped key. |
 
 ```python
 sol.sim(T=10, shocks=[Shock(dist="norm", seed=1).joint("e_z")])
@@ -107,16 +140,3 @@ sol.sim(T=10, shocks=[ShockPath(path, "e_g")])
     ```
 
     `Shock`s must be unbound in the deprecated spec and `ShockPath`s are not accepted.
-
-
-## Serialization
-
-```python
-Shock.to_dict() -> ShockParameters
-Shock.from_dict(data: Mapping[str, Any]) -> Shock
-
-ShockPath.to_dict() -> ShockPathParameters
-ShockPath.from_dict(data: Mapping[str, Any]) -> ShockPath
-```
-
-`to_dict()` serializes shocks with string distribution families. A live scipy distribution object cannot be faithfully reproduced from JSON and is rejected.
