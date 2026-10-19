@@ -133,7 +133,7 @@ print(stat_ci, pval_ci, sep="\n")
 
 ### Reproduce a Monte Carlo run
 
-`MCPipeline.run`'s `models` argument is a `{name: SolvedModel} | None` exactly like `LoadedBundle.models`, the bundles models directly pass into the pipeline.
+`MCPipeline.run`'s `models` argument is typed to match `LoadedBundle.models` (`{name: SolvedModel} | None`), the bundle's models directly pass into the pipeline.
 Additionally, the `run_config` on the result can be used to produce the deterministic pipeline result by parameterizing the run as the author did.
 
 ```python

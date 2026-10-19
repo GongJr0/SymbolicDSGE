@@ -144,7 +144,7 @@ BundleBuilder.set_simulation(
 ) -> BundleBuilder
 ```
 
-Attach a simulation prefill under `model`. Prefills are bundle members stored as a `{model: SimSpec}` map; call it once per model to ship several (for example `"reference"`, `"dgp"`, or an arbitrary `"example1"`). `as_parquet` controls how paths and distribution tables are stored. `False` stores them as CSVs. The parmaeter has no effect for Shock objects using a built-in native distribution.
+Attach a simulation prefill under `model`. Prefills are bundle members stored as a `{model: SimSpec}` map; call it once per model to ship several (for example `"reference"`, `"dgp"`, or an arbitrary `"example1"`). `as_parquet` controls how paths and distribution tables are stored. `False` stores them as CSVs. The parameter has no effect for Shock objects using a built-in native distribution.
 
 &nbsp;
 

@@ -5,7 +5,7 @@ tags:
 
 # Portable Experiments
 
-A `.sdsge` file packages everything needed to reopen a model in the GUI or recover its components in code. Model and Kalman configuration, estimation spec + results, Monte Carlo pipeline + traces, observed data, and simulation prefills are parcked into a single shareable archive. The file is a zip with a versioned manifest (`manifest.json`) and an aliased extension; nothing about reading or writing it requires a custom tool beyond the bundled CLIs.
+A `.sdsge` file packages everything needed to reopen a model in the GUI or recover its components in code. Model and Kalman configuration, estimation spec + results, Monte Carlo pipeline + traces, observed data, and simulation prefills are packed into a single shareable archive. The file is a zip with a versioned manifest (`manifest.json`) and an aliased extension; nothing about reading or writing it requires a custom tool beyond the bundled CLIs.
 
 The container exists so a non-coding collaborator can run an experiment by opening one file, and so a coding collaborator can reach every component the bundle carries without re-deriving them.
 
@@ -23,7 +23,7 @@ The container exists so a non-coding collaborator can run an experiment by openi
 | Simulation prefill          | JSON + CSV/Parquet | `BundleBuilder.set_simulation` (per model)              |
 
 ???+ note "Authoring formats"
-    Bulk numeric members are written as Parquet by default for size. CSV authoring is also supported: `sdsge-compile --csv-only` keeps everything as CSV, and `sdsge-decompile --csv` re-encodes Parquet members back to CSV. The reader is format-agnostic: a hand-zipped CSV-only bundle and a CLI-built Parquet bundle both validate.
+    Bulk numeric members are written as Parquet by default for size. CSV authoring is also supported: `sdsge-decompile --csv` re-encodes Parquet members back to CSV. The reader is format-agnostic: a hand-zipped CSV-only bundle and a CLI-built Parquet bundle both validate.
 
 ## Entry points
 
@@ -38,10 +38,10 @@ There are three ways to produce or consume a `.sdsge`:
 
 ## Determinism
 
-The bundle stores simulation specs and a seed, not simulation results. Runs on the receiver's side reproduces the author's intended simulation deterministically (numpy `PCG64` + fixed seed). Re-solving the embedded YAML at load time is also deterministic, so the receiver's policy matrices match the author's.
+The bundle stores simulation specs and a seed, not simulation results. A run on the receiver's side reproduces the author's intended simulation deterministically (numpy `PCG64` + fixed seed). Re-solving the embedded YAML at load time is also deterministic, so the receiver's policy matrices match the author's.
 
 ???+ warning "Source YAML embedding"
-    `SolvedModel.save_sdsge()` requires a source YAML. Its populated automatically when the model was loaded via `ModelParser(path)` or `ModelParser.from_string(text)`. Programmatically constructed `ModelConfig` instances need `yaml_text=` passed explicitly.
+    `SolvedModel.save_sdsge()` requires a source YAML. It is populated automatically when the model was loaded via `ModelParser(path)` or `ModelParser.from_string(text)`. Programmatically constructed `ModelConfig` instances need `yaml_text=` passed explicitly.
 
 ## Where to next
 
