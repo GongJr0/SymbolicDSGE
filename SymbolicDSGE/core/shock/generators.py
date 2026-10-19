@@ -8,7 +8,7 @@ import numpy as np
 from numpy import asarray, ndarray, float64
 from numpy.typing import ArrayLike, NDArray
 
-from typing import Any, Callable, Literal, Mapping, TypedDict, Sequence, cast, get_args
+from typing import Any, Callable, Literal, Mapping, TypedDict, Sequence, get_args
 import copy
 
 NDF = NDArray[float64]
