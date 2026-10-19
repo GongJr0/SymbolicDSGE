@@ -109,4 +109,3 @@ __Additional Fields and Properties:__
 
 ???+ note "Endpoint Dispatch"
     `l1_ratio=0.0` delegates to ridge logic and `l1_ratio=1.0` delegates to lasso logic where the selected criterion allows it. The returned object is still normalized to `ElasticNetResult`.
-

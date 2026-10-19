@@ -68,9 +68,6 @@ bundle.add_model(
 ???+ note "Why we solve first"
     The bundle preserves the YAML and the recorded compile/solve kwargs, then runs them again at load time. Solving here is only required if we want to attach an estimation, an MC pipeline, or a result derived from a `SolvedModel`. Bundles that only carry authored model text do not need a live `SolvedModel`.
 
-???+ note "Model Roles"
-    The model framework inside bundles can work with two model roles: `reference` and `dgp`. At least one of them must be present. `reference` is later used as the subject of Monte Carlo experiments and simulation prefill. `dgp` is used as the data generating process for Monte Carlo experiments. We attach the same model twice here for demonstration, but in practice you may want to attach two different models.
-
 ## Specify the estimation tab
 
 We define a small MCMC run estimating `psi_pi` and `psi_x` against synthetic observed data. The estimation is carried out as it would be in a live run.

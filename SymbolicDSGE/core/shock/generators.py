@@ -13,7 +13,7 @@ import copy
 
 NDF = NDArray[float64]
 
-_DIST_PARAMS_MV: dict[str, tuple[set, bool]] = {
+_DIST_PARAMS_MV: dict[str, tuple[set[str], bool]] = {
     "norm": (set(), True),
     "uni": (set(), False),
     "t": ({"df"}, True),
@@ -392,7 +392,8 @@ def _validate_shock_family(
         return
 
     params, is_mv = _DIST_PARAMS_MV[dist]
-    _require_univariate(dist, width) if not is_mv else None
+    if not is_mv:
+        _require_univariate(dist, width)
 
     if unk := (set(dist_kwargs) - (params | {"loc"})):
         raise ValueError(

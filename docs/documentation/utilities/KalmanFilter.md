@@ -54,7 +54,7 @@ KalmanFilter.run(
     P0: np.ndarray[float64] | None = None,
     return_shocks: bool = False,
     symmetrize: bool = True,
-    joseph_cov: bool = False, 
+    joseph_cov: bool = False,
     jitter: float = 0.0,
 ) -> FilterResult
 ```
@@ -84,8 +84,8 @@ __Inputs:__
 
 ```python
 KalmanFilter.run_extended(
-    meas_addr: int, 
-    jac_addr: int, 
+    meas_addr: int,
+    jac_addr: int,
     A: np.ndarray[float64 | complex128],
     B: np.ndarray[float64 | complex128],
     calib_params: np.ndarray[float64],
@@ -97,7 +97,7 @@ KalmanFilter.run_extended(
     P0: np.ndarray[float64] | None = None,
     return_shocks: bool = False,
     symmetrize: bool = True,
-    joseph_cov: bool = False, 
+    joseph_cov: bool = False,
     jitter: float = 0.0,
     compute_y_filt: bool = True,
 ) -> FilterResult

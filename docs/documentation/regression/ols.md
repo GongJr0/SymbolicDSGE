@@ -57,4 +57,3 @@ __Additional Fields and Methods:__
 
 ???+ note "Rank-Deficient Designs"
     OLS first attempts a Cholesky solve and falls back to least squares when needed. The `status` field records the solver status used by the result.
-

@@ -20,7 +20,7 @@ filter_step(
     R: ndarray | None = None,
     jitter: float | None = None,
     symmetrize: bool = True,
-    joseph_cov: bool = False, 
+    joseph_cov: bool = False,
     return_shocks: bool = False,
 ) -> MCStep
 ```
@@ -35,7 +35,7 @@ __Inputs:__
 | __Name__ | __Default__ | __Description__ |
 |:---------|:-----------:|----------------:|
 | name | `"filter"` | Runtime step name. Downstream steps use this as `source`. |
-| target | Required | Model name supplying filter components. Must be supplied to `MCPipeline.run(...)`. | 
+| target | Required | Model name supplying filter components. Must be supplied to `MCPipeline.run(...)`. |
 | obs_source | Required | Producer step supplying observed data. |
 | obs_field | Required | Two-dimensional output field to read from the producer. |
 | obs_columns | `None` | Column index, sequence of indices, or slice; `None` selects all columns. |

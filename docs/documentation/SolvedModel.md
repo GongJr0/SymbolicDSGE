@@ -205,7 +205,7 @@ SolvedModel.kalman(
     x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None, # (2)!
     jitter: float | None = None, # (3)!
     symmetrize: bool = False,
-    joseph_cov: bool = False, 
+    joseph_cov: bool = False,
     return_shocks: bool = False,
     P0: ndarray | None = None,
     R: ndarray | None = None,
@@ -222,7 +222,7 @@ Run a Kalman Filter application on the observables specified.
     When a DataFrame is used as `y`, column names will be used to align and order observables' names and position. However, for `ndarray` inputs, the method assumes names in `observables` and columns of `y` are position-aligned.
 
 ???+ info "State Units and Timing"
-    This public path returns state histories in levels. 
+    This public path returns state histories in levels.
 
     For linear and extended filters, `x0` and `P0` are the prior mean and covariance of the first observed state. For the unscented filter, they describe the state and covariance before the first observation.
 
@@ -274,7 +274,7 @@ SolvedModel.save_sdsge(
     path: str | Path,
     *,
     yaml_text: str | None = None, # (1)!
-    role: str = "reference",
+    name: str = "reference",
     compile_kwargs: Mapping[str, Any] | None = None,
     solve_kwargs: Mapping[str, Any] | None = None,
 ) -> Path
@@ -293,7 +293,7 @@ __Inputs:__
 |:---------|----------------:|
 | path | Output `.sdsge` path. |
 | yaml_text | Explicit YAML override. |
-| role | `"reference"` or `"dgp"`. |
+| name | Name of the model in the bundle. |
 | compile_kwargs | Kwargs the loader will use to rebuild the `#!python SolvedModel`. |
 | solve_kwargs | Kwargs the loader will use at the solve step. |
 
@@ -312,7 +312,7 @@ __Returns:__
 SolvedModel.to_bundle_builder(
     *,
     yaml_text: str | None = None,
-    role: str = "reference",
+    name: str = "reference",
     compile_kwargs: Mapping[str, Any] | None = None,
     solve_kwargs: Mapping[str, Any] | None = None,
     created_by: str | None = None, # (1)!
@@ -335,7 +335,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | yaml_text | Explicit YAML override; defaults to `compiled.config.source_yaml`. |
-| role | `"reference"` or `"dgp"`. |
+| name | Name of the model in the bundle. |
 | compile_kwargs | Kwargs the loader will use to rebuild the `#!python SolvedModel`. |
 | solve_kwargs | Kwargs the loader will use at the solve step. |
 | created_by | Manifest `created_by` string. |

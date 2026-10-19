@@ -9,7 +9,7 @@ tags:
     If you're not interested in the details, you can skip to the [results](#results).
     However, it's recommended to give a quick skim since not all comparisons are measuring equivalent algorithms.
 
-The linear Gaussian Kalman filter (KF) is the backbone of many DSGE applications. 
+The linear Gaussian Kalman filter (KF) is the backbone of many DSGE applications.
 It provides state estimation, and is the main likelihood engine of choice for linear first-order DSGE models.
 Therefore, the performance of a library's KF has direct and noticeable implications on estimation workflows.
 This benchmark compares the SymbolicDSGE KF implementation against Dynare's on multiple published models.

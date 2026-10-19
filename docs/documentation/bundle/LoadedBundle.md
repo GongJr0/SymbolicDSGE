@@ -22,7 +22,7 @@ __Fields:__
 | simulation | `#!python dict[str, SimulationPrefill] | None` | Simulation prefills keyed by model name, or `None` if none was set. Prefills are typed dicts that unpack directly into `SolvedModel.sim`. |
 
 ???+ info "Re-solving on load"
-    Models are stored as configs and re-solved on load. The solve operations use `solve_kwargs` and `compile_kwargs` per model. 
+    Models are stored as configs and re-solved on load. The solve operations use `solve_kwargs` and `compile_kwargs` per model.
 
 ## `LoadedEstimation`
 
@@ -35,7 +35,7 @@ __Fields:__
 
 | __Name__  | __Type__ | __Description__ |
 |:----------|:--------:|----------------:|
-| estimator | `#!python Estimator` | The live estimator object lazily rebuilt from the stored spec and the reference model. Always present when `LoadedEstimation` is. | 
+| estimator | `#!python Estimator` | The live estimator object lazily rebuilt from the stored spec and the reference model. Always present when `LoadedEstimation` is. |
 | result    | `#!python MLEResult | MAPResult | MCMCResult | None` | The reconstructed result object. |
 
 ???+ tip "Re-running a loaded estimation"

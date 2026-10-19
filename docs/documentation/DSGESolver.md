@@ -99,7 +99,7 @@ DSGESolver.estimate(
     ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
     P0: np.ndarray | None = None,
     jitter: float | None = None,
-    symmetrize: bool = True, 
+    symmetrize: bool = True,
     R: np.ndarray | None = None, # (2)!
     **method_kwargs: Any,
 ) -> MCMCResult | OptimizationResult
@@ -143,7 +143,7 @@ DSGESolver.estimate_and_solve(
     ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
     P0: np.ndarray | None = None,
     jitter: float | None = None,
-    symmetrize: bool = True, 
+    symmetrize: bool = True,
     R: np.ndarray | None = None,
     **method_kwargs: Any,
 ) -> tuple[MLEResult | MAPResult | MCMCResult, SolvedModel]

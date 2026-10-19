@@ -64,7 +64,7 @@ print("Equations as passed to the solver: \n", compiled.construct_objective_cfun
 At compilation, the equations are transformed as shown in the code output:
 
 ```text
-Equations with symbols removed: 
+Equations with symbols removed:
  -beta*fwd_Pi + cur_Pi - kappa*(cur_x - cur_z)
 -cur_g + cur_x - fwd_x + tau_inv*(cur_r - fwd_Pi)
 cur_r - e_r - prev_r*rho_r + (rho_r - 1)*(cur_Pi*psi_pi + psi_x*(cur_x - cur_z))
@@ -173,7 +173,7 @@ __Spec Examples:__
 Shock(...).independent("e_g", "e_z", "e_r")  # Returns a sequence of uncorrelated drawn shocks
 
 # Current Spec (Array Shocks)
-[ShockPath(path=arr1, "e_g", "e_z"), ShockPath(path=arr2, "e_r")] 
+[ShockPath(path=arr1, "e_g", "e_z"), ShockPath(path=arr2, "e_r")]
 
 # Deprecated Spec (Drawn and Array)
 {("e_g", "e_z"): Shock(...), "e_r": arr2}
@@ -192,7 +192,7 @@ sim_data = sol.sim(
     shocks=shocks,
     shock_scale=1.0, # (2)!
     observables=True,
-) 
+)
 
 sim_df = pd.DataFrame(sim_data.states  | sim_data.observables)
 sim_df.head(10).round(3)

@@ -5,7 +5,7 @@ tags:
 
 # MC Pipeline Tab
 
-The MC Pipeline tab visually constructs repeated experiments comparing a solved reference model against a solved DGP model.
+The MC Pipeline tab visually constructs repeated experiments comparing models.
 
 ## Building a Pipeline
 

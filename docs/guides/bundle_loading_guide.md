@@ -35,7 +35,7 @@ from typing import cast
 loaded = load_bundle("experiment-1.sdsge")  # (1)!
 ```
 
-1. `load_bundle` is available in top-level `SymbolicDSGE` and `SymbolicDSGE.bundle`. 
+1. `load_bundle` is available in top-level `SymbolicDSGE` and `SymbolicDSGE.bundle`.
 
 `loaded` is a [`LoadedBundle`](../documentation/bundle/LoadedBundle.md). Every component is reachable through a typed field.
 
@@ -73,7 +73,7 @@ dgp = loaded.models["dgp"]
 estimation = loaded.estimation
 
 # Type checkers cannot infer that `estimation` is not `None`.
-# Asserting (alternative to casting) here silences the errors 
+# Asserting (alternative to casting) here silences the errors
 # by forcing the type to narrow.
 assert estimation, "No estimation tab found in the bundle."
 
@@ -167,15 +167,15 @@ See the [Monte Carlo Guide](monte_carlo_guide.md) for the pipeline grammar and t
 
 ## Reach the simulation prefill
 
-Simulation prefills are reachable from `loaded.simulation` directly. It is a `{role: SimulationPrefill}` map, and each `SimulationPrefill` unpacks straight into `SolvedModel.sim` and anything that accepts simulation arguments.
+Simulation prefills are reachable from `loaded.simulation` directly. It is a `{name: SimulationPrefill}` map, and each `SimulationPrefill` unpacks straight into `SolvedModel.sim` and anything that accepts simulation arguments.
 
 ```python
 prefills = loaded.simulation  # dict[str, SimulationPrefill] | None
 assert prefills, "No simulation tab found in the bundle."
 
 
-for role, prefill in prefills.items():
-    print(role, "\n", prefill)
+for name, prefill in prefills.items():
+    print(name, "\n", prefill)
 
 reference.sim(**prefills["reference"]).states["r"][:5]
 ```

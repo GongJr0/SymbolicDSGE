@@ -13,7 +13,7 @@ The model panel reports:
 
 - Variables and observables.
 - Inferred state and exogenous-state counts.
-- The active model name and role.
+- The active model name.
 
 ## Shock Configuration
 
@@ -35,7 +35,7 @@ The Python panels register functions that run against simulation output:
 - **Transform** functions return a one-dimensional array and add it as an output series.
 - **Plot** functions return a Matplotlib figure and add it to the Figures panel.
 
-Function arguments are matched to available state and observable names. Submit a function to register it for the active model role, or remove it from the list beneath the editor.
+Function arguments are matched to available state and observable names. Submit a function to register it for the active model, or remove it from the list beneath the editor.
 
 ???+ note "Execution Scope"
     Submitted functions run in the local backend process. They should only contain code you trust.

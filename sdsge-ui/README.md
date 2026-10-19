@@ -13,7 +13,7 @@ With the `ui` extra installed (`pip install 'SymbolicDSGE[ui]'`):
 sdsge-ui            # launches backend + bundled frontend, opens a browser
 ```
 
-Or from Python, with a solved model preloaded as the reference:
+Or from Python, with a solved model preloaded as `"reference"`:
 
 ```python
 solved.serve()

@@ -22,4 +22,3 @@ __Fields:__
 
 ??? info "Symbolic `R` Metadata"
     `R_symbolic`/`R_builder` are used by estimation pipelines (e.g. iterative MCMC updates) to rebuild `R` from the current parameter draw when needed.
-

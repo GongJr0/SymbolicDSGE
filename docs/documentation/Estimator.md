@@ -144,7 +144,7 @@ Estimator.mcmc(
     thin: int = 1, # (3)!
     theta0: Mapping[str, float] | None = None, # (4)!
     random_state: int | None = None,
-    adapt: bool = True, 
+    adapt: bool = True,
     adapt_start: int = 100,
     proposal_scale: float = 0.1,
     adapt_epsilon: float = 1e-8,

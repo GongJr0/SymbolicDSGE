@@ -357,7 +357,7 @@ class SolvedModel(ABC, Generic[Policy]):
         self,
         *,
         yaml_text: str | None = None,
-        role: str = "reference",
+        name: str = "reference",
         compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,
         created_by: str | None = None,
@@ -376,7 +376,7 @@ class SolvedModel(ABC, Generic[Policy]):
         return export.to_bundle_builder(
             self.compiled,
             yaml_text=yaml_text,
-            role=role,
+            name=name,
             compile_kwargs=compile_kwargs,
             solve_kwargs=solve_kwargs,
             created_by=created_by,
@@ -387,7 +387,7 @@ class SolvedModel(ABC, Generic[Policy]):
         path: "str | Any",
         *,
         yaml_text: str | None = None,
-        role: str = "reference",
+        name: str = "reference",
         compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,
     ) -> "Any":
@@ -399,7 +399,7 @@ class SolvedModel(ABC, Generic[Policy]):
         """
         return self.to_bundle_builder(
             yaml_text=yaml_text,
-            role=role,
+            name=name,
             compile_kwargs=compile_kwargs,
             solve_kwargs=solve_kwargs,
         ).write(path)

@@ -12,7 +12,7 @@ class Manifest()
 `Manifest` is the schema for `manifest.json` at the root of every `.sdsge` archive. It indexes the included members and records provenance.
 
 You will never need to construct a `Manifest` or write one to disk manually. Writers generate it and loaders parse it.
-However, it is available for inspection and cerries top-level metadata. The fields are documented here for reference.
+However, it is available for inspection and carries top-level metadata. The fields are documented here for reference.
 
 __Fields:__
 

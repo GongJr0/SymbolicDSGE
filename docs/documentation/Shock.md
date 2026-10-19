@@ -6,7 +6,7 @@ tags:
 
 ```python
 class Shock(
-    dist: Literal["norm", "t", "uni", "exp", "gamma", "beta"] | DistributionTable, 
+    dist: Literal["norm", "t", "uni", "exp", "gamma", "beta"] | DistributionTable,
     seed: int | None = 0,
     **dist_kwargs,
 )
@@ -36,7 +36,7 @@ __Inputs:__
     | `"exp"`          | `loc`                       |
     | `"gamma"`        | `loc, a`                    |
     | `"beta"`         | `loc, a, b`                 |
-    
+
 ???+ info "Distribution tables"
     Distribution tables are exported from `SymbolicDSGE.core` and can be constructed directly.
     However this requires a pre-built inverse CDF table. This argument type
@@ -47,10 +47,10 @@ __Inputs:__
 
 ```python
 Shock.from_ppf(
-    dist: QuantileFn | QuantileDist, 
-    n_knots: int = 1024, 
-    discrete: bool = False, 
-    seed: int | None = 0, 
+    dist: QuantileFn | QuantileDist,
+    n_knots: int = 1024,
+    discrete: bool = False,
+    seed: int | None = 0,
     **dist_kwargs
 ) -> Shock
 ```
@@ -68,7 +68,7 @@ __Inputs:__
 | dist_kwargs | Keyword arguments passed to the distribution draw method. Do not pass `scale`; simulation supplies the model scale. |
 
 ???+ note "`QuantileFn` and `QuantileDist`"
-    A `QuantileFn` is a callable that accepts an array of quantiles and returns the corresponding values. It is `Callable[[ndarray], ArrayLike]` so functions that only take a single float are not suitable. (A scipy distribution's ppf satisfies this signature.) A `QuantileFn` input ignores all `dist_kwargs` except `loc`.
+    A `QuantileFn` is a callable that accepts an array of quantiles and returns the corresponding values. It is `Callable[[ndarray], ArrayLike]` so functions that only take a single float are not suitable. (A scipy distribution's ppf satisfies this signature.) A `QuantileFn` input rejects all `dist_kwargs` except `loc`.
     For scipy distributions, shape parameters should be passed when constructing the distribution object.
 
     A `QuantileDist` is any object that implements a `ppf` method. The library constructs a `QuantileFn` from the `ppf` as `lambda q: dist.ppf(q, **dist_kwargs)`. Since `kwargs` are unpacked into the `ppf` call, `QuantileDist` can be unfrozen scipy distributions, e.g. `scipy.stats.laplace` can be passed directly.
@@ -115,10 +115,10 @@ A pre-materialized `ndarray` path bound to `*keys` specified at the constructor.
 
 A simulation takes a sequence of entries that name their own targets. Two forms are accepted, and both leave the horizon to the simulation:
 
-| __Form__              |                                                                         __Meaning__ |
-|:----------------------|------------------------------------------------------------------------------------:|
-| `#!python Shock(...)` | Draw this family, reseeded per Monte Carlo replication, using the calibrated scale. |
-| `#!python ShockPath(...)`    |  Use  `ShockPath.path` verbatim, shaped `(T,)`/`(T, 1)` for one shock or `(T, k)` for a grouped key. |
+| __Form__                  |                                                                                        __Meaning__ |
+|:--------------------------|---------------------------------------------------------------------------------------------------:|
+| `#!python Shock(...)`     |                Draw this family, reseeded per Monte Carlo replication, using the calibrated scale. |
+| `#!python ShockPath(...)` | Use `ShockPath.path` verbatim, shaped `(T,)`/`(T, 1)` for one shock or `(T, k)` for a grouped key. |
 
 ```python
 sol.sim(T=10, shocks=[Shock(dist="norm", seed=1).joint("e_z")])
@@ -140,4 +140,3 @@ sol.sim(T=10, shocks=[ShockPath(path, "e_g")])
     ```
 
     `Shock`s must be unbound in the deprecated spec and `ShockPath`s are not accepted.
-

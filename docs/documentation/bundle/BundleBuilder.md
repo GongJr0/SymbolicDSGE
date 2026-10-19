@@ -44,7 +44,7 @@ BundleBuilder.add_model(
 1. Forwarded to `DSGESolver.compile(...)` when the loader rebuilds the `SolvedModel`.
 2. Forwarded to `DSGESolver.solve(...)` at the same step.
 
-Add a model configuration to the bundle. `role` is `"reference"` or `"dgp"`. `yaml_text` is the source YAML the loader will re-parse.
+Add a model configuration to the bundle. `yaml_text` is the source YAML the loader will re-parse.
 
 | __Name__       |                                                                __Description__ |
 |:---------------|-------------------------------------------------------------------------------:|
@@ -138,7 +138,7 @@ BundleBuilder.set_simulation(
     as_parquet: bool = True,
     *,
     T: int,
-    shocks: Mapping[str, Shock | ndarray | None] | Sequence[Shock | ShockPath] | None = None,
+    shocks: Mapping[str | Sequence[str], Shock | ndarray] | Sequence[Shock | ShockPath] | None = None,
     shock_scale: float = 1.0,
     x0: Mapping[str, float] | Sequence[float] | ndarray | None = None,
     observables: bool = False,
@@ -146,7 +146,9 @@ BundleBuilder.set_simulation(
 ) -> BundleBuilder
 ```
 
-Attach a simulation prefill under `model`. Prefills are bundle members stored as a `{model: SimSpec}` map; call it once per model to ship several (for example `"reference"`, `"dgp"`, or an arbitrary `"example1"`). `as_parquet` controls how paths and distribution tables are stored. `False` stores them as CSVs. The parameter has no effect for Shock objects using a built-in native distribution.
+Attach a simulation prefill under `model`. Prefills are bundle members stored as a `{model: SimSpec}` map; call it once per model to ship several.
+`as_parquet` controls how paths and distribution tables are stored. `False` stores them as CSVs.
+The parameter has no effect for Shock objects using a built-in native distribution.
 
 &nbsp;
 

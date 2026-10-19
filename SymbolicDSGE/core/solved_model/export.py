@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 def serve(
-    model: "SolvedModel[Any]",
+    model: SolvedModel[Any],
     *,
     host: str = "127.0.0.1",
     port: int | None = None,
@@ -38,7 +38,7 @@ def to_bundle_builder(
     compiled: CompiledModel,
     *,
     yaml_text: str | None = None,
-    role: str = "reference",
+    name: str = "reference",
     compile_kwargs: Mapping[str, Any] | None = None,
     solve_kwargs: Mapping[str, Any] | None = None,
     created_by: str | None = None,
@@ -55,7 +55,7 @@ def to_bundle_builder(
             "source is retained on compiled.config.source_yaml."
         )
     return BundleBuilder(created_by=created_by).add_model(
-        role,
+        name,
         yaml,
         compile_kwargs=compile_kwargs,
         solve_kwargs=solve_kwargs,

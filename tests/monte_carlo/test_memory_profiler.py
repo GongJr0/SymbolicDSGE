@@ -19,8 +19,6 @@ from SymbolicDSGE.monte_carlo.memory import (
 )
 from SymbolicDSGE.monte_carlo.step_factories import simulation_step
 
-from scipy.stats import t
-
 ARENA_NAMES = (
     "float_in_work",
     "int_in_work",
