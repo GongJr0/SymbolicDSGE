@@ -4,90 +4,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from enum import StrEnum
-from typing import TYPE_CHECKING, Mapping, TypeAlias
+from typing import TYPE_CHECKING, Mapping
 
 import sympy as sp
 from sympy import Eq, Expr, Function, Symbol
-from sympy.core.function import AppliedUndef, FunctionClass, UndefinedFunction
+from sympy.core.function import AppliedUndef
+
+from .spec import LinearizationMethod, VariableTransformSpec, VAR_FUNC
 
 if TYPE_CHECKING:
-    from .config import ModelConfig
-
-_VAR_FUNC: TypeAlias = FunctionClass | UndefinedFunction
-
-
-class LinearizationMethod(StrEnum):
-    """Linearization methods for transforming variables in a symbolic model.
-
-    Attributes
-    ----------
-    LOG : Literal["log"]
-        Log-linearization
-    TAYLOR : Literal["taylor"]
-        First-order Taylor expansion linearization
-    NONE : Literal["none"]
-        No linearization; the variable is used as-is in the linearized model.
-
-    """
-
-    LOG = "log"
-    TAYLOR = "taylor"
-    NONE = "none"
-
-
-@dataclass(frozen=True)
-class VariableTransformSpec:
-    """Specification of a variable transformation for symbolic linearization.
-
-    Attributes
-    ----------
-    original : _VAR_FUNC
-        Original variable function (e.g., a sympy.Function) before transformation.
-    transformed : _VAR_FUNC
-        Transformed variable function after applying the specified linearization method.
-    method : LinearizationMethod
-        Method of linearization applied to the variable (e.g., log-linearization, Taylor expansion, or none).
-    steady_state : Expr | None
-        Steady state value of the variable, required for certain linearization methods (e.g., log-linearization).
-
-    """
-
-    original: _VAR_FUNC
-    transformed: _VAR_FUNC
-    method: LinearizationMethod
-    steady_state: Expr | None
-
-    def reconstruct(self, transformed_call: Expr) -> Expr:
-        """Reconstruct the original variable expression from the transformed variable expression.
-
-        Parameters
-        ----------
-        transformed_call : Expr
-            Transformed variable expression (e.g., the result of applying the linearization method).
-
-        Returns
-        -------
-        Expr
-            Original variable expression reconstructed from the transformed expression,
-            using the specified linearization method and steady state.
-
-        """
-        if self.method == LinearizationMethod.NONE:
-            return transformed_call
-
-        if self.steady_state is None:
-            raise ValueError(
-                f"Variable '{self.original}' is missing a steady state required for {self.method.value} linearization."
-            )
-
-        if self.method == LinearizationMethod.LOG:
-            return self.steady_state * sp.exp(transformed_call)
-
-        if self.method == LinearizationMethod.TAYLOR:
-            return self.steady_state + transformed_call
-
-        raise ValueError(f"Unsupported linearization method '{self.method}'.")
+    from ..core.config import ModelConfig
 
 
 @dataclass(frozen=True)
@@ -100,20 +26,20 @@ class LinearizationContext:
         Specs for individual variable transformations.
     time_symbol : Symbol
         Symbol representing the time index in the model (e.g., 't').
-    spec_by_original : dict[_VAR_FUNC, VariableTransformSpec]
+    spec_by_original : dict[VAR_FUNC, VariableTransformSpec]
         Mapping from original variable functions to their corresponding transformation specifications.
-    spec_by_transformed : dict[_VAR_FUNC, VariableTransformSpec]
+    spec_by_transformed : dict[VAR_FUNC, VariableTransformSpec]
         Mapping from transformed variable functions to their corresponding transformation specifications.
-    transformed_call_registry : dict[_VAR_FUNC, _VAR_FUNC]
+    transformed_call_registry : dict[VAR_FUNC, VAR_FUNC]
         Registry mapping transformed variable functions back to their original variable functions.
 
     """
 
     specs: tuple[VariableTransformSpec, ...]
     time_symbol: Symbol
-    spec_by_original: dict[_VAR_FUNC, VariableTransformSpec]
-    spec_by_transformed: dict[_VAR_FUNC, VariableTransformSpec]
-    transformed_call_registry: dict[_VAR_FUNC, _VAR_FUNC]
+    spec_by_original: dict[VAR_FUNC, VariableTransformSpec]
+    spec_by_transformed: dict[VAR_FUNC, VariableTransformSpec]
+    transformed_call_registry: dict[VAR_FUNC, VAR_FUNC]
 
     def collect_original_calls(self, expr: Expr) -> tuple[AppliedUndef, ...]:
         calls = [
@@ -157,11 +83,11 @@ class Linearizer:
         self,
         conf: ModelConfig | None = None,
         *,
-        method_dict: dict[_VAR_FUNC, str | LinearizationMethod] | None = None,
-        steady_state: dict[_VAR_FUNC, Expr | float | None] | None = None,
+        method_dict: dict[VAR_FUNC, str | LinearizationMethod] | None = None,
+        steady_state: dict[VAR_FUNC, Expr | float | None] | None = None,
         equations: list[Eq] | None = None,
         time_symbol: Symbol | None = None,
-        variable_order: list[_VAR_FUNC] | None = None,
+        variable_order: list[VAR_FUNC] | None = None,
         shock_symbols: list[Symbol] | None = None,
     ) -> None:
         if conf is not None:
@@ -222,12 +148,12 @@ class Linearizer:
 
     def _build_context(
         self,
-        ordered_variables: list[_VAR_FUNC],
+        ordered_variables: list[VAR_FUNC],
     ) -> LinearizationContext:
         specs: list[VariableTransformSpec] = []
-        spec_by_original: dict[_VAR_FUNC, VariableTransformSpec] = {}
-        spec_by_transformed: dict[_VAR_FUNC, VariableTransformSpec] = {}
-        transformed_call_registry: dict[_VAR_FUNC, _VAR_FUNC] = {}
+        spec_by_original: dict[VAR_FUNC, VariableTransformSpec] = {}
+        spec_by_transformed: dict[VAR_FUNC, VariableTransformSpec] = {}
+        transformed_call_registry: dict[VAR_FUNC, VAR_FUNC] = {}
 
         for var in ordered_variables:
             method = self.method_dict[var]
@@ -394,9 +320,9 @@ class Linearizer:
 
     @staticmethod
     def _parse_methods(
-        method_dict: dict[_VAR_FUNC, str | LinearizationMethod],
-    ) -> dict[_VAR_FUNC, LinearizationMethod]:
-        parsed_methods: dict[_VAR_FUNC, LinearizationMethod] = {}
+        method_dict: dict[VAR_FUNC, str | LinearizationMethod],
+    ) -> dict[VAR_FUNC, LinearizationMethod]:
+        parsed_methods: dict[VAR_FUNC, LinearizationMethod] = {}
         for var, method in method_dict.items():
             if isinstance(method, LinearizationMethod):
                 parsed_methods[var] = method
@@ -417,12 +343,12 @@ class Linearizer:
         return self._context
 
     @property
-    def method_dict(self) -> dict[_VAR_FUNC, LinearizationMethod]:
+    def method_dict(self) -> dict[VAR_FUNC, LinearizationMethod]:
         """Mapping of original variable to linearization method."""
         return self._method_dict
 
     @property
-    def steady_state(self) -> dict[_VAR_FUNC, Expr | None]:
+    def steady_state(self) -> dict[VAR_FUNC, Expr | None]:
         """Mapping of original variable to its steady state value/expression."""
         return self._steady_state
 
@@ -437,7 +363,7 @@ class Linearizer:
         return self._residuals
 
     @property
-    def missing_steady_states(self) -> tuple[_VAR_FUNC, ...]:
+    def missing_steady_states(self) -> tuple[VAR_FUNC, ...]:
         """Tuple of original variables that are missing steady state values required for linearization."""
         return tuple(
             spec.original

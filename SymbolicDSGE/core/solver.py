@@ -32,7 +32,6 @@ from .desugar import (
     _offset_expressions,
     desugar_model,
 )
-from .linearization import linearize_model
 from .solved_model import (
     SolvedModel,
     FirstOrderSolvedModel,
@@ -83,7 +82,6 @@ class DSGESolver:
         *,
         variable_order: Sequence[Function | str] | None = None,
         params_order: list[str] | None = None,
-        linearize: bool = False,
     ) -> CompiledModel:
         """Compile a parsed Model config into numerical representation ready for solving.
 
@@ -93,8 +91,6 @@ class DSGESolver:
             Order of the model's declared variables. ``None`` uses the default canonical order (states, controls).
         params_order : list[str] | None
             Order of the model's parameters. ``None`` uses the order in which they were declared in the model.
-        linearize : bool
-            If ``True``, linearize the model after solving for the steady state. ``False`` assumes the specification is already linearized.
 
         Returns
         -------
@@ -103,8 +99,6 @@ class DSGESolver:
 
         """
         conf = self.model_config
-        if linearize and not conf.symbolically_linearized:
-            conf = linearize_model(conf)
 
         # Convert model to {-1, 0, 1} offsets with auxiliary variables for lags and leads.
         desugared = desugar_model(conf)

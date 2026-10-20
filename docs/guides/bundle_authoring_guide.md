@@ -35,7 +35,7 @@ parser = ModelParser("../../MODELS/POST82.yaml")  # (2)!
 model, kalman = parser.get_all()
 
 solver = DSGESolver(model, kalman)
-compiled = solver.compile(linearize=False)  # (3)!
+compiled = solver.compile()
 sol = solver.solve(
     compiled,
     ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
@@ -43,8 +43,7 @@ sol = solver.solve(
 
 bundle.add_model(
     "reference",
-    model.source_yaml, # (4)!
-    compile_kwargs={"linearize": False},
+    model.source_yaml, # (3)!
     solve_kwargs={"ss_seed": [0.0, 0.0, 0.0, 0.0, 0.0]},
 )
 
@@ -55,15 +54,13 @@ bundle.add_model(
 bundle.add_model(
     "dgp",
     model.source_yaml,  # same model as "reference" here, but could be any model
-    compile_kwargs={"linearize": False},
     solve_kwargs={"ss_seed": [0.0, 0.0, 0.0, 0.0, 0.0]},
 )
 ```
 
 1. We can set `created_by` to any string; it is recorded in the bundle manifest for provenance. Defaults to `"SymbolicDSGE <version>"` when omitted.
 2. `ModelParser` populates `ModelConfig.source_yaml` automatically; the bundle uses it without reading the file again.
-3. Set `True` for models authored in nonlinear levels. See the [Quick Start](quickstart.md#compilation) for details.
-4. The bundle keeps the YAML text originating our model. The loader will respect the solve/compile kwargs and solve the model again to obtain the exact same `SolvedModel` deterministically.
+3. The bundle keeps the YAML text originating our model. The loader will respect the solve/compile kwargs and solve the model again to obtain the exact same `SolvedModel` deterministically.
 
 ???+ note "Why we solve first"
     The bundle preserves the YAML and the recorded compile/solve kwargs, then runs them again at load time. Solving here is only required if we want to attach an estimation, an MC pipeline, or a result derived from a `SolvedModel`. Bundles that only carry authored model text do not need a live `SolvedModel`.

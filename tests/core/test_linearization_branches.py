@@ -7,11 +7,8 @@ from types import SimpleNamespace
 import pytest
 import sympy as sp
 
-from SymbolicDSGE.core.linearization import (
-    LinearizationMethod,
-    Linearizer,
-    VariableTransformSpec,
-)
+from SymbolicDSGE.linearization import Linearizer
+from SymbolicDSGE.linearization.spec import LinearizationMethod, VariableTransformSpec
 
 
 def test_reconstruct_requires_steady_state():

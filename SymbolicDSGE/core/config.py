@@ -9,7 +9,7 @@ from numpy import array, asarray, eye, float64, ix_, outer
 from numpy.typing import NDArray
 import pickle
 
-from .linearization import LinearizationMethod
+from ..linearization.spec import LinearizationMethod
 
 KT = TypeVar("KT")
 V = TypeVar("V")

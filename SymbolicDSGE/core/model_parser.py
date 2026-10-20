@@ -38,7 +38,7 @@ from .config import (
     FunctionGetterDict,
 )
 from ..kalman.config import KalmanConfig, make_R
-from .linearization import LinearizationMethod
+from ..linearization.spec import LinearizationMethod
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 

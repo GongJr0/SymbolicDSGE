@@ -15,9 +15,9 @@ from .core import (
     ModelParser,
     Shock,
     ShockPath,
-    linearize_model,
     SolvedModel,
 )
+from .linearization import linearize_model
 from .kalman import KalmanFilter
 from .estimation import Estimator
 from .bundle import BundleBuilder, load_bundle

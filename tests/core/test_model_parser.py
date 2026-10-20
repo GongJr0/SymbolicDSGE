@@ -10,7 +10,7 @@ import yaml
 
 from SymbolicDSGE.core.model_parser import ModelParser, _check_connective_parens
 from SymbolicDSGE.core.config import Constraint
-from SymbolicDSGE.core.linearization import LinearizationMethod
+from SymbolicDSGE.linearization.spec import LinearizationMethod
 
 
 def _write_yaml(path: Path, data: dict) -> Path:

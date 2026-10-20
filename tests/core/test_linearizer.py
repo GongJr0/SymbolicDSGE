@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 import sympy as sp
 
-from SymbolicDSGE.core import DSGESolver, ModelParser, linearize_model
-from SymbolicDSGE.core.linearization import Linearizer
+from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.linearization import Linearizer, linearize_model
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.kalman.config import KalmanConfig
 

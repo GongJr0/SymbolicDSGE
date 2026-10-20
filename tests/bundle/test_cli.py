@@ -63,7 +63,7 @@ def _bundle(tmp_path: Path, test_model_yaml, *, with_result: bool = True) -> Pat
     )
     return (
         BundleBuilder(created_by="cli-test")
-        .add_model("reference", test_model_yaml, compile_kwargs={"linearize": False})
+        .add_model("reference", test_model_yaml)
         .add_mc(pipe, result=result)
         .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
         .set_simulation(
@@ -150,8 +150,6 @@ def test_model_config_moves_to_the_root_and_back(
     packed = compile_directory(extracted, tmp_path / "out.sdsge")
     member = load_bundle(packed).manifest.model_member("reference")
     assert member is not None and member.path == "model/reference.yaml"
-    # The options the loader rebuilds the model with survive the round trip.
-    assert member.options["compile_kwargs"] == {"linearize": False}
 
 
 # -- compile refuses what it cannot pack -------------------------------------

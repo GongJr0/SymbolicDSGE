@@ -23,7 +23,7 @@ from sympy.core.function import AppliedUndef
 
 from SymbolicDSGE.core import ModelParser
 from SymbolicDSGE.core.desugar import desugar_model
-from SymbolicDSGE.core.linearization import LinearizationMethod
+from SymbolicDSGE.linearization.spec import LinearizationMethod
 
 t = sp.Symbol("t", integer=True)
 
