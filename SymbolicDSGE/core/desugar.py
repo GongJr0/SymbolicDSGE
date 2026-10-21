@@ -278,9 +278,6 @@ def _register(
         # The aux tracks its origin exactly, so it shares the origin's expansion
         # point and linearization.
         conf.variables.ss_seed[func] = conf.variables.ss_seed[origin]  # pyright: ignore
-        conf.variables.linearization[func] = (  # pyright: ignore
-            conf.variables.linearization[origin]
-        )
         conf.equations.model[g.name] = sp.Eq(  # pyright: ignore
             func(t), source(t - 1) if g.depth < 0 else source(t + 1)
         )

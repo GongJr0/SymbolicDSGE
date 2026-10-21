@@ -1,6 +1,5 @@
-from .linearization import Linearizer, linearize_model
+from .linearizer import Linearizer
 
 __all__ = [
     "Linearizer",
-    "linearize_model",
 ]

@@ -1,7 +1,9 @@
-"""End-to-end rejection tests: malformed configs must not slip through the parser.
+"""Rejection tests: malformed configs must not slip through the parser.
 
 Each case starts from a minimal valid model and breaks exactly one field, then
 asserts ``ModelParser.from_string(...).get_all()`` raises with a clear message.
+The last section calls three parser helpers directly, for guards whose branches
+no authored config can reach.
 """
 
 from __future__ import annotations
@@ -10,6 +12,11 @@ import pytest
 import sympy as sp
 
 from SymbolicDSGE import ModelParser
+from SymbolicDSGE.core.model_parser import (
+    _load_yaml,
+    _reject_unknown_keys,
+    _sympy_parsers,
+)
 
 
 def _parse(text: str):
@@ -18,8 +25,7 @@ def _parse(text: str):
 
 BASE = """
 name: MINI
-variables:
-  x: {ss_seed: null}
+variables: [x]
 shocks:
   - e
 equations:
@@ -42,15 +48,6 @@ calibration:
 def test_base_is_valid():
     model, _ = _parse(BASE)
     assert model is not None
-
-
-def test_rejects_invalid_linearization_method():
-    text = BASE.replace(
-        "x: {ss_seed: null}",
-        "x: {ss_seed: null, linearization: bogus}",
-    )
-    with pytest.raises(ValueError, match="Invalid linearization method 'bogus'"):
-        _parse(text)
 
 
 def test_rejects_malformed_shock_correlation_pair():
@@ -101,7 +98,7 @@ def test_derived_entries_resolve_through_each_other():
     text = BASE.replace(
         "    sig: 0.1",
         "    sig: 0.1\n    half_rho: rho / 2\n    quarter_rho: half_rho / 2",
-    ).replace("x: {ss_seed: null}", "x: {ss_seed: quarter_rho}")
+    ).replace("variables: [x]", "variables: [x]\nss_seed:\n  x: quarter_rho")
     model, _ = _parse(text)
 
     seed = model.variables.ss_seed[model.variables.variables[0]]
@@ -146,10 +143,7 @@ def test_rejects_derived_entry_named_as_shock_std():
 # and more than one correlation pair to collide with.
 MULTI = """
 name: MULTI
-variables:
-  x: {ss_seed: null}
-  y: {ss_seed: null}
-  z: {ss_seed: null}
+variables: [x, y, z]
 shocks:
   - e_x
   - e_y
@@ -265,3 +259,89 @@ def test_unspecified_correlation_pairs_do_not_count_as_duplicates():
     assert corr["e_x", "e_y"] == "rho_xy"
     assert corr["e_x", "e_z"] is None
     assert corr["e_y", "e_z"] is None
+
+
+# ---------------- variables and the top-level ss_seed block ----------------
+
+
+def test_rejects_missing_variables():
+    text = BASE.replace("variables: [x]", "")
+    with pytest.raises(ValueError, match="Missing required 'variables'"):
+        _parse(text)
+
+
+def test_rejects_mapping_form_variables():
+    text = BASE.replace("variables: [x]", "variables:\n  x: {ss_seed: null}")
+    with pytest.raises(TypeError, match="'variables' must be a list"):
+        _parse(text)
+
+
+def test_rejects_non_string_variable_names():
+    text = BASE.replace("variables: [x]", "variables: [1]")
+    with pytest.raises(TypeError, match="list of strings"):
+        _parse(text)
+
+
+def test_rejects_non_mapping_ss_seed():
+    text = BASE.replace("variables: [x]", "variables: [x]\nss_seed: [x]")
+    with pytest.raises(TypeError, match="'ss_seed' must be a mapping"):
+        _parse(text)
+
+
+def test_rejects_ss_seed_for_undeclared_variable():
+    text = BASE.replace("variables: [x]", "variables: [x]\nss_seed:\n  xx: rho")
+    with pytest.raises(ValueError, match=r"Unknown field\(s\) under 'ss_seed'"):
+        _parse(text)
+
+
+def test_ss_seed_densifies_over_the_declared_set():
+    # Authored sparse, stored dense: every declared variable gets a key, and
+    # None is what the solver reads as "seed this one at zero".
+    text = MULTI.replace(
+        "variables: [x, y, z]", "variables: [x, y, z]\nss_seed:\n  y: rho"
+    )
+    model, _ = _parse(text)
+    seeds = model.variables.ss_seed
+
+    assert set(seeds) == set(model.variables.variables)
+    assert seeds["y"] == sp.Symbol("rho")
+    assert seeds["x"] is None
+    assert seeds["z"] is None
+
+
+def test_accepts_an_empty_ss_seed_block():
+    text = BASE.replace("variables: [x]", "variables: [x]\nss_seed:")
+    model, _ = _parse(text)
+
+    assert model.variables.ss_seed["x"] is None
+
+
+# ---------------- helper guards with no authored expression ----------------
+
+
+def test_reject_unknown_keys():
+    # non-dict is a no-op
+    _reject_unknown_keys(["not", "a", "dict"], frozenset(), "where")
+    # subset is fine
+    _reject_unknown_keys({"a": 1}, frozenset({"a", "b"}), "where")
+    with pytest.raises(ValueError, match="Unknown field"):
+        _reject_unknown_keys({"z": 1}, frozenset({"a"}), "block")
+
+
+def test_load_yaml_rejects_non_mapping_root():
+    with pytest.raises(TypeError, match="root must be a mapping"):
+        _load_yaml("- a\n- b\n", "<test>")
+
+
+def test_sympy_parsers_relational_and_expr_guards():
+    locals_ = {"x": sp.Symbol("x"), "y": sp.Symbol("y")}
+    get_expr, get_relational, _get_eq = _sympy_parsers(locals_, {})
+
+    rel = get_relational("x > y")
+    assert rel.rel_op == ">"
+    # a plain expression is not a Relational
+    with pytest.raises(TypeError, match="not a valid SymPy Relational"):
+        get_relational("x + y")
+    # a relational is not an Expr
+    with pytest.raises(TypeError, match="not a valid SymPy Expr"):
+        get_expr("x > y")

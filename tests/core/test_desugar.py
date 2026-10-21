@@ -23,7 +23,6 @@ from sympy.core.function import AppliedUndef
 
 from SymbolicDSGE.core import ModelParser
 from SymbolicDSGE.core.desugar import desugar_model
-from SymbolicDSGE.linearization.spec import LinearizationMethod
 
 t = sp.Symbol("t", integer=True)
 
@@ -251,40 +250,17 @@ def test_observables_are_rewritten(tmp_path):
     )(t - 1)
 
 
-def test_lag_aux_inherits_its_origin_expansion_point(tmp_path):
+def test_aux_inherits_its_origin_expansion_point(tmp_path):
     data = copy.deepcopy(NATURAL_TIME_MODEL)
+    data["ss_seed"] = {"u": "rbar"}
+
     data["equations"]["model"]["u_process"] = "u(t) = rho_u*u(t-2) + e_u"
-    data["variables"] = {
-        "u": {"ss_seed": "rbar", "linearization": "log"},
-        "v": None,
-        "r": None,
-        "Pi": None,
-        "x": None,
-        "r_star": None,
-    }
-    result = desugar_model(_parse(tmp_path, data))
-    variables = result.config.variables
-
+    variables = desugar_model(_parse(tmp_path, data)).config.variables
     assert variables.ss_seed["u_lag1"] == variables.ss_seed["u"]
-    assert variables.linearization["u_lag1"] is LinearizationMethod.LOG
 
-
-def test_lead_aux_inherits_its_origin_expansion_point(tmp_path):
-    data = copy.deepcopy(NATURAL_TIME_MODEL)
     data["equations"]["model"]["u_process"] = "u(t) = rho_u*u(t+2) + e_u"
-    data["variables"] = {
-        "u": {"ss_seed": "rbar", "linearization": "log"},
-        "v": None,
-        "r": None,
-        "Pi": None,
-        "x": None,
-        "r_star": None,
-    }
-    result = desugar_model(_parse(tmp_path, data))
-    variables = result.config.variables
-
+    variables = desugar_model(_parse(tmp_path, data)).config.variables
     assert variables.ss_seed["u_lead1"] == variables.ss_seed["u"]
-    assert variables.linearization["u_lead1"] is LinearizationMethod.LOG
 
 
 def test_generated_variables_are_appended_to_the_declared_set(deep):

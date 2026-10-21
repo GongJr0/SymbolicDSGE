@@ -17,7 +17,6 @@ from .core import (
     ShockPath,
     SolvedModel,
 )
-from .linearization import linearize_model
 from .kalman import KalmanFilter
 from .estimation import Estimator
 from .bundle import BundleBuilder, load_bundle
@@ -33,7 +32,6 @@ __all__ = [
     "Shock",
     "ShockPath",
     "utils",
-    "linearize_model",
     # .sdsge bundle API
     "BundleBuilder",
     "load_bundle",

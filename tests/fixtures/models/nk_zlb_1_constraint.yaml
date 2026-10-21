@@ -30,24 +30,22 @@
 # binding variant is the one entry under regime.
 
 name: "NK_ZLB"
-
-variables:
-  bet: {ss_seed: bet_seed} # 0.994
-  c: {ss_seed: c_seed}
-  y: {ss_seed: y_seed}
-  l: {ss_seed: l_seed}
-  w: {ss_seed: w_seed}
-  mc: {ss_seed: mc_seed}
-  r: {ss_seed: r_seed}
-  g: {ss_seed: g_seed}
-  pie: {ss_seed: pie_seed}
-  pie_star: {ss_seed: pie_star_seed}
-  x1: {ss_seed: x1_seed}
-  x2: {ss_seed: x2_seed}
-  v: {ss_seed: v_seed}
-  pie_an: # zero at the steady state, and affine in pie, so the default seed is exact
-  r_an:
-  yhat:
+variables: [bet, c, y, l, w, mc, r, g, pie, pie_star, x1, x2, v,
+            pie_an, r_an, yhat]
+ss_seed:
+  bet: bet_seed # 0.994
+  c: c_seed
+  y: y_seed
+  l: l_seed
+  w: w_seed
+  mc: mc_seed
+  r: r_seed
+  g:  g_seed
+  pie:  pie_seed
+  pie_star:  pie_star_seed
+  x1:  x1_seed
+  x2:  x2_seed
+  v:  v_seed
 
 shocks:
     - epsi

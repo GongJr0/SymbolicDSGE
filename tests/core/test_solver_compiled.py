@@ -20,14 +20,7 @@ def _nonlinear_compile_yaml() -> str:
     return textwrap.dedent(
         """
         name: "NONLINEAR_COMPILE_LINEARIZE_TEST"
-        variables:
-          a:
-            linearization: log
-            ss_seed: a_ss
-          k:
-            linearization: taylor
-            ss_seed: k_ss
-          z: {}
+        variables: [a, k, z]
         shocks:
           - e_a
           - e_z

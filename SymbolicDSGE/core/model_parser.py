@@ -38,7 +38,6 @@ from .config import (
     FunctionGetterDict,
 )
 from ..kalman.config import KalmanConfig, make_R
-from ..linearization.spec import LinearizationMethod
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
@@ -53,6 +52,7 @@ _ALLOWED_TOP_LEVEL_KEYS = (
         {
             "name",
             "variables",
+            "ss_seed",
             "shocks",
             "equations",
             "calibration",
@@ -524,9 +524,7 @@ class ModelParser:
 
         _get_expr, _get_relational, _get_eq = _sympy_parsers(_LOCALS, local_subs)
 
-        variables = _parse_variables(
-            data, _LOCALS, ordered_var_names, variable_funcs, _get_expr
-        )
+        variables = _parse_variables(data, ordered_var_names, variable_funcs, _get_expr)
 
         equations = _parse_equations(
             data,
@@ -737,7 +735,7 @@ def _build_namespace(
     list[Symbol],
     list[Symbol],
 ]:
-    ordered_var_names, _ = _coerce_variable_data(data)
+    ordered_var_names = _get_variables(data)
 
     t = sp.symbols("t", integer=True)
 
@@ -777,35 +775,24 @@ def _build_namespace(
     )
 
 
-def _coerce_variable_data(
-    data: dict[str, Any],
-) -> tuple[list[str], dict[str, dict[str, Any]]]:
-    raw_variables = data["variables"]
-    if isinstance(raw_variables, list):
-        ordered_var_names = list(raw_variables)
-        return ordered_var_names, {name: {} for name in ordered_var_names}
-    if not isinstance(raw_variables, dict):
-        raise TypeError("`variables` must be either a list or a mapping.")
+def _get_variables(data: dict[str, Any]) -> list[str]:
+    variables = data.get("variables")
+    if variables is None:
+        raise ValueError("Missing required 'variables' field in the configuration.")
+    if not isinstance(variables, list):
+        raise TypeError(f"'variables' must be a list, got {type(variables).__name__}")
+    if not all(isinstance(v, str) for v in variables):
+        raise TypeError("'variables' must be a list of strings")
+    return variables
 
-    ordered_var_names = list(raw_variables.keys())
-    variable_data: dict[str, dict[str, Any]] = {}
-    allowed_keys = {"ss_seed", "linearization"}
-    for name, spec in raw_variables.items():
-        if spec is None:
-            variable_data[name] = {}
-        elif isinstance(spec, dict):
-            unknown_keys = sorted(set(spec).difference(allowed_keys))
-            if unknown_keys:
-                raise ValueError(
-                    f"Variable '{name}' has unsupported metadata keys: {unknown_keys}. "
-                    f"Supported keys are: {sorted(allowed_keys)}."
-                )
-            variable_data[name] = spec
-        else:
-            raise TypeError(
-                "Each variable entry must be a mapping or null when `variables` is a mapping."
-            )
-    return ordered_var_names, variable_data
+
+def _get_ss_seed(data: dict[str, Any]) -> dict[str, Any]:
+    ss_seed = data.get("ss_seed")
+    if ss_seed is None:
+        return {}
+    _require_mapping(ss_seed, "ss_seed")
+    _reject_unknown_keys(ss_seed, frozenset(data["variables"]), "ss_seed")
+    return dict(ss_seed)
 
 
 def _sympy_parsers(
@@ -954,39 +941,23 @@ def _derive_observable_structure(
 
 def _parse_variables(
     data: dict[str, Any],
-    _LOCALS: dict[str, Any],
     ordered_var_names: list[str],
     variable_funcs: list[Function],
     _get_expr: Callable[[str], Expr],
 ) -> Variables:
-    _, variable_data = _coerce_variable_data(data)
+    ss_seed_raw = _get_ss_seed(data)
 
     ss_seed: dict[Function, Expr | None] = {}
-    linearization: dict[Function, LinearizationMethod] = {}
-
     for var_name, var_func in zip(ordered_var_names, variable_funcs):
-        spec = variable_data[var_name]
-
-        ss_raw = spec.get("ss_seed", None)
+        ss_raw = ss_seed_raw.get(var_name)
         if ss_raw is None:
             ss_seed[var_func] = None
         else:
             ss_seed[var_func] = _get_expr(str(ss_raw))
 
-        method_raw = spec.get("linearization", LinearizationMethod.NONE.value)
-        if isinstance(method_raw, str):
-            method_raw = method_raw.strip().lower()
-        try:
-            linearization[var_func] = LinearizationMethod(method_raw)
-        except ValueError as exc:
-            raise ValueError(
-                f"Invalid linearization method '{method_raw}' for variable '{var_name}'."
-            ) from exc
-
     return Variables(
         variables=variable_funcs,
         ss_seed=FunctionGetterDict(ss_seed),
-        linearization=FunctionGetterDict(linearization),
     )
 
 
