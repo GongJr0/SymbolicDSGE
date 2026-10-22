@@ -19,7 +19,6 @@ the controls.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Iterator
 
@@ -27,7 +26,7 @@ import sympy as sp
 from sympy import Eq, Expr, Function, Symbol
 from sympy.core.function import AppliedUndef
 
-from SymbolicDSGE.core.config import RegimeGetterDict
+from SymbolicDSGE.core.config import SymbolGetterDict, RegimeGetterDict
 
 if TYPE_CHECKING:
     from .config import ModelConfig
@@ -66,7 +65,10 @@ class DesugarResult:
 
     """
 
-    config: ModelConfig
+    model: dict[str, Eq]
+    regimes: RegimeGetterDict | None
+    observables: SymbolGetterDict[Expr]
+    variables: tuple[Function, ...]
     generated: tuple[GeneratedVariable, ...]
 
     @property
@@ -107,27 +109,28 @@ def desugar_model(conf: ModelConfig) -> DesugarResult:
 
     aux_funcs = {(g.origin, g.depth): sp.Function(g.name) for g in generated}
 
-    out = deepcopy(conf)
-
     def rewrite(expr: Any) -> Any:
         return _rewrite(expr, aux_funcs, declared, t)  # pyright: ignore
 
-    out.equations.model = {
-        name: _rewrite_eq(eq, rewrite) for name, eq in out.equations.model.items()
+    model = {
+        name: _rewrite_eq(eq, rewrite) for name, eq in conf.equations.model.items()
     }
-    if out.equations.regime:
-        out.equations.regime = RegimeGetterDict(
+
+    regimes: RegimeGetterDict | None = None
+    if conf.equations.regime:
+        regimes = RegimeGetterDict(
             {
                 key: {
                     name: _rewrite_eq(eq, rewrite) for name, eq in replacements.items()
                 }
-                for key, replacements in out.equations.regime.items()
+                for key, replacements in conf.equations.regime.items()
             }
         )
-    for obs, expr in list(out.equations.observable.items()):
-        out.equations.observable[obs] = rewrite(expr)
-    _register(out, generated, t)
-    return DesugarResult(config=out, generated=generated)
+    observables: SymbolGetterDict[Expr] = SymbolGetterDict(
+        {obs: rewrite(expr) for obs, expr in conf.equations.observable.items()}
+    )
+    variables, model = _register(model, declared_funcs, generated, t)
+    return DesugarResult(model, regimes, observables, variables, generated)
 
 
 def _scan_offset_depths(
@@ -139,7 +142,9 @@ def _scan_offset_depths(
     """
     lags: dict[str, int] = {}
     leads: dict[str, int] = {}
-    for expr in _offset_expressions(conf):
+    for expr in _offset_expressions(
+        conf.equations.model, conf.equations.regime, conf.equations.observable
+    ):
         for call in expr.atoms(AppliedUndef):
             info = _call_offset(call, declared, t)
             if info is None:
@@ -152,15 +157,19 @@ def _scan_offset_depths(
     return lags, leads
 
 
-def _offset_expressions(conf: ModelConfig) -> Iterator[Expr]:
-    for eq in conf.equations.model.values():
+def _offset_expressions(
+    model: dict[str, Eq],
+    regimes: RegimeGetterDict | None,
+    observables: SymbolGetterDict[Expr],
+) -> Iterator[Expr]:
+    for eq in model.values():
         yield eq.lhs  # pyright: ignore[reportReturnType]
         yield eq.rhs  # pyright: ignore[reportReturnType]
-    for replacements in (conf.equations.regime or {}).values():
+    for replacements in (regimes or {}).values():
         for eq in replacements.values():
             yield eq.lhs  # pyright: ignore[reportReturnType]
             yield eq.rhs  # pyright: ignore[reportReturnType]
-    yield from conf.equations.observable.values()
+    yield from observables.values()
 
 
 def _call_offset(
@@ -257,17 +266,22 @@ def _rewrite_eq(eq: Eq, rewrite: Any) -> Eq:
 
 
 def _register(
-    conf: ModelConfig, generated: tuple[GeneratedVariable, ...], t: Symbol
-) -> None:
+    model: dict[str, Eq],
+    variables: list[Function],
+    generated: tuple[GeneratedVariable, ...],
+    t: Symbol,
+) -> tuple[tuple[Function, ...], dict[str, Eq]]:
     """Append the aux variables and their defining equations.
 
     ``v_lag{k}(t) = v_lag{k-1}(t-1)`` and ``v_lead{k}(t) = v_lead{k-1}(t+1)``
     are written in natural time, at dates the residual already carries, so
     neither chain needs a shift of its own.
     """
+    vars_out = list(variables)
+    model_out = dict(model)
     for g in generated:
         func = sp.Function(g.name)
-        conf.variables.variables.append(func)  # pyright: ignore
+        vars_out.append(func)  # pyright: ignore
 
         origin = sp.Function(g.origin)
         source = (
@@ -277,7 +291,7 @@ def _register(
         )
         # The aux tracks its origin exactly, so it shares the origin's expansion
         # point and linearization.
-        conf.variables.ss_seed[func] = conf.variables.ss_seed[origin]  # pyright: ignore
-        conf.equations.model[g.name] = sp.Eq(  # pyright: ignore
+        model_out[g.name] = sp.Eq(  # pyright: ignore
             func(t), source(t - 1) if g.depth < 0 else source(t + 1)
         )
+    return tuple(vars_out), model_out

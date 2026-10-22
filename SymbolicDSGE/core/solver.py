@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import warnings
 
 import sympy as sp
@@ -113,7 +114,7 @@ class DSGESolver:
 
         # Convert model to {-1, 0, 1} offsets with auxiliary variables for lags and leads.
         desugared = desugar_model(conf)
-        conf = desugared.config
+        conf = deepcopy(self.model_config)
         kalman_conf = self.kalman_config
         t = self.t
         ordered_variables = conf.variables.variables
@@ -357,7 +358,9 @@ class DSGESolver:
         t = Symbol("t", integer=True)
         declared = {v.__name__ for v in conf.variables.variables}
         lagged: set[str] = set()
-        for expr in _offset_expressions(conf):
+        for expr in _offset_expressions(
+            conf.equations.model, conf.equations.regime, conf.equations.observable
+        ):
             for call in expr.atoms(AppliedUndef):
                 info = _call_offset(call, declared, t)
                 if info is not None and info[1] < 0:
