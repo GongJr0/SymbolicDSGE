@@ -289,3 +289,11 @@ def test_linearize_model_matches_the_class_at_base_calibration(rbc, rbc_log):
 
     assert view.model == rbc_log.model
     assert dict(view.steady_state) == dict(rbc_log.steady_state)
+
+
+# ---------------- solver rejects a view ----------------
+
+
+def test_solver_rejects_a_view(gap_linear):
+    with pytest.raises(TypeError, match="point-linearized model is not accepted"):
+        DSGESolver(gap_linear)
