@@ -79,11 +79,6 @@ __Returns:__
 |:---------|----------------:|
 | `#!python SolvedModel` | Solved model object with relevant methods attached. |
 
-&nbsp;
-
-???+ note "Linearized Inputs"
-    `DSGESolver.solve(...)` expects a compiled linearized model. If your original model is nonlinear, pass `#!python linearize=True` to `#!python DSGESolver.compile(...)` or apply `#!python SymbolicDSGE.core.linearize_model(...)` before compilation.
-
 ```python
 DSGESolver.estimate(
     *,
