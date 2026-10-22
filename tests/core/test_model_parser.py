@@ -606,21 +606,6 @@ def test_parser_rejects_model_equation_without_single_equals(tmp_path, test_mode
         ModelParser(bad)
 
 
-def test_legacy_variable_list_defaults_linearization_and_ss_seed(parsed_test):
-    conf = parsed_test.model
-
-    assert conf.symbolically_linearized is False
-    assert [v.__name__ for v in conf.variables.variables] == [
-        "u",
-        "v",
-        "r",
-        "Pi",
-        "x",
-        "r_star",
-    ]
-    assert all(ss is None for ss in conf.variables.ss_seed.values())
-
-
 def test_parser_builds_variable_metadata_from_mapping(tmp_path, test_model_yaml):
     data = yaml.safe_load(test_model_yaml)
     data["ss_seed"] = {

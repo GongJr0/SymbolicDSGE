@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import AbstractSet, Literal, Mapping, NamedTuple, NoReturn
+from typing import Annotated, Literal, Mapping, NamedTuple, NoReturn
 
 import numpy as np
 import sympy as sp
 from numpy import float64
 from numpy.typing import NDArray
-from sympy import Eq, Expr, Symbol
+from sympy import Eq, Expr, Function, Symbol
 from sympy.core.function import AppliedUndef
 
 from .._ckernels.core import steady_state_newton
 from ..core.compiled_model import CompiledModel
-from ..core.config import SymbolGetterDict
+from ..core.config import SymbolGetterDict, FunctionGetterDict
 from .view import PointLinearView
 
 NDF = NDArray[float64]
@@ -53,7 +53,7 @@ class Linearizer:
     def __init__(
         self,
         compiled: CompiledModel,
-        methods: Mapping[str, Literal["log", "level"]] | None = None,
+        methods: Mapping[str, Annotated[str, Literal["log", "level"]]] | None = None,
         *,
         default: Literal["log", "level"] = "level",
     ) -> None:
@@ -86,14 +86,20 @@ class Linearizer:
         ----------
         params : Mapping[str, float] | None
             Parameter overrides on the model's calibration. ``None`` linearizes at
-            the calibration as authored.
+            the config calibration.
 
         Returns
         -------
         PointLinearView
-            Equations and observables in the transformed variables, the steady
-            state they expand about, and the parameters that produced it.
+            Linearized view of the model at the steady state implied by the calibration parameters.
 
+        Notes
+        -----
+        This view is only a diagnostic representation and no solver kernel requires pre-linearization.
+        For any model specified in levels, using a config from `PointLinearView.to_config()` lock the
+        model to the linearization at the config calibration and the steady state at zero. Mind that
+        estimating a model numerically linearized per parameter vector is not equivalent to estimating
+        a point-linearized model whose original equations are in levels.
         """
         compiled = self._compiled
         parameters = _resolve_parameters(compiled, params)
@@ -108,20 +114,59 @@ class Linearizer:
                 name: _linearize_equation(eq, self._methods, point, shocks)
                 for name, eq in equations.model.items()
             },
-            observables={
-                str(name): _expand(expr, self._methods, point, shocks).affine
-                for name, expr in equations.observable.items()
-            },
+            observables=SymbolGetterDict(
+                {
+                    name: _expand(expr, self._methods, point, shocks).affine
+                    for name, expr in equations.observable.items()
+                }
+            ),
             parameters=parameters,
-            ss=point,
+            steady_state=FunctionGetterDict(
+                {Function(name): value for name, value in point.items()}
+            ),
+            _config=compiled.config,
         )
+
+
+def linearize_model(
+    compiled: CompiledModel,
+    methods: Mapping[str, Literal["log", "level"]] | None = None,
+    *,
+    default: Literal["log", "level"] = "level",
+) -> PointLinearView:
+    """Linearize a model at its steady state at the config's calibration parameters.
+
+    Parameters
+    ----------
+    compiled : CompiledModel
+        Compiled model to linearize.
+    methods : Mapping[str, Literal["log", "level"]] | None
+        Linearization methods per variable. `None` uses the default for all variables.
+        When `methods` is provided with omissions, the default is filled in for the missing variables.
+    default : Literal["log", "level"]
+        Default linearization method for variables not specified in `methods`.
+
+    Returns
+    -------
+    PointLinearView
+        Linearized view of the model at the steady state implied by the calibration parameters.
+
+    Notes
+    -----
+    This view is only a diagnostic representation and no solver kernel requires pre-linearization.
+    For any model specified in levels, using a config from `PointLinearView.to_config()` lock the
+    model to the linearization at the config calibration and the steady state at zero. Mind that
+    estimating a model numerically linearized per parameter vector is not equivalent to estimating
+    a point-linearized model whose original equations are in levels.
+    """
+    return Linearizer(compiled, methods, default=default).at()
 
 
 def _linearize_equation(
     equation: Eq,
     methods: Mapping[str, LinearizationMethod],
     point: Mapping[str, float],
-    shocks: AbstractSet[Symbol],
+    shocks: frozenset[Symbol],
 ) -> Eq:
     # Each side drops its own value at the expansion point, which is what leaves
     # a deviation system and makes a second pass over the result a no-op.
@@ -141,7 +186,7 @@ def _expand(
     expr: Expr,
     methods: Mapping[str, LinearizationMethod],
     point: Mapping[str, float],
-    shocks: AbstractSet[Symbol],
+    shocks: frozenset[Symbol],
 ) -> _Expansion:
     """Affine expansion of ``expr`` about the point, and its value there.
 

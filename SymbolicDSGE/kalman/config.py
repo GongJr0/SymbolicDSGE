@@ -36,7 +36,7 @@ def make_R(
     y_order: Sequence[Symbol | str],
     std_param_map: Mapping[Any, str],
     corr_param_map: Mapping[Any, str | None] | None,
-    params: Mapping[Any, float64],
+    params: Mapping[Any, float],
     *,
     observables: Sequence[str] | None = None,
 ) -> NDArray[float64]:

@@ -700,7 +700,7 @@ class CompiledModel:
 
 def _shock_covariance(
     compiled: "CompiledModel",
-    params: Mapping[Any, float64] | None = None,
+    params: Mapping[Any, float] | None = None,
     *,
     shocks: Sequence[str] | None = None,
     corr: NDF | None = None,
@@ -723,7 +723,7 @@ def _shock_covariance(
 
 def _measurement_covariance(
     compiled: "CompiledModel",
-    params: Mapping[Any, float64] | None = None,
+    params: Mapping[Any, float] | None = None,
     *,
     observables: Sequence[str] | None = None,
 ) -> NDF:

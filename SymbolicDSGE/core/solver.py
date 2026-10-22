@@ -16,7 +16,9 @@ from numpy.typing import NDArray
 import pandas as pd
 
 if TYPE_CHECKING:
+    from ..estimation.estimator import Estimator
     from ..estimation.results import MLEResult, MAPResult, MCMCResult
+    from ..bayesian.priors import Prior
 
 from .config import ModelConfig
 from .compiled_model import (
@@ -40,10 +42,8 @@ from .solved_model import (
 )
 from .solver_backend import klein_solve, piecewise_solve, sgu_solve
 
-if TYPE_CHECKING:
-    from ..estimation.estimator import Estimator
-    from ..bayesian.priors import Prior
 from ..kalman.config import KalmanConfig
+from ..linearization.view import PointLinearView
 
 NDF = NDArray[float64]
 ND = NDArray
@@ -73,6 +73,17 @@ class DSGESolver:
     def __init__(
         self, model_config: ModelConfig, kalman_config: KalmanConfig | None = None
     ) -> None:
+
+        if isinstance(model_config, PointLinearView):  # type: ignore[unreachable]
+            raise TypeError(
+                "A point-linearized model is not accepted as solver input. "
+                "Linearizing a levels model about a point in parameter space changes the "
+                "interpretation of any likelihood-related operation under varying parameters. "
+                "Linearization already occurs numerically in the solver. You do not need to "
+                "pre-linearize a specification symbolically. If you intended to use the model "
+                "linearized at one constant point, pass `PointLinearView.to_config(). "
+            )
+
         self.model_config = model_config
         self.kalman_config = kalman_config
         self.t = sp.Symbol("t", integer=True)

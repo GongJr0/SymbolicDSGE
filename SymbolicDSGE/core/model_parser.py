@@ -551,7 +551,6 @@ class ModelParser:
             observables=observables,
             equations=equations,
             calibration=calibration,
-            symbolically_linearized=False,
         )
 
         kalman_cfg = _parse_kalman_if_present(data, observables, parameters)
@@ -932,7 +931,7 @@ def _derive_observable_structure(
     is_affine = {obs: False for obs in observables_eq}
     for obs, expr in observables_eq.items():
         expr_symbolized = expr.xreplace(state_sym_subs)
-        grads = [expr_symbolized.diff(s) for s in state_syms]
+        grads = [expr_symbolized.diff(s) for s in state_syms]  # pyright: ignore
         if all((g.free_symbols & state_set) == set() for g in grads):
             is_affine[obs] = True
 
@@ -963,7 +962,7 @@ def _parse_variables(
 
 def _resolve_calibration_locals(
     data: dict[str, Any], _LOCALS: dict[str, Any]
-) -> tuple[SymbolGetterDict[float64], dict[Symbol, Expr]]:
+) -> tuple[SymbolGetterDict[float], dict[Symbol, Expr]]:
     """Split ``calibration.parameters`` into values and derived locals.
 
     An entry carrying free symbols names a formula over other parameters
@@ -1004,7 +1003,9 @@ def _resolve_calibration_locals(
     for _ in range(len(local_subs)):
         if not any(e.free_symbols & derived for e in local_subs.values()):
             break
-        local_subs = {s: e.xreplace(local_subs) for s, e in local_subs.items()}
+        local_subs = {
+            s: e.xreplace(local_subs) for s, e in local_subs.items()
+        }  # pyright: ignore
 
     if cyclic := {s for s, e in local_subs.items() if e.free_symbols & derived}:
         raise ValueError(
@@ -1068,7 +1069,7 @@ def _parse_shock_calibration(
 def _parse_kalman_if_present(
     data: dict[str, Any],
     observables: list[Symbol],
-    parameters: SymbolGetterDict[float64],
+    parameters: SymbolGetterDict[float],
 ) -> KalmanConfig | None:
     kalman_data = data.get("kalman")
     if not kalman_data:

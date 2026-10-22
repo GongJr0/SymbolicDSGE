@@ -22,7 +22,6 @@ __Fields:__
 | observables | `#!python list[sympy.Symbol]` | Observable variables as symbols. |
 | equations | `#!python Equations` | `dataclass` containing model, constraint, observable equations, observable affinity flags, and observable Jacobian. |
 | calibration | `#!python Calib` | `dataclass` of parameter calibrations plus shock standard deviation and correlation parameter mappings. |
-| symbolically_linearized | `#!python bool` | Whether the config has already been symbolically linearized. |
 | source_yaml | `#!python str | None` | Source YAML text retained for bundle round trips. |
 
 ## `Variables`

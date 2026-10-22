@@ -143,7 +143,7 @@ class Calib:
 
     """
 
-    parameters: SymbolGetterDict[float64]
+    parameters: SymbolGetterDict[float]
     shock_std: SymbolGetterDict[str]
     shock_corr: PairGetterDict[str | None]
 
@@ -161,7 +161,7 @@ def make_Q(
     shock_order: Sequence[Symbol | str],
     std_param_map: Mapping[Any, str],
     corr_param_map: Mapping[Any, str | None] | None,
-    params: Mapping[Any, float64],
+    params: Mapping[Any, float],
     *,
     shocks: Sequence[str] | None = None,
     corr: NDArray[float64] | None = None,
@@ -255,8 +255,6 @@ class ModelConfig:
     calibration : Calib
         :class:`Calib` object containing the model's calibration parameters, shock
         standard deviations, and shock correlations.
-    symbolically_linearized : bool
-        Boolean indicating whether the model has been symbolically linearized.
     source_yaml : str | None
         Optional string containing the source YAML text from which the model
         configuration was parsed.
@@ -269,7 +267,6 @@ class ModelConfig:
     observables: list[Symbol]
     equations: Equations
     calibration: Calib
-    symbolically_linearized: bool = False
 
     #: Source YAML text the config was parsed from, retained so a model can be
     #: round-tripped into a ``.sdsge`` bundle without re-reading from disk
