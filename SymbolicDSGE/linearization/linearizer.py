@@ -13,7 +13,7 @@ from sympy import Eq, Expr, Function, Symbol
 from sympy.core.function import AppliedUndef
 
 from .._ckernels.core import steady_state_newton
-from ..core.compiled_model import CompiledModel
+from ..core.compiled_model import CompiledModel, _newton_seed
 from ..core.config import SymbolGetterDict, FunctionGetterDict
 from .view import PointLinearView
 
@@ -122,7 +122,7 @@ class Linearizer:
             ),
             parameters=parameters,
             steady_state=FunctionGetterDict(
-                {Function(name): value for name, value in point.items()}
+                {Function(name): point[name] for name in compiled.layout.declared_names}
             ),
             _config=compiled.config,
         )
@@ -130,7 +130,7 @@ class Linearizer:
 
 def linearize_model(
     compiled: CompiledModel,
-    methods: Mapping[str, Literal["log", "level"]] | None = None,
+    methods: Mapping[str, Annotated[str, Literal["log", "level"]]] | None = None,
     *,
     default: Literal["log", "level"] = "level",
 ) -> PointLinearView:
@@ -279,30 +279,6 @@ def _solve_steady_state(
         compiled.n_exog,
     )
     return {name: float(value) for name, value in zip(compiled.var_names, ss)}
-
-
-def _newton_seed(compiled: CompiledModel, parameters: Mapping[Symbol, float]) -> NDF:
-    """The model's own ``ss_seed``, resolved at ``parameters``, in canonical order.
-
-    A variable that declares no seed starts at zero, which is the right guess for
-    a model already authored in gaps.
-    """
-    seeds = compiled.config.variables.ss_seed
-    values = dict(parameters)
-    seed = np.zeros(compiled.n_var, dtype=float64)
-    for i, name in enumerate(compiled.var_names):
-        expr = seeds[name]
-        if expr is None:
-            continue
-        resolved = sp.sympify(expr).subs(values)
-        try:
-            seed[i] = float(resolved)
-        except TypeError as exc:
-            raise ValueError(
-                f"ss_seed for '{name}' did not resolve to a number at these "
-                f"parameters: {resolved}"
-            ) from exc
-    return seed
 
 
 def _parameter_vector(

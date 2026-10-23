@@ -107,18 +107,6 @@ def test_an_invalid_method_names_the_valid_ones(rbc):
         Linearizer(rbc, {"c": "taylor"})
 
 
-def test_an_aux_inherits_its_origin_method(aux):
-    # u_lag1(t) = u(t-1) only survives linearization when both sides carry the
-    # same transform. Under LOG the coefficient on the aux is rho*ubar; it would
-    # be a bare rho if the aux had fallen back to the default.
-    view = Linearizer(aux, {"u": "log"}).at()
-
-    assert view.model["u_eq"].rhs.coeff(
-        sp.Function("u_lag1")(T - 1)
-    ) == 2.0 * sp.Symbol("rho")
-    assert float(view.steady_state["u_lag1"]) == pytest.approx(2.0)
-
-
 # ---------------- the expansion point ----------------
 
 

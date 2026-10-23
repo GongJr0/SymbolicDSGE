@@ -17,6 +17,14 @@ class PointLinearView:
     _config: ModelConfig
 
     def to_config(self) -> ModelConfig:
+        if self._config.equations.constraint is not None:
+            raise NotImplementedError(
+                "Linear views of constrained models are not convertible to ModelConfig. "
+                "Any constraint conditions with literals change interpretation after linearization, "
+                "solving a point-linear constrained model may not produce results accurate to the "
+                "original specification."
+            )
+
         new = deepcopy(self._config)
         new.equations.model = dict(self.model)
 

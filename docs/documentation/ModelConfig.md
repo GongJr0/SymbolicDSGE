@@ -16,7 +16,7 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | name | `#!python str` | Model name. |
-| variables | `#!python Variables` | Parsed variable functions, steady state expressions, and linearization methods. |
+| variables | `#!python Variables` | Parsed variables (as functions of time) and steady state expressions. |
 | parameters | `#!python list[sympy.Symbol]` | Model parameters as symbols. |
 | shocks | `#!python list[sympy.Symbol]` | Innovation symbols, in declaration order, which is the shock column order. |
 | observables | `#!python list[sympy.Symbol]` | Observable variables as symbols. |
@@ -39,7 +39,6 @@ __Fields:__
 |:---------|:--------:|----------------:|
 | variables | `#!python list[sympy.Function]` | Variables as functions of time. |
 | ss_seed | `#!python FunctionGetterDict[Expr | None]` | Newton seed for the steady-state solve, per variable. `None` seeds at zero. |
-| linearization | `#!python FunctionGetterDict[LinearizationMethod]` | Linearization method per variable. |
 
 ## `Equations`
 

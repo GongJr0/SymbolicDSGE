@@ -98,7 +98,7 @@ def _parse_in(text: str, _LOCALS: dict[str, Any]) -> Basic:
     return sp.parse_expr(
         text,
         local_dict=_LOCALS,
-        evaluate=False,
+        evaluate=True,
         transformations=_GLOBAL_TRANSFORMATIONS,
     )
 

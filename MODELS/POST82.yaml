@@ -1,8 +1,6 @@
 name: "NK_LS_POST82"
 
-variables:
-  g:
-    ss_seed: 0
+variables: [g, z, r, x, Pi]
 
 # Parameter naming:
 # beta: discount factor (often fixed near 0.99 in quarterly models; LS paper doesn’t pin it in Table 3)

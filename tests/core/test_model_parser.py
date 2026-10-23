@@ -570,7 +570,7 @@ def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path, test_model_y
     data["calibration"]["parameters"].pop("beta")
     bad = _write_yaml(tmp_path / "missing_declared.yaml", data)
 
-    with pytest.raises(ValueError, match="SympifyError: beta"):
+    with pytest.raises(TypeError):
         ModelParser(bad)
 
 

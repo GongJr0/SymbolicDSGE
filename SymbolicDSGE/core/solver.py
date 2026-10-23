@@ -26,11 +26,12 @@ from .compiled_model import (
     CompiledModel,
     VariableLayout,
     RegimeBlock,
+    _newton_seed,
 )
 from sympy.core.function import AppliedUndef
 
 from .desugar import (
-    GeneratedVariable,
+    DesugarResult,
     _call_offset,
     _offset_expressions,
     desugar_model,
@@ -117,16 +118,16 @@ class DSGESolver:
         conf = deepcopy(self.model_config)
         kalman_conf = self.kalman_config
         t = self.t
-        ordered_variables = conf.variables.variables
+        ordered_variables = desugared.variables
 
         # Convert model to minimization problem
         residuals = [
-            eq.lhs - eq.rhs for eq in conf.equations.model.values()  # pyright: ignore
+            eq.lhs - eq.rhs for eq in desugared.model.values()  # pyright: ignore
         ]
 
         name_to_func = {v.__name__: v for v in ordered_variables}
 
-        layout = self._infer_variable_layout(conf, desugared.generated, variable_order)
+        layout = self._infer_variable_layout(desugared, conf.shocks, variable_order)
         var_order = list(layout.canonical_names)
 
         var_funcs = [name_to_func[name] for name in var_order]
@@ -170,7 +171,8 @@ class DSGESolver:
             conf, subs_map, set(idx.keys()), t
         )
         regimes = self._compile_regimes(
-            conf,
+            desugared,
+            conf.shocks,
             constraint_names,
             subs_map,
             cur_syms,
@@ -180,7 +182,7 @@ class DSGESolver:
         )
 
         observable_exprs = [
-            expr.xreplace(subs_map) for expr in conf.equations.observable.values()
+            expr.xreplace(subs_map) for expr in desugared.observables.values()
         ]
         # Flat row-major (n_obs, n_var) jacobian; printed to a native cfunc on
         # demand via CompiledModel.construct_measurement_jacobian_cfunc.
@@ -239,7 +241,8 @@ class DSGESolver:
 
     def _compile_regimes(
         self,
-        conf: ModelConfig,
+        desugared: DesugarResult,
+        shocks: Sequence[Symbol],
         constraint_names: tuple[str, ...],
         subs_map: dict[Any, Symbol],
         cur_syms: list[Symbol],
@@ -261,24 +264,25 @@ class DSGESolver:
         shock block, ``(len(rows), n_exog)``; ``constants`` is those rows' residual
         at the expansion point, ``(len(rows),)``.
         """
-        regimes = conf.equations.regime
+        regimes = desugared.regimes
         if not regimes:
             return {}
 
         bit = {name: i for i, name in enumerate(constraint_names)}
-        shock_syms = list(conf.shocks)
+        shock_syms = list(shocks)
+
         # At the expansion point every date holds the same vector and the
         # innovation is zero, so the pencil blocks fold onto the cur symbols.
         at_point: dict[Any, Any] = dict(zip(fwd_syms, cur_syms))
         at_point.update(zip(prev_syms, cur_syms))
-        at_point.update({shock: 0.0 for shock in conf.shocks})
+        at_point.update({shock: 0.0 for shock in shocks})
 
         compiled: dict[int, RegimeBlock] = {}
         for key, replacements in regimes.items():
             label = ", ".join(sorted(key))
             # An unknown target would append instead of overwrite, silently
             # lengthening the regime and misplacing every row index after it.
-            unknown = set(replacements) - set(conf.equations.model)
+            unknown = set(replacements) - set(desugared.model)
             if unknown:
                 raise ValueError(
                     f"Regime '{label}' replaces equations the model does not "
@@ -287,7 +291,7 @@ class DSGESolver:
 
             residuals: list[Expr] = []
             rows: list[int] = []
-            merged = {**conf.equations.model, **replacements}
+            merged = {**desugared.model, **replacements}
             for row, (name, eq) in enumerate(merged.items()):
                 resid = eq.lhs - eq.rhs  # pyright: ignore
                 residuals.append(resid.xreplace(subs_map))
@@ -346,7 +350,7 @@ class DSGESolver:
         return str(var)
 
     @staticmethod
-    def _lagged_names(conf: ModelConfig) -> set[str]:
+    def _lagged_names(desugared: DesugarResult) -> set[str]:
         """Declared variables occurring at ``t-1`` anywhere in the model.
 
         Scanned over the reference equations, every regime and the observables
@@ -356,10 +360,10 @@ class DSGESolver:
         otherwise resize the state vector between draws.
         """
         t = Symbol("t", integer=True)
-        declared = {v.__name__ for v in conf.variables.variables}
+        declared = {v.__name__ for v in desugared.variables}
         lagged: set[str] = set()
         for expr in _offset_expressions(
-            conf.equations.model, conf.equations.regime, conf.equations.observable
+            desugared.model, desugared.regimes, desugared.observables
         ):
             for call in expr.atoms(AppliedUndef):
                 info = _call_offset(call, declared, t)
@@ -369,8 +373,8 @@ class DSGESolver:
 
     def _infer_variable_layout(
         self,
-        conf: ModelConfig,
-        generated: tuple[GeneratedVariable, ...],
+        desugared: DesugarResult,
+        shocks: Sequence[Symbol],
         variable_order: Sequence[Function | str] | None = None,
     ) -> VariableLayout:
         """Canonical layout of a desugared model.
@@ -390,11 +394,11 @@ class DSGESolver:
         # too. The canonical split spans all of them including aux variables.
         # while ``declared_names`` keeps only the user's own, filtered by name
         # rather than sliced off the tail.
-        all_names = tuple(v.__name__ for v in conf.variables.variables)
-        minted = frozenset(g.name for g in generated)
+        all_names = tuple(v.__name__ for v in desugared.variables)
+        minted = frozenset(g.name for g in desugared.generated)
         declared_names = tuple(n for n in all_names if n not in minted)
 
-        lagged = self._lagged_names(conf)
+        lagged = self._lagged_names(desugared)
         state_names = tuple(name for name in all_names if name in lagged)
         control_names = tuple(name for name in all_names if name not in lagged)
 
@@ -403,7 +407,7 @@ class DSGESolver:
                 variable_order,
                 state_names,
                 control_names,
-                frozenset(g.name for g in generated),
+                frozenset(g.name for g in desugared.generated),
             )
 
         canonical_names = (*state_names, *control_names)
@@ -412,54 +416,25 @@ class DSGESolver:
         # Shock columns follow declaration order. A shock reaches the residual
         # as a bare symbol and may drive any number of equations, so which
         # variables it moves is the shock jacobian's answer, not a declared one.
-        shock_names = tuple(shock.name for shock in conf.shocks)
+        shock_names = tuple(shock.name for shock in shocks)
 
         return VariableLayout(
             n_var=len(all_names),
             n_declared=len(declared_names),
-            n_generated=len(generated),
+            n_generated=len(desugared.generated),
             n_exog=len(shock_names),
             n_state=len(state_names),
             n_ctrl=len(control_names),
             declared_names=declared_names,
-            generated_names=tuple(g.name for g in generated),
+            generated_names=tuple(g.name for g in desugared.generated),
             canonical_names=canonical_names,
             state_names=state_names,
             control_names=control_names,
             idx=idx,
-            aux_origin={g.name: g.origin for g in generated},
+            aux_origin={g.name: g.origin for g in desugared.generated},
             shock_names=shock_names,
             shock_idx={name: i for i, name in enumerate(shock_names)},
         )
-
-    @staticmethod
-    def _resolve_p0(
-        P0: ND, layout: VariableLayout, generated: tuple[GeneratedVariable, ...]
-    ) -> ND:
-        """Widen the parse-time ``P0`` over the generated variables, then permute.
-
-        ``P0`` is assembled in declared variable order at parse time, before the
-        compiler mints anything. A lag aux is its origin some periods back, so it
-        takes the origin's variance. The permutation into canonical order is a
-        lossless reindex.
-        """
-        n_declared = layout.n_declared
-        if P0.shape != (n_declared, n_declared):
-            raise ValueError(
-                f"P0 has shape {P0.shape}, expected ({n_declared}, {n_declared}) "
-                f"for the model's declared variables."
-            )
-
-        full = (*layout.declared_names, *layout.generated_names)
-        declared_idx = {name: i for i, name in enumerate(full)}
-        wide = np.eye(len(full), dtype=float64)
-        wide[:n_declared, :n_declared] = P0
-        for g in generated:
-            origin = declared_idx[g.origin]
-            wide[declared_idx[g.name], declared_idx[g.name]] = P0[origin, origin]
-
-        perm = [declared_idx[name] for name in layout.canonical_names]
-        return wide[np.ix_(perm, perm)]
 
     @staticmethod
     def _resolve_variable_order(
@@ -624,8 +599,9 @@ class DSGESolver:
         """
         layout = compiled.layout
         declared = layout.declared_names
+        params = compiled.config.calibration.parameters
 
-        seed = DSGESolver._configured_ss_seed(compiled)
+        seed = _newton_seed(compiled, params)
         if ss_seed is None:
             return seed
 
@@ -661,29 +637,6 @@ class DSGESolver:
             if origin in by_name:
                 seed[i] = by_name[origin]
         return seed
-
-    @staticmethod
-    def _configured_ss_seed(compiled: CompiledModel) -> NDF:
-        """The model's own symbolic ``ss_seed``, evaluated in canonical order.
-
-        A variable that declares none seeds at zero.
-        """
-        conf = compiled.config
-        name_to_func = {v.__name__: v for v in conf.variables.variables}
-        params = conf.calibration.parameters
-        ss = np.zeros(compiled.n_var, dtype=float64)
-        for i, name in enumerate(compiled.var_names):
-            expr = conf.variables.ss_seed[name_to_func[name]]
-            if expr is None:
-                continue
-            val = sp.simplify(sp.sympify(expr).subs(params))
-            try:
-                ss[i] = float(val)
-            except TypeError as exc:
-                raise ValueError(
-                    f"ss_seed for '{name}' did not evaluate to a number: {val}"
-                ) from exc
-        return ss
 
     def _estimator(
         self,

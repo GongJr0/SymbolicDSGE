@@ -219,7 +219,6 @@ bundle_path = (
     .add_model(
         "reference",
         model.source_yaml, # (3)!
-        compile_kwargs={"linearize": False},
     )
     .write("experiment-1.sdsge")
 )

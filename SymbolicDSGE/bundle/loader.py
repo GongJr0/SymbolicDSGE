@@ -174,6 +174,13 @@ def _load_models(
         model, kalman = parser.get_all()
         solver = DSGESolver(model, cast(Any, kalman))
         compile_kwargs = dict(member.options.get("compile_kwargs", {}))
+
+        # --- Remove after SDSGE_MIN_READABLE_VERSION is past V12 ---
+        # Linearization is not a kwarg in compile anymore. Tolerating
+        # instead of bumping the version until a version bump is due.
+        compile_kwargs.pop("linearize", None)
+        # -----------------------------------------------------------
+
         solve_kwargs = dict(member.options.get("solve_kwargs", {}))
         compiled = solver.compile(**compile_kwargs)
         out[member.model_name] = solver.solve(compiled, **solve_kwargs)

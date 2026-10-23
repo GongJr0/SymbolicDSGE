@@ -45,8 +45,6 @@ This displays the parsed equations as `SymPy` objects. Variables are functions o
 
 Compilation converts the symbolic model to a numeric residual callback. It desugars longer leads and lags with auxiliary variables, derives the state and control layout from equation timing, and compiles the residual consumed by the first-order solver.
 
-If your model is written in nonlinear levels, pass `linearize=True` to `DSGESolver.compile(...)`. The example is already written in linearized gap form, so it compiles directly.
-
 ```python
 solver = DSGESolver(model, kalman)
 compiled = solver.compile(
