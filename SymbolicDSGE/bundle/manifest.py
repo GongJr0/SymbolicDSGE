@@ -32,14 +32,14 @@ from ..core.shock.generators import ShockParameters, ShockPathParameters
 # ------
 
 #: Bundle format version. Bump on every manifest or member change.
-SDSGE_FORMAT_VERSION = 12
+SDSGE_FORMAT_VERSION = 13
 
 #: Oldest bundle format this reader can reconstruct.
-SDSGE_MIN_READABLE_VERSION = 12
+SDSGE_MIN_READABLE_VERSION = 13
 
 #: Most recent format change requiring a newer reader. Written into the
 #: manifest so older readers reject bundles they cannot interpret.
-SDSGE_LAST_BREAKING_VERSION = 12
+SDSGE_LAST_BREAKING_VERSION = 13
 
 MemberKind = Literal[
     "model_config",

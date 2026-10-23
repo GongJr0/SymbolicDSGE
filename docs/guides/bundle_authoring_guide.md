@@ -229,23 +229,23 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     3962  17-10-2026 16:50   manifest.json
-     2099  17-10-2026 16:50   model/reference.yaml
-     2099  17-10-2026 16:50   model/dgp.yaml
-      643  17-10-2026 16:50   estimation/spec.json
-     1891  17-10-2026 16:50   estimation/observed.parquet
-    18922  17-10-2026 16:50   estimation/posterior.parquet
-      585  17-10-2026 16:50   estimation/result.json
-     7131  17-10-2026 16:50   shock/table/aadb84934fad3b59.parquet
-     1322  17-10-2026 16:50   montecarlo/pipeline.json
-      563  17-10-2026 16:50   montecarlo/result/meta.json
-      538  17-10-2026 16:50   montecarlo/result/datagen/datagen_steps.json
-      175  17-10-2026 16:50   montecarlo/result/tests/test_steps.json
-     2276  17-10-2026 16:50   montecarlo/result/tests/test_traces.parquet
-      305  17-10-2026 16:50   simulation.json
-     1282  17-10-2026 16:50   data/auxiliary_series.parquet
+     3826  23-10-2026 06:54   manifest.json
+     2099  23-10-2026 06:54   model/reference.yaml
+     2099  23-10-2026 06:54   model/dgp.yaml
+      643  23-10-2026 06:54   estimation/spec.json
+     1891  23-10-2026 06:54   estimation/observed.parquet
+    18922  23-10-2026 06:54   estimation/posterior.parquet
+      585  23-10-2026 06:54   estimation/result.json
+     7131  23-10-2026 06:54   shock/table/aadb84934fad3b59.parquet
+     1322  23-10-2026 06:54   montecarlo/pipeline.json
+      562  23-10-2026 06:54   montecarlo/result/meta.json
+      538  23-10-2026 06:54   montecarlo/result/datagen/datagen_steps.json
+      175  23-10-2026 06:54   montecarlo/result/tests/test_steps.json
+     2276  23-10-2026 06:54   montecarlo/result/tests/test_traces.parquet
+      305  23-10-2026 06:54   simulation.json
+     1282  23-10-2026 06:54   data/auxiliary_series.parquet
 ---------                     -------
-    43793                     15 files
+    43656                     15 files
 ```
 
 For a structured view, decompile it:
