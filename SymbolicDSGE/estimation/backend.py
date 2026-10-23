@@ -257,8 +257,8 @@ def _build_q_spec(
     takes the ``corr_from_block`` regime.
     """
     calib = compiled.config.calibration
-    shock_std = calib.shock_std
-    shock_corr = calib.shock_corr
+    shock_std = calib.shocks.std
+    shock_corr = calib.shocks.corr
     std_names = [shock_std[s] for s in compiled.config.shocks]
 
     corr_pairs: list[tuple[int, int, str]] = []
@@ -319,10 +319,11 @@ def _build_r_spec(
     n_obs = len(observables)
     obs_list = list(observables)
 
-    kalman = compiled.kalman
-    std_map = None if kalman is None else kalman.R_std_param_map
+    meas_noise = compiled.config.calibration.measurement_noise
+
+    std_map = meas_noise.std if meas_noise is not None else None
     corr_map: Mapping[Any, str | None] | None = (
-        None if kalman is None else kalman.R_corr_param_map
+        meas_noise.corr if meas_noise is not None else None
     )
 
     std_names: list[str] = [] if std_map is None else [std_map[o] for o in obs_list]
@@ -407,7 +408,6 @@ def estim_context(
         priors=priors,
         matrix_blocks=matrix_blocks,
         compiled=compiled,
-        kalman=compiled.kalman,
         observables=prepared.observables,
     )
 
@@ -421,7 +421,7 @@ def estim_context(
     roles = None
     if priors is None:
         stdQ, corrQ = r.active_Q(param_names, compiled)
-        stdR, corrR = r.active_R(param_names, compiled.kalman, prepared.observables)
+        stdR, corrR = r.active_R(param_names, compiled, prepared.observables)
         roles = (stdQ | stdR, corrQ | corrR)
     lo, hi = r.resolve_bounds(bounds, param_index, matrix_blocks, transforms, roles)
 
@@ -580,24 +580,18 @@ def _build_R(
             raise ValueError(f"Provided R has shape {R.shape}, expected ({m}, {m}).")
         return R
 
-    kalman = compiled.kalman
-    if kalman is None:
+    meas_noise = compiled.config.calibration.measurement_noise
+    if meas_noise is None or meas_noise.std is None:
         raise ValueError(
-            "KalmanConfig is required to build R from config parameters."
-            "Supply an R override or add a kalman config to the model specification."
+            "`calibration.measurement_noise` is required to build R from config parameters."
+            "Supply an R override or add a measurement noise block to the model specification."
         )
 
-    if kalman.R_std_param_map is not None:
-        return _measurement_covariance(
-            compiled,
-            params,
-            observables=observables,
-        )
-    if kalman.R is None:
-        raise ValueError("R is not available. Provide `R` or a KalmanConfig with R.")
-    obs_idx = {name: i for i, name in enumerate(compiled.observable_names)}
-    mat_idx = [obs_idx[name] for name in observables]
-    return kalman.R[np.ix_(mat_idx, mat_idx)]
+    return _measurement_covariance(
+        compiled,
+        params,
+        observables=observables,
+    )
 
 
 def resolve_filter_options(

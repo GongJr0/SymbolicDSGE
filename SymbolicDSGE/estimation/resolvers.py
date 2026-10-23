@@ -13,7 +13,6 @@ from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
 from ..bayesian.support import OutOfSupportError
 from ..bayesian.transforms import CholeskyCorrTransform, Transform
-from ..kalman.config import KalmanConfig
 from ..core.config import PairGetterDict
 
 NDF = NDArray[np.float64]
@@ -78,7 +77,6 @@ def resolve_theta_layout(
     requested: Sequence[str],
     priored: Mapping[str, Prior] | None,
     compiled: CompiledModel,
-    kalman: KalmanConfig | None,
     observables: list[str],
 ) -> tuple[dict[str, int], dict[str, b.MatrixPriorBlock]]:
     """Resolve the requested names into the theta layout and its CPC blocks.
@@ -96,7 +94,7 @@ def resolve_theta_layout(
         by_key = key in present
         try:
             block = (
-                _resolve_R(kalman=kalman, observables=observables)
+                _resolve_R(compiled, observables=observables)
                 if key == "R_corr"
                 else _resolve_Q(compiled=compiled)
             )
@@ -150,7 +148,7 @@ def resolve_theta_layout(
             )
 
     if blocks:
-        std_names = _matrix_std_names(compiled, kalman, observables)
+        std_names = _matrix_std_names(compiled, observables)
         for key, block in blocks.items():
             clash = sorted(std_names & set(block.member_names))
             if clash:
@@ -184,7 +182,6 @@ def resolve_theta_layout(
 
 def _matrix_std_names(
     compiled: CompiledModel,
-    kalman: KalmanConfig | None,
     observables: list[str],
 ) -> set[str]:
     """Std parameter names that reach a cov spec's ``std_slots``, across Q and R.
@@ -192,13 +189,17 @@ def _matrix_std_names(
     R contributes only the stds of the active observables, matching the
     ``obs_list`` the R spec indexes; Q contributes every named shock std.
     """
+    meas_noise = compiled.config.calibration.measurement_noise
+    shocks = compiled.config.calibration.shocks
+
     active = {str(o) for o in observables}
     out: set[str] = set()
-    std_map = None if kalman is None else kalman.R_std_param_map
+    std_map = meas_noise.std if meas_noise is not None else None
     for obs, name in (std_map or {}).items():
         if name is not None and str(obs) in active:
             out.add(name)
-    shock_std = getattr(compiled.config.calibration, "shock_std", None) or {}
+
+    shock_std = shocks.std
     for name in shock_std.values():
         if name is not None:
             out.add(name)
@@ -266,13 +267,15 @@ def _assert_lkj_prior(key: str, prior: Prior, K: int) -> None:
 
 
 def check_estimated_versus_constant_R(
-    requested: Sequence[str], kalman: KalmanConfig | None, R: NDF | None
+    requested: Sequence[str], compiled: CompiledModel, R: NDF | None
 ) -> None:
     r_block_target = "R_corr" in requested
     r_component_target = False
-    if kalman is not None:
+
+    meas_noise = compiled.config.calibration.measurement_noise
+    if meas_noise is not None:
         r_component_target = any(
-            name in requested for name in (kalman.R_param_names or [])
+            name in requested for name in (meas_noise.param_names or [])
         )
     is_target = r_block_target or r_component_target
 
@@ -326,28 +329,26 @@ def _build_matrix_resolution(
     )
 
 
-def _resolve_R(
-    kalman: KalmanConfig | None, observables: list[str]
-) -> b.MatrixPriorBlock:
-    if kalman is None:
+def _resolve_R(complied: CompiledModel, observables: list[str]) -> b.MatrixPriorBlock:
+    meas_noise = complied.config.calibration.measurement_noise
+    if meas_noise is None:
         raise ValueError(
             "Block estimation of R requires a KalmanConfig to specify symbolic R std/correlation metadata."
         )
-    std_param_map = kalman.R_std_param_map
-    corr_param_map = kalman.R_corr_param_map
-    if std_param_map is None or corr_param_map is None:
+
+    if meas_noise.std is None or meas_noise.corr is None:
         raise ValueError(
             "LKJChol prior on R_corr requires parser-generated R std/correlation metadata."
         )
     return _build_matrix_resolution(
         key="R_corr",
         labels=observables,
-        corr_param_map=corr_param_map,
+        corr_param_map=meas_noise.corr,
     )
 
 
 def _resolve_Q(compiled: CompiledModel) -> b.MatrixPriorBlock:
-    shock_corr = compiled.config.calibration.shock_corr
+    shock_corr = compiled.config.calibration.shocks.corr
     labels = list(compiled.shock_names)
     return _build_matrix_resolution(
         key="Q_corr",
@@ -371,9 +372,9 @@ def active_Q(
     present = set(requested)
     shocks = compiled.shock_names
 
-    corr_map: Mapping[Any, str | None] = calib.shock_corr
+    corr_map: Mapping[Any, str | None] = calib.shocks.corr
 
-    std = {calib.shock_std[s] for s in shocks} & present
+    std = {calib.shocks.std[s] for s in shocks} & present
     corr = {
         name
         for pair in combinations(shocks, 2)
@@ -385,7 +386,7 @@ def active_Q(
 
 def active_R(
     requested: Sequence[str],
-    kalman: KalmanConfig | None,
+    compiled: CompiledModel,
     observables: Sequence[str],
 ) -> tuple[set[str], set[str]]:
     """Estimated R parameters split by role, as ``(stds, correlations)``.
@@ -393,12 +394,13 @@ def active_R(
     Labels are the active observables, the order the R covariance spec is built
     over; a name reaching only an inactive observable is not estimated.
     """
-    if kalman is None:
+    meas_noise = compiled.config.calibration.measurement_noise
+    if meas_noise is None:
         return set(), set()
 
     present = set(requested)
-    std_map = kalman.R_std_param_map
-    corr_map: Mapping[Any, str | None] | None = kalman.R_corr_param_map
+    std_map = meas_noise.std
+    corr_map: Mapping[Any, str | None] | None = meas_noise.corr
 
     std: set[str] = set()
     if std_map is not None:
@@ -417,7 +419,6 @@ def active_R(
 
 def _corr_pairs(
     compiled: CompiledModel,
-    kalman: KalmanConfig | None,
     observables: Sequence[str],
 ) -> list[tuple[str, str, frozenset[str]]]:
     """Every active correlation as ``(matrix key, name, the pair it couples)``.
@@ -425,14 +426,17 @@ def _corr_pairs(
     A name is unique within a matrix but not across the two, so an entry is the
     pair rather than the name.
     """
+    shocks = compiled.config.calibration.shocks
+    meas_noise = compiled.config.calibration.measurement_noise
+
     out: list[tuple[str, str, frozenset[str]]] = []
-    corr_map: Mapping[Any, str | None] = compiled.config.calibration.shock_corr
+    corr_map: Mapping[Any, str | None] = shocks.corr
     for pair in combinations(compiled.shock_names, 2):
         if (name := corr_map.get(pair)) is not None:  # pyright: ignore
             out.append(("Q_corr", name, frozenset(pair)))
 
     r_map: Mapping[Any, str | None] | None = (
-        kalman.R_corr_param_map if kalman is not None else None
+        meas_noise.corr if meas_noise is not None else None
     )
     if r_map is not None:
         for pair in combinations(observables, 2):
@@ -445,7 +449,6 @@ def assert_scalar_corr_spd_safe(
     param_index: Mapping[str, int],
     matrix_blocks: Mapping[str, b.MatrixPriorBlock],
     compiled: CompiledModel,
-    kalman: KalmanConfig | None,
     observables: Sequence[str],
 ) -> None:
     """Reject a standalone scalar correlation whose region admits a non-SPD matrix.
@@ -458,7 +461,7 @@ def assert_scalar_corr_spd_safe(
     transform does not change that, since every scalar correlation map lands on
     the same open interval, so the rejection is the same on either leg.
     """
-    entries = _corr_pairs(compiled, kalman, observables)
+    entries = _corr_pairs(compiled, observables)
     blocked = {name for block in matrix_blocks.values() for name in block.member_names}
     scalars = [e for e in entries if e[1] in param_index and e[1] not in blocked]
     scalars.sort(key=lambda entry: param_index[entry[1]])

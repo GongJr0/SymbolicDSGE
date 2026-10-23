@@ -347,28 +347,17 @@ def _build_R(model: SolvedModel, R: NDF | None, observables: Sequence[str]) -> N
     if validated_R is not None:
         return validated_R
 
-    conf = model.kalman_config
-    if conf is None:
+    meas_noise = model.config.calibration.measurement_noise
+    if meas_noise is None:
         raise ValueError(
             "R must be provided in symbolic or scalar form, either through the "
-            "model's Kalman configuration or as a parameter override."
+            "model's `calibration.measurement_noise` configuration or as a parameter override."
         )
 
-    obs_idx = {name: i for i, name in enumerate(model.compiled.observable_names)}
-
-    if conf.R_std_param_map is not None:
-        # Assemble from the CURRENT calibration, which may have moved since
-        # parse (a re-solved model). The name maps fix the layout at parse;
-        # only the values are read live here.
-        return _measurement_covariance(model.compiled, observables=observables)
-    R = conf.R
-    if R is None:
-        raise ValueError("Constant R matrix not specified in configuration.")
-
-    # Get included observables
-    mat_idx = [obs_idx[name] for name in observables]
-    R_subset: NDF = asarray(R[np.ix_(mat_idx, mat_idx)], dtype=float64)
-    return R_subset
+    # Assemble from the CURRENT calibration, which may have moved since
+    # parse (a re-solved model). The name maps fix the layout at parse;
+    # only the values are read live here.
+    return _measurement_covariance(model.compiled, observables=observables)
 
 
 def _build_default_P0(model: SolvedModel, filter_mode: FilterMode) -> NDF:

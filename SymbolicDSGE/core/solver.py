@@ -44,7 +44,6 @@ from .solved_model import (
 )
 from .solver_backend import klein_solve, piecewise_solve, sgu_solve
 
-from ..kalman.config import KalmanConfig
 from ..linearization.view import PointLinearView
 
 NDF = NDArray[float64]
@@ -56,11 +55,9 @@ class DSGESolver:
 
     Parameters
     ----------
-    model_config : ModelConfig
+    config : ModelConfig
         Configuration object defining the DSGE model specification, including
         variables, equations, and calibration.
-    kalman_config : KalmanConfig | None
-        Optional Kalman filter configuration object.
 
     Attributes
     ----------
@@ -72,11 +69,9 @@ class DSGESolver:
         Time index symbol used in the model equations.
     """
 
-    def __init__(
-        self, model_config: ModelConfig, kalman_config: KalmanConfig | None = None
-    ) -> None:
+    def __init__(self, config: ModelConfig) -> None:
 
-        if isinstance(model_config, PointLinearView):  # type: ignore[unreachable]
+        if isinstance(config, PointLinearView):  # type: ignore[unreachable]
             raise TypeError(
                 "A point-linearized model is not accepted as solver input. "
                 "Linearizing a levels model about a point in parameter space changes the "
@@ -86,8 +81,7 @@ class DSGESolver:
                 "linearized at one constant point, pass `PointLinearView.to_config(). "
             )
 
-        self.model_config = model_config
-        self.kalman_config = kalman_config
+        self.model_config = config
         self.t = sp.Symbol("t", integer=True)
 
     def compile(
@@ -116,7 +110,6 @@ class DSGESolver:
         # Convert model to {-1, 0, 1} offsets with auxiliary variables for lags and leads.
         desugared = desugar_model(conf)
         conf = deepcopy(self.model_config)
-        kalman_conf = self.kalman_config
         t = self.t
         ordered_variables = desugared.variables
 
@@ -148,13 +141,15 @@ class DSGESolver:
             subs_map[f(t - 1)] = prev  # pyright: ignore
 
         if not params_order:
-            params_order = [p.name for p in conf.parameters]
+            params_order = [p.name for p in conf.calibration.parameters]
 
-        p_missing = [p.name for p in conf.parameters if p.name not in params_order]
+        p_missing = [
+            p.name for p in conf.calibration.parameters if p.name not in params_order
+        ]
         p_unknown = [
             name
             for name in params_order
-            if name not in {p.name for p in conf.parameters}
+            if name not in {p.name for p in conf.calibration.parameters}
         ]
         p_dupe = [name for name in params_order if params_order.count(name) > 1]
 
@@ -192,7 +187,6 @@ class DSGESolver:
 
         return CompiledModel(
             config=conf,
-            kalman=kalman_conf,
             cur_syms=cur_syms,
             layout=layout,
             var_names=var_order,
