@@ -101,7 +101,7 @@ def test_derived_entries_resolve_through_each_other():
     ).replace("variables: [x]", "variables: [x]\nss_seed:\n  x: quarter_rho")
     model, _ = _parse(text)
 
-    seed = model.variables.ss_seed[model.variables.variables[0]]
+    seed = model.ss_seed[model.variables[0]]
     assert sp.simplify(seed - sp.Symbol("rho") / 4) == 0
 
 
@@ -301,9 +301,9 @@ def test_ss_seed_densifies_over_the_declared_set():
         "variables: [x, y, z]", "variables: [x, y, z]\nss_seed:\n  y: rho"
     )
     model, _ = _parse(text)
-    seeds = model.variables.ss_seed
+    seeds = model.ss_seed
 
-    assert set(seeds) == set(model.variables.variables)
+    assert set(seeds) == set(model.variables)
     assert seeds["y"] == sp.Symbol("rho")
     assert seeds["x"] is None
     assert seeds["z"] is None
@@ -313,7 +313,7 @@ def test_accepts_an_empty_ss_seed_block():
     text = BASE.replace("variables: [x]", "variables: [x]\nss_seed:")
     model, _ = _parse(text)
 
-    assert model.variables.ss_seed["x"] is None
+    assert model.ss_seed["x"] is None
 
 
 # ---------------- helper guards with no authored expression ----------------

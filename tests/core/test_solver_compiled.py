@@ -52,7 +52,7 @@ def _nonlinear_compile_yaml() -> str:
 
 def test_compile_builds_expected_structures(compiled_test):
     c = compiled_test
-    n_vars = len(c.config.variables.variables)
+    n_vars = len(c.config.variables)
 
     # test.yaml lags u, v and r, so those three are the states; its two shocks
     # are innovations rather than variables.
@@ -156,9 +156,7 @@ def test_compile_rejects_unknown_variable_order(parsed_test):
     solver = DSGESolver(model, kalman)
 
     with pytest.raises(ValueError, match="Unknown: \\['ghost'\\]"):
-        solver.compile(
-            variable_order=[*model.variables.variables, sp.Function("ghost")]
-        )
+        solver.compile(variable_order=[*model.variables, sp.Function("ghost")])
 
 
 def test_compile_rejects_unknown_param_order(parsed_test):
@@ -186,7 +184,7 @@ def test_compile_lifts_a_lead_beyond_the_three_dates(parsed_test):
     model, kalman = parsed_test
     deep = copy.deepcopy(model)
     t = sp.Symbol("t", integer=True)
-    u = deep.variables.variables[0]
+    u = deep.variables[0]
     e_u = next(iter(deep.shocks))
     first = next(iter(deep.equations.model))
     deep.equations.model[first] = sp.Eq(u(t + 2), deep.parameters[0] * u(t) + e_u)

@@ -16,7 +16,8 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | name | `#!python str` | Model name. |
-| variables | `#!python Variables` | Parsed variables (as functions of time) and steady state expressions. |
+| variables | `#!python list[sympy.Function]` | Parsed variables (as functions of time). |
+| ss_seed | `#!python FunctionGetterDict[Expr | None]` | Newton seed for the steady-state solve, per variable. `None` seeds at zero. |
 | parameters | `#!python list[sympy.Symbol]` | Model parameters as symbols. |
 | shocks | `#!python list[sympy.Symbol]` | Innovation symbols, in declaration order, which is the shock column order. |
 | observables | `#!python list[sympy.Symbol]` | Observable variables as symbols. |
@@ -24,21 +25,6 @@ __Fields:__
 | calibration | `#!python Calib` | `dataclass` of parameter calibrations plus shock standard deviation and correlation parameter mappings. |
 | source_yaml | `#!python str | None` | Source YAML text retained for bundle round trips. |
 
-## `Variables`
-
-```python
-@dataclass
-class Variables()
-```
-
-Parsed variable metadata.
-
-__Fields:__
-
-| __Name__ | __Type__ | __Description__ |
-|:---------|:--------:|----------------:|
-| variables | `#!python list[sympy.Function]` | Variables as functions of time. |
-| ss_seed | `#!python FunctionGetterDict[Expr | None]` | Newton seed for the steady-state solve, per variable. `None` seeds at zero. |
 
 ## `Equations`
 
@@ -54,7 +40,7 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | model | `#!python dict[str, sympy.Eq]` | Model equations keyed by equation name. |
-| constraint | `#!python dict[str, Constraint | None]` | `bind`/`relax` pairs as `Constraint` objects. Keyed by the constraint name.|
-| regime | `#!python RegimeGetterDict[Regime]` | Regime equations keyed by the constraint names that define the regime. Each `Regime` is a mapping of model equation name and the expression that replaces it when the regime binds. |
-| observable | `#!python SymbolGetterDict[Expr]` | Observable equations. |
+| constraints | `#!python dict[str, Constraint | None]` | `bind`/`relax` pairs as `Constraint` objects. Keyed by the constraint name.|
+| regimes | `#!python RegimeGetterDict[Regime]` | Regime equations keyed by the constraint names that define the regime. Each `Regime` is a mapping of model equation name and the expression that replaces it when the regime binds. |
+| observables | `#!python SymbolGetterDict[Expr]` | Observable equations. |
 | obs_is_affine | `#!python SymbolGetterDict[bool]` | Whether each observable equation is affine in current state variables. |

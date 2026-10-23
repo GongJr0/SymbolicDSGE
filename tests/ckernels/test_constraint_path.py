@@ -34,7 +34,7 @@ OVER_ON, OVER_BOTH, OVER_OFF = -2.0, 0.0, 2.0
 def compiled(parsed_post82):
     model, kalman = parsed_post82
     conf = copy.deepcopy(model)
-    by_name = {v.__name__: v for v in conf.variables.variables}
+    by_name = {v.__name__: v for v in conf.variables}
     g, z = by_name["g"], by_name["z"]
 
     conf.equations.constraints = {

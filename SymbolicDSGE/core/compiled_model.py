@@ -694,7 +694,7 @@ def _newton_seed(compiled: CompiledModel, parameters: Mapping[Symbol, float]) ->
     """
     import sympy as sp
 
-    seeds = compiled.config.variables.ss_seed
+    seeds = compiled.config.ss_seed
     values = dict(parameters)
     seed = np.zeros(compiled.n_var, dtype=float64)
     for i, name in enumerate(compiled.var_names):

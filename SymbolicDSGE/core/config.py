@@ -215,23 +215,6 @@ def make_Q(
     return Q[ix_(idx, idx)]
 
 
-@dataclass
-class Variables:
-    """Variable specification for a model, including the list of variables, the steady-state seed, and the linearization method.
-
-    Attributes
-    ----------
-    variables : list[Function]
-        List of model variables as :class:`sympy.Function`s of time.
-    ss_seed : FunctionGetterDict[Expr | None]
-        Initial guess for the steady-state Newton solve.
-    """
-
-    variables: list[Function]
-    # None == 0 seed newton.
-    ss_seed: FunctionGetterDict[Expr | None]
-
-
 @dataclass(repr=False)
 class ModelConfig:
     """A model configuration parsed into symbolic representations of its variables, parameters, shocks, observables, and equations.
@@ -240,9 +223,10 @@ class ModelConfig:
     ----------
     name : str
         Name of the model.
-    variables : Variables
-        :class:`Variables` object containing the model's variables, steady-state
-        seed, and linearization method.
+    variables : list[Function]
+        List of model variables as :class:`sympy.Function`s of time.
+    ss_seed : FunctionGetterDict[Expr | None]
+        Initial guess for the steady-state Newton solve.
     parameters : list[Symbol]
         List of model parameters as :class:`sympy.Symbol`s.
     shocks : list[Symbol]
@@ -261,7 +245,8 @@ class ModelConfig:
     """
 
     name: str
-    variables: Variables
+    variables: list[Function]
+    ss_seed: FunctionGetterDict[Expr | None]
     parameters: list[Symbol]
     shocks: list[Symbol]
     observables: list[Symbol]

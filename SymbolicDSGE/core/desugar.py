@@ -99,7 +99,7 @@ def desugar_model(conf: ModelConfig) -> DesugarResult:
     does not still finds its aux column in the reference pencil.
     """
     t = Symbol("t", integer=True)
-    declared_funcs = list(conf.variables.variables)
+    declared_funcs = list(conf.variables)
     declared_names = [f.__name__ for f in declared_funcs]
     declared = set(declared_names)
 

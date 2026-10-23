@@ -199,7 +199,7 @@ def test_a_minted_lag_is_minted_again_from_the_linear_config(aux):
     assert aux.direct.compiled.var_names == ["u", "u_lag1"]
     assert aux.linear.compiled.var_names == ["u", "u_lag1"]
     assert aux.linear.compiled.layout.aux_origin == {"u_lag1": "u"}
-    assert set(aux.linear.config.variables.ss_seed) == {sp.Function("u")}
+    assert set(aux.linear.config.ss_seed) == {sp.Function("u")}
 
 
 def test_an_aux_round_trips_on_its_origins_scale(aux):

@@ -64,7 +64,7 @@ def solver(parsed_rbc_so):
     """Levels RBC where TFP below a threshold shuts investment off."""
     model, kalman = parsed_rbc_so
     conf = copy.deepcopy(model)
-    _, k, z = conf.variables.variables
+    _, k, z = conf.variables
     delta = sp.Symbol("delta")
 
     conf.equations.constraints = {

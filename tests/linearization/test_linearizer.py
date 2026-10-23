@@ -236,7 +236,7 @@ def test_to_config_keeps_the_equation_key_order(rbc, rbc_log):
 def test_to_config_zeroes_every_seed(rbc_log):
     # The deviation system clears at the origin. Left alone, the authored k_ss
     # would seed Newton at exp(k_ss) times the level it was written for.
-    seeds = rbc_log.to_config().variables.ss_seed
+    seeds = rbc_log.to_config().ss_seed
 
     assert set(seeds) == set(rbc_log.steady_state)
     assert all(float(value) == 0.0 for value in seeds.values())

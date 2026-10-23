@@ -32,7 +32,6 @@ from .config import (
     Equations,
     Calib,
     RegimeGetterDict,
-    Variables,
     SymbolGetterDict,
     PairGetterDict,
     FunctionGetterDict,
@@ -288,9 +287,7 @@ class ModelParser:
         var_funcs = {c.func for c in applied}
 
         declared = set(conf.parameters) | set(conf.shocks)
-        return (var_funcs - set(conf.variables.variables)) | (
-            (free - time_syms) - declared
-        )
+        return (var_funcs - set(conf.variables)) | ((free - time_syms) - declared)
 
     @classmethod
     def validate_equations(cls, conf: ModelConfig) -> None:
@@ -329,14 +326,14 @@ class ModelParser:
             defining.extend(replacements.values())
         used = {call.func for eq in defining for call in eq.atoms(AppliedUndef)}
 
-        absent = [v for v in conf.variables.variables if v not in used]
+        absent = [v for v in conf.variables if v not in used]
         if absent:
             raise ValueError(
                 f"Variable(s) {sorted(str(v) for v in absent)} occur in no model "
                 "equation."
             )
 
-        n_var, n_eq = len(conf.variables.variables), len(conf.equations.model)
+        n_var, n_eq = len(conf.variables), len(conf.equations.model)
         if n_var != n_eq:
             raise ValueError(
                 f"The model block has {n_eq} equation(s) for {n_var} variable(s); "
@@ -479,7 +476,7 @@ class ModelParser:
 
         """
         params = set(conf.parameters)
-        for var, expr in conf.variables.ss_seed.items():
+        for var, expr in conf.ss_seed.items():
             if expr is None:
                 continue
             applied = expr.atoms(AppliedUndef)
@@ -524,7 +521,9 @@ class ModelParser:
 
         _get_expr, _get_relational, _get_eq = _sympy_parsers(_LOCALS, local_subs)
 
-        variables = _parse_variables(data, ordered_var_names, variable_funcs, _get_expr)
+        variables, ss_seed = _parse_variables(
+            data, ordered_var_names, variable_funcs, _get_expr
+        )
 
         equations = _parse_equations(
             data,
@@ -546,6 +545,7 @@ class ModelParser:
         mdl_cfg = ModelConfig(
             name=data.get("name", "Unnamed"),
             variables=variables,
+            ss_seed=ss_seed,
             parameters=params,
             shocks=shocks,
             observables=observables,
@@ -943,7 +943,7 @@ def _parse_variables(
     ordered_var_names: list[str],
     variable_funcs: list[Function],
     _get_expr: Callable[[str], Expr],
-) -> Variables:
+) -> tuple[list[Function], FunctionGetterDict[Expr | None]]:
     ss_seed_raw = _get_ss_seed(data)
 
     ss_seed: dict[Function, Expr | None] = {}
@@ -954,10 +954,7 @@ def _parse_variables(
         else:
             ss_seed[var_func] = _get_expr(str(ss_raw))
 
-    return Variables(
-        variables=variable_funcs,
-        ss_seed=FunctionGetterDict(ss_seed),
-    )
+    return (variable_funcs, FunctionGetterDict(ss_seed))
 
 
 def _resolve_calibration_locals(

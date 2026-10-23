@@ -51,7 +51,7 @@ def compiled(parsed_rbc_so):
     """Levels RBC where a bad-TFP regime shuts investment off."""
     model, kalman = parsed_rbc_so
     conf = copy.deepcopy(model)
-    _, k, z = conf.variables.variables
+    _, k, z = conf.variables
     delta = sp.Symbol("delta")
 
     conf.equations.constraints = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
