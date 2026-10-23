@@ -83,7 +83,6 @@ export default function App() {
     const [modelName, setModelName] = useState("");
     const [path, setPath] = useState("MODELS/POST82.yaml");
     const [content, setContent] = useState("");
-    const [linearize, setLinearize] = useState(false);
     const [simT, setSimT] = useState(100);
     const [shockScale, setShockScale] = useState(1);
     const [includeObs, setIncludeObs] = useState(true);
@@ -384,22 +383,10 @@ export default function App() {
                     </button>
                 </div>
 
-                <label className="switch-row">
-                    <span>Linearize</span>
-                    <input
-                        type="checkbox"
-                        checked={linearize}
-                        onChange={(event) => setLinearize(event.target.checked)}
-                    />
-                </label>
-
                 <button
                     disabled={busy || !activeModel.loaded}
                     onClick={() =>
-                        runAction(
-                            () => solveModel(model_name, { linearize }),
-                            linearize ? "Model linearized and solved." : "Model solved.",
-                        )
+                        runAction(() => solveModel(model_name), "Model solved.")
                     }
                 >
                     <Play size={16} />
