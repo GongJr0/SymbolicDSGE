@@ -238,7 +238,7 @@ def constraint_path(size_t cond_addr, path, par, regime_in,
     if not 0 < n_constraint <= 2:
         raise ValueError(
             "A model may declare one or two constraints under "
-            f"equations.constraint, got {n_constraint}."
+            f"equations.constraints, got {n_constraint}."
         )
 
     cdef double[:, ::1] pv = np.ascontiguousarray(path, dtype=np.float64)
@@ -694,7 +694,7 @@ def occbin_sim(a, b, c, d, cst, ghx_ref, ss, par, size_t cond_addr,
     if not 0 < n_constraint <= 2:
         raise ValueError(
             "A model may declare one or two constraints under "
-            f"equations.constraint, got {n_constraint}."
+            f"equations.constraints, got {n_constraint}."
         )
     # The latch emits every mask over n_constraint bits and the kernel indexes
     # table[mask[t]] with it, so a partial stack would read past the table.
@@ -944,7 +944,7 @@ def occbin_solve1(size_t residual_addr, seed, params, incidence,
     if not 0 < n_constraint <= 2:
         raise ValueError(
             "A model may declare one or two constraints under "
-            f"equations.constraint, got {n_constraint}."
+            f"equations.constraints, got {n_constraint}."
         )
 
     cdef int64_t n_regime = 1 << n_constraint

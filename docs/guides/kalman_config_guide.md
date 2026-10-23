@@ -18,7 +18,7 @@ tags:
 
 ## Observables
 
-The model configuration's `equations.observable` denote the measurement equations available to the Kalman filter. `kalman.R` inherits its ordering from the model's observable ordering. A filter call can select a subset through `SolvedModel.kalman(..., observables=...)`; the selected covariance block is sliced from the configured full `R`.
+The model configuration's `equations.observables` denote the measurement equations available to the Kalman filter. `kalman.R` inherits its ordering from the model's observable ordering. A filter call can select a subset through `SolvedModel.kalman(..., observables=...)`; the selected covariance block is sliced from the configured full `R`.
 
 ???+ info "Array Alignment"
     `DataFrame` inputs are aligned by column name. `ndarray` inputs are interpreted positionally against the selected observables.

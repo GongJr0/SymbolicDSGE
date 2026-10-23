@@ -44,7 +44,7 @@ _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 #: is rejected at parse time (see ``_validate_schema``).
 
 # "parameters": list of param names, re-declared in the calibration.parameters mapping
-# "observables": list of observable names, re-declared in the equations.observable mapping
+# "observables": list of observable names, re-declared in the equations.observables mapping
 _DEPRECATED_TOP_LEVEL_KEYS = frozenset({"parameters", "observables"})
 _ALLOWED_TOP_LEVEL_KEYS = (
     frozenset(
@@ -399,9 +399,9 @@ class ModelParser:
             return
         if not constraints or not regimes:
             raise ValueError(
-                "equations.constraint and equations.regime must be declared together; "
-                f"got constraint={'set' if constraints else 'empty'}, "
-                f"regime={'set' if regimes else 'empty'}"
+                "equations.constraints and equations.regimes must be declared together; "
+                f"got constraints={'set' if constraints else 'empty'}, "
+                f"regimes={'set' if regimes else 'empty'}"
             )
 
         declared = set(constraints)
@@ -421,7 +421,7 @@ class ModelParser:
         missing = expected - set(regimes)
         if missing:
             raise ValueError(
-                "equations.regime is missing entries for binding combinations: "
+                "equations.regimes is missing entries for binding combinations: "
                 f"{sorted(', '.join(sorted(key)) for key in missing)}"
             )
 
@@ -709,7 +709,7 @@ def _validate_schema(data: dict[str, Any]) -> None:
             _reject_unknown_keys(
                 spec,
                 _ALLOWED_CONSTRAINT_KEYS,
-                f"equations.constraint.{name}",
+                f"equations.constraints.{name}",
             )
     calib = data.get("calibration")
     _reject_unknown_keys(calib, _ALLOWED_CALIBRATION_KEYS, "calibration")
@@ -884,7 +884,7 @@ def _parse_equations(
         if raw_key in regimes:
             raise ValueError(
                 f"Duplicate regime key '{raw_key}' encountered "
-                "in equations.regime. Each regime key must be unique."
+                "in equations.regimes. Each regime key must be unique."
             )
         regimes[raw_key] = {
             name: _get_eq(eq)
