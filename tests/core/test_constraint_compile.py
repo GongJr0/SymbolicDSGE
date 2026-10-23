@@ -45,7 +45,7 @@ def _with_constraints(parsed, constraint, replacements=None):
     """
     model, kalman = parsed
     conf = copy.deepcopy(model)
-    conf.equations.constraint = constraint
+    conf.equations.constraints = constraint
 
     target = next(iter(conf.equations.model))
     var = conf.variables.variables[0]
@@ -54,7 +54,7 @@ def _with_constraints(parsed, constraint, replacements=None):
     if len(names) == 2:
         combos.append(frozenset(names))
     replacements = replacements or {}
-    conf.equations.regime = {
+    conf.equations.regimes = {
         c: replacements.get(c, {target: sp.Eq(var(t), 0)}) for c in combos
     }
     return DSGESolver(conf, kalman)
@@ -670,8 +670,8 @@ def compiled_rbc_obc(parsed_rbc_so):
     c, k, z = conf.variables.variables
     delta = sp.Symbol("delta")
 
-    conf.equations.constraint = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
-    conf.equations.regime = {
+    conf.equations.constraints = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
+    conf.equations.regimes = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
     return DSGESolver(conf, kalman).compile()

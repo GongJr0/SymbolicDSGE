@@ -105,13 +105,13 @@ class Equations:
         The reference state-space model equations. This is the base (and only) set
         of equations for perturbation models. OccBin takes it as the reference state
         and any binding constraint replaces the relevant equations.
-    constraint : Dict[str, Constraint] | None
+    constraints : Dict[str, Constraint] | None
         Constraints that can bind the model equations. Each constraint can declare a
         binding and relaxing condition separately.
-    regime : RegimeGetterDict | None
+    regimes : RegimeGetterDict | None
         Regime to apply when the relevant constraint is binding. The regime is a
         mapping of model equation names to replacement equations.
-    observable : SymbolGetterDict[Expr]
+    observables : SymbolGetterDict[Expr]
         Mapping of observable names to their symbolic expressions in terms of the
         model's variables.
     obs_is_affine : SymbolGetterDict[bool]
@@ -122,9 +122,9 @@ class Equations:
     """
 
     model: Dict[str, Eq]
-    constraint: Dict[str, Constraint] | None  # {constraint_name: Constraint}
-    regime: RegimeGetterDict | None  # {binding_set: Regime}
-    observable: SymbolGetterDict[Expr]
+    constraints: Dict[str, Constraint] | None  # {constraint_name: Constraint}
+    regimes: RegimeGetterDict | None  # {binding_set: Regime}
+    observables: SymbolGetterDict[Expr]
     obs_is_affine: SymbolGetterDict[bool]
 
 

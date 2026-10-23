@@ -117,17 +117,17 @@ def desugar_model(conf: ModelConfig) -> DesugarResult:
     }
 
     regimes: RegimeGetterDict | None = None
-    if conf.equations.regime:
+    if conf.equations.regimes:
         regimes = RegimeGetterDict(
             {
                 key: {
                     name: _rewrite_eq(eq, rewrite) for name, eq in replacements.items()
                 }
-                for key, replacements in conf.equations.regime.items()
+                for key, replacements in conf.equations.regimes.items()
             }
         )
     observables: SymbolGetterDict[Expr] = SymbolGetterDict(
-        {obs: rewrite(expr) for obs, expr in conf.equations.observable.items()}
+        {obs: rewrite(expr) for obs, expr in conf.equations.observables.items()}
     )
     variables, model = _register(model, declared_funcs, generated, t)
     return DesugarResult(model, regimes, observables, variables, generated)
@@ -143,7 +143,7 @@ def _scan_offset_depths(
     lags: dict[str, int] = {}
     leads: dict[str, int] = {}
     for expr in _offset_expressions(
-        conf.equations.model, conf.equations.regime, conf.equations.observable
+        conf.equations.model, conf.equations.regimes, conf.equations.observables
     ):
         for call in expr.atoms(AppliedUndef):
             info = _call_offset(call, declared, t)

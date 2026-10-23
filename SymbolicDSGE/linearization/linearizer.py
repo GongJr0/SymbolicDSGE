@@ -117,7 +117,7 @@ class Linearizer:
             observables=SymbolGetterDict(
                 {
                     name: _expand(expr, self._methods, point, shocks).affine
-                    for name, expr in equations.observable.items()
+                    for name, expr in equations.observables.items()
                 }
             ),
             parameters=parameters,
@@ -207,14 +207,19 @@ def _expand(
         }
     )
 
-    atoms: tuple[Expr, ...] = calls + tuple(
+    atoms: tuple[Expr, ...] = calls + tuple(  # pyright: ignore
         sorted(expanded.free_symbols & shocks, key=str)
     )
     zeros: dict[Expr, Expr] = {atom: sp.Integer(0) for atom in atoms}
 
     constant = expanded.xreplace(zeros)
-    linear = sp.Add(*(sp.diff(expanded, atom).subs(zeros) * atom for atom in atoms))
-    return _Expansion(constant + linear, constant)
+    linear = sp.Add(
+        *(
+            sp.diff(expanded, atom).subs(zeros) * atom  # pyright: ignore
+            for atom in atoms
+        )
+    )
+    return _Expansion(constant + linear, constant)  # pyright: ignore
 
 
 def _reconstruct(method: LinearizationMethod, point: float, call: AppliedUndef) -> Expr:
@@ -262,7 +267,7 @@ def _resolve_parameters(
         )
     return SymbolGetterDict(
         {
-            name: float(overrides.get(name, calibration[name]))
+            name: float(overrides.get(name, calibration[name]))  # pyright: ignore
             for name in compiled.calib_params
         }
     )

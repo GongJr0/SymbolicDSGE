@@ -155,7 +155,7 @@ def test_validate_constraints_errors_on_unknown_symbols(conf):
     t = sp.Symbol("t", integer=True)
     ghost = sp.Function("ghost")
     # Binding condition references an undeclared variable -> rejected.
-    conf.equations.constraint = {
+    conf.equations.constraints = {
         "obc": Constraint(bind=ghost(t) < 0, relax=ghost(t) >= 0)
     }
 
@@ -167,7 +167,7 @@ def test_validate_constraints_accepts_valid_conditions(conf):
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
     # Declared variable on both conditions; the time symbol is excluded.
-    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
+    conf.equations.constraints = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
 
     ModelParser.validate_constraints(conf)
 
@@ -175,7 +175,7 @@ def test_validate_constraints_accepts_valid_conditions(conf):
 def test_validate_constraints_accepts_boolean_conditions(conf):
     t = sp.Symbol("t", integer=True)
     a, b = conf.variables.variables[:2]
-    conf.equations.constraint = {
+    conf.equations.constraints = {
         "obc": Constraint(bind=sp.And(a(t) < 0, b(t) < 0), relax=a(t) >= 0)
     }
 
@@ -186,7 +186,7 @@ def test_validate_constraints_accepts_nested_connectives(conf):
     t = sp.Symbol("t", integer=True)
     a, b = conf.variables.variables[:2]
     cond = sp.Or(sp.And(a(t) < 0, b(t) < 0), sp.Not(a(t) > 5))
-    conf.equations.constraint = {"obc": Constraint(bind=cond, relax=a(t) >= 0)}
+    conf.equations.constraints = {"obc": Constraint(bind=cond, relax=a(t) >= 0)}
 
     ModelParser.validate_constraints(conf)
 
@@ -199,7 +199,7 @@ def test_validate_constraints_rejects_non_relational_leaves(conf, depth):
     a = conf.variables.variables[0]
     param = conf.parameters[0]
     bind = param if depth == "root" else sp.Or(sp.And(a(t) < 0, param), a(t) > 5)
-    conf.equations.constraint = {"obc": Constraint(bind=bind, relax=a(t) >= 0)}
+    conf.equations.constraints = {"obc": Constraint(bind=bind, relax=a(t) >= 0)}
 
     with pytest.raises(TypeError, match="is not a valid SymPy Relational"):
         ModelParser.validate_constraints(conf)
@@ -208,7 +208,7 @@ def test_validate_constraints_rejects_non_relational_leaves(conf, depth):
 def test_validate_constraints_rejects_relation_compared_to_relation(conf):
     t = sp.Symbol("t", integer=True)
     a, b = conf.variables.variables[:2]
-    conf.equations.constraint = {
+    conf.equations.constraints = {
         "obc": Constraint(bind=sp.Eq(a(t) < 0, b(t) < 0), relax=a(t) >= 0)
     }
 
@@ -224,7 +224,7 @@ def test_validate_constraints_rejects_shocks(conf, side):
     conditions = {"bind": a(t) < 0, "relax": a(t) >= 0}
     conditions[side] = a(t) + shock < 0
 
-    conf.equations.constraint = {"obc": Constraint(**conditions)}
+    conf.equations.constraints = {"obc": Constraint(**conditions)}
 
     match = f"references shock\\(s\\) \\['{shock.name}'\\]"
     with pytest.raises(ValueError, match=match):
@@ -276,7 +276,7 @@ def test_parser_rejects_unparenthesized_connective():
 
 
 def test_validate_equations_accepts_variables_parameters_and_shocks(parsed_test):
-    # The declared set is the same one regime replacements are checked against.
+    # The declared set is the same one.regimes replacements are checked against.
     ModelParser.validate_equations(parsed_test.model)
 
 
@@ -441,7 +441,7 @@ def test_parser_reports_where_a_repeated_key_is():
 
 def test_validate_constraints_rejects_more_than_two(conf):
     t = sp.Symbol("t", integer=True)
-    conf.equations.constraint = {
+    conf.equations.constraints = {
         f"obc{i}": Constraint(bind=var(t) < 0, relax=var(t) >= 0)
         for i, var in enumerate(conf.variables.variables[:3])
     }
@@ -453,8 +453,8 @@ def test_validate_constraints_rejects_more_than_two(conf):
 def test_validate_regimes_requires_constraint_and_regime_together(conf):
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
-    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
-    conf.equations.regime = None
+    conf.equations.constraints = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
+    conf.equations.regimes = None
 
     with pytest.raises(ValueError, match="declared together"):
         ModelParser.validate_regimes(conf)
@@ -464,12 +464,12 @@ def test_validate_regimes_requires_every_binding_combination(conf):
     t = sp.Symbol("t", integer=True)
     a, b = conf.variables.variables[:2]
     first, second = list(conf.equations.model)[:2]
-    conf.equations.constraint = {
+    conf.equations.constraints = {
         "lo": Constraint(bind=a(t) < 0, relax=a(t) >= 0),
         "hi": Constraint(bind=b(t) < 0, relax=b(t) >= 0),
     }
     # The joint cell {lo, hi} is absent.
-    conf.equations.regime = {
+    conf.equations.regimes = {
         frozenset({"lo"}): {first: sp.Eq(a(t), 0)},
         frozenset({"hi"}): {second: sp.Eq(b(t), 0)},
     }
@@ -481,8 +481,8 @@ def test_validate_regimes_requires_every_binding_combination(conf):
 def test_validate_regimes_rejects_unknown_replacement_target(conf):
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
-    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
-    conf.equations.regime = {frozenset({"obc"}): {"nosuch": sp.Eq(var(t), 0)}}
+    conf.equations.constraints = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
+    conf.equations.regimes = {frozenset({"obc"}): {"nosuch": sp.Eq(var(t), 0)}}
 
     with pytest.raises(ValueError, match="replaces undeclared model equations"):
         ModelParser.validate_regimes(conf)
@@ -495,8 +495,8 @@ def test_validate_regimes_accepts_shocks_in_replacements(conf):
     var = conf.variables.variables[0]
     shock = next(iter(conf.shocks))
     target = next(iter(conf.equations.model))
-    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
-    conf.equations.regime = {frozenset({"obc"}): {target: sp.Eq(var(t), shock)}}
+    conf.equations.constraints = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
+    conf.equations.regimes = {frozenset({"obc"}): {target: sp.Eq(var(t), shock)}}
 
     ModelParser.validate_regimes(conf)
 
@@ -505,8 +505,8 @@ def test_validate_regimes_rejects_unknown_symbols_in_replacements(conf):
     t = sp.Symbol("t", integer=True)
     var = conf.variables.variables[0]
     target = next(iter(conf.equations.model))
-    conf.equations.constraint = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
-    conf.equations.regime = {
+    conf.equations.constraints = {"obc": Constraint(bind=var(t) < 0, relax=var(t) >= 0)}
+    conf.equations.regimes = {
         frozenset({"obc"}): {target: sp.Eq(var(t), sp.Symbol("typo_symbol"))}
     }
 
@@ -518,11 +518,11 @@ def test_validate_regimes_accepts_a_complete_two_constraint_grid(conf):
     t = sp.Symbol("t", integer=True)
     a, b = conf.variables.variables[:2]
     first, second = list(conf.equations.model)[:2]
-    conf.equations.constraint = {
+    conf.equations.constraints = {
         "lo": Constraint(bind=a(t) < 0, relax=a(t) >= 0),
         "hi": Constraint(bind=b(t) < 0, relax=b(t) >= 0),
     }
-    conf.equations.regime = {
+    conf.equations.regimes = {
         frozenset({"lo"}): {first: sp.Eq(a(t), 0)},
         frozenset({"hi"}): {second: sp.Eq(b(t), 0)},
         frozenset({"lo", "hi"}): {first: sp.Eq(a(t), 0), second: sp.Eq(b(t), 0)},

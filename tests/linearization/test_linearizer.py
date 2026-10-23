@@ -259,7 +259,7 @@ def test_to_config_marks_every_observable_affine(aux):
 def test_to_config_does_not_alias_the_view(rbc_log):
     config = rbc_log.to_config()
     config.equations.model.clear()
-    config.equations.observable.clear()
+    config.equations.observables.clear()
     config.calibration.parameters.clear()
 
     assert rbc_log.model

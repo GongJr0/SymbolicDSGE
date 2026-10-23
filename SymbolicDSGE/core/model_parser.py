@@ -309,7 +309,7 @@ class ModelParser:
                     f"{sorted(str(a) for a in unknown_atoms)}"
                 )
 
-        for name, eq in conf.equations.observable.items():
+        for name, eq in conf.equations.observables.items():
             unknown_atoms = cls._unknown_atoms(conf, eq)
             if unknown_atoms:
                 raise ValueError(
@@ -325,7 +325,7 @@ class ModelParser:
                 )
 
         defining = list(conf.equations.model.values())
-        for replacements in (conf.equations.regime or {}).values():
+        for replacements in (conf.equations.regimes or {}).values():
             defining.extend(replacements.values())
         used = {call.func for eq in defining for call in eq.atoms(AppliedUndef)}
 
@@ -353,10 +353,10 @@ class ModelParser:
             The configuration object containing the model equations and constraints.
 
         """
-        if not conf.equations.constraint:
+        if not conf.equations.constraints:
             return
 
-        constraints: dict[str, Constraint] = conf.equations.constraint
+        constraints: dict[str, Constraint] = conf.equations.constraints
 
         if len(constraints) > 2:
             raise NotImplementedError(
@@ -396,8 +396,8 @@ class ModelParser:
             The configuration object containing the model equations and regimes.
 
         """
-        constraints = conf.equations.constraint
-        regimes = conf.equations.regime
+        constraints = conf.equations.constraints
+        regimes = conf.equations.regimes
         if not constraints and not regimes:
             return
         if not constraints or not regimes:
@@ -853,16 +853,16 @@ def _parse_equations(
 
     model: dict[str, Eq] = {name: _get_eq(eq) for name, eq in eq_data["model"].items()}
 
-    constraint_raw = eq_data.get("constraints", {}) or {}
-    if len(constraint_raw) > 2:
+    constraints_raw = eq_data.get("constraints", {}) or {}
+    if len(constraints_raw) > 2:
         raise NotImplementedError(
             "OBCs are solved via OccBin of Guirreiri and Iacoviello (2015), which explicitly supports one or two constraints. "
             "Use at most two constraints in your model configuration."
         )
 
-    constraint: dict[str, Constraint] = {}
-    for name, raw_spec in constraint_raw.items():
-        spec = _require_mapping(raw_spec, f"equations.constraint.{name}")
+    constraints: dict[str, Constraint] = {}
+    for name, raw_spec in constraints_raw.items():
+        spec = _require_mapping(raw_spec, f"equations.constraints.{name}")
         if (bind := spec.get("bind")) is None:
             raise ValueError(f"Constraint '{name}' is missing a 'bind' condition.")
         bind = _get_relational(bind)
@@ -871,24 +871,24 @@ def _parse_equations(
         else:
             relax = _get_relational(relax)
 
-        constraint[name] = Constraint(
+        constraints[name] = Constraint(
             bind=bind,
             relax=relax,
         )
 
-    regime_raw = eq_data.get("regimes", {}) or {}
+    regimes_raw = eq_data.get("regimes", {}) or {}
 
-    regime = RegimeGetterDict({})
+    regimes = RegimeGetterDict({})
 
-    for raw_key, v in regime_raw.items():
-        if raw_key in regime:
+    for raw_key, v in regimes_raw.items():
+        if raw_key in regimes:
             raise ValueError(
                 f"Duplicate regime key '{raw_key}' encountered "
                 "in equations.regime. Each regime key must be unique."
             )
-        regime[raw_key] = {
+        regimes[raw_key] = {
             name: _get_eq(eq)
-            for name, eq in _require_mapping(v, f"equations.regime.{raw_key}").items()
+            for name, eq in _require_mapping(v, f"equations.regimes.{raw_key}").items()
         }
 
     observables_raw = eq_data.get("observables", {}) or {}
@@ -904,9 +904,9 @@ def _parse_equations(
 
     return Equations(
         model=model,
-        constraint=constraint if constraint else None,
-        regime=regime if regime else None,
-        observable=SymbolGetterDict(observables_eq),
+        constraints=constraints if constraints else None,
+        regimes=regimes if regimes else None,
+        observables=SymbolGetterDict(observables_eq),
         obs_is_affine=SymbolGetterDict(is_affine),
     )
 

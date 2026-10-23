@@ -6,7 +6,7 @@ import numpy as np
 from numpy import complex128, float64, int64
 from numpy.typing import NDArray
 
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any, Mapping, Sequence
 

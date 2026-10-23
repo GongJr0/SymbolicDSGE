@@ -45,8 +45,8 @@ def solver(parsed_rbc_so):
     _, k, z = conf.variables.variables
     delta = sp.Symbol("delta")
 
-    conf.equations.constraint = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
-    conf.equations.regime = {
+    conf.equations.constraints = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
+    conf.equations.regimes = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
     return DSGESolver(conf, kalman)

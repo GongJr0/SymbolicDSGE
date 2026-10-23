@@ -142,7 +142,7 @@ def test_offsets_stay_within_the_three_dates_the_residual_holds(deep):
     assert any(
         offset < -1
         for _, offset in _offsets(
-            deep.variables.variables, eq.model, eq.regime, eq.observable
+            deep.variables.variables, eq.model, eq.regimes, eq.observables
         )
     )
 
@@ -217,7 +217,7 @@ def test_lag_scan_covers_regimes_the_reference_never_lags(natural):
     # regime pencil past the reference it has to stay row-aligned with.
     conf = copy.deepcopy(natural)
     r, Pi = (sp.Function(n) for n in ("r", "Pi"))
-    conf.equations.regime = {frozenset({"elb"}): {"policy": sp.Eq(r(t), Pi(t - 2))}}
+    conf.equations.regimes = {frozenset({"elb"}): {"policy": sp.Eq(r(t), Pi(t - 2))}}
     result = desugar_model(conf)
 
     assert "Pi_lag1" in result.names
@@ -229,7 +229,7 @@ def test_lag_scan_covers_regimes_the_reference_never_lags(natural):
 def test_lead_scan_covers_regimes_the_reference_never_leads(natural):
     conf = copy.deepcopy(natural)
     r, Pi = (sp.Function(n) for n in ("r", "Pi"))
-    conf.equations.regime = {frozenset({"elb"}): {"policy": sp.Eq(r(t), Pi(t + 2))}}
+    conf.equations.regimes = {frozenset({"elb"}): {"policy": sp.Eq(r(t), Pi(t + 2))}}
     result = desugar_model(conf)
 
     assert "Pi_lead1" in result.names
@@ -278,7 +278,7 @@ def test_source_config_is_untouched(deep):
     assert any(
         offset < -1
         for _, offset in _offsets(
-            deep.variables.variables, eq.model, eq.regime, eq.observable
+            deep.variables.variables, eq.model, eq.regimes, eq.observables
         )
     )
 

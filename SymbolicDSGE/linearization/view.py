@@ -17,7 +17,7 @@ class PointLinearView:
     _config: ModelConfig
 
     def to_config(self) -> ModelConfig:
-        if self._config.equations.constraint is not None:
+        if self._config.equations.constraints is not None:
             raise NotImplementedError(
                 "Linear views of constrained models are not convertible to ModelConfig. "
                 "Any constraint conditions with literals change interpretation after linearization, "
@@ -28,7 +28,7 @@ class PointLinearView:
         new = deepcopy(self._config)
         new.equations.model = dict(self.model)
 
-        new.equations.observable = SymbolGetterDict(self.observables)
+        new.equations.observables = SymbolGetterDict(self.observables)
         new.equations.obs_is_affine = SymbolGetterDict(
             {var: True for var in self.observables}
         )
