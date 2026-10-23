@@ -28,7 +28,7 @@ equations:
     real_wage: w_real(t) = siggma*c(t) + varphi*n(t)
     markup: mu(t) = -(siggma+(varphi+alppha)/(1-alppha))*y(t) + (1+varphi)/(1-alppha)*a(t)
     markup_gap: mu_hat(t) = -(siggma+(varphi+alppha)/(1-alppha))*y_gap(t)
-  constraint: {}
+
   observables:
     obs_pi_ann: 4*pi(t)
     obs_i_ann: 4*i(t)

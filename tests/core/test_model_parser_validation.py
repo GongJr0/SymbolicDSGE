@@ -31,7 +31,7 @@ shocks:
 equations:
   model:
     x_process: "x(t+1) = rho * x(t) + e"
-  constraint: {}
+  constraints: {}
   observables:
     x_obs: x(t)
 calibration:
@@ -153,7 +153,7 @@ equations:
     x_process: "x(t+1) = rho * x(t) + e_x"
     y_process: "y(t+1) = rho * y(t) + e_y"
     z_process: "z(t+1) = rho * z(t) + e_z"
-  constraint: {}
+  constraints: {}
   observables:
     x_obs: x(t)
     y_obs: y(t)

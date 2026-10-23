@@ -63,7 +63,7 @@ _ALLOWED_TOP_LEVEL_KEYS = (
 )
 
 #: Allowed sub-keys for the nested config blocks
-_ALLOWED_EQUATION_KEYS = frozenset({"model", "constraint", "regime", "observables"})
+_ALLOWED_EQUATION_KEYS = frozenset({"model", "constraints", "regimes", "observables"})
 _ALLOWED_CONSTRAINT_KEYS = frozenset({"bind", "relax"})
 
 #: Sympy types accepted as a regime entry/exit condition.
@@ -853,7 +853,7 @@ def _parse_equations(
 
     model: dict[str, Eq] = {name: _get_eq(eq) for name, eq in eq_data["model"].items()}
 
-    constraint_raw = eq_data.get("constraint", {}) or {}
+    constraint_raw = eq_data.get("constraints", {}) or {}
     if len(constraint_raw) > 2:
         raise NotImplementedError(
             "OBCs are solved via OccBin of Guirreiri and Iacoviello (2015), which explicitly supports one or two constraints. "
@@ -876,7 +876,7 @@ def _parse_equations(
             relax=relax,
         )
 
-    regime_raw = eq_data.get("regime", {}) or {}
+    regime_raw = eq_data.get("regimes", {}) or {}
 
     regime = RegimeGetterDict({})
 

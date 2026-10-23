@@ -18,7 +18,7 @@ equations:
     observed_rate: robs(t) = rhat(t)
     annual_rate: r_annual(t) = 4*rhat(t)
     annual_inflation: pi_annual(t) = 4*pihat(t)
-  constraint: {}
+
   observables:
     obs_gobs: ghat(t)
     obs_piobs: pihat(t)

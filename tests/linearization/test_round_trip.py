@@ -46,7 +46,6 @@ shocks: [e]
 equations:
   model:
     u_eq: "u(t) = (1 - rho)*ubar + rho*u(t-2) + e"
-  constraint: {}
   observables:
     u_obs: "u(t)"
 calibration:

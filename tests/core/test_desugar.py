@@ -41,7 +41,7 @@ NATURAL_TIME_MODEL = {
             "policy": "r(t) = rho_r*r(t-1) + (1 - rho_r)*r_star(t)",
             "v_process": "v(t) = rho_v*v(t-1) + e_v",
         },
-        "constraint": {},
+        "constraints": {},
         "observables": {"Infl": "Pi(t) + pi_mean", "Rate": "r(t)"},
     },
     "calibration": {

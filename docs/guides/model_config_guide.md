@@ -82,7 +82,7 @@ Equations contain the bulk of model dynamics. In `SymbolicDSGE` the field is use
 ```yaml
 equations:
     model: ...
-    constraint: ...
+    constraints: ...
     observables: ...
 ```
 
@@ -106,7 +106,7 @@ equations:
         g_process: g(t) = rho_g*g(t-1) + e_g # (5)!
 
         z_process: z(t) = rho_z*z(t-1) + e_z # (6)!
-    constraint: ...
+    constraints: ...
     observables: ...
 ```
 
@@ -123,7 +123,7 @@ equations:
 
 ### Constraints
 
-The `constraint` field stores named piecewise OBC conditions. Each condition defines `bind` and, optionally, `relax` expressions. Conditions are parsed as `SymPy` relational expressions and must be contemporaneous. The corresponding `regime` entry replaces model equations when that condition binds.
+The `constraints` field stores named piecewise OBC conditions. Each condition defines `bind` and, optionally, `relax` expressions. Conditions are parsed as `SymPy` relational expressions and must be contemporaneous. The corresponding `regimes` entry replaces model equations when that condition binds.
 
 ```yaml
 equations:
@@ -143,7 +143,7 @@ equations:
         ZLB:
             bind: r_shadow(t) < 0
             relax: r_shadow(t) >= 0 # (1)!
-    regime:
+    regimes:
         ZLB:
             rate_link: r(t) = 0
     observables: ...

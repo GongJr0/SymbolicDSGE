@@ -15,8 +15,6 @@ equations:
     g_process: "g(t) = rho_g*g(t-1) + e_g"
     z_process: "z(t) = rho_z*z(t-1) + e_z"
 
-  constraint: {}
-
   observables:
     OutGap: x(t)
     Infl: 4*Pi(t) + pi_star

@@ -96,7 +96,7 @@ equations:
     x_process: "x(t+1) = rho * x(t) + e_x"
     y_process: "y(t+1) = rho * y(t) + e_y"
     z_process: "z(t+1) = rho * z(t) + e_z"
-  constraint: {}
+  constraints: {}
   observables:
     x_obs: x(t)
     y_obs: y(t)
@@ -264,8 +264,8 @@ def test_connective_parens_rejects_unparenthesized_relations(condition):
 def test_parser_rejects_unparenthesized_connective():
     text = _edit(
         _R_ARITHMETIC_MODEL,
-        "  constraint: {}",
-        "  constraint:\n"
+        "  constraints: {}",
+        "  constraints:\n"
         "    obc:\n"
         '      bind: "x(t) < 0 & y(t) < 0"\n'
         '      relax: "x(t) >= 0"',

@@ -35,7 +35,6 @@ def _no_fixed_point_yaml() -> str:
         equations:
           model:
             drift: "x(t) = x(t-1) + 1 + e"
-          constraint: {}
           observables: {}
         calibration:
           parameters:
@@ -61,7 +60,6 @@ def _overflowing_residual_yaml() -> str:
         equations:
           model:
             growth: "x(t) = exp(x(t-1)) + e"
-          constraint: {}
           observables: {}
         calibration:
           parameters:

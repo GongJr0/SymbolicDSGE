@@ -96,7 +96,6 @@ equations:
     observation_investment: rep_dinve(t) = inve(t) - inve(t-1) + ctrend
     observation_wage: rep_dw(t) = w(t) - w(t-1) + ctrend
 
-  constraint: {}
 
   observables:
     dy: rep_dy(t)

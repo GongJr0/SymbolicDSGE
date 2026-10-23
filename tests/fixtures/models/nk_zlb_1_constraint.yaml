@@ -72,7 +72,7 @@ equations:
     rep_pie_an: "pie_an(t) = 400*(pie(t) - PI)"
     rep_yhat: "yhat(t) = 100*(y(t)/Y_SS - 1)"
 
-  constraint:
+  constraints:
     zlb:
       bind: "r(t) <= ZLB"
       # Stated rather than left to the negated bind, so the strict/non-strict
@@ -80,7 +80,7 @@ equations:
       # not.
       relax: "r(t) > ZLB"
 
-  regime:
+  regimes:
     zlb:
       mp_rule: "r(t) = ZLB"
 
