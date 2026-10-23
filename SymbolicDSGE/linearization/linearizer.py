@@ -247,7 +247,8 @@ def _reject_nonpositive_log_point(
     offenders = {
         name: point[name]
         for name, method in methods.items()
-        if method is LinearizationMethod.LOG and point[name] <= 0.0
+        if method is LinearizationMethod.LOG
+        and point[name] <= 1e-12  # tolerance for fp noise
     }
     if offenders:
         raise ValueError(
