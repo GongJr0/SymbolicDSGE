@@ -34,15 +34,15 @@ OVER_ON, OVER_BOTH, OVER_OFF = -2.0, 0.0, 2.0
 def compiled(parsed_post82):
     model, kalman = parsed_post82
     conf = copy.deepcopy(model)
-    by_name = {v.__name__: v for v in conf.variables.variables}
+    by_name = {v.__name__: v for v in conf.variables}
     g, z = by_name["g"], by_name["z"]
 
-    conf.equations.constraint = {
+    conf.equations.constraints = {
         "band": Constraint(bind=g(t) < -1, relax=g(t) > 1),
         "over": Constraint(bind=z(t) < 1, relax=z(t) > -1),
     }
     target = next(iter(conf.equations.model))
-    conf.equations.regime = {
+    conf.equations.regimes = {
         combo: {target: sp.Eq(g(t), 0)}
         for combo in (
             frozenset({"band"}),

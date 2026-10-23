@@ -29,8 +29,6 @@ equations:
         # Placeholder Monetary policy shock:
         v_process: "v(t) = rho_v*v(t-1) + e_v"
 
-    constraint: {}
-
     observables:
         # Observed inflation level:
         Infl: Pi(t) + pi_mean

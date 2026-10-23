@@ -45,16 +45,16 @@ def _with_constraints(parsed, constraint, replacements=None):
     """
     model, kalman = parsed
     conf = copy.deepcopy(model)
-    conf.equations.constraint = constraint
+    conf.equations.constraints = constraint
 
     target = next(iter(conf.equations.model))
-    var = conf.variables.variables[0]
+    var = conf.variables[0]
     names = list(constraint)
     combos = [frozenset({n}) for n in names]
     if len(names) == 2:
         combos.append(frozenset(names))
     replacements = replacements or {}
-    conf.equations.regime = {
+    conf.equations.regimes = {
         c: replacements.get(c, {target: sp.Eq(var(t), 0)}) for c in combos
     }
     return DSGESolver(conf, kalman)
@@ -63,7 +63,7 @@ def _with_constraints(parsed, constraint, replacements=None):
 @pytest.fixture(scope="module")
 def compiled_obc(parsed_post82):
     model, _ = parsed_post82
-    g, z = (v for v in model.variables.variables[:2])
+    g, z = (v for v in model.variables[:2])
     beta = model.parameters[0]
     solver = _with_constraints(
         parsed_post82,
@@ -211,7 +211,7 @@ def test_a_connective_mixing_strict_and_inclusive_is_rejected(parsed_post82):
     # The fold reports one branch's distance and the caller has one bit to read
     # zero with, so the branches may not disagree about their boundary.
     model, _ = parsed_post82
-    g, z = (v for v in model.variables.variables[:2])
+    g, z = (v for v in model.variables[:2])
     beta = model.parameters[0]
     compiled = _with_constraints(
         parsed_post82,
@@ -225,7 +225,7 @@ def test_a_connective_mixing_strict_and_inclusive_is_rejected(parsed_post82):
 def test_an_equality_condition_has_no_distance(parsed_post82):
     # A Relational the parser accepts and the distance encoding cannot express.
     model, _ = parsed_post82
-    g = model.variables.variables[0]
+    g = model.variables[0]
     compiled = _with_constraints(
         parsed_post82, {"lo": Constraint(bind=sp.Eq(g(t), 0), relax=g(t) > 0)}
     ).compile()
@@ -331,7 +331,7 @@ def compiled_lead_regime(parsed_post82):
     clean up.
     """
     model, _ = parsed_post82
-    g, z, r = model.variables.variables[:3]
+    g, z, r = model.variables[:3]
     beta = model.parameters[0]
     shock = next(iter(model.shocks))
     target = list(model.equations.model)[2]
@@ -514,7 +514,7 @@ def test_regime_pencil_rejects_a_block_that_does_not_match_its_rows(compiled_reg
 def compiled_regimes(parsed_post82):
     """Two constraints whose regimes each replace the third model equation."""
     model, _ = parsed_post82
-    g, _, r = model.variables.variables[:3]
+    g, _, r = model.variables[:3]
     beta = model.parameters[0]
     target = list(model.equations.model)[2]
     solver = _with_constraints(
@@ -618,7 +618,7 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
     # so an aux landing anywhere but the end misplaces the patch onto a row the
     # regime never touched, with no numerical symptom at compile time.
     model, _ = parsed_post82
-    r, Pi = model.variables.variables[2], model.variables.variables[4]
+    r, Pi = model.variables[2], model.variables[4]
     solver = _with_constraints(
         parsed_post82,
         {"elb": Constraint(bind=r(t) < 0, relax=r(t) >= 0)},
@@ -667,11 +667,11 @@ def compiled_rbc_obc(parsed_rbc_so):
     """
     model, kalman = parsed_rbc_so
     conf = copy.deepcopy(model)
-    c, k, z = conf.variables.variables
+    c, k, z = conf.variables
     delta = sp.Symbol("delta")
 
-    conf.equations.constraint = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
-    conf.equations.regime = {
+    conf.equations.constraints = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
+    conf.equations.regimes = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
     return DSGESolver(conf, kalman).compile()
@@ -749,7 +749,7 @@ def test_regime_replacements_carry_shocks_like_the_reference(parsed_post82):
     # A shock stays a bare symbol in the residual and reaches the pencil through
     # the shock jacobian, on a replaced row exactly as on a reference one.
     model, _ = parsed_post82
-    r = model.variables.variables[2]
+    r = model.variables[2]
     shock = next(iter(model.shocks))
     rho_r = sp.Symbol("rho_r")
     solver = _with_constraints(
@@ -777,7 +777,7 @@ def test_regime_replacing_an_undeclared_equation_is_rejected(parsed_post82):
     # The merge would append rather than overwrite, shifting every later row
     # index off the reference.
     model, _ = parsed_post82
-    r = model.variables.variables[2]
+    r = model.variables[2]
     solver = _with_constraints(
         parsed_post82,
         {"lo": Constraint(bind=r(t) < 0, relax=r(t) >= 0)},
@@ -807,7 +807,7 @@ def test_model_without_constraints_cannot_build_a_constraint_func(compiled_post8
 @pytest.mark.parametrize("offset", [1, -1, 2, -2])
 def test_conditions_reject_leads_and_lags(parsed_post82, offset):
     model, _ = parsed_post82
-    g = model.variables.variables[0]
+    g = model.variables[0]
     solver = _with_constraints(
         parsed_post82,
         {"lo": Constraint(bind=g(t + offset) < 0, relax=g(t) >= 0)},

@@ -41,7 +41,7 @@ NATURAL_TIME_MODEL = {
             "policy": "r(t) = rho_r*r(t-1) + (1 - rho_r)*r_star(t)",
             "v_process": "v(t) = rho_v*v(t-1) + e_v",
         },
-        "constraint": {},
+        "constraints": {},
         "observables": {"Infl": "Pi(t) + pi_mean", "Rate": "r(t)"},
     },
     "calibration": {
@@ -117,7 +117,7 @@ def test_a_model_of_ordinary_lags_mints_nothing(natural):
 
     assert result.names == ()
     assert [f.__name__ for f in result.variables] == [
-        f.__name__ for f in natural.variables.variables
+        f.__name__ for f in natural.variables
     ]
 
 
@@ -141,9 +141,7 @@ def test_offsets_stay_within_the_three_dates_the_residual_holds(deep):
     )
     assert any(
         offset < -1
-        for _, offset in _offsets(
-            deep.variables.variables, eq.model, eq.regime, eq.observable
-        )
+        for _, offset in _offsets(deep.variables, eq.model, eq.regimes, eq.observables)
     )
 
 
@@ -217,7 +215,7 @@ def test_lag_scan_covers_regimes_the_reference_never_lags(natural):
     # regime pencil past the reference it has to stay row-aligned with.
     conf = copy.deepcopy(natural)
     r, Pi = (sp.Function(n) for n in ("r", "Pi"))
-    conf.equations.regime = {frozenset({"elb"}): {"policy": sp.Eq(r(t), Pi(t - 2))}}
+    conf.equations.regimes = {frozenset({"elb"}): {"policy": sp.Eq(r(t), Pi(t - 2))}}
     result = desugar_model(conf)
 
     assert "Pi_lag1" in result.names
@@ -229,7 +227,7 @@ def test_lag_scan_covers_regimes_the_reference_never_lags(natural):
 def test_lead_scan_covers_regimes_the_reference_never_leads(natural):
     conf = copy.deepcopy(natural)
     r, Pi = (sp.Function(n) for n in ("r", "Pi"))
-    conf.equations.regime = {frozenset({"elb"}): {"policy": sp.Eq(r(t), Pi(t + 2))}}
+    conf.equations.regimes = {frozenset({"elb"}): {"policy": sp.Eq(r(t), Pi(t + 2))}}
     result = desugar_model(conf)
 
     assert "Pi_lead1" in result.names
@@ -250,10 +248,8 @@ def test_generated_variables_are_appended_to_the_declared_set(deep):
     result = desugar_model(deep)
     names = [f.__name__ for f in result.variables]
 
-    assert names[: len(deep.variables.variables)] == [
-        f.__name__ for f in deep.variables.variables
-    ]
-    assert names[len(deep.variables.variables) :] == list(result.names)
+    assert names[: len(deep.variables)] == [f.__name__ for f in deep.variables]
+    assert names[len(deep.variables) :] == list(result.names)
 
 
 def test_positions_maps_generated_names_to_their_slot(deep):
@@ -268,18 +264,16 @@ def test_source_config_is_untouched(deep):
     # Compared by content rather than against a deepcopy: the parser leaves time
     # arguments unevaluated (`t - 1*1`) and deepcopy normalizes them, so a copied
     # baseline differs from its source on expressions nothing ever rewrote.
-    names = [f.__name__ for f in deep.variables.variables]
+    names = [f.__name__ for f in deep.variables]
     eq = deep.equations
     equations = set(deep.equations.model)
     desugar_model(deep)
 
-    assert [f.__name__ for f in deep.variables.variables] == names
+    assert [f.__name__ for f in deep.variables] == names
     assert set(deep.equations.model) == equations
     assert any(
         offset < -1
-        for _, offset in _offsets(
-            deep.variables.variables, eq.model, eq.regime, eq.observable
-        )
+        for _, offset in _offsets(deep.variables, eq.model, eq.regimes, eq.observables)
     )
 
 

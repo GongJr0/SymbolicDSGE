@@ -64,13 +64,13 @@ def solver(parsed_rbc_so):
     """Levels RBC where TFP below a threshold shuts investment off."""
     model, kalman = parsed_rbc_so
     conf = copy.deepcopy(model)
-    _, k, z = conf.variables.variables
+    _, k, z = conf.variables
     delta = sp.Symbol("delta")
 
-    conf.equations.constraint = {
+    conf.equations.constraints = {
         "low": Constraint(bind=z(t) < THRESHOLD, relax=z(t) >= THRESHOLD)
     }
-    conf.equations.regime = {
+    conf.equations.regimes = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
     return DSGESolver(conf, kalman)

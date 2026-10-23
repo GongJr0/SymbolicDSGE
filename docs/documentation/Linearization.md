@@ -147,10 +147,10 @@ __Overrides:__
 | __Field__ | __Becomes__ |
 |:----------|------------:|
 | `equations.model` | deviation form |
-| `equations.observable` | affine form |
+| `equations.observables` | affine form |
 | `equations.obs_is_affine` | all `#!python True`, by construction |
 | `calibration.parameters` | the view's parameterization |
-| `variables.ss_seed` | zeros; the deviation system's steady state is the origin |
+| `ss_seed` | zeros; the deviation system's steady state is the origin |
 
 Everything else is carried from the source config unchanged.
 

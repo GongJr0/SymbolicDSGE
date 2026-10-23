@@ -32,7 +32,6 @@ from .config import (
     Equations,
     Calib,
     RegimeGetterDict,
-    Variables,
     SymbolGetterDict,
     PairGetterDict,
     FunctionGetterDict,
@@ -45,7 +44,7 @@ _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 #: is rejected at parse time (see ``_validate_schema``).
 
 # "parameters": list of param names, re-declared in the calibration.parameters mapping
-# "observables": list of observable names, re-declared in the equations.observable mapping
+# "observables": list of observable names, re-declared in the equations.observables mapping
 _DEPRECATED_TOP_LEVEL_KEYS = frozenset({"parameters", "observables"})
 _ALLOWED_TOP_LEVEL_KEYS = (
     frozenset(
@@ -63,7 +62,7 @@ _ALLOWED_TOP_LEVEL_KEYS = (
 )
 
 #: Allowed sub-keys for the nested config blocks
-_ALLOWED_EQUATION_KEYS = frozenset({"model", "constraint", "regime", "observables"})
+_ALLOWED_EQUATION_KEYS = frozenset({"model", "constraints", "regimes", "observables"})
 _ALLOWED_CONSTRAINT_KEYS = frozenset({"bind", "relax"})
 
 #: Sympy types accepted as a regime entry/exit condition.
@@ -288,9 +287,7 @@ class ModelParser:
         var_funcs = {c.func for c in applied}
 
         declared = set(conf.parameters) | set(conf.shocks)
-        return (var_funcs - set(conf.variables.variables)) | (
-            (free - time_syms) - declared
-        )
+        return (var_funcs - set(conf.variables)) | ((free - time_syms) - declared)
 
     @classmethod
     def validate_equations(cls, conf: ModelConfig) -> None:
@@ -309,7 +306,7 @@ class ModelParser:
                     f"{sorted(str(a) for a in unknown_atoms)}"
                 )
 
-        for name, eq in conf.equations.observable.items():
+        for name, eq in conf.equations.observables.items():
             unknown_atoms = cls._unknown_atoms(conf, eq)
             if unknown_atoms:
                 raise ValueError(
@@ -325,18 +322,18 @@ class ModelParser:
                 )
 
         defining = list(conf.equations.model.values())
-        for replacements in (conf.equations.regime or {}).values():
+        for replacements in (conf.equations.regimes or {}).values():
             defining.extend(replacements.values())
         used = {call.func for eq in defining for call in eq.atoms(AppliedUndef)}
 
-        absent = [v for v in conf.variables.variables if v not in used]
+        absent = [v for v in conf.variables if v not in used]
         if absent:
             raise ValueError(
                 f"Variable(s) {sorted(str(v) for v in absent)} occur in no model "
                 "equation."
             )
 
-        n_var, n_eq = len(conf.variables.variables), len(conf.equations.model)
+        n_var, n_eq = len(conf.variables), len(conf.equations.model)
         if n_var != n_eq:
             raise ValueError(
                 f"The model block has {n_eq} equation(s) for {n_var} variable(s); "
@@ -353,10 +350,10 @@ class ModelParser:
             The configuration object containing the model equations and constraints.
 
         """
-        if not conf.equations.constraint:
+        if not conf.equations.constraints:
             return
 
-        constraints: dict[str, Constraint] = conf.equations.constraint
+        constraints: dict[str, Constraint] = conf.equations.constraints
 
         if len(constraints) > 2:
             raise NotImplementedError(
@@ -396,15 +393,15 @@ class ModelParser:
             The configuration object containing the model equations and regimes.
 
         """
-        constraints = conf.equations.constraint
-        regimes = conf.equations.regime
+        constraints = conf.equations.constraints
+        regimes = conf.equations.regimes
         if not constraints and not regimes:
             return
         if not constraints or not regimes:
             raise ValueError(
-                "equations.constraint and equations.regime must be declared together; "
-                f"got constraint={'set' if constraints else 'empty'}, "
-                f"regime={'set' if regimes else 'empty'}"
+                "equations.constraints and equations.regimes must be declared together; "
+                f"got constraints={'set' if constraints else 'empty'}, "
+                f"regimes={'set' if regimes else 'empty'}"
             )
 
         declared = set(constraints)
@@ -424,7 +421,7 @@ class ModelParser:
         missing = expected - set(regimes)
         if missing:
             raise ValueError(
-                "equations.regime is missing entries for binding combinations: "
+                "equations.regimes is missing entries for binding combinations: "
                 f"{sorted(', '.join(sorted(key)) for key in missing)}"
             )
 
@@ -479,7 +476,7 @@ class ModelParser:
 
         """
         params = set(conf.parameters)
-        for var, expr in conf.variables.ss_seed.items():
+        for var, expr in conf.ss_seed.items():
             if expr is None:
                 continue
             applied = expr.atoms(AppliedUndef)
@@ -524,7 +521,9 @@ class ModelParser:
 
         _get_expr, _get_relational, _get_eq = _sympy_parsers(_LOCALS, local_subs)
 
-        variables = _parse_variables(data, ordered_var_names, variable_funcs, _get_expr)
+        variables, ss_seed = _parse_variables(
+            data, ordered_var_names, variable_funcs, _get_expr
+        )
 
         equations = _parse_equations(
             data,
@@ -546,6 +545,7 @@ class ModelParser:
         mdl_cfg = ModelConfig(
             name=data.get("name", "Unnamed"),
             variables=variables,
+            ss_seed=ss_seed,
             parameters=params,
             shocks=shocks,
             observables=observables,
@@ -705,11 +705,11 @@ def _validate_schema(data: dict[str, Any]) -> None:
         (eq := data.get("equations")), _ALLOWED_EQUATION_KEYS, "equations"
     )
     if isinstance(eq, dict):
-        for name, spec in (eq.get("constraint") or {}).items():
+        for name, spec in (eq.get("constraints") or {}).items():
             _reject_unknown_keys(
                 spec,
                 _ALLOWED_CONSTRAINT_KEYS,
-                f"equations.constraint.{name}",
+                f"equations.constraints.{name}",
             )
     calib = data.get("calibration")
     _reject_unknown_keys(calib, _ALLOWED_CALIBRATION_KEYS, "calibration")
@@ -853,16 +853,16 @@ def _parse_equations(
 
     model: dict[str, Eq] = {name: _get_eq(eq) for name, eq in eq_data["model"].items()}
 
-    constraint_raw = eq_data.get("constraint", {}) or {}
-    if len(constraint_raw) > 2:
+    constraints_raw = eq_data.get("constraints", {}) or {}
+    if len(constraints_raw) > 2:
         raise NotImplementedError(
             "OBCs are solved via OccBin of Guirreiri and Iacoviello (2015), which explicitly supports one or two constraints. "
             "Use at most two constraints in your model configuration."
         )
 
-    constraint: dict[str, Constraint] = {}
-    for name, raw_spec in constraint_raw.items():
-        spec = _require_mapping(raw_spec, f"equations.constraint.{name}")
+    constraints: dict[str, Constraint] = {}
+    for name, raw_spec in constraints_raw.items():
+        spec = _require_mapping(raw_spec, f"equations.constraints.{name}")
         if (bind := spec.get("bind")) is None:
             raise ValueError(f"Constraint '{name}' is missing a 'bind' condition.")
         bind = _get_relational(bind)
@@ -871,24 +871,24 @@ def _parse_equations(
         else:
             relax = _get_relational(relax)
 
-        constraint[name] = Constraint(
+        constraints[name] = Constraint(
             bind=bind,
             relax=relax,
         )
 
-    regime_raw = eq_data.get("regime", {}) or {}
+    regimes_raw = eq_data.get("regimes", {}) or {}
 
-    regime = RegimeGetterDict({})
+    regimes = RegimeGetterDict({})
 
-    for raw_key, v in regime_raw.items():
-        if raw_key in regime:
+    for raw_key, v in regimes_raw.items():
+        if raw_key in regimes:
             raise ValueError(
                 f"Duplicate regime key '{raw_key}' encountered "
-                "in equations.regime. Each regime key must be unique."
+                "in equations.regimes. Each regime key must be unique."
             )
-        regime[raw_key] = {
+        regimes[raw_key] = {
             name: _get_eq(eq)
-            for name, eq in _require_mapping(v, f"equations.regime.{raw_key}").items()
+            for name, eq in _require_mapping(v, f"equations.regimes.{raw_key}").items()
         }
 
     observables_raw = eq_data.get("observables", {}) or {}
@@ -904,9 +904,9 @@ def _parse_equations(
 
     return Equations(
         model=model,
-        constraint=constraint if constraint else None,
-        regime=regime if regime else None,
-        observable=SymbolGetterDict(observables_eq),
+        constraints=constraints if constraints else None,
+        regimes=regimes if regimes else None,
+        observables=SymbolGetterDict(observables_eq),
         obs_is_affine=SymbolGetterDict(is_affine),
     )
 
@@ -943,7 +943,7 @@ def _parse_variables(
     ordered_var_names: list[str],
     variable_funcs: list[Function],
     _get_expr: Callable[[str], Expr],
-) -> Variables:
+) -> tuple[list[Function], FunctionGetterDict[Expr | None]]:
     ss_seed_raw = _get_ss_seed(data)
 
     ss_seed: dict[Function, Expr | None] = {}
@@ -954,10 +954,7 @@ def _parse_variables(
         else:
             ss_seed[var_func] = _get_expr(str(ss_raw))
 
-    return Variables(
-        variables=variable_funcs,
-        ss_seed=FunctionGetterDict(ss_seed),
-    )
+    return (variable_funcs, FunctionGetterDict(ss_seed))
 
 
 def _resolve_calibration_locals(

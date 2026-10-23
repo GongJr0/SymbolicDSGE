@@ -21,12 +21,12 @@ equations:
 
     z_process: z(t) = rho_z*z(t-1) + e_z
 
-  constraint:
+  constraints:
     ZLB:
       bind: r_shadow(t) < 0
       relax: r_shadow(t) >= 0
 
-  regime:
+  regimes:
     ZLB:
       rate_link: r(t) = 0
 

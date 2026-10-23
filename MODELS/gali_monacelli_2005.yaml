@@ -22,7 +22,7 @@ equations:
     technology: a(t) = rhoa*a(t-1)+eps_a
     foreign_output: ystar(t) = rhoy*ystar(t-1)+eps_star
     policy: pih(t) = 0
-  constraint: {}
+
   observables:
     obs_pi: pi(t)
     obs_r: r(t)

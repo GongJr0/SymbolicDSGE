@@ -38,7 +38,7 @@ equations:
     z_process: "z(t) = rho_z * z(t-1) + e_z"
     d_process: "d(t) = rho_d * d(t-1) + e_d"
     g_process: "g(t) = rho_g * g(t-1) + e_g"
-  constraint: {}
+
   observables:
     c_obs: c(t)
     k_obs: k(t)

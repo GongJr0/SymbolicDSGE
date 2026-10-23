@@ -34,7 +34,6 @@ shocks: [e]
 equations:
   model:
     u_eq: "u(t) = (1 - rho)*ubar + rho*u(t-2) + e"
-  constraint: {}
   observables:
     u_obs: "u(t)"
     log_u_obs: "log(u(t))"
@@ -237,7 +236,7 @@ def test_to_config_keeps_the_equation_key_order(rbc, rbc_log):
 def test_to_config_zeroes_every_seed(rbc_log):
     # The deviation system clears at the origin. Left alone, the authored k_ss
     # would seed Newton at exp(k_ss) times the level it was written for.
-    seeds = rbc_log.to_config().variables.ss_seed
+    seeds = rbc_log.to_config().ss_seed
 
     assert set(seeds) == set(rbc_log.steady_state)
     assert all(float(value) == 0.0 for value in seeds.values())
@@ -260,7 +259,7 @@ def test_to_config_marks_every_observable_affine(aux):
 def test_to_config_does_not_alias_the_view(rbc_log):
     config = rbc_log.to_config()
     config.equations.model.clear()
-    config.equations.observable.clear()
+    config.equations.observables.clear()
     config.calibration.parameters.clear()
 
     assert rbc_log.model

@@ -28,27 +28,12 @@ name: Test Model
 
 ## Variables
 
-The `variables` field contains the names and some optional configuration for all primary model variables. (no time indices or parameters) It is declared as a list or mapping.
-
-When using a mapping instead of a list, each variable can specify a preferred linearization method and the parameter corresponding to its steady state level. This additional information is only used when linearizing a nonlinear model.
-
-Variables are declared as follows:
+The `variables` field contains the names of all primary model variables. (no time indices or parameters) It is declared as a list.
 
 ```yaml
-variables: [g, z, r_shadow, r, Pi, x]  # as list
-variables: # as mapping
-    g: # (1)!
-    z:
-    r_shadow:
-    r:
-        linearization: log  # (2)!
-        ss_seed: r_star # (3)!
-    ...
+variables: [g, z, r_shadow, r, Pi, x]
 ```
 
-1. Exogenous processes are already linear and have no steady states. When fields are not specified we infer `linearization: none` automatically.
-2. Can be one of `log`, `taylor`, or `none`.
-3. Newton seed for the steady state. Omitted seeds at zero. Doubles as the expansion point under `log` or `taylor`.
 
 ???+ info "Ordering Convention"
     At compile time, the solver infers its canonical layout from the model config: after auxiliaries are generated (where necessary), a variable occurring at `t-1` is a state and every other variable is a control. During model compilation the canonical order is derived as `[states; controls]`.
@@ -57,6 +42,24 @@ variables: # as mapping
 
     - `x0` requires all variables, including auxiliaries in the order `[declared_variables; generated_auxiliaries]`.
     - `ss_seed` requires all declared variables (the `variables` field) in declaration order.
+
+## Steady State Seeds
+Steady states are solved numerically with Newton's method. The configuration file provides a `ss_seed` field for that solver to use as an initial guess.
+The solver evaluates the residuals at the seed, if the exact steady state is given as the seed, the solver therefore exists before the first iteration completes.
+Steady states seeds are provided in mapping form per variable and ommitted names are seeded at zero:
+
+```yaml
+# The model is in gap form as written
+# non-zero examples below are for
+# demonstration purposes only
+ss_seed:
+    g: 0
+    z: 0
+    r_shadow: 2
+    r: r_star
+    Pi: pi_star
+    x: 0
+```
 
 ## Shocks
 
@@ -82,7 +85,7 @@ Equations contain the bulk of model dynamics. In `SymbolicDSGE` the field is use
 ```yaml
 equations:
     model: ...
-    constraint: ...
+    constraints: ...
     observables: ...
 ```
 
@@ -106,7 +109,7 @@ equations:
         g_process: g(t) = rho_g*g(t-1) + e_g # (5)!
 
         z_process: z(t) = rho_z*z(t-1) + e_z # (6)!
-    constraint: ...
+    constraints: ...
     observables: ...
 ```
 
@@ -123,7 +126,7 @@ equations:
 
 ### Constraints
 
-The `constraint` field stores named piecewise OBC conditions. Each condition defines `bind` and, optionally, `relax` expressions. Conditions are parsed as `SymPy` relational expressions and must be contemporaneous. The corresponding `regime` entry replaces model equations when that condition binds.
+The `constraints` field stores named piecewise OBC conditions. Each condition defines `bind` and, optionally, `relax` expressions. Conditions are parsed as `SymPy` relational expressions and must be contemporaneous. The corresponding `regimes` entry replaces model equations when that condition binds.
 
 ```yaml
 equations:
@@ -139,11 +142,11 @@ equations:
         g_process: g(t) = rho_g*g(t-1) + e_g
 
         z_process: z(t) = rho_z*z(t-1) + e_z
-    constraint:
+    constraints:
         ZLB:
             bind: r_shadow(t) < 0
             relax: r_shadow(t) >= 0 # (1)!
-    regime:
+    regimes:
         ZLB:
             rate_link: r(t) = 0
     observables: ...
@@ -169,11 +172,11 @@ equations:
         g_process: g(t) = rho_g*g(t-1) + e_g
 
         z_process: z(t) = rho_z*z(t-1) + e_z
-    constraint:
+    constraints:
         ZLB:
             bind: r_shadow(t) < 0
             relax: r_shadow(t) >= 0
-    regime:
+    regimes:
         ZLB:
             rate_link: r(t) = 0
     observables:

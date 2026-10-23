@@ -56,7 +56,7 @@ equations:
     def_log_c: "log_c(t) = log(c(t))"
     def_log_invest: "log_invest(t) = log(invest(t))"
 
-  constraint:
+  constraints:
     IRR:
       bind: "log_invest(t) - log_invest_ss < log(phi)"
       # Asymmetric on purpose: exit is governed by the multiplier, not by the
@@ -66,7 +66,7 @@ equations:
       # No relax clause in the .mod either, so this takes the negated bind.
       bind: "log_invest(t) - log_invest_ss < -0.000001"
 
-  regime:
+  regimes:
     IRR:
       investment: "log_invest(t) = log(phi*invest_ss)"
     INEG:

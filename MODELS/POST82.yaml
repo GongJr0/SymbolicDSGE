@@ -34,8 +34,6 @@ equations:
     # Cost-push shock: z_t = rho_z z_{t-1} + e_z,t
     z_process: "z(t) = rho_z*z(t-1) + e_z"
 
-  constraint: {}
-
   observables:
     OutGap: x(t) # output gap measured plain
 

@@ -51,7 +51,7 @@ def summarize_parsed_model(
         "solved": False,
         "source": source,
         "name": model.name,
-        "variables": _symbol_names(model.variables.variables),
+        "variables": _symbol_names(model.variables),
         "parameters": _symbol_names(model.parameters),
         "parameter_values": _parameter_values(model),
         "observables": _symbol_names(model.observables),

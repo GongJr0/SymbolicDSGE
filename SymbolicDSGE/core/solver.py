@@ -220,7 +220,7 @@ class DSGESolver:
         carry none. Conditions are contemporaneous, so no lag shift applies and
         they are never simplified.
         """
-        constraints = conf.equations.constraint
+        constraints = conf.equations.constraints
         if not constraints:
             return (), []
 
