@@ -10,7 +10,6 @@ import yaml
 
 from SymbolicDSGE.core.model_parser import ModelParser, _check_connective_parens
 from SymbolicDSGE.core.config import Constraint
-from SymbolicDSGE.core.linearization import LinearizationMethod
 
 
 def _write_yaml(path: Path, data: dict) -> Path:
@@ -87,10 +86,7 @@ def test_kalman_R_built_numerically_from_calibration(parsed_post82):
 
 _R_ARITHMETIC_MODEL = """
 name: RTEST
-variables:
-  x: {ss_seed: null}
-  y: {ss_seed: null}
-  z: {ss_seed: null}
+variables: [x, y, z]
 shocks:
   - e_x
   - e_y
@@ -331,8 +327,8 @@ def test_parser_rejects_shock_in_observable():
 
 
 def test_parser_rejects_variable_with_no_model_equation():
-    text = _after(
-        _R_ARITHMETIC_MODEL, "  z: {ss_seed: null}", "  ghost: {ss_seed: null}"
+    text = _edit(
+        _R_ARITHMETIC_MODEL, "variables: [x, y, z]", "variables: [x, y, z, ghost]"
     )
 
     with pytest.raises(ValueError, match=r"\['ghost'\] occur in no model equation"):
@@ -342,8 +338,8 @@ def test_parser_rejects_variable_with_no_model_equation():
 def test_parser_rejects_a_variable_defined_only_by_an_observable():
     # An observable gives the variable an incidence bit, so the kernel's own
     # absent-variable check never sees it.
-    text = _after(
-        _R_ARITHMETIC_MODEL, "  z: {ss_seed: null}", "  ghost: {ss_seed: null}"
+    text = _edit(
+        _R_ARITHMETIC_MODEL, "variables: [x, y, z]", "variables: [x, y, z, ghost]"
     )
     text = _after(text, "    z_obs: z(t)", "    ghost_obs: ghost(t)")
     text = _after(text, "      z_obs: sig_z", "      ghost_obs: sig_x")
@@ -378,7 +374,7 @@ def test_parser_rejects_a_variable_declared_twice():
     # The mapping form cannot express this; a list of names can.
     text = _edit(
         _R_ARITHMETIC_MODEL,
-        "variables:\n  x: {ss_seed: null}\n  y: {ss_seed: null}\n  z: {ss_seed: null}",
+        "variables: [x, y, z]",
         "variables: [x, y, z, x]",
     )
 
@@ -562,14 +558,7 @@ def test_validate_ss_seed_errors_on_model_variable_reference(conf):
 
 def test_parser_rejects_undeclared_ss_seed_symbol(tmp_path, test_model_yaml):
     data = yaml.safe_load(test_model_yaml)
-    data["variables"] = {
-        "u": {"ss_seed": "u_bar"},
-        "v": {},
-        "r": {},
-        "Pi": {},
-        "x": {},
-        "r_star": {},
-    }
+    data["ss_seed"] = {"u": "u_bar"}
     bad = _write_yaml(tmp_path / "bad_ss_seed.yaml", data)
 
     with pytest.raises(ValueError, match="references unknown symbols"):
@@ -581,7 +570,7 @@ def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path, test_model_y
     data["calibration"]["parameters"].pop("beta")
     bad = _write_yaml(tmp_path / "missing_declared.yaml", data)
 
-    with pytest.raises(ValueError, match="SympifyError: beta"):
+    with pytest.raises(TypeError):
         ModelParser(bad)
 
 
@@ -617,34 +606,11 @@ def test_parser_rejects_model_equation_without_single_equals(tmp_path, test_mode
         ModelParser(bad)
 
 
-def test_legacy_variable_list_defaults_linearization_and_ss_seed(parsed_test):
-    conf = parsed_test.model
-
-    assert conf.symbolically_linearized is False
-    assert [v.__name__ for v in conf.variables.variables] == [
-        "u",
-        "v",
-        "r",
-        "Pi",
-        "x",
-        "r_star",
-    ]
-    assert all(
-        method == LinearizationMethod.NONE
-        for method in conf.variables.linearization.values()
-    )
-    assert all(ss is None for ss in conf.variables.ss_seed.values())
-
-
 def test_parser_builds_variable_metadata_from_mapping(tmp_path, test_model_yaml):
     data = yaml.safe_load(test_model_yaml)
-    data["variables"] = {
-        "u": {"linearization": "taylor"},
-        "v": {},
-        "r": {"linearization": "log", "ss_seed": "rbar"},
-        "Pi": {"ss_seed": "pi_mean"},
-        "x": {"ss_seed": None},
-        "r_star": {"linearization": "none"},
+    data["ss_seed"] = {
+        "r": "rbar",
+        "Pi": "pi_mean",
     }
     bad = _write_yaml(tmp_path / "variable_metadata.yaml", data)
 
@@ -658,41 +624,6 @@ def test_parser_builds_variable_metadata_from_mapping(tmp_path, test_model_yaml)
         "x",
         "r_star",
     ]
-    assert conf.variables.linearization["u"] == LinearizationMethod.TAYLOR
-    assert conf.variables.linearization["v"] == LinearizationMethod.NONE
-    assert conf.variables.linearization["r"] == LinearizationMethod.LOG
     assert conf.variables.ss_seed["r"] == sp.Symbol("rbar")
     assert conf.variables.ss_seed["Pi"] == sp.Symbol("pi_mean")
     assert conf.variables.ss_seed["x"] is None
-
-
-def test_parser_rejects_retired_steady_state_key(tmp_path, test_model_yaml):
-    data = yaml.safe_load(test_model_yaml)
-    data["variables"] = {
-        "u": {"steady_state": "ubar"},
-        "v": {},
-        "r": {},
-        "Pi": {},
-        "x": {},
-        "r_star": {},
-    }
-    bad = _write_yaml(tmp_path / "bad_steady_state_key.yaml", data)
-
-    with pytest.raises(ValueError, match="unsupported metadata keys"):
-        ModelParser(bad)
-
-
-def test_parser_rejects_unknown_variable_metadata_keys(tmp_path, test_model_yaml):
-    data = yaml.safe_load(test_model_yaml)
-    data["variables"] = {
-        "u": {"linearization": "taylor", "foo": 1},
-        "v": {},
-        "r": {},
-        "Pi": {},
-        "x": {},
-        "r_star": {},
-    }
-    bad = _write_yaml(tmp_path / "bad_variable_metadata.yaml", data)
-
-    with pytest.raises(ValueError, match="unsupported metadata keys"):
-        ModelParser(bad)

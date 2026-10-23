@@ -683,24 +683,39 @@ class CompiledModel:
         cache[obs] = build_measurement_cfunc(exprs, layout)
         return cache[obs]
 
-    def to_dict(self) -> dict[str, Any]:
-        """``dataclasses.asdict`` representation of the compiled model.
-
-        Returns
-        -------
-        dict[str, Any]
-            asdict output of the compiled model dataclass.
-
-        """
-        return asdict(self)
-
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.config.name})"
 
 
+def _newton_seed(compiled: CompiledModel, parameters: Mapping[Symbol, float]) -> NDF:
+    """The model's own ``ss_seed``, resolved at ``parameters``, in canonical order.
+
+    Omitted variables are zeroed. Raises if any seed expression does not resolve to a number.
+    """
+    import sympy as sp
+
+    seeds = compiled.config.variables.ss_seed
+    values = dict(parameters)
+    seed = np.zeros(compiled.n_var, dtype=float64)
+    for i, name in enumerate(compiled.var_names):
+        origin = compiled.layout.aux_origin.get(name, name)
+        expr = seeds[origin]
+        if expr is None:
+            continue
+        resolved = sp.sympify(expr).subs(values)
+        try:
+            seed[i] = float(resolved)
+        except TypeError as exc:
+            raise ValueError(
+                f"ss_seed for '{name}' did not resolve to a number at these "
+                f"parameters: {resolved}"
+            ) from exc
+    return seed
+
+
 def _shock_covariance(
     compiled: "CompiledModel",
-    params: Mapping[Any, float64] | None = None,
+    params: Mapping[Any, float] | None = None,
     *,
     shocks: Sequence[str] | None = None,
     corr: NDF | None = None,
@@ -723,7 +738,7 @@ def _shock_covariance(
 
 def _measurement_covariance(
     compiled: "CompiledModel",
-    params: Mapping[Any, float64] | None = None,
+    params: Mapping[Any, float] | None = None,
     *,
     observables: Sequence[str] | None = None,
 ) -> NDF:

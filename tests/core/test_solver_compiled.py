@@ -12,7 +12,7 @@ import yaml
 from numpy import float64
 import pytest
 
-from SymbolicDSGE.core import DSGESolver, ModelParser, linearize_model
+from SymbolicDSGE.core import DSGESolver, ModelParser
 from SymbolicDSGE._ckernels.core import jacobian_eval, measurement_eval
 
 
@@ -20,14 +20,7 @@ def _nonlinear_compile_yaml() -> str:
     return textwrap.dedent(
         """
         name: "NONLINEAR_COMPILE_LINEARIZE_TEST"
-        variables:
-          a:
-            linearization: log
-            ss_seed: a_ss
-          k:
-            linearization: taylor
-            ss_seed: k_ss
-          z: {}
+        variables: [a, k, z]
         shocks:
           - e_a
           - e_z
@@ -205,43 +198,6 @@ def test_compile_lifts_a_lead_beyond_the_three_dates(parsed_test):
     assert "u_lead1" in compiled.layout.generated_names
     assert "u_lead1" in compiled.layout.control_names
     assert "u_lead1" not in compiled.layout.state_names
-
-
-def test_compile_can_linearize_model_on_the_fly(tmp_path):
-    path = tmp_path / "nonlinear_compile_linearize.yaml"
-    path.write_text(_nonlinear_compile_yaml(), encoding="utf-8")
-
-    model, kalman = ModelParser(path).get_all()
-    solver = DSGESolver(model, kalman)
-
-    compiled_from_flag = solver.compile(linearize=True)
-    compiled_explicit = DSGESolver(
-        linearize_model(model),
-        kalman,
-    ).compile()
-
-    assert model.symbolically_linearized is False
-    assert compiled_from_flag.config is not model
-    assert compiled_from_flag.config.symbolically_linearized is True
-    assert [
-        sp.simplify(a - b)
-        for a, b in zip(
-            compiled_from_flag.objective_eqs,
-            compiled_explicit.objective_eqs,
-            strict=True,
-        )
-    ] == [0] * len(compiled_explicit.objective_eqs)
-
-    solved_from_flag = solver.solve(compiled_from_flag)
-    solved_explicit = DSGESolver(
-        compiled_explicit.config,
-        kalman,
-    ).solve(compiled_explicit)
-
-    assert solved_from_flag.policy.stab == 0
-    assert solved_explicit.policy.stab == 0
-    assert np.allclose(solved_from_flag.policy.A, solved_explicit.policy.A)
-    assert np.allclose(solved_from_flag.policy.B, solved_explicit.policy.B)
 
 
 def test_post82_randomized_calibration_still_solves(tmp_path, post82_test_model_path):

@@ -25,7 +25,6 @@ DSGESolver.compile(
     *,
     variable_order: list[sp.Function | str] | None = None,
     params_order: list[str] | None = None,
-    linearize: bool = False,
 ) -> CompiledModel
 ```
 
@@ -42,7 +41,6 @@ Produces a `#!python CompiledModel` object using the inferred canonical variable
 |:---------|----------------:|
 | variable_order | Optional expected variable order. If supplied, it must preserve the inferred grouping with states first. |
 | params_order | Custom ordering of model parameters if desired. |
-| linearize | Apply symbolic linearization to a copied model config before compilation. |
 
  &nbsp;
 
@@ -80,11 +78,6 @@ __Returns:__
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `#!python SolvedModel` | Solved model object with relevant methods attached. |
-
-&nbsp;
-
-???+ note "Linearized Inputs"
-    `DSGESolver.solve(...)` expects a compiled linearized model. If your original model is nonlinear, pass `#!python linearize=True` to `#!python DSGESolver.compile(...)` or apply `#!python SymbolicDSGE.core.linearize_model(...)` before compilation.
 
 ```python
 DSGESolver.estimate(

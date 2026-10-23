@@ -27,15 +27,16 @@
 
 name: "RBC_OCCBIN"
 
-variables:
-  a: {ss_seed: a_ss} # a_ss = 0
-  c: {ss_seed: c_ss}
-  invest: {ss_seed: invest_ss}
-  k: {ss_seed: k_ss}
-  lam: {ss_seed: lam_ss} # lam_ss = 0
-  log_k: {ss_seed: log_k_ss}
-  log_invest: {ss_seed: log_invest_ss}
-  log_c: {ss_seed: log_c_ss}
+variables: [a, c, invest, k, lam, log_k, log_invest, log_c]
+ss_seed:
+  a:  a_ss # a_ss = 0
+  c:  c_ss
+  invest:  invest_ss
+  k:  k_ss
+  lam:  lam_ss # lam_ss = 0
+  log_k:  log_k_ss
+  log_invest:  log_invest_ss
+  log_c:  log_c_ss
 
 shocks:
     - eps

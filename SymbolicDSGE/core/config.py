@@ -1,15 +1,12 @@
 """Symbolic representation of a parsed DSGE model configuration."""
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import AbstractSet, Any, Mapping, TypeAlias, TypeVar, Dict, Sequence
 from collections import UserDict
 from sympy import Symbol, Function, Eq, Expr, And, Or, Not
 from sympy.core.relational import Relational
 from numpy import array, asarray, eye, float64, ix_, outer
 from numpy.typing import NDArray
-import pickle
-
-from .linearization import LinearizationMethod
 
 KT = TypeVar("KT")
 V = TypeVar("V")
@@ -81,30 +78,7 @@ class RegimeGetterDict(_NormalizedKeyDict[frozenset[str], Regime]):
 
 
 @dataclass
-class Base:
-    """Base class implementing basic dataclass functionality for model configuration components."""
-
-    def __getitem__(self, key: str) -> Any:
-        return getattr(self, key)
-
-    def to_dict(self) -> dict[str, Any]:
-        """:func:`dataclasses.asdict` passthrough.
-
-        Returns
-        -------
-        dict[str, Any]
-            Output of :func:`dataclasses.asdict` on the dataclass instance.
-
-        """
-        return asdict(self)
-
-    def serialize(self, filepath: str) -> None:
-        with open(filepath, "wb") as f:
-            pickle.dump(self, f)
-
-
-@dataclass
-class Constraint(Base):
+class Constraint:
     """Constrants that can bind and relax on separate conditions, allowing for regime switching in the model.
 
     Attributes
@@ -122,7 +96,7 @@ class Constraint(Base):
 
 
 @dataclass
-class Equations(Base):
+class Equations:
     """Equations defining the transitions, policy, and observables of the model.
 
     Attributes
@@ -155,7 +129,7 @@ class Equations(Base):
 
 
 @dataclass
-class Calib(Base):
+class Calib:
     """Calibration of the model configuration, including parameter values, shock standard deviations, and shock correlations.
 
     Attributes
@@ -169,7 +143,7 @@ class Calib(Base):
 
     """
 
-    parameters: SymbolGetterDict[float64]
+    parameters: SymbolGetterDict[float]
     shock_std: SymbolGetterDict[str]
     shock_corr: PairGetterDict[str | None]
 
@@ -187,7 +161,7 @@ def make_Q(
     shock_order: Sequence[Symbol | str],
     std_param_map: Mapping[Any, str],
     corr_param_map: Mapping[Any, str | None] | None,
-    params: Mapping[Any, float64],
+    params: Mapping[Any, float],
     *,
     shocks: Sequence[str] | None = None,
     corr: NDArray[float64] | None = None,
@@ -242,7 +216,7 @@ def make_Q(
 
 
 @dataclass
-class Variables(Base):
+class Variables:
     """Variable specification for a model, including the list of variables, the steady-state seed, and the linearization method.
 
     Attributes
@@ -251,19 +225,15 @@ class Variables(Base):
         List of model variables as :class:`sympy.Function`s of time.
     ss_seed : FunctionGetterDict[Expr | None]
         Initial guess for the steady-state Newton solve.
-    linearization : FunctionGetterDict[LinearizationMethod]
-        Linearization method for each variable, as a mapping from variable to
-        :class:`LinearizationMethod`.
     """
 
     variables: list[Function]
     # None == 0 seed newton.
     ss_seed: FunctionGetterDict[Expr | None]
-    linearization: FunctionGetterDict[LinearizationMethod]
 
 
 @dataclass(repr=False)
-class ModelConfig(Base):
+class ModelConfig:
     """A model configuration parsed into symbolic representations of its variables, parameters, shocks, observables, and equations.
 
     Attributes
@@ -285,8 +255,6 @@ class ModelConfig(Base):
     calibration : Calib
         :class:`Calib` object containing the model's calibration parameters, shock
         standard deviations, and shock correlations.
-    symbolically_linearized : bool
-        Boolean indicating whether the model has been symbolically linearized.
     source_yaml : str | None
         Optional string containing the source YAML text from which the model
         configuration was parsed.
@@ -299,7 +267,6 @@ class ModelConfig(Base):
     observables: list[Symbol]
     equations: Equations
     calibration: Calib
-    symbolically_linearized: bool = False
 
     #: Source YAML text the config was parsed from, retained so a model can be
     #: round-tripped into a ``.sdsge`` bundle without re-reading from disk

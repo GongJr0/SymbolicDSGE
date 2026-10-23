@@ -10,10 +10,10 @@
 
 name: "RBC_SECOND_ORDER"
 
-variables:
-  c: {ss_seed: c_ss}
-  k: {ss_seed: k_ss}
-  z: {ss_seed: null} # z_ss = 0
+variables: [c, k, z]
+ss_seed:
+  c: c_ss
+  k: k_ss
 
 shocks:
     - e

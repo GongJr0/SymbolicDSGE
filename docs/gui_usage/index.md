@@ -33,7 +33,6 @@ The sidebar controls the active model and is available from every tab.
 | YAML Path | Path to a model configuration file. |
 | Load | Parse the selected YAML file into the active model slot. |
 | Sync | Refresh the displayed backend session state. |
-| Linearize | Pass `linearize=True` when compiling the model. |
 | Solve | Compile and solve the loaded model in the active slot. |
 
 ## Tabs

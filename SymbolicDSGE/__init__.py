@@ -15,7 +15,6 @@ from .core import (
     ModelParser,
     Shock,
     ShockPath,
-    linearize_model,
     SolvedModel,
 )
 from .kalman import KalmanFilter
@@ -33,7 +32,6 @@ __all__ = [
     "Shock",
     "ShockPath",
     "utils",
-    "linearize_model",
     # .sdsge bundle API
     "BundleBuilder",
     "load_bundle",

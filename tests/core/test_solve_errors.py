@@ -29,8 +29,7 @@ def _no_fixed_point_yaml() -> str:
     return textwrap.dedent(
         """
         name: "NO_FIXED_POINT"
-        variables:
-          x: {}
+        variables: [x]
         shocks:
           - e
         equations:
@@ -54,8 +53,9 @@ def _overflowing_residual_yaml() -> str:
     return textwrap.dedent(
         """
         name: "OVERFLOWING_RESIDUAL"
-        variables:
-          x: {ss_seed: x_seed}
+        variables: [x]
+        ss_seed:
+          x: x_seed
         shocks:
           - e
         equations:

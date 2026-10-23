@@ -185,6 +185,7 @@ nav:
       - ModelConfig: documentation/ModelConfig.md
       - ModelParser: documentation/ModelParser.md
       - DSGESolver: documentation/DSGESolver.md
+      - Linearization: documentation/Linearization.md
       - Estimator: documentation/Estimator.md
       - CompiledModel: documentation/CompiledModel.md
       - SolvedModel: documentation/SolvedModel.md

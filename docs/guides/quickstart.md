@@ -45,8 +45,6 @@ This displays the parsed equations as `SymPy` objects. Variables are functions o
 
 Compilation converts the symbolic model to a numeric residual callback. It desugars longer leads and lags with auxiliary variables, derives the state and control layout from equation timing, and compiles the residual consumed by the first-order solver.
 
-If your model is written in nonlinear levels, pass `linearize=True` to `DSGESolver.compile(...)`. The example is already written in linearized gap form, so it compiles directly.
-
 ```python
 solver = DSGESolver(model, kalman)
 compiled = solver.compile(
@@ -79,8 +77,6 @@ Equations as passed to the solver:
 ???+ note "Variable Layout"
     The residual callback receives numeric forward, current, and previous variable vectors, the current shock vector, and the parameter vector. A variable that occurs at `t-1` is a state, and every other variable is a control. The compiler creates any auxiliary variables needed for longer lags or leads, then places all states before controls.
 
-???+ note "Linearization"
-    With `linearize=True`, the parsed `ModelConfig` must define the linearization parameters. You can also call `SymbolicDSGE.linearize_model(...)` directly when you need the transformed symbolic configuration.
 
 ## Solution
 
