@@ -705,7 +705,7 @@ def _validate_schema(data: dict[str, Any]) -> None:
         (eq := data.get("equations")), _ALLOWED_EQUATION_KEYS, "equations"
     )
     if isinstance(eq, dict):
-        for name, spec in (eq.get("constraint") or {}).items():
+        for name, spec in (eq.get("constraints") or {}).items():
             _reject_unknown_keys(
                 spec,
                 _ALLOWED_CONSTRAINT_KEYS,
