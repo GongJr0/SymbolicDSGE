@@ -92,8 +92,8 @@ def test_newton_non_convergence_raises(rbc):
 @pytest.mark.parametrize("model_path", ["test", "post82"], indirect=True)
 def test_newton_linear_model_zero_steady_state(model_path):
     # A (log-)linear model clears at ss = 0; Newton seeded there converges at once.
-    model, kalman = ModelParser(model_path).get_all()
-    compiled = DSGESolver(model, kalman).compile()
+    model = ModelParser(model_path).get()
+    compiled = DSGESolver(model).compile()
     calib = compiled.config.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     cf = compiled.construct_objective_cfunc()

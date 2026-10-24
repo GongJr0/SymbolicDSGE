@@ -9,7 +9,7 @@ import sympy as sp
 import yaml
 
 from SymbolicDSGE.core.model_parser import ModelParser, _check_connective_parens
-from SymbolicDSGE.core.config import Constraint
+from SymbolicDSGE.core.config import Constraint, cov_from_spec
 
 
 def _write_yaml(path: Path, data: dict) -> Path:
@@ -26,62 +26,16 @@ def _after(text: str, anchor: str, *lines: str) -> str:
     return _edit(text, anchor, "\n".join((anchor, *lines)))
 
 
-def test_model_parser_get_and_get_all(parsed_test, test_model_path):
-    model, kalman = parsed_test
-    parser = ModelParser(test_model_path)
-
-    assert parser.get() is parser.get_all().model
-    assert model.name == "TEST"
-    assert kalman is None
-
-
 def test_parsed_config_is_iterable(parsed_post82):
-    model, kalman = parsed_post82
+    model = parsed_post82
 
     assert model.name == "NK_LS_POST82"
-    assert kalman is not None
-    assert kalman.R is not None
+    assert model.calibration.measurement_noise is not None
 
 
 def _corr_names(corr_map):
     """``R_corr_param_map`` keyed by observable name, for comparison."""
     return {frozenset(str(o) for o in pair): name for pair, name in corr_map.items()}
-
-
-def test_kalman_R_built_numerically_from_calibration(parsed_post82):
-    # R is now assembled directly from calibration values at parse time (no
-    # sympy Matrix / lambdify). POST82 calibrates every measurement std to 1 and
-    # every measurement correlation to 0, so R collapses to the identity.
-    _, kalman = parsed_post82
-
-    assert isinstance(kalman.R, np.ndarray)
-    assert kalman.R.dtype == np.float64
-    np.testing.assert_allclose(kalman.R, np.eye(3, dtype=np.float64))
-
-    # Surviving metadata: the name->position maps that drive R reconstruction.
-    assert {str(k): v for k, v in kalman.R_std_param_map.items()} == {
-        "OutGap": "meas_outgap",
-        "Infl": "meas_infl",
-        "Rate": "meas_rate",
-    }
-    assert _corr_names(kalman.R_corr_param_map) == {
-        frozenset({"Infl", "Rate"}): "meas_rho_ir",
-        frozenset({"OutGap", "Infl"}): "meas_rho_gi",
-        frozenset({"OutGap", "Rate"}): "meas_rho_gr",
-    }
-    assert set(kalman.R_param_names) == {
-        "meas_outgap",
-        "meas_infl",
-        "meas_rate",
-        "meas_rho_ir",
-        "meas_rho_gi",
-        "meas_rho_gr",
-    }
-
-    # The lambdify-era fields are gone from the config.
-    assert not hasattr(kalman, "R_builder")
-    assert not hasattr(kalman, "R_symbolic")
-    assert not hasattr(kalman, "R_param_symbols")
 
 
 _R_ARITHMETIC_MODEL = """
@@ -115,8 +69,7 @@ calibration:
       e_y: sig
       e_z: sig
     corr: {}
-kalman:
-  R:
+  measurement_noise:
     std:
       x_obs: sig_x
       y_obs: sig_y
@@ -130,7 +83,7 @@ def test_kalman_R_arithmetic_covers_offdiag_and_missing_corr():
     # Non-trivial stds with a single specified correlation: exercises both the
     # sig_i * sig_j * rho off-diagonal (x_obs, y_obs) and the missing-pair -> 0
     # default (any pair involving z_obs).
-    _, kalman = ModelParser.from_string(_R_ARITHMETIC_MODEL).get_all()
+    model = ModelParser.from_string(_R_ARITHMETIC_MODEL).get()
 
     expected = np.array(
         [
@@ -140,15 +93,21 @@ def test_kalman_R_arithmetic_covers_offdiag_and_missing_corr():
         ],
         dtype=np.float64,
     )
-    np.testing.assert_allclose(kalman.R, expected)
+    meas_noise = model.calibration.measurement_noise
+    built = cov_from_spec(
+        model.observables,
+        meas_noise,
+        model.calibration.parameters,
+    )
+    np.testing.assert_allclose(built, expected)
 
     # Unspecified pairs are recorded as None, not dropped.
-    assert _corr_names(kalman.R_corr_param_map) == {
+    assert _corr_names(meas_noise.corr) == {
         frozenset({"x_obs", "y_obs"}): "rho_xy",
         frozenset({"x_obs", "z_obs"}): None,
         frozenset({"y_obs", "z_obs"}): None,
     }
-    assert set(kalman.R_param_names) == {"sig_x", "sig_y", "sig_z", "rho_xy"}
+    assert set(meas_noise.param_names) == {"sig_x", "sig_y", "sig_z", "rho_xy"}
 
 
 def test_validate_constraints_errors_on_unknown_symbols(conf):
@@ -197,7 +156,7 @@ def test_validate_constraints_rejects_non_relational_leaves(conf, depth):
     # type gate accepts it; only the leaf walk rejects the bare operand.
     t = sp.Symbol("t", integer=True)
     a = conf.variables[0]
-    param = conf.parameters[0]
+    param = list(conf.calibration.parameters)[0]
     bind = param if depth == "root" else sp.Or(sp.And(a(t) < 0, param), a(t) > 5)
     conf.equations.constraints = {"obc": Constraint(bind=bind, relax=a(t) >= 0)}
 
@@ -277,7 +236,7 @@ def test_parser_rejects_unparenthesized_connective():
 
 def test_validate_equations_accepts_variables_parameters_and_shocks(parsed_test):
     # The declared set is the same one.regimes replacements are checked against.
-    ModelParser.validate_equations(parsed_test.model)
+    ModelParser.validate_equations(parsed_test)
 
 
 def test_parser_rejects_unknown_symbol_in_model_equation():
@@ -427,7 +386,7 @@ def test_path_errors_name_the_file(tmp_path):
 
 def test_from_string_keeps_the_text_verbatim():
     parser = ModelParser.from_string(_R_ARITHMETIC_MODEL)
-    assert parser.parsed.model.source_yaml == _R_ARITHMETIC_MODEL
+    assert parser.config.source_yaml == _R_ARITHMETIC_MODEL
     assert parser.config_path == "<yaml string>"
 
 

@@ -6,6 +6,8 @@ model value parity, Klein linearization parity, and cfunc compilation.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import sympy as sp
@@ -106,8 +108,8 @@ def test_ipow_complex_step_correct_for_negative_base(expr_factory, analytic):
 
 
 def _compiled(path: Path):
-    model, kalman = ModelParser(path).get_all()
-    return DSGESolver(model, kalman).compile()
+    model = ModelParser(path).get()
+    return DSGESolver(model).compile()
 
 
 def _param_vector(compiled, dtype):

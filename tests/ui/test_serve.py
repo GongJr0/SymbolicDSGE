@@ -366,8 +366,8 @@ def test_prefill_restores_the_settings_a_run_was_made_with(test_model_yaml) -> N
     screen.
     """
     parser = ModelParser.from_string(test_model_yaml)
-    model, kalman = parser.get_all()
-    compiled = DSGESolver(model, kalman).compile()
+    model = parser.get()
+    compiled = DSGESolver(model).compile()
     result = MAPResult(
         x=np.array([0.97]),
         theta={"beta": np.float64(0.97)},

@@ -40,10 +40,10 @@ class _NormalizedKeyDict(UserDict[KT, V]):
     def _key(key: Any) -> Any:
         raise NotImplementedError
 
-    def __getitem__(self, key: Any) -> Any:
+    def __getitem__(self, key: Any) -> V:
         return self.data[self._key(key)]
 
-    def __setitem__(self, key: Any, value: Any) -> None:
+    def __setitem__(self, key: Any, value: V) -> None:
         self.data[self._key(key)] = value
 
     def __delitem__(self, key: Any) -> None:
@@ -181,9 +181,9 @@ class Calib:
 
 
 def cov_from_spec(
-    order: Sequence[Symbol | str],
+    order: Sequence[Symbol],
     spec: CovarianceSpec,
-    params: Mapping[Any, float],
+    params: Mapping[str, float] | SymbolGetterDict[float],
     *,
     subset: Sequence[str] | None = None,
 ) -> NDArray[float64]:
@@ -197,9 +197,19 @@ def cov_from_spec(
     ``subset`` subsets the result. The matrix is assembled over the whole
     ``order`` and sliced afterwards, since a correlation pair may name a member
     the subset leaves out.
+
+    Every member of ``order`` needs a standard deviation. Both parsers enforce
+    that, so this repeats it for a spec that was built or edited in code and
+    never passed through one.
     """
     n = len(order)
     pos = {str(m): i for i, m in enumerate(order)}
+
+    if missing := pos.keys() - {str(name) for name in spec.std}:
+        raise ValueError(
+            "Covariance spec names no standard deviation parameter for: "
+            f"{sorted(missing)!r}"
+        )
 
     def _param(name: str) -> float64:
         if name not in params:

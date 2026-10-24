@@ -152,26 +152,29 @@ def test_measurement_cfunc_matches_array_dispatcher(compiled_test):
 
 
 def test_compile_rejects_unknown_variable_order(parsed_test):
-    model, kalman = parsed_test
-    solver = DSGESolver(model, kalman)
+    model = parsed_test
+    solver = DSGESolver(model)
 
     with pytest.raises(ValueError, match="Unknown: \\['ghost'\\]"):
         solver.compile(variable_order=[*model.variables, sp.Function("ghost")])
 
 
 def test_compile_rejects_unknown_param_order(parsed_test):
-    model, kalman = parsed_test
-    solver = DSGESolver(model, kalman)
+    model = parsed_test
+    solver = DSGESolver(model)
 
     with pytest.raises(ValueError, match="params_order contains invalid entries"):
         solver.compile(
-            params_order=[*(p.name for p in model.parameters), "ghost_param"]
+            params_order=[
+                *(p.name for p in model.calibration.parameters),
+                "ghost_param",
+            ]
         )
 
 
 def test_compile_infers_n_state_and_n_exog(parsed_test):
-    model, kalman = parsed_test
-    solver = DSGESolver(model, kalman)
+    model = parsed_test
+    solver = DSGESolver(model)
 
     compiled = solver.compile()
 
@@ -181,15 +184,16 @@ def test_compile_infers_n_state_and_n_exog(parsed_test):
 
 
 def test_compile_lifts_a_lead_beyond_the_three_dates(parsed_test):
-    model, kalman = parsed_test
+    model = parsed_test
     deep = copy.deepcopy(model)
     t = sp.Symbol("t", integer=True)
     u = deep.variables[0]
     e_u = next(iter(deep.shocks))
     first = next(iter(deep.equations.model))
-    deep.equations.model[first] = sp.Eq(u(t + 2), deep.parameters[0] * u(t) + e_u)
+    param = list(deep.calibration.parameters.keys())[0]
+    deep.equations.model[first] = sp.Eq(u(t + 2), param * u(t) + e_u)
 
-    compiled = DSGESolver(deep, kalman).compile()
+    compiled = DSGESolver(deep).compile()
 
     # A lead aux is read at t+1 and never at t-1, so it joins the controls
     # rather than widening the state block.
@@ -210,8 +214,8 @@ def test_post82_randomized_calibration_still_solves(tmp_path, post82_test_model_
     out = tmp_path / "post82_randomized.yaml"
     out.write_text(yaml.safe_dump(base, sort_keys=False), encoding="utf-8")
 
-    model, kalman = ModelParser(out).get_all()
-    solver = DSGESolver(model, kalman)
+    model = ModelParser(out).get()
+    solver = DSGESolver(model)
     compiled = solver.compile()
     solved = solver.solve(compiled)
 

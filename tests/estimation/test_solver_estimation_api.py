@@ -228,7 +228,7 @@ def test_solver_estimate_and_solve_returns_the_order_it_was_asked_for(parsed_rbc
     about. Compiled here rather than shared, since the estimate writes its point
     into the compiled model's own calibration.
     """
-    solver = DSGESolver(*parsed_rbc_so)
+    solver = DSGESolver(parsed_rbc_so)
     compiled = solver.compile()
 
     # The config's own ss_seed resolves Newton here, and x0 defaults to the

@@ -20,13 +20,11 @@ def model_loader(monkeypatch):
     monkeypatch.setattr(
         loader.ModelParser,
         "from_string",
-        lambda text, name="<yaml string>": SimpleNamespace(
-            get_all=lambda: (text, None)
-        ),
+        lambda text, name="<yaml string>": SimpleNamespace(get=lambda: text),
     )
 
     class Solver:
-        def __init__(self, model, kalman):
+        def __init__(self, model):
             self.model = model
 
         def compile(self, **kwargs):

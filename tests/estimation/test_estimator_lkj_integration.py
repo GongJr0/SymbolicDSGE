@@ -11,24 +11,31 @@ from SymbolicDSGE.bayesian import make_prior
 from SymbolicDSGE.bayesian.priors import Prior
 from SymbolicDSGE.bayesian.transforms.cholesky_corr import CholeskyCorrTransform
 from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
+from SymbolicDSGE.core.config import cov_from_spec
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.prior_program import TransformCode
 
 
 @pytest.fixture(scope="module")
 def dense_lkj_bundle(dense_lkj_test_model_path):
-    model, kalman = ModelParser(dense_lkj_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
+    model = ModelParser(dense_lkj_test_model_path).get()
+    solver = DSGESolver(model)
     compiled = solver.compile()
 
     steady = np.zeros((len(compiled.layout.declared_names),), dtype=np.float64)
     solved = solver.solve(compiled=compiled, ss_seed=steady)
 
     params = model.calibration.parameters
-    std_map = model.calibration.shock_std
+    std_map = model.calibration.shocks.std
     sig_g = float(params[std_map[Symbol("e_g")]])
     sig_z = float(params[std_map[Symbol("e_z")]])
     sig_r = float(params[std_map[Symbol("e_r")]])
+
+    R = cov_from_spec(
+        model.observables,
+        model.calibration.measurement_noise,
+        model.calibration.parameters,
+    )
 
     T = 16
     rng = np.random.default_rng(20260317)
@@ -51,7 +58,7 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
     )
     y += rng.multivariate_normal(
         mean=np.zeros((3,), dtype=np.float64),
-        cov=kalman.R,
+        cov=R,
         size=T,
     )
     return {

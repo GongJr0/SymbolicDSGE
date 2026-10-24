@@ -326,7 +326,6 @@ class ModelParser:
             )
 
         for name, constraint in constraints.items():
-
             binds, relaxes = constraint.bind, constraint.relax
             cls._validate_condition(name, "Binding", binds)
             cls._validate_condition(name, "Relaxing", relaxes)
@@ -946,12 +945,12 @@ def _resolve_calibration_locals(
         if applied := expr.atoms(AppliedUndef):
             raise ValueError(
                 f"Calibration entry '{name}' references model variable(s): "
-                f"{sorted(map(str, applied))}"
+                f"{sorted(map(str, applied))!r}"
             )
         if unknown := expr.free_symbols - param_syms:
             raise ValueError(
                 f"Calibration entry '{name}' references undeclared "
-                f"parameter(s): {sorted(map(str, unknown))}"
+                f"parameter(s): {sorted(map(str,unknown))!r}"
             )
         if expr.free_symbols:
             local_subs[_LOCALS[name]] = expr
@@ -971,7 +970,7 @@ def _resolve_calibration_locals(
     if cyclic := {s for s, e in local_subs.items() if e.free_symbols & derived}:
         raise ValueError(
             "Calibration entries reference each other in a cycle: "
-            + ", ".join(sorted(s.name for s in cyclic))
+            f"{sorted(s.name for s in cyclic)}"
         )
 
     return SymbolGetterDict(values), local_subs
@@ -987,13 +986,12 @@ def _parse_shock_calibration(
     corr_map = shocks.get("corr", {}) or {}
 
     # std: map shock symbol -> parameter Symbol (or None)
-    shock_std: dict[Symbol, str] = {}
-    for shock in shock_syms:
-        if shock.name not in std_map:
-            raise ValueError(
-                f"Missing standard deviation parameter for shock '{shock.name}'"
-            )
-        shock_std[shock] = std_map[shock.name]
+    if missing := {shock.name for shock in shock_syms} - set(std_map):
+        raise ValueError(
+            "Missing standard deviation parameter(s) in calibration.shocks.std "
+            f"for shock(s): {sorted(missing)!r}"
+        )
+    shock_std: dict[Symbol, str] = {shock: std_map[shock.name] for shock in shock_syms}
 
     # corr: map unordered pair(shock_i, shock_j) -> parameter Symbol (or None)
     shock_corr: dict[frozenset[Symbol], Symbol | None] = {}
@@ -1058,6 +1056,11 @@ def _parse_measurement_noise(
     std_param_map = SymbolGetterDict(
         {_obs(obs_name, "std"): param_name for obs_name, param_name in std_map.items()}
     )
+    if missing := set(observables) - set(std_param_map):
+        raise ValueError(
+            "Missing standard deviation parameter(s) in calibration.measurement_noise.std: "
+            f"{sorted(missing)!r}"
+        )
 
     corr_param_map = PairGetterDict({})
 
@@ -1118,11 +1121,11 @@ def _require_calibrated_params(
             + ", ".join(unknown)
         )
 
-    named_locals = sorted(referenced & {sym.name for sym in local_subs})
+    named_locals = referenced & {sym.name for sym in local_subs}
     if named_locals:
         raise ValueError(
-            "Shock and measurement blocks reference a parameter by name, so "
-            "they cannot name a derived calibration entry: " + ", ".join(named_locals)
+            "Shock and measurement cannot reference derived calibration entries: "
+            f"{sorted(named_locals)!r}"
         )
 
 

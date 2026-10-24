@@ -30,7 +30,7 @@ def test_path_based_parser_retains_source_yaml(
     test_model_path, test_model_yaml
 ) -> None:
     parser = ModelParser(test_model_path)
-    assert parser.parsed.model.source_yaml == test_model_yaml
+    assert parser.config.source_yaml == test_model_yaml
 
 
 def test_from_string_preserves_source_text_exactly(test_model_yaml) -> None:
@@ -38,7 +38,7 @@ def test_from_string_preserves_source_text_exactly(test_model_yaml) -> None:
     # caller's exact input, not whatever the temp file ended up with.
     weird_text = test_model_yaml + "\n# trailing comment\n"
     parser = ModelParser.from_string(weird_text)
-    assert parser.parsed.model.source_yaml == weird_text
+    assert parser.config.source_yaml == weird_text
 
 
 def test_save_sdsge_round_trips_via_load_bundle(tmp_path: Path, solved_test) -> None:

@@ -48,8 +48,8 @@ OUTPUTS = (
 
 
 def _model(path):
-    model, kalman = ModelParser(path).get_all()
-    compiled = DSGESolver(model, kalman).compile()
+    model = ModelParser(path).get()
+    compiled = DSGESolver(model).compile()
     calib = compiled.config.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     seed = DSGESolver._resolve_ss_seed(None, compiled)

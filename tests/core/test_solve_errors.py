@@ -74,8 +74,8 @@ def _overflowing_residual_yaml() -> str:
 
 
 def _compiled(path: Path):
-    model, kalman = ModelParser(path).get_all()
-    solver = DSGESolver(model, kalman)
+    model = ModelParser(path).get()
+    solver = DSGESolver(model)
     return solver, solver.compile()
 
 

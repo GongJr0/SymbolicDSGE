@@ -34,8 +34,8 @@ RHO_G = 0.8
 
 @pytest.fixture(scope="module")
 def indeterminate():
-    model, kalman = ModelParser(MODELS / "indeterminate.yaml").get_all()
-    solver = DSGESolver(model, kalman)
+    model = ModelParser(MODELS / "indeterminate.yaml").get()
+    solver = DSGESolver(model)
     return solver, solver.compile()
 
 

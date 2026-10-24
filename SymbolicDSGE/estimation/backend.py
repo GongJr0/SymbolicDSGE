@@ -581,7 +581,7 @@ def _build_R(
         return R
 
     meas_noise = compiled.config.calibration.measurement_noise
-    if meas_noise is None or meas_noise.std is None:
+    if not meas_noise or not meas_noise.std:
         raise ValueError(
             "`calibration.measurement_noise` is required to build R from config parameters."
             "Supply an R override or add a measurement noise block to the model specification."

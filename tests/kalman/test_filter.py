@@ -7,7 +7,7 @@ from numba import cfunc, types
 from numpy import float64
 from sympy import Symbol
 
-from SymbolicDSGE.kalman.config import make_R
+from SymbolicDSGE.core.config import cov_from_spec
 from SymbolicDSGE.kalman.errors import (
     ErrorCode,
     MatrixConditionError,
@@ -91,23 +91,6 @@ def _ukf_system_1d():
         "jitter": 1e-12,
         "symmetrize": True,
     }
-
-
-def test_make_r_builds_covariance_from_std_and_corr_maps():
-    obs_a = Symbol("ObsA")
-    obs_b = Symbol("ObsB")
-
-    out = make_R(
-        [obs_a, obs_b],
-        {obs_a: "sig_a", obs_b: "sig_b"},
-        {frozenset({obs_a, obs_b}): "rho_ab"},
-        {"sig_a": float64(2.0), "sig_b": float64(3.0), "rho_ab": float64(0.25)},
-    )
-
-    np.testing.assert_allclose(
-        out,
-        np.array([[4.0, 1.5], [1.5, 9.0]], dtype=float64),
-    )
 
 
 def test_error_code_dispatch_maps_known_errors_and_rejects_unknown():

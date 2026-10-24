@@ -69,12 +69,12 @@ class _RoundTrip(NamedTuple):
 def _round_trip(
     parser: ModelParser, methods: Mapping[str, str] | None = None
 ) -> _RoundTrip:
-    model, kalman = parser.get_all()
-    solver = DSGESolver(model, kalman)
+    model = parser.get()
+    solver = DSGESolver(model)
     compiled = solver.compile()
 
     view = Linearizer(compiled, methods).at()
-    linear_solver = DSGESolver(view.to_config(), kalman)
+    linear_solver = DSGESolver(view.to_config())
 
     return _RoundTrip(
         direct=solver.solve(compiled),
@@ -240,8 +240,8 @@ def test_a_constrained_model_refuses_to_become_a_config(rbc_occbin_test_model_pa
     # to_config's copy, so the config would pair deviation residuals with level
     # thresholds. The view itself is a sound diagnostic, which is why the guard
     # sits on the conversion rather than on at().
-    model, kalman = ModelParser(rbc_occbin_test_model_path).get_all()
-    compiled = DSGESolver(model, kalman).compile()
+    model = ModelParser(rbc_occbin_test_model_path).get()
+    compiled = DSGESolver(model).compile()
 
     view = Linearizer(compiled).at()
     assert view.model

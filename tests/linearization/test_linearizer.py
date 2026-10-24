@@ -59,21 +59,21 @@ T = sp.Symbol("t", integer=True)
 @pytest.fixture(scope="module")
 def rbc(rbc_second_order_test_model_path) -> CompiledModel:
     """Levels RBC: c and k have positive steady states, z sits at zero."""
-    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
-    return DSGESolver(model, kalman).compile()
+    model = ModelParser(rbc_second_order_test_model_path).get()
+    return DSGESolver(model).compile()
 
 
 @pytest.fixture(scope="module")
 def gap(test_model_path) -> CompiledModel:
     """A model already authored in gaps, so Newton returns the origin."""
-    model, kalman = ModelParser(test_model_path).get_all()
-    return DSGESolver(model, kalman).compile()
+    model = ModelParser(test_model_path).get()
+    return DSGESolver(model).compile()
 
 
 @pytest.fixture(scope="module")
 def aux() -> CompiledModel:
-    model, kalman = ModelParser.from_string(AUX_MODEL).get_all()
-    return DSGESolver(model, kalman).compile()
+    model = ModelParser.from_string(AUX_MODEL).get()
+    return DSGESolver(model).compile()
 
 
 @pytest.fixture(scope="module")

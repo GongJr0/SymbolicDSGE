@@ -124,7 +124,6 @@ def test_solve_order2_wiring(rbc_so_bundle):
     """The .solve(order=2) public path end to end: it resolves + cross-checks the
     nonlinear steady state and returns a SecondOrderSolution whose tensors match
     the Dynare goldens. order=1 is unchanged (no second-order fields)."""
-    model, kalman = rbc_so_bundle["parsed"]
     solved = rbc_so_bundle["solved"]
     compiled = rbc_so_bundle["compiled"]
     solver = rbc_so_bundle["solver"]

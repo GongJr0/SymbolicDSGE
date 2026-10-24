@@ -27,8 +27,8 @@ _BLOCKS = ("gxx", "hxx", "gxu", "hxu", "guu", "huu", "gss", "hss")
 
 
 def _drive(path):
-    model, kalman = ModelParser(path).get_all()
-    compiled = DSGESolver(model, kalman).compile()
+    model = ModelParser(path).get()
+    compiled = DSGESolver(model).compile()
     n_eq = len(compiled.var_names)
     n_state = compiled.n_state
     calib = compiled.config.calibration.parameters

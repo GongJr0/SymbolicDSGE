@@ -47,8 +47,8 @@ _T0 = _CHECK_AHEAD + 1
 @pytest.fixture(scope="module")
 def solved(rbc_occbin_test_model_path):
     """The model a user gets from ``solve``: constraints make it piecewise."""
-    model, kalman = ModelParser(rbc_occbin_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
+    model = ModelParser(rbc_occbin_test_model_path).get()
+    solver = DSGESolver(model)
     return solver.solve(solver.compile())
 
 

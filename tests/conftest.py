@@ -121,8 +121,8 @@ def model_path(request) -> Path:
 def post82_bundle(post82_test_model_path):
     from SymbolicDSGE import DSGESolver, ModelParser
 
-    parsed = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(*parsed)
+    parsed = ModelParser(post82_test_model_path).get()
+    solver = DSGESolver(parsed)
     compiled = solver.compile()
     solved = solver.solve(compiled=compiled)
     return {
@@ -157,8 +157,8 @@ def solved_post82(post82_bundle):
 def test_bundle(test_model_path):
     from SymbolicDSGE import DSGESolver, ModelParser
 
-    parsed = ModelParser(test_model_path).get_all()
-    solver = DSGESolver(*parsed)
+    parsed = ModelParser(test_model_path).get()
+    solver = DSGESolver(parsed)
     compiled = solver.compile()
     solved = solver.solve(compiled=compiled)
     return {
@@ -194,8 +194,8 @@ def solved_test(test_bundle):
 def rbc_so_bundle(rbc_second_order_test_model_path):
     from SymbolicDSGE import DSGESolver, ModelParser
 
-    parsed = ModelParser(rbc_second_order_test_model_path).get_all()
-    solver = DSGESolver(*parsed)
+    parsed = ModelParser(rbc_second_order_test_model_path).get()
+    solver = DSGESolver(parsed)
     compiled = solver.compile()
     solved = solver.solve(compiled=compiled, order=2)
     return {
@@ -224,3 +224,17 @@ def compiled_rbc_so(rbc_so_bundle):
 @pytest.fixture(scope="session")
 def solved_rbc_so(rbc_so_bundle):
     return rbc_so_bundle["solved"]
+
+
+@pytest.fixture(scope="session")
+def solved_multishock(rbc_multishock_test_model_path):
+    """The three-shock correlated RBC, solved to second order.
+
+    Read-only: consumers take its policy and its calibration as they are, so
+    the whole suite shares one solve. ``compiled`` comes off it.
+    """
+    from SymbolicDSGE import DSGESolver, ModelParser
+
+    model = ModelParser(rbc_multishock_test_model_path).get()
+    solver = DSGESolver(model)
+    return solver.solve(solver.compile(), order=2)

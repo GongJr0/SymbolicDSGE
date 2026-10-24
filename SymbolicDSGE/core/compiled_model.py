@@ -749,7 +749,7 @@ def _measurement_covariance(
         raise ValueError(
             "Building R from named parameters requires a `measurement_noise` block in the model's calibration."
         )
-    if meas_cov.std is None:
+    if not meas_cov.std:
         raise ValueError(
             "`measurement_noise` does not expose named parameter metadata."
         )
@@ -757,7 +757,7 @@ def _measurement_covariance(
     if params is None:
         params = calib.parameters
     return cov_from_spec(
-        compiled.observable_names,
+        compiled.config.observables,
         meas_cov,
         params,
         subset=observables,

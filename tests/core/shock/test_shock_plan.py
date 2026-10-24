@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE._ckernels.core._shocks import ShockCode
+from SymbolicDSGE.core.config import cov_from_spec
 from SymbolicDSGE.core.shock.generators import Shock
 from SymbolicDSGE.core.shock.plan import ShockEntry, get_native_shock_plan
 import SymbolicDSGE.core.shock.spec as shocks_mod
@@ -104,13 +105,13 @@ def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
     spec = {("e_u", "e_v"): Shock(dist="norm", seed=11)}
 
     calls = {"n": 0}
-    original = shocks_mod.make_Q
+    original = cov_from_spec
 
     def counting_make_Q(*args, **kwargs):
         calls["n"] += 1
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(shocks_mod, "make_Q", counting_make_Q)
+    monkeypatch.setattr(shocks_mod, "cov_from_spec", counting_make_Q)
 
     plan = resolve_shock_plan(solved_test.compiled, spec, T)
     native = get_native_shock_plan(plan, T, 1.0)
