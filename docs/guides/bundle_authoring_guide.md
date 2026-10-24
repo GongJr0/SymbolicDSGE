@@ -32,9 +32,9 @@ from SymbolicDSGE import BundleBuilder, DSGESolver, ModelParser
 bundle = BundleBuilder(created_by="experiment-1")  # (1)!
 
 parser = ModelParser("../../MODELS/POST82.yaml")  # (2)!
-model, kalman = parser.get_all()
+model = parser.get()
 
-solver = DSGESolver(model, kalman)
+solver = DSGESolver(model)
 compiled = solver.compile()
 sol = solver.solve(
     compiled,
@@ -229,23 +229,23 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     3826  23-10-2026 06:54   manifest.json
-     2099  23-10-2026 06:54   model/reference.yaml
-     2099  23-10-2026 06:54   model/dgp.yaml
-      643  23-10-2026 06:54   estimation/spec.json
-     1891  23-10-2026 06:54   estimation/observed.parquet
-    18922  23-10-2026 06:54   estimation/posterior.parquet
-      585  23-10-2026 06:54   estimation/result.json
-     7131  23-10-2026 06:54   shock/table/aadb84934fad3b59.parquet
-     1322  23-10-2026 06:54   montecarlo/pipeline.json
-      562  23-10-2026 06:54   montecarlo/result/meta.json
-      538  23-10-2026 06:54   montecarlo/result/datagen/datagen_steps.json
-      175  23-10-2026 06:54   montecarlo/result/tests/test_steps.json
-     2276  23-10-2026 06:54   montecarlo/result/tests/test_traces.parquet
-      305  23-10-2026 06:54   simulation.json
-     1282  23-10-2026 06:54   data/auxiliary_series.parquet
+     3826  24-10-2026 04:36   manifest.json
+     2088  24-10-2026 04:36   model/reference.yaml
+     2088  24-10-2026 04:36   model/dgp.yaml
+      643  24-10-2026 04:36   estimation/spec.json
+     1891  24-10-2026 04:36   estimation/observed.parquet
+    18922  24-10-2026 04:36   estimation/posterior.parquet
+      585  24-10-2026 04:36   estimation/result.json
+     7131  24-10-2026 04:36   shock/table/aadb84934fad3b59.parquet
+     1322  24-10-2026 04:36   montecarlo/pipeline.json
+      564  24-10-2026 04:36   montecarlo/result/meta.json
+      538  24-10-2026 04:36   montecarlo/result/datagen/datagen_steps.json
+      175  24-10-2026 04:36   montecarlo/result/tests/test_steps.json
+     2276  24-10-2026 04:36   montecarlo/result/tests/test_traces.parquet
+      305  24-10-2026 04:36   simulation.json
+     1282  24-10-2026 04:36   data/auxiliary_series.parquet
 ---------                     -------
-    43656                     15 files
+    43636                     15 files
 ```
 
 For a structured view, decompile it:

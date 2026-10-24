@@ -19,27 +19,26 @@ from numpy import ndarray
 from ..core.shock.generators import ShockParameters, ShockPathParameters
 
 # --- LAST BREAK ---
-# V12: Breakage from adding custom shock serialization (#571).
-# Custom shocks used to remain Python objects and unserializable.
-# The scipy handling refactor introduces quantile tabulation to approximate
-# any distribution through a ppf function. Tables are serializable and are encoded
-# as array members. Therefore the old shock format (inlined in manifest) is no longer
-# available. Simulation prefills are now members and tables/paths are stored as data
-# instead of being inlined.
+# V14: Breakage from folding kalman configs into model config objects (#579).
+# R maps were the only remaining kalman config members and they got folded into
+# calibration.measurement_noise with breaking changes to schema and parser.
 #
-# The change breaks forward and backward compatibility, both through the on-disk format
-# and the refactored shock handling code.
+# The change breaks forward and backward compatibility.
+# V14 readers theoretically read a V13 bundle, emit a
+# deprecation warning, and ignore the `kalman` member.
+# That leads to inconsistent measurement noise specifications
+# between the author's V13 library and the reader's V14 handling code.
 # ------
 
 #: Bundle format version. Bump on every manifest or member change.
-SDSGE_FORMAT_VERSION = 13
+SDSGE_FORMAT_VERSION = 14
 
 #: Oldest bundle format this reader can reconstruct.
-SDSGE_MIN_READABLE_VERSION = 13
+SDSGE_MIN_READABLE_VERSION = 14
 
 #: Most recent format change requiring a newer reader. Written into the
 #: manifest so older readers reject bundles they cannot interpret.
-SDSGE_LAST_BREAKING_VERSION = 13
+SDSGE_LAST_BREAKING_VERSION = 14
 
 MemberKind = Literal[
     "model_config",
