@@ -4348,7 +4348,7 @@ wheels = [
 
 [[package]]
 name = "symbolicdsge"
-version = "2.0.0.dev10"
+version = "2.0.0.dev11"
 source = { editable = "." }
 dependencies = [
     { name = "cloudpickle" },
