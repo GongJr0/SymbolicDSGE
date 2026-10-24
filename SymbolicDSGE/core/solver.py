@@ -61,10 +61,8 @@ class DSGESolver:
 
     Attributes
     ----------
-    model_config : ModelConfig
+    config : ModelConfig
         The model specification the solver compiles and solves.
-    kalman_config : KalmanConfig | None
-        The filter configuration, when one was supplied.
     t : sympy.Symbol
         Time index symbol used in the model equations.
     """
@@ -81,7 +79,7 @@ class DSGESolver:
                 "linearized at one constant point, pass `PointLinearView.to_config(). "
             )
 
-        self.model_config = config
+        self.config = config
         self.t = sp.Symbol("t", integer=True)
 
     def compile(
@@ -105,11 +103,11 @@ class DSGESolver:
             The compiled model holding attrs and methods necessary for all subsequent operations.
 
         """
-        conf = self.model_config
+        conf = self.config
 
         # Convert model to {-1, 0, 1} offsets with auxiliary variables for lags and leads.
         desugared = desugar_model(conf)
-        conf = deepcopy(self.model_config)
+        conf = deepcopy(self.config)
         t = self.t
         ordered_variables = desugared.variables
 
