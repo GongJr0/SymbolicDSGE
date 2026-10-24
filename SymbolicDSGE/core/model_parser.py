@@ -1,4 +1,4 @@
-"""Parser for model and Kalman filter configurations from YAML into :class:`ModelConfig` and :class:`KalmanConfig` objects."""
+"""Parser for model configurations from YAML into :class:`ModelConfig`."""
 
 from __future__ import annotations
 
@@ -70,7 +70,6 @@ _REGIME_SHIFT_CONDITIONAL: TypeAlias = Relational | And | Or | Not
 
 _ALLOWED_CALIBRATION_KEYS = frozenset({"parameters", "shocks", "measurement_noise"})
 _ALLOWED_COV_KEYS = frozenset({"std", "corr"})
-_ALLOWED_R_KEYS = frozenset({"std", "corr"})
 
 
 def _caller_stacklevel() -> int:
@@ -456,12 +455,13 @@ class ModelParser:
                 )
 
     def from_yaml(self) -> tuple[dict, ModelConfig]:
-        """Parse a YAML configuration file into a :class:`ParsedConfig` object.
+        """Parse a YAML configuration file into a :class:`ModelConfig` object.
 
         Returns
         -------
-        tuple[dict, ParsedConfig]
-            Object containing model and (if present) Kalman configuration. The first element is the raw YAML data as a dictionary, and the second element is the parsed configuration.
+        tuple[dict, ModelConfig]
+            Object containing model configuration. The first element is the raw YAML data as a dictionary,
+            and the second element is the parsed configuration.
 
         """
         data = _load_yaml(self._text, self._name)
@@ -702,7 +702,7 @@ def _build_namespace(
     t = sp.symbols("t", integer=True)
 
     _raise_if_not_unique(ordered_var_names, "variables must be unique.")
-    _raise_if_not_unique(data["shocks"], "shocks must be unique.")
+    _raise_if_not_unique(data.get("shocks", []), "shocks must be unique.")
 
     def nested_keys(mapping: dict[str, Any], l1: str, l2: str) -> list[str]:
         return list(mapping.get(l1, {}).get(l2, {}).keys())
@@ -718,7 +718,7 @@ def _build_namespace(
     variables: list[Function] = list(
         map(Function, ordered_var_names)
     )  # pyright: ignore
-    shocks: list[Symbol] = [sp.Symbol(name) for name in data["shocks"]]
+    shocks: list[Symbol] = [sp.Symbol(name) for name in data.get("shocks", [])]
 
     _LOCALS: dict[str, Any] = {
         "t": t,

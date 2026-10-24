@@ -15,7 +15,6 @@ We will use a pre-defined config file (accessible in the [repository](https://gi
 ## Reading Model Configuration
 
 The configuration files are parsed by the `#!python SymbolicDSGE.ModelParser` class.
-The class provides `#!python .get()` (model only) and `#!python .get_all()` (model + kalman config).
 
 ```python
 from SymbolicDSGE import ModelParser, DSGESolver, Shock
@@ -28,7 +27,7 @@ from numpy import ceil, sqrt
 import pandas as pd
 import matplotlib.pyplot as plt
 
-model, kalman = ModelParser("../../MODELS/POST82.yaml").get_all()
+model = ModelParser("../../MODELS/POST82.yaml").get()
 
 with catch_warnings():
     # Equations in a sp.Matrix are deprecated, this is only used as a pretty print function
@@ -46,7 +45,7 @@ This displays the parsed equations as `SymPy` objects. Variables are functions o
 Compilation converts the symbolic model to a numeric residual callback. It desugars longer leads and lags with auxiliary variables, derives the state and control layout from equation timing, and compiles the residual consumed by the first-order solver.
 
 ```python
-solver = DSGESolver(model, kalman)
+solver = DSGESolver(model)
 compiled = solver.compile(
     variable_order=None,  # None => as specified in model config
     params_order=None,  # None => as specified in model config

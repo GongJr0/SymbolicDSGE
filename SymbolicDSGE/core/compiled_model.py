@@ -244,8 +244,6 @@ class CompiledModel:
     ----------
     config : ModelConfig
         Symbolic model configuration, including calibration and solver settings.
-    kalman : KalmanConfig | None
-        Kalman configuration, if the model has a Kalman filter; otherwise ``None``.
     cur_syms : list[Symbol]
         Post-compile generated time-t model variables, in canonical order, as sympy
         symbols.

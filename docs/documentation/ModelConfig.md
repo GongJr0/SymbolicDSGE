@@ -22,7 +22,7 @@ __Fields:__
 | shocks | `#!python list[sympy.Symbol]` | Innovation symbols, in declaration order, which is the shock column order. |
 | observables | `#!python list[sympy.Symbol]` | Observable variables as symbols. |
 | equations | `#!python Equations` | `dataclass` containing model equations, constraints, regimes, observable equations, observable affinity flags. |
-| calibration | `#!python Calib` | `dataclass` of parameter calibrations plus shock standard deviation and correlation parameter mappings. |
+| calibration | `#!python Calib` | `dataclass` of parameter calibrations plus std/corr parameter mappings for shocks and measurement noise. |
 | source_yaml | `#!python str | None` | Source YAML text retained for bundle round trips. |
 
 

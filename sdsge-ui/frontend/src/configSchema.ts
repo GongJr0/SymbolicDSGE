@@ -5,87 +5,69 @@ const symbolMap: JSONSchema = {
   additionalProperties: { type: "string" },
 };
 
-const numberMap: JSONSchema = {
-  type: "object",
-  additionalProperties: { type: "number" },
-};
-
-const boolMap: JSONSchema = {
-  type: "object",
-  additionalProperties: { type: "boolean" },
-};
-
 const expressionMap: JSONSchema = {
   type: "object",
   additionalProperties: { type: "string" },
 };
+
+/** A calibration value: a number, or an expression over other parameters. */
+const numberOrExpressionMap: JSONSchema = {
+  type: "object",
+  additionalProperties: {
+    oneOf: [{ type: "number" }, { type: "string" }],
+  },
+};
+
+/**
+ * One `std`/`corr` covariance block. `calibration.shocks` and
+ * `calibration.measurement_noise` share the shape and differ only in what
+ * their keys name.
+ */
+const covarianceSpec = (member: string, pairExample: string): JSONSchema => ({
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    std: {
+      ...symbolMap,
+      description: `Map from ${member} name to its standard-deviation parameter name. Every declared ${member} must appear.`,
+    },
+    corr: {
+      ...symbolMap,
+      description: `Map from a comma-separated ${member} pair, e.g. '${pairExample}', to its correlation parameter name. An omitted pair is uncorrelated.`,
+    },
+  },
+});
 
 export const symbolicDsgeConfigSchema: JSONSchema = {
   $id: "https://symbolicdsge.local/schemas/model-config.schema.json",
   $schema: "http://json-schema.org/draft-07/schema#",
   title: "SymbolicDSGE Model Config",
   type: "object",
-  required: [
-    "variables",
-    "shock_map",
-    "observables",
-    "equations",
-    "calibration",
-  ],
+  required: ["variables", "shocks", "equations", "calibration"],
+  additionalProperties: false,
   properties: {
     name: {
       type: "string",
       description: "Model name shown in summaries and generated artifacts.",
     },
     variables: {
-      description:
-        "Ordered model variables. Use a list for plain variables or a mapping for linearization metadata.",
-      oneOf: [
-        {
-          type: "array",
-          items: { type: "string" },
-          uniqueItems: true,
-        },
-        {
-          type: "object",
-          additionalProperties: {
-            oneOf: [
-              { type: "null" },
-              {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  linearization: {
-                    type: "string",
-                    enum: ["none", "log", "taylor"],
-                    description:
-                      "Symbolic linearization method used when compile(linearize=True) is requested.",
-                  },
-                  ss_seed: {
-                    oneOf: [{ type: "string" }, { type: "number" }, { type: "null" }],
-                    description:
-                      "Newton seed for the steady state. Null seeds at zero.",
-                  },
-                },
-              },
-            ],
-          },
-        },
-      ],
-    },
-    constrained: {
-      ...boolMap,
-      description: "Map from variable name to whether the variable has a constraint equation.",
-    },
-    shock_map: {
-      ...symbolMap,
-      description: "Map from shock symbols to exogenous state variables.",
-    },
-    observables: {
       type: "array",
       items: { type: "string" },
       uniqueItems: true,
-      description: "Observable names used by measurement equations and Kalman setup.",
+      description:
+        "Ordered model variables, without time indices. Leads and lags beyond the three-date system become auxiliary variables at compile time.",
+    },
+    ss_seed: {
+      ...numberOrExpressionMap,
+      description:
+        "Newton seed for the steady-state solve, keyed by declared variable. An omitted variable is seeded at zero.",
+    },
+    shocks: {
+      type: "array",
+      items: { type: "string" },
+      uniqueItems: true,
+      description:
+        "Innovation symbols, in declaration order, which is the shock column order.",
     },
     equations: {
       type: "object",
@@ -97,12 +79,12 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
           minProperties: 1,
           description: "Map from equation name to a SymPy-parseable equality.",
         },
-        constraint: {
+        constraints: {
           type: "object",
           additionalProperties: {
             type: "object",
             additionalProperties: false,
-            required: ["bind", "relax"],
+            required: ["bind"],
             properties: {
               bind: {
                 type: "string",
@@ -112,13 +94,13 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
               relax: {
                 type: "string",
                 description:
-                  "Exit condition, evaluated on the binding regime's shadow value.",
+                  "Exit condition. Omitted, it is derived as the negation of `bind`.",
               },
             },
           },
           description: "Map from constraint name to its entry and exit conditions.",
         },
-        regime: {
+        regimes: {
           type: "object",
           additionalProperties: {
             ...expressionMap,
@@ -129,7 +111,8 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
         },
         observables: {
           ...expressionMap,
-          description: "Map from observable name to measurement expression.",
+          description:
+            "Map from observable name to its measurement expression, in current-dated variables.",
         },
       },
     },
@@ -139,71 +122,15 @@ export const symbolicDsgeConfigSchema: JSONSchema = {
       additionalProperties: false,
       properties: {
         parameters: {
-          ...numberMap,
-          description: "Numeric calibration values keyed by declared parameter name.",
+          ...numberOrExpressionMap,
+          description:
+            "Parameter values keyed by name. A name is a parameter if and only if it is calibrated here. An expression over other parameters is a derived entry: it is inlined into the equations and is not itself estimable.",
         },
-        shocks: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            std: {
-              ...symbolMap,
-              description: "Map from shock name to standard-deviation parameter name.",
-            },
-            corr: {
-              ...symbolMap,
-              description:
-                "Map from comma-separated shock pair, e.g. 'e_g, e_z', to correlation parameter name.",
-            },
-          },
-        },
-      },
-    },
-    kalman: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        y: {
-          type: "array",
-          items: { type: "string" },
-          description: "Measurement ordering. Defaults to observables when omitted.",
-        },
-        R: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            std: {
-              ...symbolMap,
-              description: "Map from observable name to measurement std parameter.",
-            },
-            corr: {
-              ...symbolMap,
-              description:
-                "Map from comma-separated observable pair to measurement correlation parameter.",
-            },
-          },
-        },
-        P0: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            mode: {
-              type: "string",
-              enum: ["diag", "eye"],
-            },
-            scale: { type: "number" },
-            diag: {
-              ...numberMap,
-              description: "Initial covariance diagonal values keyed by state variable.",
-            },
-          },
-        },
-        jitter: { type: "number" },
-        symmetrize: { type: "boolean" },
+        shocks: covarianceSpec("shock", "e_g, e_z"),
+        measurement_noise: covarianceSpec("observable", "Infl, Rate"),
       },
     },
   },
-  additionalProperties: false,
 };
 
 export const symbolicDsgeSchemaUri =

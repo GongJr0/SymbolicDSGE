@@ -333,7 +333,7 @@ def _resolve_R(complied: CompiledModel, observables: list[str]) -> b.MatrixPrior
     meas_noise = complied.config.calibration.measurement_noise
     if meas_noise is None:
         raise ValueError(
-            "Block estimation of R requires a KalmanConfig to specify symbolic R std/correlation metadata."
+            "Block estimation of R requires `calibration.measurement_noise` to specify symbolic R std/correlation metadata."
         )
 
     if meas_noise.std is None or meas_noise.corr is None:

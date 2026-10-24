@@ -8,7 +8,7 @@ tags:
 ??? tip "__TL;DR__"
     You can find a demonstration notebook [here](../assets/monte_carlo.ipynb).
 
-???+ warning "Read the Quickstart and Kalman Guides"
+???+ warning "Read the Quickstart Guide and Kalman Filter Docs"
     This guide assumes familiarity with `SolvedModel.sim(...)`, `Shock`, and `SolvedModel.kalman(...)`.
 
 This guides demonstrates the setup of an example Monte Carlo experiment.
@@ -43,17 +43,17 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 )
 import cProfile
 
-model, kalman = ModelParser("../../MODELS/POST82.yaml").get_all() # (1)!
+model = ModelParser("../../MODELS/POST82.yaml").get() # (1)!
 
-solver = DSGESolver(model, kalman)
+solver = DSGESolver(model)
 compiled = solver.compile()
 ss_seed = np.zeros(5, dtype=np.float64)  # (2)!
 reference = solver.solve(compiled, ss_seed=ss_seed)
 
-dgp_model, dgp_kalman = ModelParser("../../MODELS/POST82.yaml").get_all()
+dgp_model = ModelParser("../../MODELS/POST82.yaml").get()
 dgp_model.calibration.parameters.update({"psi_x": 0.2, "psi_pi": 3.0}) # (3)!
-dgp_comp = DSGESolver(dgp_model, dgp_kalman).compile()
-dgp_sol = DSGESolver(dgp_model, dgp_kalman)
+dgp_solver = DSGESolver(dgp_model)
+dgp_comp = dgp_solver.compile()
 dgp = dgp_sol.solve(dgp_comp, ss_seed=ss_seed)
 
 ```

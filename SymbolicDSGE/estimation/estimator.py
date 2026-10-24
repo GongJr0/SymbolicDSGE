@@ -83,8 +83,6 @@ class Estimator:
         The observation covariance override.
     P0 : NDF | None
         The initial state covariance override.
-    kalman : KalmanConfig | None
-        The compiled model's filter configuration.
     param_names : list[str]
         Estimated parameter names in theta order.
     """

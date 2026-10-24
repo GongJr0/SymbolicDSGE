@@ -71,8 +71,6 @@ class SolvedModel(ABC, Generic[Policy]):
         The decision rule solution.
     config : ModelConfig
         The compiled model's symbolic configuration.
-    kalman_config : KalmanConfig | None
-        The compiled model's filter configuration, when one was supplied.
     """
 
     def __init__(self, compiled: CompiledModel, policy: Policy) -> None:

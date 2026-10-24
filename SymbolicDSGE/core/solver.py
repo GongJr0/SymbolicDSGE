@@ -721,8 +721,8 @@ class DSGESolver:
         symmetrize : bool
             Whether to symmetrize the covariance matrices in the Kalman filter.
         R : NDArray | None
-            Measurement noise covariance matrix for the Kalman filter. If None, the KalmanConfig.R is used.
-            If both are omitted, the call will raise.
+            Measurement noise covariance matrix for the Kalman filter. If None, the `calibration.measurement_noise`
+            is used. If both are omitted, the call will raise.
 
         Returns
         -------
@@ -812,8 +812,8 @@ class DSGESolver:
         symmetrize : bool
             Whether to symmetrize the covariance matrices in the Kalman filter.
         R : NDArray | None
-            Measurement noise covariance matrix for the Kalman filter. If None, the KalmanConfig.R is used.
-            If both are omitted, the call will raise.
+            Measurement noise covariance matrix for the Kalman filter. If None, the `calibration.measurement_noise`
+            is used. If both are omitted, the call will raise.
 
         Returns
         -------

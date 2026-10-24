@@ -10,7 +10,7 @@ tags:
 
     You can find a demonstration notebook [here](../assets/bundle_authoring.ipynb).
 
-This guide walks through assembling a complete `.sdsge` bundle from code: model + Kalman config, estimation spec and result, observed data, Monte Carlo pipeline and traces, simulation prefill. Every member type the bundle supports is covered.
+This guide walks through assembling a complete `.sdsge` bundle from code: model config, estimation spec and result, observed data, Monte Carlo pipeline and traces, a simulation prefill are bundled into a single container. Every member type the bundle supports is covered.
 
 We start from `MODELS/POST82.yaml` (also used in the [Quick Start](quickstart.md)). The full assembly fits in a single script you can copy and run.
 

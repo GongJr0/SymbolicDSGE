@@ -89,8 +89,8 @@ sdsge-ui
 # Read a config and solve the model as usual
 from SymbolicDSGE import ModelParser, DSGESolver
 
-model, kalman = ModelParser(...).get_all()
-solver = DSGESolver(model, kalman)
+model = ModelParser(...).get()
+solver = DSGESolver(model)
 compiled = solver.compile(...)
 sol = solver.solve(compiled, ...)
 
@@ -118,11 +118,10 @@ Suggestions for improving or extending the documentation are welcome as issues.
 from SymbolicDSGE import ModelParser, DSGESolver
 
 # Read the YAML config (Equations, Measurements, Parameters, Optional Filter Spec)
-parsed = ModelParser("<path-to-config>.yaml").get_all()
-model, kalman = parsed
+model = ModelParser("<path-to-config>.yaml").get()
 
 # Compile the model
-solver = DSGESolver(model, kalman)
+solver = DSGESolver(model)
 compiled = solver.compile()
 
 print("Equations with symbols removed: \n", "\n".join(map(str, compiled.objective_eqs)), "\n")

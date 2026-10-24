@@ -36,7 +36,7 @@ Estimator(
 2. Measurement data for Kalman likelihood.
 3. Filter algorithm for the likelihood: `#!python "linear"`, `#!python "extended"` (EKF), or `#!python "unscented"` (UKF). Chosen explicitly, not inferred.
 4. Parameter names to estimate, or a mapping from parameter name to `Prior` object. If `None`, all parameters are estimated with uniform priors. `map()` and `mcmc()` require priors to be specified and `mle()` ignores them.
-5. Optional constant observation-covariance override. If omitted, `R` comes from the Kalman config: a fixed calibrated matrix, or rebuilt from the current parameters each evaluation when the model exposes symbolic `R` metadata.
+5. Optional constant observation-covariance override. If omitted, `R` is built from the calibration's `measurement_noise` block.
 6. Optional initial state-covariance override. If omitted, the stationary state-space covariance is used. Supply a full `(n_var, n_var)` matrix in compiled variable order; for `unscented` mode its state block is embedded automatically.
 
 ???+ info "Filter Initial Conditions"

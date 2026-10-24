@@ -34,7 +34,6 @@ export interface ModelSummary {
     n_exog?: number;
     A_shape?: number[];
     B_shape?: number[];
-    has_kalman?: boolean;
 }
 
 export type WorkspaceTab = "estimation" | "mc";

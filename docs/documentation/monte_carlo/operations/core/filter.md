@@ -43,8 +43,8 @@ __Inputs:__
 | n_retain | `-1` | Number of replications to retain. `-1` retains all replications. |
 | observables | `None` | Target-model observable names corresponding to the selected columns, in order. |
 | x0 | `None` | Initial state override in levels. It is the prior for the first observation in linear and extended modes, and the state before the first observation in unscented mode. |
-| P0 | `None` | Initial state covariance override with the same timing as `x0`. `None` uses the `P0` matrix from the target model's `KalmanConfig`. |
-| R | `None` | Measurement error covariance override. |
+| P0 | `None` | Initial state covariance override with the same timing as `x0`. `None` uses the stationary state covariance. |
+| R | `None` | Measurement error covariance override. `None` uses the calibration's `measurement_noise` block to build `R`. |
 | jitter | `None` | Filter jitter override. |
 | symmetrize | `True` | Symmetrize covariance matrices during filtering. |
 | joseph_cov | `False` | Use the Joseph covariance update for linear and extended filtering. `False` is faster but less robust. |

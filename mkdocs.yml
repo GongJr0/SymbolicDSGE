@@ -176,7 +176,6 @@ nav:
   - Guides:
       - Model Configuration Guide: guides/model_config_guide.md
       - Quick Start: guides/quickstart.md
-      - Kalman Filter Configuration Guide: guides/kalman_config_guide.md
       - Estimation Guide: guides/estimation_guide.md
       - Monte Carlo Guide: guides/monte_carlo_guide.md
       - Bundle Authoring Guide: guides/bundle_authoring_guide.md
@@ -190,7 +189,6 @@ nav:
       - CompiledModel: documentation/CompiledModel.md
       - SolvedModel: documentation/SolvedModel.md
       - Shock: documentation/Shock.md
-      - KalmanConfig: documentation/KalmanConfig.md
       - FilterResult: documentation/FilterResult.md
       - SimResult: documentation/SimResult.md
       - Model Solutions:

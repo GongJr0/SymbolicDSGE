@@ -31,7 +31,6 @@ __Properties:__
 |:---------|:--------:|----------------:|
 | is_determinate | `bool` | Whether the model solution is unique and stable. Reports for the reference regime in piecewise models. |
 | config | `#!python ModelConfig` | Parsed model configuration object. |
-| kalman_config | `#!python KalmanConfig | None` | Parsed Kalman Filter configuration object. |
 
 
 __Methods:__
@@ -239,7 +238,7 @@ __Inputs:__
 | joseph_cov | Use Joseph form for covariance update if `True`. `filter_mode == "unscented"` has it's own update mechanism and will raise when this parameter is `True`. |
 | return_shocks | Include the estimated shocks in the return object if `True`. |
 | P0 | Initial state covariance override. `None` uses the stationary state-space covariance. Supply a full `(n_var, n_var)` matrix in compiled variable order; for unscented mode its state block is embedded automatically. |
-| R | Constant measurement-error covariance override. If omitted, `R` is taken from the `KalmanConfig` (a fixed calibrated matrix, or rebuilt from named `R` parameters). |
+| R | Constant measurement-error covariance override. If omitted, `R` is built from the calibration's `measurement_noise` block. |
 
 __Returns:__
 
