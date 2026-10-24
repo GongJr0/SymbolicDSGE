@@ -48,9 +48,7 @@ calibration:
       eps_z: sig_eps_z
       eps_r: sig_eps_r
     corr: {}
-
-kalman:
-  R:
+  measurement_noise:
     std:
       obs_gobs: meas_obs_gobs
       obs_piobs: meas_obs_piobs

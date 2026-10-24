@@ -75,9 +75,7 @@ calibration:
     corr:
       e_g, e_z: rho_gz
 
-kalman:
-
-  R:
+  measurement_noise:
     std:
       Infl: meas_infl
       Rate: meas_rate

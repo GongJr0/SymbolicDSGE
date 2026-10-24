@@ -45,8 +45,6 @@ calibration:
     std:
       e: sig
     corr: {}
-
-kalman:
-  R:
+  measurement_noise:
     std:
       c_obs: meas_c

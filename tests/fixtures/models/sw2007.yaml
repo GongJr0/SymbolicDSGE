@@ -185,9 +185,7 @@ calibration:
       epinf: sig_epinf
       ew: sig_ew
     corr: {}
-
-kalman:
-  R:
+  measurement_noise:
     std:
       dy: meas_dy
       dc: meas_dc
