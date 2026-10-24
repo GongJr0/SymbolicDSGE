@@ -43,7 +43,7 @@ def _with_constraints(parsed, constraint, replacements=None):
     `replacements` maps a binding set to the equations that regime replaces;
     unlisted regimes fall back to pinning the first variable at zero.
     """
-    model, kalman = parsed
+    model = parsed
     conf = copy.deepcopy(model)
     conf.equations.constraints = constraint
 
@@ -57,14 +57,14 @@ def _with_constraints(parsed, constraint, replacements=None):
     conf.equations.regimes = {
         c: replacements.get(c, {target: sp.Eq(var(t), 0)}) for c in combos
     }
-    return DSGESolver(conf, kalman)
+    return DSGESolver(conf)
 
 
 @pytest.fixture(scope="module")
 def compiled_obc(parsed_post82):
-    model, _ = parsed_post82
+    model = parsed_post82
     g, z = (v for v in model.variables[:2])
-    beta = model.parameters[0]
+    beta = sp.Symbol("beta")
     solver = _with_constraints(
         parsed_post82,
         {
@@ -210,9 +210,9 @@ def test_a_zero_distance_is_decided_by_inclusive_alone(compiled_obc):
 def test_a_connective_mixing_strict_and_inclusive_is_rejected(parsed_post82):
     # The fold reports one branch's distance and the caller has one bit to read
     # zero with, so the branches may not disagree about their boundary.
-    model, _ = parsed_post82
+    model = parsed_post82
     g, z = (v for v in model.variables[:2])
-    beta = model.parameters[0]
+    beta = sp.Symbol("beta")
     compiled = _with_constraints(
         parsed_post82,
         {"lo": Constraint(bind=sp.And(z(t) >= beta, g(t) < 1), relax=g(t) > 1)},
@@ -224,7 +224,7 @@ def test_a_connective_mixing_strict_and_inclusive_is_rejected(parsed_post82):
 
 def test_an_equality_condition_has_no_distance(parsed_post82):
     # A Relational the parser accepts and the distance encoding cannot express.
-    model, _ = parsed_post82
+    model = parsed_post82
     g = model.variables[0]
     compiled = _with_constraints(
         parsed_post82, {"lo": Constraint(bind=sp.Eq(g(t), 0), relax=g(t) > 0)}
@@ -330,9 +330,9 @@ def compiled_lead_regime(parsed_post82):
     symbols inside the fwd derivative, which is what the fold onto cur has to
     clean up.
     """
-    model, _ = parsed_post82
+    model = parsed_post82
     g, z, r = model.variables[:3]
-    beta = model.parameters[0]
+    beta = sp.Symbol("beta")
     shock = next(iter(model.shocks))
     target = list(model.equations.model)[2]
     solver = _with_constraints(
@@ -513,9 +513,9 @@ def test_regime_pencil_rejects_a_block_that_does_not_match_its_rows(compiled_reg
 @pytest.fixture(scope="module")
 def compiled_regimes(parsed_post82):
     """Two constraints whose regimes each replace the third model equation."""
-    model, _ = parsed_post82
+    model = parsed_post82
     g, _, r = model.variables[:3]
-    beta = model.parameters[0]
+    beta = sp.Symbol("beta")
     target = list(model.equations.model)[2]
     solver = _with_constraints(
         parsed_post82,
@@ -617,7 +617,7 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
     # equation into the reference model. Rows are positions in that merged order,
     # so an aux landing anywhere but the end misplaces the patch onto a row the
     # regime never touched, with no numerical symptom at compile time.
-    model, _ = parsed_post82
+    model = parsed_post82
     r, Pi = model.variables[2], model.variables[4]
     solver = _with_constraints(
         parsed_post82,
@@ -665,7 +665,7 @@ def compiled_rbc_obc(parsed_rbc_so):
     the reference steady state is. This fixture is in levels, where the
     constant is what actually drives the piecewise solve.
     """
-    model, kalman = parsed_rbc_so
+    model = parsed_rbc_so
     conf = copy.deepcopy(model)
     c, k, z = conf.variables
     delta = sp.Symbol("delta")
@@ -674,7 +674,7 @@ def compiled_rbc_obc(parsed_rbc_so):
     conf.equations.regimes = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
-    return DSGESolver(conf, kalman).compile()
+    return DSGESolver(conf).compile()
 
 
 def _rbc_seed(compiled):
@@ -748,7 +748,7 @@ def test_levels_regime_constant_is_the_steady_state_residual(compiled_rbc_obc):
 def test_regime_replacements_carry_shocks_like_the_reference(parsed_post82):
     # A shock stays a bare symbol in the residual and reaches the pencil through
     # the shock jacobian, on a replaced row exactly as on a reference one.
-    model, _ = parsed_post82
+    model = parsed_post82
     r = model.variables[2]
     shock = next(iter(model.shocks))
     rho_r = sp.Symbol("rho_r")
@@ -776,7 +776,7 @@ def test_regime_replacements_carry_shocks_like_the_reference(parsed_post82):
 def test_regime_replacing_an_undeclared_equation_is_rejected(parsed_post82):
     # The merge would append rather than overwrite, shifting every later row
     # index off the reference.
-    model, _ = parsed_post82
+    model = parsed_post82
     r = model.variables[2]
     solver = _with_constraints(
         parsed_post82,
@@ -806,7 +806,7 @@ def test_model_without_constraints_cannot_build_a_constraint_func(compiled_post8
 
 @pytest.mark.parametrize("offset", [1, -1, 2, -2])
 def test_conditions_reject_leads_and_lags(parsed_post82, offset):
-    model, _ = parsed_post82
+    model = parsed_post82
     g = model.variables[0]
     solver = _with_constraints(
         parsed_post82,

@@ -74,7 +74,7 @@ class EstimatorParams(TypedDict):
     P0 : Sequence[Sequence[float]] | None
         Initial state covariance matrix. If ``None``, the stationary covariance is used.
     R : Sequence[Sequence[float]] | None
-        Observation noise covariance matrix. If ``None``, the kalman config is consulted. Raises when both are ``None``.
+        Observation noise covariance matrix. If ``None``, the config is consulted. Raises when both are ``None``.
     estimated_params : Sequence[str] | None
         List of parameter names to estimate. If ``None``, all parameters are estimated.
     priors : Mapping[str, PriorSpec] | None

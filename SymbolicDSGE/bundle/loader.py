@@ -171,8 +171,8 @@ def _load_models(
                 "model_name; cannot load it."
             )
         parser = ModelParser.from_string(archive.read_text(member.path), member.path)
-        model, kalman = parser.get_all()
-        solver = DSGESolver(model, cast(Any, kalman))
+        model = parser.get()
+        solver = DSGESolver(model)
         compile_kwargs = dict(member.options.get("compile_kwargs", {}))
         solve_kwargs = dict(member.options.get("solve_kwargs", {}))
         compiled = solver.compile(**compile_kwargs)

@@ -1,7 +1,6 @@
 # type: ignore
 from __future__ import annotations
 
-from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,7 +12,6 @@ from sympy import Symbol
 from sympy.core.function import AppliedUndef
 
 import SymbolicDSGE.core.solved_model as solved_model_module
-from SymbolicDSGE.core.compiled_model import VariableLayout
 from SymbolicDSGE.core.sim_result import SimResult
 from SymbolicDSGE.core.solved_model import (
     FirstOrderSolvedModel,
@@ -87,127 +85,53 @@ def _unscented_result(
     )
 
 
-def _make_second_order_test_model() -> tuple[solved_model_module.SolvedModel, dict]:
-    hx = np.array([[0.5, 0.1], [0.0, 0.8]], dtype=np.float64)
-    gx = np.array([[2.0, -1.0]], dtype=np.float64)
-    # The control row is nonzero: an innovation reaches a control
-    # contemporaneously, and a state-only loading cannot express that.
-    bu = np.array([[1.0], [0.25], [-0.4]], dtype=np.float64)
-    hxx = np.array(
-        [
-            [[0.2, 0.1], [0.1, -0.2]],
-            [[0.0, 0.3], [0.3, 0.1]],
-        ],
-        dtype=np.float64,
-    )
-    gxx = np.array([[[0.4, -0.1], [-0.1, 0.2]]], dtype=np.float64)
-    # Shock-quadratic blocks: nonzero, so the fixture would catch a recursion
-    # that silently drops them.
-    hxu = np.array([[[0.05], [-0.03]], [[0.02], [0.04]]], dtype=np.float64)
-    gxu = np.array([[[-0.06], [0.01]]], dtype=np.float64)
-    huu = np.array([[[0.07]], [[-0.02]]], dtype=np.float64)
-    guu = np.array([[[0.03]]], dtype=np.float64)
-    hss = np.array([0.01, -0.02], dtype=np.float64)
-    gss = np.array([0.03], dtype=np.float64)
-
-    compiled = SimpleNamespace(
-        idx={"e": 0, "k": 1, "c": 2},
-        var_names=["e", "k", "c"],
-        # Real layout rather than a stub: x0 is written in declaration order and
-        # resolved through it, so a fake would let the permutation drift.
-        layout=VariableLayout(
-            n_var=3,
-            n_declared=3,
-            n_generated=0,
-            n_exog=1,
-            n_state=2,
-            n_ctrl=1,
-            idx={"e": 0, "k": 1, "c": 2},
-            declared_names=("e", "k", "c"),
-            canonical_names=("e", "k", "c"),
-            state_names=("e", "k"),
-            control_names=("c",),
-        ),
-        n_exog=1,
-        n_var=3,
-        n_state=2,
-        n_ctrl=1,
-        observable_names=[],
-        shock_names=("eps",),
-        shock_idx={"eps": 0},
-        config=SimpleNamespace(
-            shocks=[Symbol("eps")],
-            calibration=SimpleNamespace(
-                parameters={"sig_eps": 1.0}, shock_std={"eps": "sig_eps"}
-            ),
-        ),
-    )
-    solved = SecondOrderSolvedModel(
-        compiled=compiled,
-        policy=SimpleNamespace(
-            p=hx,
-            f=gx,
-            order=2,
-            hxx=hxx,
-            gxx=gxx,
-            hxu=hxu,
-            gxu=gxu,
-            huu=huu,
-            guu=guu,
-            hss=hss,
-            gss=gss,
-            steady_state=np.zeros(3, dtype=np.float64),
-            A=np.eye(3, dtype=np.float64),
-            B=bu,
-        ),
-    )
-    data = {
-        "hx": hx,
-        "gx": gx,
-        "bu": bu,
-        "hxx": hxx,
-        "gxx": gxx,
-        "hxu": hxu,
-        "gxu": gxu,
-        "huu": huu,
-        "guu": guu,
-        "hss": hss,
-        "gss": gss,
-    }
-    return solved, data
-
-
-def _manual_second_order_path(data, shock, x0_state) -> np.ndarray:
+def _manual_second_order_path(policy, n_state, shock_mat, x0_state) -> np.ndarray:
     """Every row of a period from the previous state and this period's shock,
     the way Dynare's simult_.m writes the order-2 pruned branch. The controls
-    read the same previous state as the states do, not the updated one."""
-    T = shock.shape[0]
-    bu = data["bu"]
-    expected = np.empty((T, 3), dtype=np.float64)
+    read the same previous state as the states do, not the updated one.
+
+    Deviations in canonical ``[states; controls]`` order, which is what the
+    kernel works in before it adds the expansion point back.
+    """
+    hx, gx, bu = policy.p, policy.f, policy.B
+    n_ctrl = gx.shape[0]
+    T = shock_mat.shape[0]
+
+    expected = np.empty((T, n_state + n_ctrl), dtype=np.float64)
     x1 = x0_state.copy()
-    x2 = np.zeros(2, dtype=np.float64)
+    x2 = np.zeros(n_state, dtype=np.float64)
     for t in range(T):
-        u = shock[t]
+        u = shock_mat[t]
         xx = np.outer(x1, x1)
-        x1_next = data["hx"] @ x1 + bu[:2, 0] * u
+        x1_next = hx @ x1 + bu[:n_state] @ u
         x2_next = (
-            data["hx"] @ x2
-            + 0.5 * np.einsum("ijk,jk->i", data["hxx"], xx)
-            + data["hxu"][:, :, 0] @ x1 * u
-            + 0.5 * data["huu"][:, 0, 0] * u * u
-            + 0.5 * data["hss"]
+            hx @ x2
+            + 0.5 * np.einsum("ijk,jk->i", policy.hxx, xx)
+            + np.einsum("ijk,j,k->i", policy.hxu, x1, u)
+            + 0.5 * np.einsum("ijk,j,k->i", policy.huu, u, u)
+            + 0.5 * policy.hss
         )
-        expected[t, 2] = (
-            data["gx"][0] @ (x1 + x2)
-            + bu[2, 0] * u
-            + 0.5 * np.sum(data["gxx"][0] * xx)
-            + data["gxu"][0, :, 0] @ x1 * u
-            + 0.5 * data["guu"][0, 0, 0] * u * u
-            + 0.5 * data["gss"][0]
+        expected[t, n_state:] = (
+            gx @ (x1 + x2)
+            + bu[n_state:] @ u
+            + 0.5 * np.einsum("ijk,jk->i", policy.gxx, xx)
+            + np.einsum("ijk,j,k->i", policy.gxu, x1, u)
+            + 0.5 * np.einsum("ijk,j,k->i", policy.guu, u, u)
+            + 0.5 * policy.gss
         )
         x1, x2 = x1_next, x2_next
-        expected[t, :2] = x1 + x2
+        expected[t, :n_state] = x1 + x2
     return expected
+
+
+def _impulse_matrix(model, shock: str, T: int) -> np.ndarray:
+    """``irf``'s own impulse: one standard deviation in period zero."""
+    calib = model.config.calibration
+    out = np.zeros((T, model.compiled.n_exog), dtype=np.float64)
+    out[0, model.compiled.shock_idx[shock]] = float(
+        calib.parameters[calib.shocks.std[shock]]
+    )
+    return out
 
 
 def test_solved_model_sim_shapes_and_keys(solved_test):
@@ -289,34 +213,54 @@ def test_solved_model_sim_matches_manual_state_recursion(solved_test):
     np.testing.assert_allclose(out.X, expected)
 
 
-def test_solved_model_second_order_sim_matches_pruned_recursion() -> None:
+def test_solved_model_second_order_sim_matches_pruned_recursion(solved_multishock):
     T = 3
-    solved, data = _make_second_order_test_model()
-    shock = np.array([0.0, 0.05, -0.02], dtype=np.float64)
-    x0 = np.array([0.2, -0.1, 99.0], dtype=np.float64)
+    solved = solved_multishock
+    compiled = solved.compiled
+    n_state = compiled.n_state
+    ss = solved.policy.steady_state
 
-    out = solved.sim(T, shocks={"eps": shock}, x0=x0).X
-    expected = _manual_second_order_path(data, shock, x0[:2])
+    path = np.array([0.0, 0.05, -0.02], dtype=np.float64)
+    # A control value in x0 is discarded: the policy rule recomputes it from
+    # the state, so 99.0 must not reach the output.
+    x0 = {
+        "k": ss[compiled.idx["k"]] + 0.2,
+        "z": 0.05,
+        "c": ss[compiled.idx["c"]] + 99.0,
+    }
 
-    np.testing.assert_allclose(out, expected)
-    assert out[0, 2] != x0[2]
+    out = solved.sim(T, shocks={"e_z": path}, x0=x0).X
 
-
-def test_solved_model_second_order_irf_subtracts_pruned_baseline() -> None:
-    T = 3
-    solved, data = _make_second_order_test_model()
-    shock = np.array([1.0, 0.0, 0.0], dtype=np.float64)
-    zero = np.zeros(T, dtype=np.float64)
-
-    out = solved.irf(shocks=["eps"], T=T).X
+    shock_mat = np.zeros((T, compiled.n_exog), dtype=np.float64)
+    shock_mat[:, compiled.shock_idx["e_z"]] = path
     expected = _manual_second_order_path(
-        data,
-        shock,
-        np.zeros(2, dtype=np.float64),
-    ) - _manual_second_order_path(data, zero, np.zeros(2, dtype=np.float64))
+        solved.policy, n_state, shock_mat, solved._initial_state(x0)[:n_state]
+    )
+
+    np.testing.assert_allclose(out, expected + ss)
+    assert out[0, compiled.idx["c"]] != x0["c"]
+
+
+def test_solved_model_second_order_irf_subtracts_pruned_baseline(solved_multishock):
+    T = 3
+    solved = solved_multishock
+    compiled = solved.compiled
+    n_state = compiled.n_state
+    x0_state = np.zeros(n_state, dtype=np.float64)
+
+    out = solved.irf(shocks=["e_z"], T=T).X
+
+    # The baseline is not flat at second order: the risk correction accumulates
+    # with no shock at all, which is what makes the subtraction necessary.
+    impulse = _impulse_matrix(solved, "e_z", T)
+    expected = _manual_second_order_path(
+        solved.policy, n_state, impulse, x0_state
+    ) - _manual_second_order_path(
+        solved.policy, n_state, np.zeros_like(impulse), x0_state
+    )
 
     np.testing.assert_allclose(out, expected)
-    assert out.shape == (T, 3)
+    assert out.shape == (T, compiled.n_var)
 
 
 def test_solved_model_sim_rejects_wrong_shock_length(solved_test):
@@ -341,32 +285,24 @@ def test_solved_model_affine_observables_can_drop_initial_row(solved_test):
     np.testing.assert_allclose(Y, expected)
 
 
-def test_solved_model_sim_uses_non_affine_measurement_branch(monkeypatch):
-    compiled = SimpleNamespace(
-        idx={"g": 0, "x": 1},
-        var_names=["g", "x"],
-        shock_names=("eps",),
-        n_exog=1,
-        n_var=2,
-        n_state=1,
-        n_ctrl=1,
-        observable_names=["Obs"],
-        config=SimpleNamespace(equations=SimpleNamespace(obs_is_affine={"Obs": False})),
-    )
-    solved = FirstOrderSolvedModel(
-        compiled=compiled,
-        policy=SimpleNamespace(
-            f=np.array([[0.0]], dtype=np.float64),
-            order=1,
-            A=np.eye(2, dtype=np.float64),
-            B=np.zeros((2, 1), dtype=np.float64),
-            steady_state=np.zeros(2, dtype=np.float64),
-        ),
-    )
+def test_solved_model_sim_uses_non_affine_measurement_branch(
+    solved_multishock, monkeypatch
+):
+    """One non-affine observable sends the whole set down the symbolic path.
+
+    ``g_obs`` is ``gbar * exp(g(t))``, so this model cannot take the (C, d)
+    route. The replacement stands in for the symbolic evaluation to show the
+    branch was taken and the state path reached it whole.
+    """
+    solved = solved_multishock
+    obs_names = list(solved.compiled.observable_names)
+    assert not all(solved.config.equations.obs_is_affine.values())
 
     def fake_non_affine(compiled_arg, y_names, state):
-        assert y_names == ["Obs"]
-        return np.arange(state.shape[0], dtype=np.float64).reshape(-1, 1)
+        assert list(y_names) == obs_names
+        assert state.shape == (3, solved.compiled.n_var)
+        T, m = state.shape[0], len(y_names)
+        return np.arange(T * m, dtype=np.float64).reshape(T, m)
 
     monkeypatch.setattr(
         solved_model_module.measurement,
@@ -376,7 +312,27 @@ def test_solved_model_sim_uses_non_affine_measurement_branch(monkeypatch):
 
     out = solved.sim(3, observables=True)
 
-    assert np.array_equal(out.observables["Obs"], np.array([0.0, 1.0, 2.0]))
+    for j, name in enumerate(obs_names):
+        assert np.array_equal(
+            out.observables[name], np.array([j, j + 3, j + 6], dtype=np.float64)
+        )
+
+
+def test_solved_model_sim_skips_the_non_affine_branch_when_every_obs_is_affine(
+    solved_test, monkeypatch
+):
+    """``test.yaml``'s observables are all affine, so (C, d) serves."""
+    assert all(solved_test.config.equations.obs_is_affine.values())
+
+    def bomb(*args, **kwargs):
+        raise AssertionError("non_affine_measurement should not run for an affine set")
+
+    monkeypatch.setattr(solved_model_module.measurement, "non_affine_measurement", bomb)
+
+    out = solved_test.sim(3, observables=True)
+
+    for name in solved_test.compiled.observable_names:
+        assert out.observables[name].shape == (3,)
 
 
 def test_solved_model_irf_validation_errors(solved_test):
@@ -503,31 +459,11 @@ def test_solved_model_non_affine_measurement_matches_reference(solved_test):
     assert np.allclose(got, expected)
 
 
-def _kalman_dispatch_stub(cls):
-    alpha = Symbol("alpha")
-    compiled = SimpleNamespace(
-        calib_params=[alpha],
-        observable_names=["ObsA", "ObsB"],
-        construct_measurement_cfunc=lambda obs: SimpleNamespace(address=456),
-        construct_measurement_jacobian_cfunc=lambda obs: SimpleNamespace(address=789),
-        config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
-        kalman=SimpleNamespace(y_names=["ObsB", "ObsA"]),
-    )
-    return cls(
-        compiled=compiled,
-        policy=SimpleNamespace(
-            order=1 if cls is FirstOrderSolvedModel else 2,
-            A=np.eye(1, dtype=np.float64),
-            B=np.eye(1, dtype=np.float64),
-            steady_state=np.zeros(1, dtype=np.float64),
-        ),
-    )
-
-
 @pytest.mark.parametrize(
-    ("cls", "mode", "resolver", "runner", "result"),
+    ("model_fixture", "cls", "mode", "resolver", "runner", "result"),
     [
         (
+            "solved_test",
             FirstOrderSolvedModel,
             "linear",
             "resolve_linear_args",
@@ -535,6 +471,7 @@ def _kalman_dispatch_stub(cls):
             _filter_result,
         ),
         (
+            "solved_test",
             FirstOrderSolvedModel,
             "extended",
             "resolve_extended_args",
@@ -542,6 +479,7 @@ def _kalman_dispatch_stub(cls):
             _filter_result,
         ),
         (
+            "solved_multishock",
             SecondOrderSolvedModel,
             "unscented",
             "resolve_unscented_args",
@@ -551,12 +489,14 @@ def _kalman_dispatch_stub(cls):
     ],
 )
 def test_solved_model_kalman_routes_each_mode_to_its_runner(
-    monkeypatch, cls, mode, resolver, runner, result
+    request, monkeypatch, model_fixture, cls, mode, resolver, runner, result
 ):
     # Each mode pairs one resolver with one runner. The resolvers are covered
     # against a model in tests/kalman; what matters here is that the pairing
     # holds and that the resolved set is splatted through unchanged.
-    solved = _kalman_dispatch_stub(cls)
+    solved = request.getfixturevalue(model_fixture)
+    assert isinstance(solved, cls)
+
     resolved = {"sentinel": object()}
     captured = {}
 
@@ -581,28 +521,10 @@ def test_solved_model_kalman_routes_each_mode_to_its_runner(
     assert captured == resolved
 
 
-def test_solved_model_kalman_unscented_rejects_return_shocks(monkeypatch):
-    alpha = Symbol("alpha")
-    compiled = SimpleNamespace(
-        calib_params=[alpha],
-        observable_names=["ObsA"],
-        construct_measurement_cfunc=lambda obs: SimpleNamespace(address=456),
-        construct_measurement_jacobian_cfunc=lambda obs: SimpleNamespace(address=789),
-        config=SimpleNamespace(calibration=SimpleNamespace(parameters={alpha: 1.5})),
-        kalman=SimpleNamespace(y_names=["ObsA"]),
-    )
-    solved = SecondOrderSolvedModel(
-        compiled=compiled,
-        policy=SimpleNamespace(
-            order=2,
-            A=np.eye(1, dtype=np.float64),
-            B=np.eye(1, dtype=np.float64),
-            steady_state=np.zeros(1, dtype=np.float64),
-        ),
-    )
-
+def test_solved_model_kalman_unscented_rejects_return_shocks(solved_multishock):
+    # Rejected before the resolver runs, so no filter is reached.
     with pytest.raises(ValueError, match="return_shocks is not supported"):
-        solved.kalman(
+        solved_multishock.kalman(
             y=np.zeros((3, 1), dtype=np.float64),
             filter_mode="unscented",
             return_shocks=True,
@@ -612,8 +534,13 @@ def test_solved_model_kalman_unscented_rejects_return_shocks(monkeypatch):
 def test_resolvers_rebuild_symbolic_R_from_current_calibration(
     post82_test_model_path,
 ):
-    model, kalman = ModelParser(post82_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
+    """R is read from the calibration at resolve time, not frozen at parse.
+
+    The three parameters move after the compile, so a prebuilt matrix would
+    still report the parsed values here.
+    """
+    model = ModelParser(post82_test_model_path).get()
+    solver = DSGESolver(model)
     compiled = solver.compile()
 
     compiled.config.calibration.parameters[Symbol("meas_infl")] = 2.0
@@ -627,10 +554,6 @@ def test_resolvers_rebuild_symbolic_R_from_current_calibration(
     assert np.allclose(
         args["R"],
         np.array([[4.0, 0.6], [0.6, 9.0]], dtype=np.float64),
-    )
-    assert np.allclose(
-        solved.kalman_config.R,
-        np.eye(3, dtype=np.float64),
     )
 
 
@@ -664,8 +587,8 @@ def variant(tmp_path, test_model_path):
         path = tmp_path / f"variant_{len(list(tmp_path.iterdir()))}.yaml"
         path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
-        model, kalman = ModelParser(path).get_all()
-        solver = DSGESolver(model, kalman)
+        model = ModelParser(path).get()
+        solver = DSGESolver(model)
         compiled = solver.compile()
         return model, compiled, solver.solve(compiled=compiled)
 
@@ -717,9 +640,7 @@ def _worst_residual(model, compiled, solved, eps: np.ndarray) -> float:
 def test_simulated_paths_satisfy_the_authored_equations(
     parsed_test, compiled_test, solved_test
 ):
-    model, _ = parsed_test
-
-    assert _worst_residual(model, compiled_test, solved_test, EPS) < 1e-12
+    assert _worst_residual(parsed_test, compiled_test, solved_test, EPS) < 1e-12
 
 
 def test_non_unit_loading_scales_the_response(solved_test, variant):

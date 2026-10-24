@@ -49,7 +49,7 @@ def _regime_cfuncs(compiled):
 @pytest.fixture(scope="module")
 def compiled(parsed_rbc_so):
     """Levels RBC where a bad-TFP regime shuts investment off."""
-    model, kalman = parsed_rbc_so
+    model = parsed_rbc_so
     conf = copy.deepcopy(model)
     _, k, z = conf.variables
     delta = sp.Symbol("delta")
@@ -58,7 +58,7 @@ def compiled(parsed_rbc_so):
     conf.equations.regimes = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
-    return DSGESolver(conf, kalman).compile()
+    return DSGESolver(conf).compile()
 
 
 @pytest.fixture(scope="module")

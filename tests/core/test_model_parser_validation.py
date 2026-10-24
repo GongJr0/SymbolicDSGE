@@ -20,7 +20,7 @@ from SymbolicDSGE.core.model_parser import (
 
 
 def _parse(text: str):
-    return ModelParser.from_string(text).get_all()
+    return ModelParser.from_string(text).get()
 
 
 BASE = """
@@ -46,7 +46,7 @@ calibration:
 
 
 def test_base_is_valid():
-    model, _ = _parse(BASE)
+    model = _parse(BASE)
     assert model is not None
 
 
@@ -63,13 +63,15 @@ def test_rejects_trivial_equation():
 
 
 def test_rejects_malformed_observable_correlation_pair():
-    # rho_obs must be calibrated so the undeclared-parameter check passes and
-    # parsing reaches the R-correlation pair guard.
-    text = BASE.replace("    sig: 0.1", "    sig: 0.1\n    rho_obs: 0.0")
+    # Both names must be calibrated and every observable must carry a standard
+    # deviation, so that parsing clears those guards and reaches the pair guard.
+    text = BASE.replace(
+        "    sig: 0.1", "    sig: 0.1\n    rho_obs: 0.0\n    meas_x: 0.2"
+    )
     kalman_block = """
-kalman:
-  R:
-    std: {}
+  measurement_noise:
+    std:
+      x_obs: meas_x
     corr:
       x_obs: rho_obs
 """
@@ -84,13 +86,12 @@ def test_derived_entry_is_inlined_and_dropped():
     text = BASE.replace("    sig: 0.1", "    sig: 0.1\n    half_rho: rho / 2").replace(
         "rho * x(t)", "half_rho * x(t)"
     )
-    model, _ = _parse(text)
+    model = _parse(text)
 
     equation = model.equations.model["x_process"]
     free = (equation.lhs - equation.rhs).free_symbols
     assert sp.Symbol("half_rho") not in free
     assert sp.Symbol("rho") in free
-    assert sp.Symbol("half_rho") not in model.parameters
     assert sp.Symbol("half_rho") not in model.calibration.parameters
 
 
@@ -99,7 +100,7 @@ def test_derived_entries_resolve_through_each_other():
         "    sig: 0.1",
         "    sig: 0.1\n    half_rho: rho / 2\n    quarter_rho: half_rho / 2",
     ).replace("variables: [x]", "variables: [x]\nss_seed:\n  x: quarter_rho")
-    model, _ = _parse(text)
+    model = _parse(text)
 
     seed = model.ss_seed[model.variables[0]]
     assert sp.simplify(seed - sp.Symbol("rho") / 4) == 0
@@ -119,13 +120,13 @@ def test_rejects_calibration_entry_referencing_model_variable():
 
 def test_rejects_self_referential_calibration_entry():
     text = BASE.replace("    sig: 0.1", "    sig: 0.1\n    loop: loop + 1")
-    with pytest.raises(ValueError, match="cycle: loop"):
+    with pytest.raises(ValueError, match=r"cycle: \['loop'\]"):
         _parse(text)
 
 
 def test_rejects_mutually_referential_calibration_entries():
     text = BASE.replace("    sig: 0.1", "    sig: 0.1\n    a: b + 1\n    b: a * 2")
-    with pytest.raises(ValueError, match="cycle: a, b"):
+    with pytest.raises(ValueError, match=r"cycle: \['a', 'b'\]"):
         _parse(text)
 
 
@@ -133,7 +134,7 @@ def test_rejects_derived_entry_named_as_shock_std():
     text = BASE.replace("    sig: 0.1", "    sig: 0.1\n    sig_loc: sig * 2").replace(
         "      e: sig\n", "      e: sig_loc\n"
     )
-    with pytest.raises(ValueError, match="cannot name a derived calibration entry"):
+    with pytest.raises(ValueError, match="reference derived calibration entries"):
         _parse(text)
 
 
@@ -182,8 +183,7 @@ calibration:
       "e_x, e_y": rho_xy
       "e_x, e_z": rho_xz
       "e_y, e_z": rho_yz
-kalman:
-  R:
+  measurement_noise:
     std:
       x_obs: meas_x
       y_obs: meas_y
@@ -196,9 +196,8 @@ kalman:
 
 
 def test_multi_is_valid():
-    model, kalman = _parse(MULTI)
+    model = _parse(MULTI)
     assert model is not None
-    assert kalman is not None
 
 
 def test_accepts_shock_std_shared_across_shocks():
@@ -206,16 +205,18 @@ def test_accepts_shock_std_shared_across_shocks():
     # spec indexes the calibration by slot, so a repeated slot resolves the same
     # value for both members and one estimated parameter moves both variances.
     text = MULTI.replace("      e_y: sig_y\n", "      e_y: sig_x\n")
-    model, _ = _parse(text)
-    assert model.calibration.shock_std["e_x"] == "sig_x"
-    assert model.calibration.shock_std["e_y"] == "sig_x"
+    model = _parse(text)
+    assert model.calibration.shocks.std["e_x"] == "sig_x"
+    assert model.calibration.shocks.std["e_y"] == "sig_x"
 
 
 def test_accepts_measurement_std_shared_across_observables():
     text = MULTI.replace("      y_obs: meas_y\n", "      y_obs: meas_x\n")
-    _, kalman = _parse(text)
-    assert kalman.R_std_param_map["x_obs"] == "meas_x"
-    assert kalman.R_std_param_map["y_obs"] == "meas_x"
+    model = _parse(text)
+    meas_noise = model.calibration.measurement_noise
+    assert meas_noise
+    assert meas_noise.std["x_obs"] == "meas_x"
+    assert meas_noise.std["y_obs"] == "meas_x"
 
 
 def test_rejects_shock_corr_parameter_used_for_two_pairs():
@@ -236,7 +237,9 @@ def test_rejects_shock_parameter_used_as_both_std_and_corr():
 
 def test_rejects_measurement_corr_parameter_used_for_two_pairs():
     text = MULTI.replace('"x_obs, z_obs": meas_rho_xz', '"x_obs, z_obs": meas_rho_xy')
-    with pytest.raises(ValueError, match="kalman.R.corr values must be unique"):
+    with pytest.raises(
+        ValueError, match="calibration.measurement_noise.corr values must be unique"
+    ):
         _parse(text)
 
 
@@ -254,8 +257,8 @@ def test_unspecified_correlation_pairs_do_not_count_as_duplicates():
     text = MULTI.replace('      "e_x, e_z": rho_xz\n', "").replace(
         '      "e_y, e_z": rho_yz\n', ""
     )
-    model, _ = _parse(text)
-    corr = model.calibration.shock_corr
+    model = _parse(text)
+    corr = model.calibration.shocks.corr
     assert corr["e_x", "e_y"] == "rho_xy"
     assert corr["e_x", "e_z"] is None
     assert corr["e_y", "e_z"] is None
@@ -300,7 +303,7 @@ def test_ss_seed_densifies_over_the_declared_set():
     text = MULTI.replace(
         "variables: [x, y, z]", "variables: [x, y, z]\nss_seed:\n  y: rho"
     )
-    model, _ = _parse(text)
+    model = _parse(text)
     seeds = model.ss_seed
 
     assert set(seeds) == set(model.variables)
@@ -311,7 +314,7 @@ def test_ss_seed_densifies_over_the_declared_set():
 
 def test_accepts_an_empty_ss_seed_block():
     text = BASE.replace("variables: [x]", "variables: [x]\nss_seed:")
-    model, _ = _parse(text)
+    model = _parse(text)
 
     assert model.ss_seed["x"] is None
 

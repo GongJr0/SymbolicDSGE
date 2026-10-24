@@ -1,19 +1,17 @@
 # type: ignore
 from __future__ import annotations
 
-from types import MethodType, SimpleNamespace
-
 import numpy as np
 import pandas as pd
 import pytest
-from sympy import Symbol
 
 import SymbolicDSGE.kalman.resolvers as resolvers
-from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
-from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.core import DSGESolver
 from SymbolicDSGE.core.compiled_model import _shock_covariance
+from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.resolvers import (
     FilterMode,
+    LinearRunArgs,
     resolve_extended_args,
     resolve_linear_args,
     resolve_unscented_args,
@@ -21,197 +19,155 @@ from SymbolicDSGE.kalman.resolvers import (
 
 FLOAT = np.float64
 
-E_U = Symbol("e_u")
-E_V = Symbol("e_v")
-SIG_U = Symbol("sig_u")
-SIG_V = Symbol("sig_v")
-RHO_UV = Symbol("rho_uv")
-MEAS_A = Symbol("meas_a")
-MEAS_B = Symbol("meas_b")
+#: Canonical observable order of ``rbc_multishock_second_order``. Its canonical
+#: variable order is ``[k, z, d, g, c]`` against a declaration order of
+#: ``[c, k, z, d, g]``, so every reordering the resolvers do is visible here.
+OBS = ("c_obs", "k_obs", "g_obs")
 
-STUB_Q = np.array([[0.04, 0.015], [0.015, 0.09]], dtype=FLOAT)
-MEAS_ADDR = 111
-JAC_ADDR = 222
+#: The fixture's ``calibration.measurement_noise``: standard deviations 1e-3,
+#: 2e-3, and 4e-3 over ``OBS``, correlated 0.25 on ``c_obs, k_obs`` alone.
+R_FULL = np.array(
+    [
+        [1e-6, 5e-7, 0.0],
+        [5e-7, 4e-6, 0.0],
+        [0.0, 0.0, 1.6e-5],
+    ],
+    dtype=FLOAT,
+)
 
 
-def _make_stub_model(
-    *,
-    kalman_config=...,
-    params: dict[Symbol | str, float] | None = None,
-    order: int = 2,
-):
-    observable_names = ["ObsA", "ObsB"]
-    var_names = ["u", "v", "x"]
-    parameters = {
-        SIG_U: 0.2,
-        SIG_V: 0.3,
-        RHO_UV: 0.25,
-        MEAS_A: 4.0,
-        MEAS_B: 9.0,
-    }
-    if params is not None:
-        parameters.update(params)
-
-    calibration = SimpleNamespace(
-        parameters=SymbolGetterDict(parameters),
-        shock_std=SymbolGetterDict({E_U: SIG_U.name, E_V: SIG_V.name}),
-        shock_corr=PairGetterDict({frozenset({E_U, E_V}): RHO_UV.name}),
-        fingerprint=lambda: hash(
-            (
-                tuple(parameters.keys()),
-                tuple(float(v) for v in parameters.values()),
-            )
-        ),
-    )
-    config = SimpleNamespace(
-        calibration=calibration,
-        shocks=[E_U, E_V],
-    )
-    compiled = SimpleNamespace(
-        config=config,
-        observable_names=observable_names,
-        var_names=var_names,
-        # Declaration order matches canonical order here, so `_initial_state`
-        # only has the level-to-gap conversion left to do.
-        layout=SimpleNamespace(declared_names=tuple(var_names), generated_names=()),
-        idx={name: i for i, name in enumerate(var_names)},
-        n_var=3,
-        n_state=2,
-        n_ctrl=1,
-        n_exog=2,
-        calib_params=[SIG_U, SIG_V],
-        construct_measurement_cfunc=lambda obs: SimpleNamespace(address=MEAS_ADDR),
-        construct_measurement_jacobian_cfunc=lambda obs: SimpleNamespace(
-            address=JAC_ADDR
-        ),
+@pytest.fixture(scope="module")
+def multishock_order1(solved_multishock) -> SolvedModel:
+    """The shared compile solved to first order, for the unscented order gate."""
+    return DSGESolver(solved_multishock.config).solve(
+        compiled=solved_multishock.compiled, order=1
     )
 
-    rows = {
-        "ObsA": np.array([1.0, 0.0, 0.0], dtype=FLOAT),
-        "ObsB": np.array([0.0, 1.0, 1.0], dtype=FLOAT),
-    }
-    constants = {"ObsA": 1.0, "ObsB": -1.0}
 
-    def build_measurement(obs_names):
-        C = np.vstack([rows[name] for name in obs_names]).astype(FLOAT)
-        d = np.array([constants[name] for name in obs_names], dtype=FLOAT)
-        return C, d
+@pytest.fixture
+def y3() -> np.ndarray:
+    """Two periods of three observables, every entry distinct.
 
-    if kalman_config is ...:
-        kalman_config = SimpleNamespace(
-            y_names=["ObsB", "ObsA"],
-            R=np.array([[4.0, 0.6], [0.6, 9.0]], dtype=FLOAT),
-            jitter=0.125,
-            symmetrize=True,
-            R_std_param_map=None,
-            R_corr_param_map=None,
-        )
-
-    # the real CompiledModel carries the kalman config; kalman_config on the
-    # model is a property over it
-    compiled.kalman = kalman_config
-
-    model = SimpleNamespace(
-        compiled=compiled,
-        config=config,
-        kalman_config=kalman_config,
-        policy=SimpleNamespace(
-            order=order,
-            A=np.eye(3, dtype=FLOAT),
-            B=np.array([[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]], dtype=FLOAT),
-            p=np.array([[0.8, 0.1], [0.0, 0.7]], dtype=FLOAT),
-            f=np.array([[0.2, 0.3]], dtype=FLOAT),
-            hxx=np.zeros((2, 2, 2), dtype=FLOAT),
-            gxx=np.zeros((1, 2, 2), dtype=FLOAT),
-            hxu=np.zeros((2, 2, 2), dtype=FLOAT),
-            gxu=np.zeros((1, 2, 2), dtype=FLOAT),
-            huu=np.zeros((2, 2, 2), dtype=FLOAT),
-            guu=np.zeros((1, 2, 2), dtype=FLOAT),
-            hss=np.array([0.01, 0.02], dtype=FLOAT),
-            gss=np.array([0.03], dtype=FLOAT),
-            steady_state=np.array([1.0, 2.0, 3.0], dtype=FLOAT),
-        ),
-    )
-    model._build_C_d_from_obs = build_measurement
-    # Bound rather than stubbed: the resolvers hand x0 to this, and a fake
-    # would stop these tests from seeing the level-to-gap conversion at all.
-    model._initial_state = MethodType(SolvedModel._initial_state, model)
-    return model
+    Already canonical when the observables arrive in canonical order, permuted
+    otherwise, which is what makes the column alignment legible.
+    """
+    return np.arange(6, dtype=FLOAT).reshape(2, 3)
 
 
-def test_resolve_linear_args_is_a_complete_run_argument_set():
-    model = _make_stub_model()
-    y = np.array([[10.0, 1.0], [20.0, 2.0]], dtype=FLOAT)
+def test_resolve_linear_args_is_a_complete_run_argument_set(solved_multishock, y3):
+    model = solved_multishock
 
     args = resolve_linear_args(
         model,
-        y,
-        ["ObsB", "ObsA"],
+        y3,
+        # Columns are read in the order the names arrive, then the two are
+        # canonicalized together.
+        ["g_obs", "c_obs", "k_obs"],
         jitter=0.125,
         symmetrize=True,
         return_shocks=True,
     )
 
-    # Observables are canonicalized and y's columns follow them.
-    assert np.array_equal(args["y"], np.array([[1.0, 10.0], [2.0, 20.0]], dtype=FLOAT))
+    assert set(args) == set(LinearRunArgs.__annotations__)
+
     assert np.array_equal(
-        args["C"], np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 1.0]], dtype=FLOAT)
+        args["y"], np.array([[1.0, 2.0, 0.0], [4.0, 5.0, 3.0]], dtype=FLOAT)
     )
-    assert np.array_equal(args["d"], np.array([1.0, -1.0], dtype=FLOAT))
+    C, d = model._build_C_d_from_obs(OBS)
+    assert np.array_equal(args["C"], C)
+    assert np.array_equal(args["d"], d)
     assert np.array_equal(args["A"], model.policy.A)
     assert np.array_equal(args["B"], model.policy.B)
-    assert np.allclose(args["Q"], STUB_Q)
-    assert np.array_equal(args["R"], np.array([[4.0, 0.6], [0.6, 9.0]], dtype=FLOAT))
-    assert np.array_equal(args["x0"], np.zeros((3,), dtype=FLOAT))
-    assert np.array_equal(args["P0"], np.eye(3, dtype=FLOAT))
+    assert np.allclose(args["Q"], _shock_covariance(model.compiled))
+    assert np.allclose(args["R"], R_FULL)
     assert np.array_equal(args["steady_state"], model.policy.steady_state)
+    # x0 defaults to the steady state, which is a zero deviation.
+    assert np.array_equal(args["x0"], np.zeros((model.compiled.n_var,), dtype=FLOAT))
     assert args["jitter"] == pytest.approx(0.125)
     assert args["symmetrize"] is True
     assert args["joseph_cov"] is False
     assert args["return_shocks"] is True
 
 
-def test_resolve_extended_args_carries_cfunc_addresses_and_skips_c_and_d():
-    model = _make_stub_model()
+def test_default_p0_is_solved_from_the_policy(solved_multishock, y3):
+    """With no P0 supplied the default is the stationary covariance.
+
+    The identity is the fallback for a policy whose stationary covariance does
+    not converge, not the default.
+    """
+    model = solved_multishock
+    n_var = model.compiled.n_var
+
+    P0 = resolve_linear_args(model, y3, list(OBS))["P0"]
+
+    assert P0.shape == (n_var, n_var)
+    assert np.allclose(P0, P0.T)
+    assert np.all(np.diag(P0) > 0.0)
+    assert not np.allclose(P0, np.eye(n_var, dtype=FLOAT))
+
+
+def test_resolve_extended_args_carries_cfunc_addresses_and_skips_c_and_d(
+    solved_multishock, y3, monkeypatch
+):
+    model = solved_multishock
 
     def bomb(obs_names):
         raise AssertionError("_build_C_d_from_obs should not run in extended mode")
 
-    model._build_C_d_from_obs = bomb
+    monkeypatch.setattr(model, "_build_C_d_from_obs", bomb)
 
-    args = resolve_extended_args(model, np.array([[1.0], [2.0]], dtype=FLOAT), ["ObsA"])
+    args = resolve_extended_args(model, y3, list(OBS))
 
     assert "C" not in args
     assert "d" not in args
-    assert args["meas_addr"] == MEAS_ADDR
-    assert args["jac_addr"] == JAC_ADDR
-    assert np.array_equal(args["calib_params"], np.array([0.2, 0.3], dtype=FLOAT))
-    assert np.array_equal(args["x0"], np.zeros((3,), dtype=FLOAT))
+    assert args["meas_addr"] == int(
+        model.compiled.construct_measurement_cfunc(OBS).address
+    )
+    assert args["jac_addr"] == int(
+        model.compiled.construct_measurement_jacobian_cfunc(OBS).address
+    )
+    assert args["meas_addr"] != args["jac_addr"]
+
+    params = model.config.calibration.parameters
+    assert np.array_equal(
+        args["calib_params"],
+        np.array([params[name] for name in model.compiled.calib_params], dtype=FLOAT),
+    )
 
 
-def test_resolve_unscented_args_embeds_x0_and_defaults_the_sigma_point_weights():
-    model = _make_stub_model()
+def test_resolve_unscented_args_embeds_x0_and_defaults_the_sigma_point_weights(
+    solved_multishock, y3
+):
+    model = solved_multishock
+    policy = model.policy
+    idx = model.compiled.idx
+    ss = policy.steady_state
 
     args = resolve_unscented_args(
         model,
-        np.array([[1.0], [2.0]], dtype=FLOAT),
-        ["ObsA"],
-        # x0 arrives in levels, so it is given as the steady state plus a
-        # known deviation and the deviation is what has to come back out.
-        x0=np.array([1.0, 2.0, 3.0], dtype=FLOAT)
-        + np.array([0.2, 0.3, 99.0], dtype=FLOAT),
+        y3,
+        list(OBS),
+        # x0 arrives in levels. ``k`` is a state and ``c`` is the control, so
+        # the deviation on ``k`` survives the embedding and the one on ``c`` is
+        # truncated away with the rest of the control block.
+        x0={"k": ss[idx["k"]] + 0.3, "c": ss[idx["c"]] + 0.2},
         jitter=0.25,
         symmetrize=False,
     )
 
-    assert args["meas_addr"] == MEAS_ADDR
     # Converted to deviations, truncated to the state block and embedded; the
     # second-order block starts at zero.
-    assert np.allclose(args["z0"], np.array([0.2, 0.3, 0.0, 0.0], dtype=FLOAT))
-    assert np.array_equal(args["hx"], model.policy.p)
-    assert np.array_equal(args["gx"], model.policy.f)
-    assert np.array_equal(args["bu"], model.policy.B)
-    assert np.array_equal(args["steady_state"], np.array([1.0, 2.0, 3.0], dtype=FLOAT))
+    expected_z0 = np.zeros((2 * model.compiled.n_state,), dtype=FLOAT)
+    expected_z0[idx["k"]] = 0.3
+    assert np.allclose(args["z0"], expected_z0)
+
+    assert args["meas_addr"] == int(
+        model.compiled.construct_measurement_cfunc(OBS).address
+    )
+    assert np.array_equal(args["hx"], policy.p)
+    assert np.array_equal(args["gx"], policy.f)
+    assert np.array_equal(args["bu"], policy.B)
+    assert np.array_equal(args["steady_state"], ss)
     assert args["alpha"] == pytest.approx(1.0)
     assert args["beta"] == pytest.approx(2.0)
     assert args["kappa"] == pytest.approx(1.0)
@@ -222,31 +178,23 @@ def test_resolve_unscented_args_embeds_x0_and_defaults_the_sigma_point_weights()
     assert "return_shocks" not in args
 
 
-def test_resolve_unscented_args_rejects_a_first_order_policy_and_a_bad_x0():
+def test_resolve_unscented_args_rejects_a_first_order_policy_and_a_bad_x0(
+    solved_multishock, multishock_order1, y3
+):
     with pytest.raises(ValueError, match="requires a second order solution"):
-        resolve_unscented_args(
-            _make_stub_model(order=1),
-            np.array([[1.0], [2.0]], dtype=FLOAT),
-            ["ObsA"],
-        )
+        resolve_unscented_args(multishock_order1, y3, list(OBS))
 
     with pytest.raises(ValueError, match="must be a complete list/array"):
         resolve_unscented_args(
-            _make_stub_model(),
-            np.array([[1.0], [2.0]], dtype=FLOAT),
-            ["ObsA"],
-            x0=np.array([1.0], dtype=FLOAT),
+            solved_multishock, y3, list(OBS), x0=np.array([1.0], dtype=FLOAT)
         )
 
 
-def test_an_explicit_p0_reaches_the_run_arguments():
-    P0 = np.diag([2.0, 6.0, 10.0]).astype(FLOAT)
-    args = resolve_linear_args(
-        _make_stub_model(),
-        np.array([[1.0, 2.0], [3.0, 4.0]], dtype=FLOAT),
-        ["ObsA", "ObsB"],
-        P0=P0,
-    )
+def test_an_explicit_p0_reaches_the_run_arguments(solved_multishock, y3):
+    n_var = solved_multishock.compiled.n_var
+    P0 = np.diag(np.arange(2.0, 2.0 + n_var, dtype=FLOAT))
+
+    args = resolve_linear_args(solved_multishock, y3, list(OBS), P0=P0)
 
     assert np.array_equal(args["P0"], P0)
 
@@ -256,133 +204,103 @@ def test_jitter_defaults_to_zero():
     assert resolvers._jitter(None) == pytest.approx(0.0)
 
 
-def test_validate_user_r_and_build_constant_r_subset_paths():
-    model = _make_stub_model()
-
+def test_a_user_r_is_validated_and_passed_through(solved_multishock):
     with pytest.raises(ValueError, match="Provided R matrix has shape"):
-        resolvers._validate_user_R(np.eye(2, dtype=FLOAT), ["ObsB"])
+        resolvers._validate_user_R(np.eye(2, dtype=FLOAT), ["k_obs"])
 
     user_R = np.array([[2.5]], dtype=FLOAT)
-    assert np.array_equal(resolvers._validate_user_R(user_R, ["ObsB"]), user_R)
-    assert np.array_equal(resolvers._build_R(model, user_R, ["ObsB"]), user_R)
+    assert np.array_equal(resolvers._validate_user_R(user_R, ["k_obs"]), user_R)
     assert np.array_equal(
-        resolvers._build_R(model, None, ["ObsB"]),
-        np.array([[9.0]], dtype=FLOAT),
+        resolvers._build_R(solved_multishock, user_R, ["k_obs"]), user_R
     )
 
 
-def test_build_constant_r_assembles_from_param_maps_and_current_calibration():
-    # Named R: the constant R is assembled from the CURRENT calibration via the
-    # std/corr param maps (make_R), then subset to the included observables.
-    # make_R treats the std params as standard deviations, so the diagonal is
-    # sig**2 and the off-diagonal is sig_i * sig_j * corr.
-    named_conf = SimpleNamespace(
-        y_names=["ObsA", "ObsB"],
-        R=None,
-        jitter=0.0,
-        symmetrize=False,
-        P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-        R_std_param_map={"ObsA": "meas_a", "ObsB": "meas_b"},
-        R_corr_param_map={frozenset({"ObsA", "ObsB"}): "meas_rho"},
-    )
-    model = _make_stub_model(
-        kalman_config=named_conf,
-        params={Symbol("meas_rho"): 0.1},
-    )
-    # std meas_a=4, meas_b=9, corr meas_rho=0.1 ->
-    #   [[16, 3.6], [3.6, 81]]; subset to [ObsB] -> [[81]].
+def test_build_r_assembles_the_measurement_noise_block_over_the_subset(
+    solved_multishock,
+):
+    """R is assembled from the named std/corr parameters, then subset.
+
+    The std entries are standard deviations, so the diagonal is ``sig**2`` and
+    an off-diagonal is ``sig_i * sig_j * corr``. A pair with no named
+    correlation stays at zero. Assembly runs over the whole observable set
+    before the subset is taken, which is what lets a correlation pair name an
+    observable the subset leaves out.
+    """
+    model = solved_multishock
+
+    assert np.allclose(resolvers._build_R(model, None, OBS), R_FULL)
     assert np.allclose(
-        resolvers._build_R(model, None, ["ObsA", "ObsB"]),
-        np.array([[16.0, 3.6], [3.6, 81.0]], dtype=FLOAT),
+        resolvers._build_R(model, None, ["c_obs", "k_obs"]),
+        np.array([[1e-6, 5e-7], [5e-7, 4e-6]], dtype=FLOAT),
     )
     assert np.allclose(
-        resolvers._build_R(model, None, ["ObsB"]),
-        np.array([[81.0]], dtype=FLOAT),
+        resolvers._build_R(model, None, ["k_obs"]),
+        np.array([[4e-6]], dtype=FLOAT),
     )
 
-    # A std/corr param that is absent from calibration is a hard error.
-    missing_param_conf = SimpleNamespace(
-        y_names=["ObsA", "ObsB"],
-        R=None,
-        jitter=0.0,
-        symmetrize=False,
-        P0=SimpleNamespace(mode="eye", scale=1.0, diag=None),
-        R_std_param_map={"ObsA": "not_calibrated", "ObsB": "meas_b"},
-        R_corr_param_map={},
-    )
-    with pytest.raises(KeyError, match="Missing R parameter"):
-        resolvers._build_R(
-            _make_stub_model(kalman_config=missing_param_conf), None, ["ObsA"]
-        )
 
-    # No param maps and no static R -> nothing to build from.
-    no_r_conf = SimpleNamespace(
-        y_names=["ObsA"],
-        R=None,
-        jitter=0.0,
-        symmetrize=False,
-        R_std_param_map=None,
-        R_corr_param_map=None,
-    )
-    with pytest.raises(ValueError, match="Constant R matrix not specified"):
-        resolvers._build_R(_make_stub_model(kalman_config=no_r_conf), None, ["ObsA"])
+def test_measurement_noise_is_required_only_for_r(solved_test):
+    """R is the one input with no default.
 
+    ``test.yaml`` carries no ``calibration.measurement_noise``, so there is
+    nothing to assemble from and R has to be supplied. P0 has a default, so the
+    rest of the argument set still resolves.
+    """
+    model = solved_test
+    obs = ["Infl", "Rate"]
+    y = np.arange(4.0, dtype=FLOAT).reshape(2, 2)
 
-def test_kalman_config_is_required_only_for_R():
-    # R is the one input with no default. P0 has one, so a model with no Kalman
-    # configuration resolves fine as long as R is supplied.
-    model = _make_stub_model(kalman_config=None)
-    y = np.array([[1.0], [2.0]], dtype=FLOAT)
+    assert model.config.calibration.measurement_noise is None
 
     with pytest.raises(ValueError, match="R must be provided"):
-        resolve_linear_args(model, y, ["ObsA"])
+        resolve_linear_args(model, y, obs)
 
-    R = np.array([[4.0]], dtype=FLOAT)
-    args = resolve_linear_args(model, y, ["ObsA"], R=R)
+    R = np.diag(np.array([4.0, 9.0], dtype=FLOAT))
+    args = resolve_linear_args(model, y, obs, R=R)
+
     assert np.array_equal(args["R"], R)
-    assert np.array_equal(args["P0"], np.eye(3, dtype=FLOAT))
+    assert args["P0"].shape == (model.compiled.n_var, model.compiled.n_var)
 
 
 def test_resolve_p0_passes_through_for_linear_and_extended():
     # Explicit runtime P0 values pass through linear and extended paths verbatim.
-    P0 = np.diag([2.0, 6.0, 10.0]).astype(FLOAT)
-    assert np.array_equal(resolvers._resolve_P0(FilterMode.LINEAR, 2, 3, P0), P0)
-    assert np.array_equal(resolvers._resolve_P0(FilterMode.EXTENDED, 2, 3, P0), P0)
+    P0 = np.diag(np.array([2.0, 6.0, 10.0, 14.0, 18.0], dtype=FLOAT))
+    assert np.array_equal(resolvers._resolve_P0(FilterMode.LINEAR, 4, 5, P0), P0)
+    assert np.array_equal(resolvers._resolve_P0(FilterMode.EXTENDED, 4, 5, P0), P0)
 
 
 def test_resolve_p0_embeds_state_block_for_unscented():
     # Unscented embedding carries the supplied first-order state block. The
     # second-order block starts at zero.
-    P0 = np.diag([2.0, 6.0, 10.0]).astype(FLOAT)  # 3 model vars, n_state=2
+    P0 = np.diag(np.array([2.0, 6.0, 10.0, 14.0, 18.0], dtype=FLOAT))
     assert np.array_equal(
-        resolvers._resolve_P0(FilterMode.UNSCENTED, 2, 3, P0),
-        np.diag([2.0, 6.0, 0.0, 0.0]).astype(FLOAT),
+        resolvers._resolve_P0(FilterMode.UNSCENTED, 4, 5, P0),
+        np.diag(np.array([2.0, 6.0, 10.0, 14.0, 0.0, 0.0, 0.0, 0.0], dtype=FLOAT)),
     )
 
 
-def test_resolve_observations_aligns_dataframe_and_ndarray_inputs():
-    model = _make_stub_model()
-    df = pd.DataFrame({"ObsA": [1.0, 2.0], "ObsB": [10.0, 20.0]})
+def test_resolve_observations_aligns_dataframe_and_ndarray_inputs(solved_multishock):
+    model = solved_multishock
+    canonical = np.array([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]], dtype=FLOAT)
 
+    # A DataFrame is aligned by label, so its own column order is irrelevant.
+    df = pd.DataFrame({"g_obs": [2.0, 5.0], "c_obs": [0.0, 3.0], "k_obs": [1.0, 4.0]})
     obs_df, y_df = resolvers._resolve_observations(model, None, df)
-    assert obs_df == ("ObsA", "ObsB")
-    assert np.array_equal(y_df, np.array([[1.0, 10.0], [2.0, 20.0]], dtype=FLOAT))
+    assert obs_df == OBS
+    assert np.array_equal(y_df, canonical)
 
+    # An ndarray's columns are read in the order the names arrive.
     obs_arr, y_arr = resolvers._resolve_observations(
         model,
-        ["ObsB", "ObsA"],
-        np.array([[10.0, 1.0], [20.0, 2.0]], dtype=FLOAT),
+        ["g_obs", "c_obs", "k_obs"],
+        np.array([[2.0, 0.0, 1.0], [5.0, 3.0, 4.0]], dtype=FLOAT),
     )
-    assert obs_arr == ("ObsA", "ObsB")
-    assert np.array_equal(y_arr, np.array([[1.0, 10.0], [2.0, 20.0]], dtype=FLOAT))
+    assert obs_arr == OBS
+    assert np.array_equal(y_arr, canonical)
 
-    obs_default, y_default = resolvers._resolve_observations(
-        model,
-        None,
-        np.array([[1.0, 2.0], [3.0, 4.0]], dtype=FLOAT),
-    )
-    assert obs_default == ("ObsA", "ObsB")
-    assert np.array_equal(y_default, np.array([[1.0, 2.0], [3.0, 4.0]], dtype=FLOAT))
+    obs_default, y_default = resolvers._resolve_observations(model, None, canonical)
+    assert obs_default == OBS
+    assert np.array_equal(y_default, canonical)
 
 
 @pytest.mark.parametrize(
@@ -390,32 +308,34 @@ def test_resolve_observations_aligns_dataframe_and_ndarray_inputs():
     [
         ([], np.zeros((2, 0), dtype=FLOAT), "Observable list is empty"),
         (
-            ["ObsA", "ObsA"],
+            ["c_obs", "c_obs"],
             np.zeros((2, 2), dtype=FLOAT),
             "Duplicate observables provided",
         ),
         (["Ghost"], np.zeros((2, 1), dtype=FLOAT), "Unknown observables"),
         (
-            ["ObsA"],
-            pd.DataFrame({"ObsB": [1.0]}),
+            ["c_obs"],
+            pd.DataFrame({"k_obs": [1.0]}),
             "DataFrame is missing observable columns",
         ),
-        (["ObsA"], np.zeros((2,), dtype=FLOAT), "Observation data must be 2D"),
+        (["c_obs"], np.zeros((2,), dtype=FLOAT), "Observation data must be 2D"),
         (
-            ["ObsA", "ObsB"],
+            ["c_obs", "k_obs"],
             np.zeros((2, 1), dtype=FLOAT),
             "y has 1 columns but obs list has 2 names",
         ),
         (
-            ["ObsA"],
+            ["c_obs"],
             np.array([[np.nan]], dtype=FLOAT),
             "Observation data contains NaN values",
         ),
     ],
 )
-def test_resolve_observations_rejects_invalid_inputs(observables, y, match):
+def test_resolve_observations_rejects_invalid_inputs(
+    solved_multishock, observables, y, match
+):
     with pytest.raises(ValueError, match=match):
-        resolvers._resolve_observations(_make_stub_model(), observables, y)
+        resolvers._resolve_observations(solved_multishock, observables, y)
 
 
 @pytest.fixture(scope="module")

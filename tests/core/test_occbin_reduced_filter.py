@@ -39,8 +39,8 @@ _ESTIMATED = ["RHO"]
 
 @pytest.fixture(scope="module")
 def solved(nk_zlb_test_model_path):
-    model, kalman = ModelParser(nk_zlb_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
+    model = ModelParser(nk_zlb_test_model_path).get()
+    solver = DSGESolver(model)
     return solver.solve(solver.compile())
 
 

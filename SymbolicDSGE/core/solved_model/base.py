@@ -33,7 +33,6 @@ from ..sim_result import StatePath, SimResult
 
 from ..compiled_model import CompiledModel
 from ..config import ModelConfig
-from ...kalman.config import KalmanConfig
 from ...kalman.resolvers import (
     resolve_extended_args,
     resolve_linear_args,
@@ -72,8 +71,6 @@ class SolvedModel(ABC, Generic[Policy]):
         The decision rule solution.
     config : ModelConfig
         The compiled model's symbolic configuration.
-    kalman_config : KalmanConfig | None
-        The compiled model's filter configuration, when one was supplied.
     """
 
     def __init__(self, compiled: CompiledModel, policy: Policy) -> None:
@@ -233,7 +230,7 @@ class SolvedModel(ABC, Generic[Policy]):
 
         # An impulse is a literal path, not a draw, which is what ShockPath is
         # for: one entry per shock, each naming its own target.
-        sig_map = conf.calibration.shock_std
+        sig_map = conf.calibration.shocks.std
         shock_spec: list[Shock | ShockPath] = []
         for s in shocks:
             arr = np.zeros((T,), dtype=float64)
@@ -622,11 +619,6 @@ class SolvedModel(ABC, Generic[Policy]):
     def config(self) -> ModelConfig:
         """Model configuration, including calibration, equations, and metadata."""
         return self.compiled.config
-
-    @property
-    def kalman_config(self) -> KalmanConfig | None:
-        """Kalman filter configuration, if one was supplied during model compilation."""
-        return self.compiled.kalman
 
     @cached_property
     def _cd_cache(self) -> dict[tuple, Tuple[NDF, NDF]]:

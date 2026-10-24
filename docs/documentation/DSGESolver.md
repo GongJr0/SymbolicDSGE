@@ -5,7 +5,7 @@ tags:
 # DSGESolver
 
 ```python
-class DSGESolver(model_config: ModelConfig, kalman_config: KalmanConfig | None = None)
+class DSGESolver(config: ModelConfig)
 ```
 
 Class responsible for model compilation and solution.
@@ -14,8 +14,7 @@ __Attributes:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| model_config | `#!python ModelConfig` | Configuration object to be compiled/solved. |
-| kalman_config | `#!python KalmanConfig | None` | Kalman Filter configuration object. `None` when the model declares no `kalman:` block. |
+| config | `#!python ModelConfig` | Configuration object to be compiled/solved. |
 | t | `#!python sp.Symbol` | Time symbol used in model components. |
 
 __Methods:__
@@ -99,7 +98,7 @@ DSGESolver.estimate(
 ```
 
 1. Initial parameter guess: A `dict` uses values that are specified and leaves the rest at their calibration. `None` uses the calibration values for each estimated parameter.
-2. If `#!python R` is not supplied, it comes from the Kalman config: a fixed calibrated matrix, or rebuilt from the current parameters each evaluation when the model exposes symbolic `R` metadata.
+2. If `#!python R` is not supplied, it is built from the calibration's `measurement_noise` block.
 3. Filter algorithm for the likelihood: `#!python "linear"` (affine measurements), `#!python "extended"` (EKF, nonlinear measurements), or `#!python "unscented"` (UKF).
 
 ???+ note "Point Estimation Result"

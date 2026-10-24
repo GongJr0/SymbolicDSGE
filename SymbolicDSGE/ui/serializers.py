@@ -8,7 +8,6 @@ from numpy.typing import NDArray
 
 from SymbolicDSGE.core.config import ModelConfig
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.kalman.config import KalmanConfig
 
 from .schemas import ArrayEnvelope
 
@@ -41,8 +40,7 @@ def encode_named_arrays(values: Mapping[str, NDArray[Any]]) -> list[dict[str, An
 def summarize_parsed_model(
     *,
     model_name: str,
-    model: ModelConfig,
-    kalman: KalmanConfig | None,
+    config: ModelConfig,
     source: str | None,
 ) -> dict[str, Any]:
     return {
@@ -50,13 +48,12 @@ def summarize_parsed_model(
         "loaded": True,
         "solved": False,
         "source": source,
-        "name": model.name,
-        "variables": _symbol_names(model.variables),
-        "parameters": _symbol_names(model.parameters),
-        "parameter_values": _parameter_values(model),
-        "observables": _symbol_names(model.observables),
-        "shocks": _symbol_names(model.shocks),
-        "has_kalman": kalman is not None,
+        "name": config.name,
+        "variables": _symbol_names(config.variables),
+        "parameters": _symbol_names(list(config.calibration.parameters)),
+        "parameter_values": _parameter_values(config),
+        "observables": _symbol_names(config.observables),
+        "shocks": _symbol_names(config.shocks),
     }
 
 
@@ -77,14 +74,13 @@ def summarize_solved_model(
         "name": compiled.config.name,
         "variables": list(compiled.var_names),
         "observables": list(compiled.observable_names),
-        "parameters": _symbol_names(compiled.config.parameters),
+        "parameters": compiled.calib_params,
         "parameter_values": _parameter_values(compiled.config),
         "shocks": _symbol_names(compiled.config.shocks),
         "n_state": int(compiled.n_state),
         "n_exog": int(compiled.n_exog),
         "A_shape": list(policy.A.shape),
         "B_shape": list(policy.B.shape),
-        "has_kalman": compiled.kalman is not None,
         "policy": {"stab": _coerce_json_scalar(policy.stab)},
         "layout": {
             "declared_names": list(layout.declared_names),

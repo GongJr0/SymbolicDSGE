@@ -8,6 +8,7 @@ loop. Same step, same arithmetic, and same output.
 
 from __future__ import annotations
 
+from pathlib import Path
 import numpy as np
 import pytest
 
@@ -22,8 +23,8 @@ ATOL = 1e-12
 
 
 def _compiled(path: Path):
-    model, kalman = ModelParser(path).get_all()
-    return DSGESolver(model, kalman).compile()
+    model = ModelParser(path).get()
+    return DSGESolver(model).compile()
 
 
 def _params(compiled) -> np.ndarray:

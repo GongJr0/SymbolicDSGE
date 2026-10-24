@@ -57,8 +57,8 @@ def test_bicomplex_hessian_transcendental():
 @pytest.mark.parametrize("model_path", ["test", "post82"], indirect=True)
 def test_bicomplex_hessian_linear_model_is_zero(model_path):
     # A log linear model has an identically zero residual Hessian.
-    model, kalman = ModelParser(model_path).get_all()
-    compiled = DSGESolver(model, kalman).compile()
+    model = ModelParser(model_path).get()
+    compiled = DSGESolver(model).compile()
     layout = ResidualLayout.from_compiled(compiled)
     cf = compiled.construct_objective_cfunc_bicomplex()
 

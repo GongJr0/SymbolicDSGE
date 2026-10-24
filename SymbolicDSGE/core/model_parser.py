@@ -1,4 +1,4 @@
-"""Parser for model and Kalman filter configurations from YAML into :class:`ModelConfig` and :class:`KalmanConfig` objects."""
+"""Parser for model configurations from YAML into :class:`ModelConfig`."""
 
 from __future__ import annotations
 
@@ -6,12 +6,11 @@ import copy
 import io
 import re
 import sys
-from dataclasses import dataclass
 from io import StringIO
 from itertools import combinations
 from pathlib import Path
 from types import FrameType
-from typing import Any, Callable, Iterator, TypeAlias, Sequence
+from typing import Any, Callable, TypeAlias, Sequence
 import warnings
 
 from sympy.core.basic import Basic
@@ -23,9 +22,10 @@ from sympy import Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
 from sympy.logic.boolalg import And, Or, Not
 from sympy.parsing.sympy_parser import standard_transformations, convert_xor
-from numpy import float64, ndarray
+from numpy import float64
 
 from .config import (
+    CovarianceSpec,
     ModelConfig,
     Constraint,
     Regime,
@@ -36,7 +36,6 @@ from .config import (
     PairGetterDict,
     FunctionGetterDict,
 )
-from ..kalman.config import KalmanConfig, make_R
 
 _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
@@ -45,7 +44,9 @@ _GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
 
 # "parameters": list of param names, re-declared in the calibration.parameters mapping
 # "observables": list of observable names, re-declared in the equations.observables mapping
-_DEPRECATED_TOP_LEVEL_KEYS = frozenset({"parameters", "observables"})
+# "kalman": Used to store many kalman filter knobs that are now arguments.
+# R is the only remaining symbol map and it's folded into the model config.
+_DEPRECATED_TOP_LEVEL_KEYS = frozenset({"parameters", "observables", "kalman"})
 _ALLOWED_TOP_LEVEL_KEYS = (
     frozenset(
         {
@@ -55,7 +56,6 @@ _ALLOWED_TOP_LEVEL_KEYS = (
             "shocks",
             "equations",
             "calibration",
-            "kalman",
         }
     )
     | _DEPRECATED_TOP_LEVEL_KEYS
@@ -68,10 +68,8 @@ _ALLOWED_CONSTRAINT_KEYS = frozenset({"bind", "relax"})
 #: Sympy types accepted as a regime entry/exit condition.
 _REGIME_SHIFT_CONDITIONAL: TypeAlias = Relational | And | Or | Not
 
-_ALLOWED_CALIBRATION_KEYS = frozenset({"parameters", "shocks"})
-_ALLOWED_SHOCK_KEYS = frozenset({"std", "corr"})
-_ALLOWED_KALMAN_KEYS = frozenset({"R"})
-_ALLOWED_R_KEYS = frozenset({"std", "corr"})
+_ALLOWED_CALIBRATION_KEYS = frozenset({"parameters", "shocks", "measurement_noise"})
+_ALLOWED_COV_KEYS = frozenset({"std", "corr"})
 
 
 def _caller_stacklevel() -> int:
@@ -131,26 +129,6 @@ class InlineList(list):
     pass
 
 
-@dataclass(frozen=True)
-class ParsedConfig:
-    """YAML configuration parsed into a model and (if present) Kalman config.
-
-    Attributes
-    ----------
-    model : ModelConfig
-        Parsed model configuration.
-    kalman : KalmanConfig | None
-        Parsed Kalman configuration, or ``None`` if the config has no Kalman block.
-
-    """
-
-    model: ModelConfig
-    kalman: KalmanConfig | None
-
-    def __iter__(self) -> Iterator[Any]:
-        yield from (self.model, self.kalman)
-
-
 class ModelParser:
     """Parse a model configuration from YAML into a :class:`ModelConfig` object.
 
@@ -174,19 +152,19 @@ class ModelParser:
         self.config_path = config_path
         self._text = text
         self._name = name
-        self.raw_data, self.parsed = self.from_yaml()
-        self.parsed.model.source_yaml = text
+        self.raw_data, self.config = self.from_yaml()
+        self.config.source_yaml = text
         self.__post_init__()
 
     def __post_init__(self) -> None:
-        conf = self.parsed.model
+        conf = self.config
         self.validate_equations(conf)
         self.validate_constraints(conf)
         self.validate_regimes(conf)  # reads validated bind conditions
         self.validate_ss_seed(conf)
 
     def get(self) -> ModelConfig:
-        """Return the parsed model config, without the Kalman block.
+        """Return the parsed model config.
 
         Returns
         -------
@@ -194,21 +172,7 @@ class ModelParser:
             Configuration object holding symbolic model equations, variables, parameters, shocks, and calibration.
 
         """
-        return self.parsed.model
-
-    def get_all(self) -> ParsedConfig:
-        """Return the parsed model and (if present) Kalman config.
-
-        Returns
-        -------
-        ParsedConfig
-            object with ``model`` and ``kalman`` attributes, the latter of which
-            is ``None`` if the config has no Kalman block. Supports unpacking and splatting.
-            (e.g. ``model, kalman = parser.get_all()`` or ``*parser.get_all()``)
-
-
-        """
-        return self.parsed
+        return self.config
 
     @classmethod
     def from_string(cls, text: str, name: str = "<yaml string>") -> "ModelParser":
@@ -286,7 +250,7 @@ class ModelParser:
         time_syms = {s for c in applied for a in c.args for s in a.free_symbols}
         var_funcs = {c.func for c in applied}
 
-        declared = set(conf.parameters) | set(conf.shocks)
+        declared = set(conf.calibration.parameters) | set(conf.shocks)
         return (var_funcs - set(conf.variables)) | ((free - time_syms) - declared)
 
     @classmethod
@@ -361,7 +325,6 @@ class ModelParser:
             )
 
         for name, constraint in constraints.items():
-
             binds, relaxes = constraint.bind, constraint.relax
             cls._validate_condition(name, "Binding", binds)
             cls._validate_condition(name, "Relaxing", relaxes)
@@ -475,7 +438,7 @@ class ModelParser:
             The configuration object containing the model variables and their steady-state seed expressions.
 
         """
-        params = set(conf.parameters)
+        params = set(conf.calibration.parameters)
         for var, expr in conf.ss_seed.items():
             if expr is None:
                 continue
@@ -491,13 +454,14 @@ class ModelParser:
                     f"ss_seed for variable '{var.__name__}' references unknown symbols: {unknown}"
                 )
 
-    def from_yaml(self) -> tuple[dict, ParsedConfig]:
-        """Parse a YAML configuration file into a :class:`ParsedConfig` object.
+    def from_yaml(self) -> tuple[dict, ModelConfig]:
+        """Parse a YAML configuration file into a :class:`ModelConfig` object.
 
         Returns
         -------
-        tuple[dict, ParsedConfig]
-            Object containing model and (if present) Kalman configuration. The first element is the raw YAML data as a dictionary, and the second element is the parsed configuration.
+        tuple[dict, ModelConfig]
+            Object containing model configuration. The first element is the raw YAML data as a dictionary,
+            and the second element is the parsed configuration.
 
         """
         data = _load_yaml(self._text, self._name)
@@ -535,26 +499,25 @@ class ModelParser:
             _get_expr,
         )
 
-        shock_std, shock_corr = _parse_shock_calibration(data, _LOCALS, shocks)
+        shock_map = _parse_shock_calibration(data, _LOCALS, shocks)
+        measurement_noise = _parse_measurement_noise(data, observables, parameters)
         calibration = Calib(
             parameters=parameters,
-            shock_std=shock_std,
-            shock_corr=shock_corr,
+            shocks=shock_map,
+            measurement_noise=measurement_noise,
         )
 
         mdl_cfg = ModelConfig(
             name=data.get("name", "Unnamed"),
             variables=variables,
             ss_seed=ss_seed,
-            parameters=params,
             shocks=shocks,
             observables=observables,
             equations=equations,
             calibration=calibration,
         )
 
-        kalman_cfg = _parse_kalman_if_present(data, observables, parameters)
-        return data, ParsedConfig(model=mdl_cfg, kalman=kalman_cfg)
+        return (data, mdl_cfg)
 
     def to_yaml(
         self,
@@ -564,10 +527,10 @@ class ModelParser:
     ) -> str:
         """Emit the authored configuration as canonical YAML text.
 
-        Re-dumps the retained ``raw_data`` so the Kalman block and the
-        ``(t)``/``(t+1)`` equation grammar round-trip through :class:`ModelParser`
-        unchanged. When ``config`` is given, its calibration is baked in (rounded
-        to ``digits``), capturing e.g. estimated parameter values.
+        Re-dumps the retained ``raw_data`` so the equation grammar round-trip
+        through :class:`ModelParser` unchanged. When ``config`` is given, its
+        calibration is baked in (rounded to ``digits``), capturing e.g. estimated
+        parameter values.
         """
         data_out = copy.deepcopy(self.raw_data)
 
@@ -715,13 +678,13 @@ def _validate_schema(data: dict[str, Any]) -> None:
     _reject_unknown_keys(calib, _ALLOWED_CALIBRATION_KEYS, "calibration")
     if isinstance(calib, dict):
         _reject_unknown_keys(
-            calib.get("shocks"), _ALLOWED_SHOCK_KEYS, "calibration.shocks"
+            calib.get("shocks"), _ALLOWED_COV_KEYS, "calibration.shocks"
         )
-
-    kal = data.get("kalman")
-    _reject_unknown_keys(kal, _ALLOWED_KALMAN_KEYS, "kalman")
-    if isinstance(kal, dict):
-        _reject_unknown_keys(kal.get("R"), _ALLOWED_R_KEYS, "kalman.R")
+        _reject_unknown_keys(
+            calib.get("measurement_noise"),
+            _ALLOWED_COV_KEYS,
+            "calibration.measurement_noise",
+        )
 
 
 def _build_namespace(
@@ -739,7 +702,7 @@ def _build_namespace(
     t = sp.symbols("t", integer=True)
 
     _raise_if_not_unique(ordered_var_names, "variables must be unique.")
-    _raise_if_not_unique(data["shocks"], "shocks must be unique.")
+    _raise_if_not_unique(data.get("shocks", []), "shocks must be unique.")
 
     def nested_keys(mapping: dict[str, Any], l1: str, l2: str) -> list[str]:
         return list(mapping.get(l1, {}).get(l2, {}).keys())
@@ -755,7 +718,7 @@ def _build_namespace(
     variables: list[Function] = list(
         map(Function, ordered_var_names)
     )  # pyright: ignore
-    shocks: list[Symbol] = [sp.Symbol(name) for name in data["shocks"]]
+    shocks: list[Symbol] = [sp.Symbol(name) for name in data.get("shocks", [])]
 
     _LOCALS: dict[str, Any] = {
         "t": t,
@@ -982,12 +945,12 @@ def _resolve_calibration_locals(
         if applied := expr.atoms(AppliedUndef):
             raise ValueError(
                 f"Calibration entry '{name}' references model variable(s): "
-                f"{sorted(map(str, applied))}"
+                f"{sorted(map(str, applied))!r}"
             )
         if unknown := expr.free_symbols - param_syms:
             raise ValueError(
                 f"Calibration entry '{name}' references undeclared "
-                f"parameter(s): {sorted(map(str, unknown))}"
+                f"parameter(s): {sorted(map(str,unknown))!r}"
             )
         if expr.free_symbols:
             local_subs[_LOCALS[name]] = expr
@@ -1007,7 +970,7 @@ def _resolve_calibration_locals(
     if cyclic := {s for s, e in local_subs.items() if e.free_symbols & derived}:
         raise ValueError(
             "Calibration entries reference each other in a cycle: "
-            + ", ".join(sorted(s.name for s in cyclic))
+            f"{sorted(s.name for s in cyclic)}"
         )
 
     return SymbolGetterDict(values), local_subs
@@ -1017,19 +980,18 @@ def _parse_shock_calibration(
     data: dict[str, Any],
     _LOCALS: dict[str, Any],
     shock_syms: list[Symbol],
-) -> tuple[SymbolGetterDict[str], PairGetterDict[str | None]]:
+) -> CovarianceSpec:
     shocks = data.get("calibration", {}).get("shocks", {}) or {}
     std_map = shocks.get("std", {}) or {}
     corr_map = shocks.get("corr", {}) or {}
 
     # std: map shock symbol -> parameter Symbol (or None)
-    shock_std: dict[Symbol, str] = {}
-    for shock in shock_syms:
-        if shock.name not in std_map:
-            raise ValueError(
-                f"Missing standard deviation parameter for shock '{shock.name}'"
-            )
-        shock_std[shock] = std_map[shock.name]
+    if missing := {shock.name for shock in shock_syms} - set(std_map):
+        raise ValueError(
+            "Missing standard deviation parameter(s) in calibration.shocks.std "
+            f"for shock(s): {sorted(missing)!r}"
+        )
+    shock_std: dict[Symbol, str] = {shock: std_map[shock.name] for shock in shock_syms}
 
     # corr: map unordered pair(shock_i, shock_j) -> parameter Symbol (or None)
     shock_corr: dict[frozenset[Symbol], Symbol | None] = {}
@@ -1060,85 +1022,72 @@ def _parse_shock_calibration(
         "calibration.shocks cannot share parameter names between std and corr.",
     )
 
-    return SymbolGetterDict(shock_std), PairGetterDict(shock_corr)
+    return CovarianceSpec(
+        SymbolGetterDict(shock_std),
+        PairGetterDict(shock_corr),
+    )
 
 
-def _parse_kalman_if_present(
+def _parse_measurement_noise(
     data: dict[str, Any],
     observables: list[Symbol],
     parameters: SymbolGetterDict[float],
-) -> KalmanConfig | None:
-    kalman_data = data.get("kalman")
-    if not kalman_data:
+) -> CovarianceSpec | None:
+    mcov_data = data.get("calibration", {}).get("measurement_noise")
+    if not mcov_data:
         return None
 
-    R: ndarray | None
-    R_param_names: list[str] | None
-    R_std_param_map: SymbolGetterDict[str] | None
-    R_corr_param_map: PairGetterDict[str | None]
+    std_param_map: SymbolGetterDict[str] | None
+    corr_param_map: PairGetterDict[str | None]
 
-    R_data = kalman_data.get("R")
-    if R_data:
-        std_map = R_data.get("std", {}) or {}
-        corr_map = R_data.get("corr", {}) or {}
+    std_map = mcov_data.get("std", {}) or {}
+    corr_map = mcov_data.get("corr", {}) or {}
 
-        obs_syms = {obs.name: obs for obs in observables}
+    obs_syms = {obs.name: obs for obs in observables}
 
-        def _obs(name: str, field: str) -> Symbol:
-            if (obs := obs_syms.get(name)) is None:
-                raise ValueError(
-                    f"kalman.R.{field} names '{name}', which is not an observable. "
-                    "Declare it under equations.observables or remove the entry."
-                )
-            return obs
+    def _obs(name: str, field: str) -> Symbol:
+        if (obs := obs_syms.get(name)) is None:
+            raise ValueError(
+                f"calibration.measurement_noise.{field} names '{name}', which is not an observable. "
+                "Declare it under equations.observables or remove the entry."
+            )
+        return obs
 
-        R_std_param_map = SymbolGetterDict(
-            {
-                _obs(obs_name, "std"): param_name
-                for obs_name, param_name in std_map.items()
-            }
-        )
-
-        R_corr_param_map = PairGetterDict({})
-
-        for pair_str, param_name in corr_map.items():
-            names = [x.strip() for x in pair_str.split(",")]
-            if len(names) != 2:
-                raise ValueError(
-                    f"Correlation pair must contain exactly two observables: {pair_str!r}"
-                )
-            a = _obs(names[0], "corr")
-            b = _obs(names[1], "corr")
-            R_corr_param_map[frozenset((a, b))] = param_name
-
-        for a, b in combinations(observables, 2):
-            R_corr_param_map.setdefault(frozenset((a, b)), None)
-        _raise_if_not_unique(
-            list(R_corr_param_map.values()), "kalman.R.corr values must be unique."
-        )
-
-        cross_vals = list(set(R_std_param_map.values())) + list(
-            set(R_corr_param_map.values())
-        )
-        _raise_if_not_unique(
-            cross_vals, "kalman.R cannot share parameter names between std and corr."
-        )
-
-        R = make_R(observables, R_std_param_map, R_corr_param_map, parameters)
-
-        R_param_names = list(dict.fromkeys([*std_map.values(), *corr_map.values()]))
-    else:
-        R = None
-        R_param_names = None
-        R_std_param_map = None
-        R_corr_param_map = PairGetterDict({})
-
-    return KalmanConfig(
-        R=R,
-        R_param_names=R_param_names,
-        R_std_param_map=R_std_param_map,
-        R_corr_param_map=R_corr_param_map,
+    std_param_map = SymbolGetterDict(
+        {_obs(obs_name, "std"): param_name for obs_name, param_name in std_map.items()}
     )
+    if missing := set(observables) - set(std_param_map):
+        raise ValueError(
+            "Missing standard deviation parameter(s) in calibration.measurement_noise.std: "
+            f"{sorted(missing)!r}"
+        )
+
+    corr_param_map = PairGetterDict({})
+
+    for pair_str, param_name in corr_map.items():
+        names = [x.strip() for x in pair_str.split(",")]
+        if len(names) != 2:
+            raise ValueError(
+                f"Correlation pair must contain exactly two observables: {pair_str!r}"
+            )
+        a = _obs(names[0], "corr")
+        b = _obs(names[1], "corr")
+        corr_param_map[frozenset((a, b))] = param_name
+
+    for a, b in combinations(observables, 2):
+        corr_param_map.setdefault(frozenset((a, b)), None)
+    _raise_if_not_unique(
+        list(corr_param_map.values()),
+        "calibration.measurement_noise.corr values must be unique.",
+    )
+
+    cross_vals = list(set(std_param_map.values())) + list(set(corr_param_map.values()))
+    _raise_if_not_unique(
+        cross_vals,
+        "calibration.measurement_noise cannot share parameter names between std and corr.",
+    )
+
+    return CovarianceSpec(std_param_map, corr_param_map)
 
 
 def _require_calibrated_params(
@@ -1150,33 +1099,33 @@ def _require_calibrated_params(
     so the name has to be one a value can be read from: a derived entry
     resolves to a formula and leaves nothing to build a covariance out of.
     """
-    calib = data.get("calibration", {}).get("parameters", {}) or {}
+    calib = data.get("calibration", {})
+    params = calib.get("parameters", {})
 
     referenced: set[str] = set()
 
-    shocks = data.get("calibration", {}).get("shocks", {}) or {}
+    shocks = calib.get("shocks", {}) or {}
     referenced.update((shocks.get("std", {}) or {}).values())
     referenced.update((shocks.get("corr", {}) or {}).values())
 
-    kal = data.get("kalman", {}) or {}
-    R = kal.get("R", {}) or {}
-    referenced.update((R.get("std", {}) or {}).values())
-    referenced.update((R.get("corr", {}) or {}).values())
+    meas_noise = calib.get("measurement_noise", {}) or {}
+    referenced.update((meas_noise.get("std", {}) or {}).values())
+    referenced.update((meas_noise.get("corr", {}) or {}).values())
 
     referenced = {p for p in referenced if isinstance(p, str)}
 
-    unknown = sorted(referenced - calib.keys())
+    unknown = sorted(referenced - params.keys())
     if unknown:
         raise ValueError(
             "Config references parameter(s) not declared in `calibration.parameters`: "
             + ", ".join(unknown)
         )
 
-    named_locals = sorted(referenced & {sym.name for sym in local_subs})
+    named_locals = referenced & {sym.name for sym in local_subs}
     if named_locals:
         raise ValueError(
-            "Shock and measurement blocks reference a parameter by name, so "
-            "they cannot name a derived calibration entry: " + ", ".join(named_locals)
+            "Shock and measurement cannot reference derived calibration entries: "
+            f"{sorted(named_locals)!r}"
         )
 
 

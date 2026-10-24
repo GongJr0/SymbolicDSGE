@@ -61,7 +61,7 @@ class Estimator:
     joseph_cov : bool
         Whether to use the Joseph form of the covariance update in the Kalman filter.
     R : NDF | None
-        Observation covariance matrix. If none, the model's Kalman configuration must provide a symbolic or scalar R.
+        Observation covariance matrix. If none, the model configuration must provide it.
     P0 : NDF | None
         Initial state covariance matrix for the Kalman filter. If none, the model's stationary state covariance is used.
 
@@ -83,8 +83,6 @@ class Estimator:
         The observation covariance override.
     P0 : NDF | None
         The initial state covariance override.
-    kalman : KalmanConfig | None
-        The compiled model's filter configuration.
     param_names : list[str]
         Estimated parameter names in theta order.
     """
@@ -108,13 +106,13 @@ class Estimator:
             estimated_params, compiled
         )
         self.compiled = compiled
-        if compiled.kalman is None and R is None:
+        meas_noise = compiled.config.calibration.measurement_noise
+        if meas_noise is None and R is None:
             raise ValueError(
                 "R must be provided in symbolic or scalar form, either through the "
-                "model's Kalman configuration or as a parameter override."
+                "model configuration or as a parameter override."
             )
 
-        self.kalman = compiled.kalman
         self.observables = observables
         self.y = y
 
@@ -135,7 +133,7 @@ class Estimator:
         r.check_parameters(compiled, self.estimated_params)
         r.check_estimated_versus_constant_R(
             self.estimated_params,
-            self.kalman,
+            self.compiled,
             self.R,
         )
 
@@ -143,14 +141,12 @@ class Estimator:
             self.estimated_params,
             self.priors,
             self.compiled,
-            self.kalman,
             self._prepared_filter.observables,
         )
         r.assert_scalar_corr_spd_safe(
             self._param_index,
             self._matrix_blocks,
             self.compiled,
-            self.kalman,
             self._prepared_filter.observables,
         )
 

@@ -16,7 +16,7 @@ from numpy.linalg import cholesky, LinAlgError, eigh
 from numpy.typing import NDArray
 
 from ..compiled_model import CompiledModel
-from ..config import make_Q
+from ..config import cov_from_spec
 
 from .plan import get_native_shock_plan, native_code
 from .table import DistributionTable
@@ -226,14 +226,13 @@ def resolve_shock_plan(
             # standard deviation needs no square root and every consumer sees
             # one shape.
             factor = np.array(
-                [[calib.parameters[calib.shock_std[key[0]]]]], dtype=float64
+                [[calib.parameters[calib.shocks.std[key[0]]]]], dtype=float64
             )
         else:
             if cov is None:
-                cov = make_Q(
+                cov = cov_from_spec(
                     compiled.config.shocks,
-                    calib.shock_std,
-                    calib.shock_corr,
+                    calib.shocks,
                     calib.parameters,
                 )
             scale = cov[np.ix_(indices, indices)]

@@ -37,7 +37,6 @@ def pack(compiled_post82):
             priors=priors,
             matrix_blocks=matrix_blocks or {},
             compiled=compiled,
-            kalman=compiled.kalman,
             observables=observables,
         )
         return tables

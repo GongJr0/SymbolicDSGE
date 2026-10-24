@@ -5,7 +5,7 @@ tags:
 
 # Portable Experiments
 
-A `.sdsge` file packages everything needed to reopen a model in the GUI or recover its components in code. Model and Kalman configuration, estimation spec + results, Monte Carlo pipeline + traces, observed data, and simulation prefills are packed into a single shareable archive. The file is a zip with a versioned manifest (`manifest.json`) and an aliased extension; nothing about reading or writing it requires a custom tool beyond the bundled CLIs.
+A `.sdsge` file packages everything needed to reopen a model in the GUI or recover its components in code. Model configurations, estimation spec + results, Monte Carlo pipeline + traces, observed data, and simulation prefills are packed into a single shareable archive. The file is a zip with a versioned manifest (`manifest.json`) and an aliased extension; nothing about reading or writing it requires a custom tool beyond the bundled CLIs.
 
 The container exists so a non-coding collaborator can run an experiment by opening one file, and so a coding collaborator can reach every component the bundle carries without re-deriving them.
 

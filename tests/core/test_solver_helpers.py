@@ -112,8 +112,8 @@ def deep_compiled(tmp_path, test_model_path):
     data["equations"]["model"]["u_process"] = "u(t) = rho_u*u(t-3) + e_u"
     path = tmp_path / "deep_test.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-    model, kalman = ModelParser(path).get_all()
-    return DSGESolver(model, kalman).compile()
+    model = ModelParser(path).get()
+    return DSGESolver(model).compile()
 
 
 def test_ss_seed_is_written_over_the_declared_variables(compiled_rbc_so):

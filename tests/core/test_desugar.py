@@ -67,7 +67,7 @@ NATURAL_TIME_MODEL = {
 def _parse(tmp_path, data):
     path = tmp_path / f"model_{len(list(tmp_path.iterdir()))}.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-    return ModelParser(path).get_all().model
+    return ModelParser(path).get()
 
 
 def _deep(tmp_path, **equations: str):

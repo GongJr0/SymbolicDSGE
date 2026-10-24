@@ -12,8 +12,7 @@ from typing import Any, Mapping, Sequence
 
 from sympy.logic.boolalg import Boolean
 
-from .config import ModelConfig, make_Q
-from ..kalman.config import KalmanConfig, make_R
+from .config import ModelConfig, cov_from_spec
 from SymbolicDSGE._symbolic_printers import (
     BicomplexOps,
     ConstraintLayout,
@@ -245,8 +244,6 @@ class CompiledModel:
     ----------
     config : ModelConfig
         Symbolic model configuration, including calibration and solver settings.
-    kalman : KalmanConfig | None
-        Kalman configuration, if the model has a Kalman filter; otherwise ``None``.
     cur_syms : list[Symbol]
         Post-compile generated time-t model variables, in canonical order, as sympy
         symbols.
@@ -288,7 +285,6 @@ class CompiledModel:
     """
 
     config: ModelConfig
-    kalman: KalmanConfig | None
 
     cur_syms: list[Symbol]
 
@@ -718,7 +714,6 @@ def _shock_covariance(
     params: Mapping[Any, float] | None = None,
     *,
     shocks: Sequence[str] | None = None,
-    corr: NDF | None = None,
 ) -> NDF:
     """``Q`` for a compiled model, at its own calibration unless ``params`` says otherwise.
 
@@ -726,13 +721,11 @@ def _shock_covariance(
     matrix.
     """
     calib = compiled.config.calibration
-    return make_Q(
+    return cov_from_spec(
         compiled.config.shocks,
-        calib.shock_std,
-        calib.shock_corr,
+        calib.shocks,
         calib.parameters if params is None else params,
-        shocks=shocks,
-        corr=corr,
+        subset=shocks,
     )
 
 
@@ -748,18 +741,22 @@ def _measurement_covariance(
     config carrying a fixed ``R`` matrix rather than named parameters is the
     caller's to slice.
     """
-    conf = compiled.kalman
-    if conf is None:
-        raise ValueError("Building R from named parameters requires a KalmanConfig.")
-    if conf.R_std_param_map is None:
-        raise ValueError("KalmanConfig does not expose named R parameter metadata.")
+    calib = compiled.config.calibration
+    meas_cov = calib.measurement_noise
+    if meas_cov is None:
+        raise ValueError(
+            "Building R from named parameters requires a `measurement_noise` block in the model's calibration."
+        )
+    if not meas_cov.std:
+        raise ValueError(
+            "`measurement_noise` does not expose named parameter metadata."
+        )
 
     if params is None:
-        params = compiled.config.calibration.parameters
-    return make_R(
-        compiled.observable_names,
-        conf.R_std_param_map,
-        conf.R_corr_param_map,
+        params = calib.parameters
+    return cov_from_spec(
+        compiled.config.observables,
+        meas_cov,
         params,
-        observables=observables,
+        subset=observables,
     )

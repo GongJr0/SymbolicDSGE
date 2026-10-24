@@ -53,11 +53,11 @@ Steady states seeds are provided in mapping form per variable and ommitted names
 # non-zero examples below are for
 # demonstration purposes only
 ss_seed:
-    g: 0
-    z: 0
-    r_shadow: 2
-    r: r_star
-    Pi: pi_star
+  g: 0
+  z: 0
+  r_shadow: 2
+  r: r_star
+  Pi: pi_star
     x: 0
 ```
 
@@ -71,9 +71,9 @@ A shock symbol is separate from its (co)variance and is used to indicate where a
 
 ```yaml
 shocks:
-    - e_r
-    - e_g
-    - e_z
+  - e_r
+  - e_g
+  - e_z
 ```
 
 Shock realizations are only injected when the user selects them at simulation time. Therefore, declaring extra variables here and including them in the model equations can be used to test multiple shock configurations from a single model config.
@@ -84,9 +84,9 @@ Equations contain the bulk of model dynamics. In `SymbolicDSGE` the field is use
 
 ```yaml
 equations:
-    model: ...
-    constraints: ...
-    observables: ...
+  model: ...
+  constraints: ...
+  observables: ...
 ```
 
 The equations field treats all variables as a function of time; to refer to past, current, and future observations we use `#!python x(t-1)`, `#!python x(t)`, and `#!python x(t+1)` respectively.
@@ -97,20 +97,20 @@ This field contains the elementary state-space definition. Equations are supplie
 
 ```yaml
 equations:
-    model:
-        nkpc: Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t) # (1)!
+  model:
+    nkpc: Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t) # (1)!
 
-        euler: x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t) # (2)!
+    euler: x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t) # (2)!
 
-        taylor_shadow: r_shadow(t) = rho_r*r_shadow(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r # (3)!
+    taylor_shadow: r_shadow(t) = rho_r*r_shadow(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r # (3)!
 
-        rate_link: r(t) = r_shadow(t) # (4)!
+    rate_link: r(t) = r_shadow(t) # (4)!
 
-        g_process: g(t) = rho_g*g(t-1) + e_g # (5)!
+    g_process: g(t) = rho_g*g(t-1) + e_g # (5)!
 
-        z_process: z(t) = rho_z*z(t-1) + e_z # (6)!
-    constraints: ...
-    observables: ...
+    z_process: z(t) = rho_z*z(t-1) + e_z # (6)!
+  constraints: ...
+  observables: ...
 ```
 
 1. New Keynesian Phillips Curve (NKPC)
@@ -130,26 +130,18 @@ The `constraints` field stores named piecewise OBC conditions. Each condition de
 
 ```yaml
 equations:
-    model:
-        nkpc: Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)
+  model: ...
 
-        euler: x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
+  constraints:
+    ZLB:
+      bind: r_shadow(t) < 0
+      relax: r_shadow(t) >= 0 # (1)!
 
-        taylor_shadow: r_shadow(t) = rho_r*r_shadow(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r
+  regimes:
+    ZLB:
+      rate_link: r(t) = 0
 
-        rate_link: r(t) = r_shadow(t)
-
-        g_process: g(t) = rho_g*g(t-1) + e_g
-
-        z_process: z(t) = rho_z*z(t-1) + e_z
-    constraints:
-        ZLB:
-            bind: r_shadow(t) < 0
-            relax: r_shadow(t) >= 0 # (1)!
-    regimes:
-        ZLB:
-            rate_link: r(t) = 0
-    observables: ...
+  observables: ...
 ```
 
 1. The binding regime pins the actual policy rate while the shadow rate determines whether the constraint binds. If `relax` is omitted, the parser derives it as `Not(bind)`.
@@ -160,31 +152,15 @@ This field contains the mappings of model variables to real-life observed variab
 
 ```yaml
 equations:
-    model:
-        nkpc: Pi(t) = beta*Pi(t+1) + kappa*x(t) + z(t)
+  model: ...
+  constraints: ...
+  regimes: ...
+  observables:
+    OutGap: x(t) # (1)!
 
-        euler: x(t) = x(t+1) - tau_inv*(r(t) - Pi(t+1)) + g(t)
+    Infl: 4*Pi(t) + pi_star # (2)!
 
-        taylor_shadow: r_shadow(t) = rho_r*r_shadow(t-1) + (1 - rho_r)*(psi_pi*Pi(t) + psi_x*x(t)) + e_r
-
-        rate_link: r(t) = r_shadow(t)
-
-        g_process: g(t) = rho_g*g(t-1) + e_g
-
-        z_process: z(t) = rho_z*z(t-1) + e_z
-    constraints:
-        ZLB:
-            bind: r_shadow(t) < 0
-            relax: r_shadow(t) >= 0
-    regimes:
-        ZLB:
-            rate_link: r(t) = 0
-    observables:
-        OutGap: x(t) # (1)!
-
-        Infl: 4*Pi(t) + pi_star # (2)!
-
-        Rate: 4*r(t) + (r_star + pi_star) # (3)!
+    Rate: 4*r(t) + (r_star + pi_star) # (3)!
 ```
 
 1. Output gap is a direct mapping of the model variable to the observable.
@@ -193,13 +169,14 @@ equations:
 
 ## Calibration
 
-The `calibration` field stores values and shock variance specifications to annotate the corresponding values of all model components except the variables.
+The `calibration` field stores parameter values and (co)variance mappings for shocks/measurement noise.
 The field is a parent containing two sections:
 
 ```yaml
 calibration:
-    parameters: ...
-    shocks: ...
+  parameters: ...
+  shocks: ...
+  measurement_noise: ...
 ```
 
 ### Parameters
@@ -214,31 +191,43 @@ Common examples of parameters are:
 
 This section declares them and their known (initial) values.
 A name is a parameter if and only if it is calibrated here; there is no separate `parameters` list.
-Any name referenced by the equations, shock calibration, or Kalman block must appear here.
+Any name referenced by the equations or shock/measurement noise mappings must appear here.
 
 ```yaml
 calibration:
-    parameters:
-        beta: 0.99
+  parameters:
+    beta: 0.99
 
-        psi_pi: 2.19
-        psi_x: 0.30
-        rho_r: 0.84
+    psi_pi: 2.19
+    psi_x: 0.30
+    rho_r: 0.84
 
-        pi_star: 3.43
-        r_star: 3.01
+    pi_star: 3.43
+    r_star: 3.01
 
-        kappa: 0.58
-        tau_inv: 1.86
+    kappa: 0.58
+    tau_inv: 1.86
 
-        rho_g: 0.83
-        rho_z: 0.85
-        rho_gz: 0.36
+    rho_g: 0.83
+    rho_z: 0.85
 
-        sig_r: 0.18
-        sig_g: 0.18
-        sig_z: 0.64
-    shocks: ...
+    # Shock (co)variances
+    sig_r: 0.18
+    sig_g: 0.18
+    sig_z: 0.64
+    rho_gz: 0.36
+
+
+    # Measurement noise (co)variances
+    meas_infl: 0.2
+    meas_rate: 0.1
+    meas_out: 0.2
+    meas_rho_ir: 0.05
+    meas_rho_or: 0.0
+    meas_rho_io: 0.0
+
+  shocks: ...
+  measurement_noise: ...
 ```
 
 ???+ info "Configuration Local Parameters"
@@ -263,10 +252,7 @@ calibration:
 
 ### Shocks
 
-The shocks section maps shock (co)variances to the corresponding terms in model equations. Shock terms that are defined but not included in this field will use default values.
-
-- Innovations without a specified standard deviation will assume `1.0`
-- Correlation between excluded pairs will assume `0.0`
+The shocks section maps shock (co)variances to the corresponding terms in model equations. Correlation terms can be omitted and default to zero. Standard deviations must be declared for every shock symbol in the `shocks` field.
 
 ???+ warning "Shock Parameter Convention"
     Dependence and spread of shocks are specified through standard deviations and correlation coefficients rather than covariance matrices.
@@ -276,38 +262,45 @@ The shocks section maps shock (co)variances to the corresponding terms in model 
 
 ```yaml
 calibration:
-    parameters:
-        beta: 0.99
+  parameters: ...
 
-        psi_pi: 2.19
-        psi_x: 0.30
-        rho_r: 0.84
+  shocks:
+    std:
+      e_r: sig_r
+      e_g: sig_g
+      e_z: sig_z
+    corr:
+      e_g, e_z: rho_gz
 
-        pi_star: 3.43
-        r_star: 3.01 # (1)!
-
-        kappa: 0.58
-        tau_inv: 1.86
-
-        rho_g: 0.83
-        rho_z: 0.85
-        rho_gz: 0.36
-
-        sig_r: 0.18
-        sig_g: 0.18
-        sig_z: 0.64
-    shocks:
-        std:
-            e_r: sig_r
-            e_g: sig_g
-            e_z: sig_z
-        corr:
-            e_g, e_z: rho_gz
+    measurement_noise: ...
 ```
 
-1. This parameter will be used for linearization as declared, but it is not reserved for that purpose.
 
 Innovation terms are paired with the relevant (co)variance parameters through the `std` and `corr` fields of the configuration.
+
+### Measurement Noise
+
+Measurement noise is mapped exactly like shocks. It parameterizes the measurement noise covariance matrix `R` in the Kalman filter. `R` is estimable in SymbolicDSGE and this mapping is required to relate matrix indices to parameter names.
+
+???+ info "Constant R Workflows"
+    A constant `R` workflow does not require this mapping, methods that need an `R` expose a parameter to set a regular matrix.
+    The mapping can be omitted in full; when it is declared the parser will request all standard deviations be named, similar to shocks.
+
+```yaml
+calibration:
+  parameters: ...
+  shocks: ...
+
+  measurement_noise:
+    std:
+      OutGap: meas_out
+      Infl: meas_infl
+      Rate: meas_rate
+    corr:
+      OutGap, Infl: meas_rho_io
+      OutGap, Rate: meas_rho_or
+      Infl, Rate: meas_rho_ir
+```
 
 ## Conclusion
 

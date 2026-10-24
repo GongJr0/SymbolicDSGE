@@ -32,7 +32,7 @@ OVER_ON, OVER_BOTH, OVER_OFF = -2.0, 0.0, 2.0
 
 @pytest.fixture(scope="module")
 def compiled(parsed_post82):
-    model, kalman = parsed_post82
+    model = parsed_post82
     conf = copy.deepcopy(model)
     by_name = {v.__name__: v for v in conf.variables}
     g, z = by_name["g"], by_name["z"]
@@ -50,7 +50,7 @@ def compiled(parsed_post82):
             frozenset({"band", "over"}),
         )
     }
-    return DSGESolver(conf, kalman).compile()
+    return DSGESolver(conf).compile()
 
 
 @pytest.fixture(scope="module")

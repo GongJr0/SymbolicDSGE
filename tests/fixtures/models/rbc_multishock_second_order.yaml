@@ -60,6 +60,10 @@ calibration:
     corr_zd: 0.35
     corr_zg: -0.20
     corr_dg: 0.15
+    meas_c: 0.001
+    meas_k: 0.002
+    meas_g: 0.004
+    meas_rho_ck: 0.25
     # Steady state (deterministic), consistent with the calibration above:
     #   k_ss = (alpha / (1/beta - 1 + delta))^(1/(1-alpha))
     #   c_ss = k_ss^alpha - delta*k_ss - gbar
@@ -74,3 +78,10 @@ calibration:
       e_z, e_d: corr_zd
       e_z, e_g: corr_zg
       e_d, e_g: corr_dg
+  measurement_noise:
+    std:
+      c_obs: meas_c
+      k_obs: meas_k
+      g_obs: meas_g
+    corr:
+      c_obs, k_obs: meas_rho_ck

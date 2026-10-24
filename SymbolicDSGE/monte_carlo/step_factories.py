@@ -172,9 +172,9 @@ def filter_step(
         Initial state for the filter.
     P0 : NDF | None
         Initial state covariance matrix for the filter. If ``None``, the steady-state covariance is used.
-    R : NDF | None
-        Measurement noise covariance matrix for the filter. If ``None``, and the model has no ``R`` in :class:`KalmanConfig`,
-        the filter will raise.
+    R : NDArray | None
+        Measurement noise covariance matrix for the Kalman filter. If None, the `calibration.measurement_noise`
+        is used. If both are omitted, the call will raise.
     jitter : float | np.float64 | None
         Jitter to add when a cholesky decomposition fails. If ``None``, no jitter is added.
     symmetrize : bool

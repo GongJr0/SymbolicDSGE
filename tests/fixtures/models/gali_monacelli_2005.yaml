@@ -57,9 +57,7 @@ calibration:
       eps_star: sig_eps_star
       eps_a: sig_eps_a
     corr: {}
-
-kalman:
-  R:
+  measurement_noise:
     std:
       obs_pi: meas_obs_pi
       obs_r: meas_obs_r

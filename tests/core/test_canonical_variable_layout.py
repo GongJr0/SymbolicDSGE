@@ -30,8 +30,8 @@ def _write_misordered_test_model(tmp_path, test_model_path):
 
 def _compile_misordered_test_model(tmp_path, test_model_path):
     path = _write_misordered_test_model(tmp_path, test_model_path)
-    model, kalman = ModelParser(path).get_all()
-    solver = DSGESolver(model, kalman)
+    model = ModelParser(path).get()
+    solver = DSGESolver(model)
     return solver.compile()
 
 
@@ -114,8 +114,8 @@ def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(
 
 def test_explicit_order_permutes_within_each_block(tmp_path, test_model_path):
     path = _write_misordered_test_model(tmp_path, test_model_path)
-    model, kalman = ModelParser(path).get_all()
-    compiled = DSGESolver(model, kalman).compile(
+    model = ModelParser(path).get()
+    compiled = DSGESolver(model).compile(
         variable_order=["r", "v", "u", "r_star", "x", "Pi"],
     )
 
@@ -135,8 +135,8 @@ def test_explicit_order_places_a_minted_lag_after_the_named_states(
     path = tmp_path / "deep_test.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
-    model, kalman = ModelParser(path).get_all()
-    compiled = DSGESolver(model, kalman).compile(
+    model = ModelParser(path).get()
+    compiled = DSGESolver(model).compile(
         variable_order=["r", "v", "u", "r_star", "x", "Pi"],
     )
 
@@ -154,8 +154,8 @@ def test_explicit_order_places_a_minted_lag_after_the_named_states(
 
 def test_explicit_order_rejects_a_control_in_the_state_block(tmp_path, test_model_path):
     path = _write_misordered_test_model(tmp_path, test_model_path)
-    model, kalman = ModelParser(path).get_all()
-    solver = DSGESolver(model, kalman)
+    model = ModelParser(path).get()
+    solver = DSGESolver(model)
 
     with pytest.raises(ValueError, match="must lead with the model's states"):
         solver.compile(variable_order=["u", "v", "Pi", "r", "x", "r_star"])
@@ -163,8 +163,8 @@ def test_explicit_order_rejects_a_control_in_the_state_block(tmp_path, test_mode
 
 def test_compile_rejects_an_order_naming_a_generated_state(tmp_path, test_model_path):
     path = _write_misordered_test_model(tmp_path, test_model_path)
-    model, kalman = ModelParser(path).get_all()
-    solver = DSGESolver(model, kalman)
+    model = ModelParser(path).get()
+    solver = DSGESolver(model)
 
     with pytest.raises(ValueError, match="must not appear"):
         solver.compile(

@@ -10,9 +10,14 @@ from SymbolicDSGE.core.compiled_model import (
     _measurement_covariance,
     _shock_covariance,
 )
+from SymbolicDSGE.core.config import (
+    CovarianceSpec,
+    PairGetterDict,
+    SymbolGetterDict,
+    cov_from_spec,
+)
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation import backend
-from SymbolicDSGE.kalman.config import KalmanConfig
 
 
 def test_extract_base_params_reads_the_calibration_by_name():
@@ -130,22 +135,31 @@ def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
     assert np.isfinite(ll)
 
 
-def _compiled_with_kalman(kalman, observable_names=("Infl", "Rate", "Out")):
-    """A compiled stub carrying a Kalman config, which is where R is read from."""
-    return SimpleNamespace(
-        observable_names=list(observable_names),
-        kalman=kalman,
-        config=SimpleNamespace(calibration=SimpleNamespace(parameters={})),
-    )
+@pytest.fixture
+def injected_measurement_noise(compiled_post82, monkeypatch):
+    """Put a hand-built covariance spec on the model's own calibration.
 
+    ``_parse_measurement_noise`` requires a std entry per observable, so a
+    block that is empty or short of one cannot come out of a config file. A
+    programmatically built or post-parse edited config reaches these branches,
+    which is the state they guard, so the spec is assembled directly here and
+    restored when the test ends.
+    """
 
-def test_build_R_override_and_config_branches():
-    compiled = _compiled_with_kalman(
-        KalmanConfig(
-            R=None,
-            R_std_param_map={"Infl": "s_i", "Rate": "s_r", "Out": "s_o"},
-            R_corr_param_map={},
+    def apply(std, corr=None):
+        monkeypatch.setattr(
+            compiled_post82.config.calibration,
+            "measurement_noise",
+            CovarianceSpec(std=SymbolGetterDict(std), corr=PairGetterDict(corr or {})),
         )
+        return compiled_post82
+
+    return apply
+
+
+def test_build_R_override_and_config_branches(injected_measurement_noise):
+    compiled = injected_measurement_noise(
+        std={"OutGap": "s_o", "Infl": "s_i", "Rate": "s_r"}
     )
 
     # An override wins, but its shape must match the observable count.
@@ -167,77 +181,10 @@ def test_build_R_override_and_config_branches():
     out_config = backend._build_R(compiled, ["Rate", "Infl"], params)
     assert np.allclose(out_config, np.array([[4.0, 0.0], [0.0, 1.0]], dtype=np.float64))
 
-    # A directly-configured constant R with no named-param maps is sliced as-is
-    # (nothing to rebuild from params), preserving observable order.
-    const = _compiled_with_kalman(
-        KalmanConfig(
-            R=np.array(
-                [[1.0, 2.0, 3.0], [2.0, 5.0, 6.0], [3.0, 6.0, 9.0]], dtype=np.float64
-            ),
-        )
-    )
-    out_const = backend._build_R(const, ["Rate", "Infl"], {})
-    assert np.allclose(out_const, np.array([[5.0, 2.0], [2.0, 1.0]], dtype=np.float64))
-
-    # No override, no maps, no constant R: genuinely unavailable.
-    empty = _compiled_with_kalman(KalmanConfig(R=None))
-    with pytest.raises(ValueError, match="R is not available"):
+    # A block naming no standard deviation leaves nothing to assemble from.
+    empty = injected_measurement_noise(std={})
+    with pytest.raises(ValueError, match="measurement_noise` is required"):
         backend._build_R(empty, ["Infl", "Rate"], {})
-
-
-@pytest.mark.skip(
-    reason="R-estimation rework: R_builder/R_symbolic removed; build_R_from_config_params "
-    "is being rewired onto make_R and the R std/corr param maps."
-)
-def test_kalman_symbolic_R_builder_matches_numeric_config_R(compiled_post82):
-    compiled = compiled_post82
-    kalman = compiled.kalman
-    assert kalman is not None
-    assert kalman.R_symbolic is not None
-    assert kalman.R_builder is not None
-    assert kalman.R_param_names == [
-        "meas_outgap",
-        "meas_infl",
-        "meas_rate",
-        "meas_rho_ir",
-        "meas_rho_gi",
-        "meas_rho_gr",
-    ]
-
-    params = backend.extract_base_params(compiled)
-    R_from_builder = backend.build_R_from_config_params(
-        compiled=compiled,
-        kalman=kalman,
-        observables=["Infl", "Rate"],
-        params=params,
-    )
-    R_resolved = backend.resolve_R(
-        compiled=compiled,
-        kalman=kalman,
-        observables=["Infl", "Rate"],
-        R=None,
-    )
-    assert np.allclose(R_from_builder, R_resolved)
-
-
-@pytest.mark.skip(
-    reason="R-estimation rework: build_R_from_config_params is being rewired onto make_R "
-    "and the R std/corr param maps; the R_builder metadata guard no longer applies."
-)
-def test_build_R_from_config_params_raises_on_missing_param(compiled_post82):
-    compiled = compiled_post82
-    kalman = compiled.kalman
-    assert kalman is not None
-    params = backend.extract_base_params(compiled)
-    params.pop("meas_rho_ir")
-
-    with pytest.raises(KeyError, match="Missing R-builder parameter"):
-        backend.build_R_from_config_params(
-            compiled=compiled,
-            kalman=kalman,
-            observables=["Infl", "Rate"],
-            params=params,
-        )
 
 
 def _post82_estimator(compiled, solved, y, **kwargs):
@@ -290,7 +237,13 @@ def test_estimator_loglik_respects_R_override_and_mode_validation(
             compiled_post82, solved_post82, y_post82, filter_mode="bad_mode"
         )
 
-    scaled_R = 2.0 * compiled_post82.kalman.R[:2, :2]
+    calib = compiled_post82.config.calibration
+    scaled_R = 2.0 * cov_from_spec(
+        compiled_post82.observable_names,
+        calib.measurement_noise,
+        calib.parameters,
+        subset=["Infl", "Rate"],
+    )
     overridden = _post82_estimator(
         compiled_post82, solved_post82, y_post82, filter_mode="linear", R=scaled_R
     )
@@ -321,27 +274,20 @@ def test_resolve_filter_options_prefers_defaults_and_honors_overrides():
     assert backend.resolve_filter_options(0.5, True) == pytest.approx((0.5, True))
 
 
-def test_measurement_covariance_error_branches():
-    params = {"sig_a": 1.0, "sig_b": 1.0}
+def test_measurement_covariance_error_branches(injected_measurement_noise):
+    params = {"s_o": 1.0, "s_i": 1.0}
 
-    # A config that carries no named std/corr metadata has nothing to build from.
-    no_metadata = _compiled_with_kalman(
-        SimpleNamespace(R_std_param_map=None, R_corr_param_map=None),
-        observable_names=("a", "b"),
-    )
-    with pytest.raises(ValueError, match="named R parameter metadata"):
-        _measurement_covariance(no_metadata, params, observables=["a", "b"])
+    # A block that names no standard deviation has nothing to build from.
+    no_metadata = injected_measurement_noise(std={})
+    with pytest.raises(ValueError, match="does not expose named parameter metadata"):
+        _measurement_covariance(no_metadata, params, observables=["Infl", "Rate"])
 
     # A named parameter absent from the supplied mapping is a hard error.
-    missing_param = _compiled_with_kalman(
-        SimpleNamespace(
-            R_std_param_map={"a": "sig_a", "b": "not_in_params"},
-            R_corr_param_map={},
-        ),
-        observable_names=("a", "b"),
+    missing_param = injected_measurement_noise(
+        std={"OutGap": "s_o", "Infl": "s_i", "Rate": "not_in_params"}
     )
-    with pytest.raises(KeyError, match="Missing R parameter"):
-        _measurement_covariance(missing_param, params, observables=["a", "b"])
+    with pytest.raises(KeyError, match="Missing covariance parameter"):
+        _measurement_covariance(missing_param, params, observables=["Infl", "Rate"])
 
 
 def test_backend_corr_cov_helpers_and_validation_error_paths():

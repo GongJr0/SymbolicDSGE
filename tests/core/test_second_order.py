@@ -21,8 +21,8 @@ from _oracles.core import first_order_residual
 
 def _drive(path):
     """Compile a model and run the full second-order preproc chain at ss = 0."""
-    model, kalman = ModelParser(path).get_all()
-    compiled = DSGESolver(model, kalman).compile()
+    model = ModelParser(path).get()
+    compiled = DSGESolver(model).compile()
     layout = ResidualLayout.from_compiled(compiled)
     n_eq, n_state = layout.n_var, compiled.n_state
 

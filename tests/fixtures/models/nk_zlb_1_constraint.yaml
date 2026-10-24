@@ -132,7 +132,6 @@ calibration:
 # Filtering a constrained model runs against the reference regime, so this block
 # reaches nothing the Dynare goldens cover. P0 is omitted and defaults to the
 # identity.
-kalman:
-  R:
+  measurement_noise:
     std:
       yhat_obs: meas_yhat

@@ -376,8 +376,8 @@ def test_native_lowering_runs_first_order_simulation_with_observables(
     # A levels model, deliberately: with a zero steady state the native path
     # returning deviations and solved.sim returning levels agree by accident,
     # and the whole assertion goes blind to the steady state.
-    model, kalman = ModelParser(rbc_second_order_test_model_path).get_all()
-    solver = DSGESolver(model, kalman)
+    model = ModelParser(rbc_second_order_test_model_path).get()
+    solver = DSGESolver(model)
     solved = solver.solve(solver.compile(), order=1)
     assert np.any(solved.policy.steady_state != 0.0)
     T = 7

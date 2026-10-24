@@ -54,9 +54,7 @@ calibration:
       e_g, e_z: rho_gz
       e_g, e_r: rho_gr_shock
       e_z, e_r: rho_zr_shock
-
-kalman:
-  R:
+  measurement_noise:
     std:
       OutGap: meas_outgap
       Infl: meas_infl

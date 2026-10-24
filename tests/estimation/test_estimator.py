@@ -2,10 +2,11 @@
 import warnings
 from types import SimpleNamespace
 
+import yaml
+
 import numpy as np
 import pytest
 from numpy import float64
-from sympy import Matrix, Symbol
 
 from SymbolicDSGE import DSGESolver, ModelParser
 from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
@@ -15,13 +16,13 @@ from SymbolicDSGE.bayesian.transforms import (
     AffineLogitTransform,
     CholeskyCorrTransform,
 )
-from SymbolicDSGE.core.config import PairGetterDict, SymbolGetterDict
+from SymbolicDSGE.core.config import PairGetterDict
 from SymbolicDSGE.estimation.prior_program import TransformCode, build_prior_tables
 from SymbolicDSGE.estimation.resolvers import (
     _CORR_LIMIT,
     _STD_FLOOR,
+    _build_matrix_resolution,
     _resolve_Q,
-    _resolve_R,
     active_Q,
     active_R,
     resolve_bounds,
@@ -44,67 +45,52 @@ _BOUNDED_CORR_PRIOR = make_prior(
 )
 
 
-def _with_filter_prep(compiled):
-    """Complete a stub with the surface Estimator's construction-time filter prep
-    needs. ``Estimator.__init__`` builds the filter run unconditionally now (the
-    old duck-typed guard is gone), so every stub must satisfy
-    ``prepare_filter_run``. No test on a stub evaluates an objective, so the cfunc
-    addresses and P0 are never read; they only have to exist."""
-    if not hasattr(compiled, "observable_names"):
-        compiled.observable_names = ["y"]
-    if not hasattr(compiled, "var_names"):
-        compiled.var_names = [
-            Symbol(f"s{i}") for i in range(len(compiled.observable_names))
-        ]
-    if not hasattr(compiled, "cur_syms"):
-        compiled.cur_syms = list(compiled.var_names)
-    compiled.construct_measurement_cfunc = lambda obs: SimpleNamespace(address=0)
-    compiled.construct_measurement_jacobian_cfunc = lambda obs: SimpleNamespace(
-        address=0
-    )
-    if not hasattr(compiled, "n_state"):
-        compiled.n_state = len(compiled.var_names)
-    if not hasattr(compiled, "n_var"):
-        compiled.n_var = len(compiled.var_names)
-    if getattr(compiled.kalman, "P0", None) is None:
-        compiled.kalman.P0 = np.eye(len(compiled.var_names), dtype=np.float64)
-    if not hasattr(compiled.kalman, "R_param_names"):
-        compiled.kalman.R_param_names = None
-    if not hasattr(compiled.kalman, "R_std_param_map"):
-        compiled.kalman.R_std_param_map = None
-    if not hasattr(compiled.kalman, "R_corr_param_map"):
-        compiled.kalman.R_corr_param_map = None
-    # active_Q reads these three directly, so a stub that names no shocks still
-    # has to say so rather than omit them.
-    if not hasattr(compiled, "shock_names"):
-        compiled.shock_names = []
-    if not hasattr(compiled.config.calibration, "shock_std"):
-        compiled.config.calibration.shock_std = {}
-    if not hasattr(compiled.config.calibration, "shock_corr"):
-        compiled.config.calibration.shock_corr = {}
-    if getattr(compiled.kalman, "R", None) is None:
-        compiled.kalman.R = np.eye(len(compiled.observable_names), dtype=np.float64)
-    return compiled
+@pytest.fixture
+def compiled_variant():
+    """Compile a fixture model with parts of its calibration replaced.
+
+    These cases need a calibration shape no fixture model carries: one
+    correlation name serving both Q and R, or a partially named correlation
+    block. The parser accepts each of them; it is the estimator that rejects
+    them, which is what leaves the shape unreachable through a stored model.
+    """
+
+    def build(base, *, parameters=None, shock_corr=None, measurement_noise=None):
+        data = yaml.safe_load(base.read_text(encoding="utf-8"))
+        calib = data["calibration"]
+        if parameters:
+            calib["parameters"].update(parameters)
+        if shock_corr is not None:
+            calib["shocks"]["corr"] = shock_corr
+        if measurement_noise is not None:
+            calib["measurement_noise"] = measurement_noise
+
+        model = ModelParser.from_string(
+            yaml.safe_dump(data, sort_keys=False), "<variant>"
+        ).get()
+        return DSGESolver(model).compile()
+
+    return build
 
 
 @pytest.fixture
 def role_context():
-    """Packed transform codes and the theta box for one stub spec.
+    """Packed transform codes and the theta box for one estimator.
 
     ``estim_context`` also resolves the steady-state seed, the param map and
-    both covariance specs, none of which these cases assert and none of which
-    these stubs can reach, so this runs only the two steps that decide a
-    slot's transform and its box. The role merge mirrors the one
-    ``estim_context`` does inline. ``observables`` narrows the active set, which
-    is what sizes a resolved R block.
+    both covariance specs, none of which these cases assert, so this runs only
+    the two steps that decide a slot's transform and its box. The role merge
+    mirrors the one ``estim_context`` does inline. ``observables`` narrows the
+    active set, which is what sizes a resolved R block.
     """
 
-    def _build(compiled, y_shape, estimated_params, observables=None):
+    def _build(compiled, y_shape, estimated_params, observables=None, R=None):
         est = Estimator(
             compiled=compiled,
             y=np.zeros(y_shape, dtype=np.float64),
             observables=observables,
             estimated_params=estimated_params,
+            R=R,
         )
         observables = est._prepared_filter.observables
         tables, transforms = build_prior_tables(
@@ -112,13 +98,12 @@ def role_context():
             priors=est.priors,
             matrix_blocks=est._matrix_blocks,
             compiled=est.compiled,
-            kalman=est.kalman,
             observables=observables,
         )
         roles = None
         if est.priors is None:
             std_q, corr_q = active_Q(est.param_names, est.compiled)
-            std_r, corr_r = active_R(est.param_names, est.kalman, observables)
+            std_r, corr_r = active_R(est.param_names, est.compiled, observables)
             roles = (std_q | std_r, corr_q | corr_r)
         lo, hi = resolve_bounds(
             None, est._param_index, est._matrix_blocks, transforms, roles
@@ -137,97 +122,6 @@ def role_context():
         )
 
     return _build
-
-
-def _stub_compiled_with_dense_r_block():
-    meas_a = Symbol("meas_a")
-    meas_b = Symbol("meas_b")
-    meas_rho_ab = Symbol("meas_rho_ab")
-    calibration = SimpleNamespace(
-        parameters=SymbolGetterDict(
-            {
-                "meas_a": float64(1.0),
-                "meas_b": float64(1.0),
-                "meas_rho_ab": float64(0.0),
-            }
-        )
-    )
-    config = SimpleNamespace(calibration=calibration)
-    R = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float64)
-
-    def _R_builder(meas_a_val, meas_b_val, meas_rho_ab_val):
-        return np.array(
-            [
-                [meas_a_val**2, meas_a_val * meas_b_val * meas_rho_ab_val],
-                [meas_a_val * meas_b_val * meas_rho_ab_val, meas_b_val**2],
-            ],
-            dtype=np.float64,
-        )
-
-    kalman = SimpleNamespace(
-        R=R,
-        R_symbolic=Matrix(
-            [
-                [meas_a**2, meas_a * meas_b * meas_rho_ab],
-                [meas_a * meas_b * meas_rho_ab, meas_b**2],
-            ]
-        ),
-        R_param_names=["meas_a", "meas_b", "meas_rho_ab"],
-        R_builder=_R_builder,
-        R_std_param_map=SymbolGetterDict({"A": "meas_a", "B": "meas_b"}),
-        R_corr_param_map=PairGetterDict({frozenset(("A", "B")): "meas_rho_ab"}),
-        y_names=["A", "B"],
-    )
-    return _with_filter_prep(
-        SimpleNamespace(
-            config=config,
-            calib_params=["meas_a", "meas_b", "meas_rho_ab"],
-            kalman=kalman,
-            observable_names=["A", "B"],
-        )
-    )
-
-
-def _stub_compiled_with_sparse_q_block():
-    e1 = Symbol("e1")
-    e2 = Symbol("e2")
-    e3 = Symbol("e3")
-    x1 = Symbol("x1")
-    x2 = Symbol("x2")
-    x3 = Symbol("x3")
-    calibration = SimpleNamespace(
-        parameters=SymbolGetterDict(
-            {
-                "sig1": float64(1.0),
-                "sig2": float64(1.0),
-                "sig3": float64(1.0),
-                "rho12": float64(0.0),
-            }
-        ),
-        shock_std=SymbolGetterDict({e1: "sig1", e2: "sig2", e3: "sig3"}),
-        shock_corr=PairGetterDict(
-            {
-                frozenset((e1, e2)): "rho12",
-                frozenset((e1, e3)): None,
-                frozenset((e2, e3)): None,
-            }
-        ),
-    )
-    config = SimpleNamespace(
-        calibration=calibration,
-        shocks=[e1, e2, e3],
-    )
-    return _with_filter_prep(
-        SimpleNamespace(
-            config=config,
-            calib_params=["sig1", "sig2", "sig3", "rho12"],
-            kalman=SimpleNamespace(y_names=["y"]),
-            observable_names=["y"],
-            var_names=[x1, x2, x3],
-            shock_names=("e1", "e2", "e3"),
-            n_exog=3,
-        )
-    )
 
 
 def test_to_spec_captures_construction_state(compiled_post82, solved_post82, y_post82):
@@ -855,8 +749,8 @@ def test_sparse_q_block_for_lkj_prior_raises_descriptive_error(
 ):
     # Three shocks, none of whose correlations the config names: the pairs fall
     # back to zero, which is fine until a block prior needs a name per pair.
-    model, kalman = ModelParser(gali_2015_test_model_path).get_all()
-    compiled = DSGESolver(model, kalman).compile()
+    model = ModelParser(gali_2015_test_model_path).get()
+    compiled = DSGESolver(model).compile()
     with pytest.raises(ValueError, match="dense correlation block") as excinfo:
         Estimator(
             compiled=compiled,
@@ -988,46 +882,15 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches(
 def test_resolve_r_and_effective_observables_error_paths(
     compiled_post82, solved_post82, y_post82, compiled_test
 ):
-    # A model with no `kalman:` block parses to no config at all. Without one
-    # there is nothing to build R from, so the estimator fails fast at
-    # construction rather than lazily when the R block is resolved. P0 has a
-    # default and is not part of the demand.
-    assert compiled_test.kalman is None
+    # A model with no `calibration.measurement_noise` has nothing to build R
+    # from, so the estimator fails fast at construction rather than lazily when
+    # the R block is resolved. P0 has a default and is not part of the demand.
+    assert compiled_test.config.calibration.measurement_noise is None
     with pytest.raises(ValueError, match="R must be provided"):
         Estimator(
             compiled=compiled_test,
             y=np.zeros((3, 2), dtype=np.float64),
             estimated_params=["beta"],
-        )
-
-    est_missing_meta = Estimator(
-        compiled=_with_filter_prep(
-            SimpleNamespace(
-                config=SimpleNamespace(
-                    calibration=SimpleNamespace(
-                        parameters=SymbolGetterDict({"a": float64(0.0)})
-                    )
-                ),
-                calib_params=["a"],
-                # What `kalman: {R: {}}` parses to: a config that exists and
-                # declares no R, so there are no names to resolve a block from.
-                # A numeric R with no maps is not a state the parser can reach,
-                # since R is only ever built from the named maps.
-                kalman=SimpleNamespace(
-                    y_names=["y"],
-                    R=None,
-                    R_std_param_map=None,
-                    R_corr_param_map=PairGetterDict({}),
-                ),
-                observable_names=["y"],
-            )
-        ),
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["a"],
-    )
-    with pytest.raises(ValueError, match="parser-generated R std/correlation metadata"):
-        _resolve_R(
-            est_missing_meta.kalman, est_missing_meta._prepared_filter.observables
         )
 
     # Unknown observables are now rejected at construction by the filter prep.
@@ -1086,33 +949,11 @@ def test_mcmc_validation_branches(
         )
 
 
-def test_resolve_q_reports_the_missing_pair_of_a_sparse_block():
-    e1 = Symbol("e1")
-    e2 = Symbol("e2")
-    x1 = Symbol("x1")
-    x2 = Symbol("x2")
-    calibration = SimpleNamespace(
-        parameters=SymbolGetterDict({"sig1": float64(1.0), "sig2": float64(1.0)}),
-        shock_std=SymbolGetterDict({e1: "sig1", e2: "sig2"}),
-        shock_corr=PairGetterDict({frozenset((e1, e2)): None}),
-    )
-    compiled = _with_filter_prep(
-        SimpleNamespace(
-            config=SimpleNamespace(calibration=calibration, shocks=[e1, e2]),
-            calib_params=["sig1", "sig2"],
-            kalman=SimpleNamespace(y_names=["y"]),
-            observable_names=["y"],
-            var_names=[x1, x2],
-            shock_names=("e1", "e2"),
-            n_exog=2,
-        )
-    )
-    est = Estimator(
-        compiled=compiled,
-        y=np.zeros((3, 1), dtype=np.float64),
-        estimated_params=["sig1"],
-    )
-    block = _resolve_Q(est.compiled)
+def test_resolve_q_reports_the_missing_pair_of_a_sparse_block(compiled_test):
+    # ``test.yaml`` names two shocks and correlates neither, so the one pair the
+    # block expects is the one the resolution has to report as absent.
+    block = _resolve_Q(compiled_test)
+
     present = {(int(r), int(c)) for r, c in block.positions}
     missing = [
         (block.labels[row], block.labels[col])
@@ -1120,24 +961,8 @@ def test_resolve_q_reports_the_missing_pair_of_a_sparse_block():
         for col in range(row)
         if (row, col) not in present
     ]
-    assert missing == [("e2", "e1")]
-
-
-def _stub_compiled_sharing_a_corr_name():
-    """One parameter name serving both an R pair and a Q pair. The parser keeps
-    correlation names unique within a matrix but not across the two."""
-    compiled = _stub_compiled_with_dense_r_block()
-    e1 = Symbol("e1")
-    e2 = Symbol("e2")
-    compiled.config.calibration.shock_std = SymbolGetterDict(
-        {e1: "meas_a", e2: "meas_b"}
-    )
-    compiled.config.calibration.shock_corr = PairGetterDict(
-        {frozenset((e1, e2)): "meas_rho_ab"}
-    )
-    compiled.config.shocks = [e1, e2]
-    compiled.shock_names = ("e1", "e2")
-    return compiled
+    assert block.labels == ["e_u", "e_v"]
+    assert missing == [("e_v", "e_u")]
 
 
 def _lkj(K: int) -> Prior:
@@ -1150,8 +975,8 @@ def _lkj(K: int) -> Prior:
 def test_reserved_block_key_rejects_a_one_dimensional_matrix(nk_zlb_test_model_path):
     # One observable means a named R std and no pair to correlate, so naming the
     # reserved key asks for a block the matrix has no room for.
-    model, kalman = ModelParser(nk_zlb_test_model_path).get_all()
-    compiled = DSGESolver(model, kalman).compile()
+    model = ModelParser(nk_zlb_test_model_path).get()
+    compiled = DSGESolver(model).compile()
     with pytest.raises(ValueError, match="dimension at least 2"):
         Estimator(
             compiled=compiled,
@@ -1160,72 +985,50 @@ def test_reserved_block_key_rejects_a_one_dimensional_matrix(nk_zlb_test_model_p
         )
 
 
-def _stub_compiled_with_a_corr_name_in_both_matrices():
-    """``rho`` names a Q pair and an R pair, and R stays too sparse to promote.
-    ``rho2`` is a nonzero Q sibling over the shared shock."""
-    e1, e2, e3 = Symbol("e1"), Symbol("e2"), Symbol("e3")
-    params = SymbolGetterDict(
-        {
-            name: float64(value)
-            for name, value in (
-                ("rho", 0.1),
-                ("rho2", 0.3),
-                ("s1", 1.0),
-                ("s2", 1.0),
-                ("s3", 1.0),
-                ("ma", 1.0),
-                ("mb", 1.0),
-                ("mc", 1.0),
-            )
-        }
-    )
-    calibration = SimpleNamespace(
-        parameters=params,
-        shock_std=SymbolGetterDict({e1: "s1", e2: "s2", e3: "s3"}),
-        shock_corr=PairGetterDict(
-            {
-                frozenset((e1, e2)): "rho",
-                frozenset((e1, e3)): "rho2",
-                frozenset((e2, e3)): None,
-            }
-        ),
-    )
-    return _with_filter_prep(
-        SimpleNamespace(
-            config=SimpleNamespace(calibration=calibration, shocks=[e1, e2, e3]),
-            calib_params=[str(name) for name in params],
-            kalman=SimpleNamespace(
-                y_names=["A", "B", "C"],
-                R_std_param_map=SymbolGetterDict({"A": "ma", "B": "mb", "C": "mc"}),
-                R_corr_param_map=PairGetterDict(
-                    {
-                        frozenset(("A", "B")): "rho",
-                        frozenset(("A", "C")): None,
-                        frozenset(("B", "C")): None,
-                    }
-                ),
-            ),
-            observable_names=["A", "B", "C"],
-            shock_names=("e1", "e2", "e3"),
-        )
-    )
-
-
-def test_a_corr_name_in_both_matrices_is_checked_against_each():
+def test_a_corr_name_in_both_matrices_is_checked_against_each(
+    compiled_variant, rbc_multishock_test_model_path
+):
     """A name unique within each matrix can still serve both. Keyed by name, the
-    second matrix read would be the only one left to check against."""
-    with pytest.raises(ValueError, match="couples the same variable 'e1' in 'Q'"):
+    second matrix read would be the only one left to check against.
+
+    ``rho`` names one Q pair and one R pair, and R keeps only that one pair so
+    it stays too sparse to promote into a block. ``rho2`` is the nonzero Q
+    sibling over the shared shock.
+    """
+    compiled = compiled_variant(
+        rbc_multishock_test_model_path,
+        parameters={"rho": 0.1, "rho2": 0.3},
+        shock_corr={"e_z, e_d": "rho", "e_z, e_g": "rho2"},
+        measurement_noise={
+            "std": {"c_obs": "meas_c", "k_obs": "meas_k", "g_obs": "meas_g"},
+            "corr": {"c_obs, k_obs": "rho"},
+        },
+    )
+
+    with pytest.raises(ValueError, match="couples the same variable 'e_z' in 'Q'"):
         Estimator(
-            compiled=_stub_compiled_with_a_corr_name_in_both_matrices(),
+            compiled=compiled,
             y=np.zeros((4, 3), dtype=np.float64),
             estimated_params=["rho"],
         )
 
 
-def test_reserved_block_keys_reject_a_shared_member():
+def test_reserved_block_keys_reject_a_shared_member(compiled_variant, test_model_path):
+    # Two shocks and two observables leave each matrix one pair, so one name on
+    # both makes the two blocks complete and overlapping at once.
+    compiled = compiled_variant(
+        test_model_path,
+        parameters={"rho_shared": 0.2, "meas_infl": 0.3, "meas_rate": 0.4},
+        shock_corr={"e_u, e_v": "rho_shared"},
+        measurement_noise={
+            "std": {"Infl": "meas_infl", "Rate": "meas_rate"},
+            "corr": {"Infl, Rate": "rho_shared"},
+        },
+    )
+
     with pytest.raises(ValueError, match="cannot share member parameters"):
         Estimator(
-            compiled=_stub_compiled_sharing_a_corr_name(),
+            compiled=compiled,
             y=np.zeros((4, 2), dtype=np.float64),
             estimated_params={"R_corr": _lkj(2), "Q_corr": _lkj(2)},
         )
@@ -1246,23 +1049,22 @@ def test_lkj_prior_k_must_match_the_resolved_block(
 
 
 def test_matrix_resolution_rejects_a_reused_correlation_name():
-    """One name on two pairs of the same matrix. The parser rejects this, so the
-    resolver is only reached directly."""
+    """One name on two pairs of the same matrix.
+
+    ``_parse_measurement_noise`` rejects a reused correlation name, so no
+    config reaches this; the resolution is driven on its own argument instead.
+    """
     with pytest.raises(ValueError, match="is reused"):
-        _resolve_R(
-            SimpleNamespace(
-                R_std_param_map=SymbolGetterDict(
-                    {"A": "sig_a", "B": "sig_b", "C": "sig_c"}
-                ),
-                R_corr_param_map=PairGetterDict(
-                    {
-                        frozenset(("A", "B")): "rho",
-                        frozenset(("A", "C")): "rho",
-                        frozenset(("B", "C")): None,
-                    }
-                ),
+        _build_matrix_resolution(
+            key="R_corr",
+            labels=["A", "B", "C"],
+            corr_param_map=PairGetterDict(
+                {
+                    frozenset(("A", "B")): "rho",
+                    frozenset(("A", "C")): "rho",
+                    frozenset(("B", "C")): None,
+                }
             ),
-            ["A", "B", "C"],
         )
 
 
@@ -1276,14 +1078,20 @@ def test_mle_std_member_without_prior_gets_a_positivity_box(
     assert ctx.box["meas_infl"] == (_STD_FLOOR, np.inf)
 
 
-def test_mle_isolated_scalar_corr_without_prior_gets_an_interval_box(role_context):
-    ctx = role_context(_stub_compiled_with_sparse_q_block(), (3, 1), ["rho12"])
-    # rho12 is the sole named Q correlation (e1, e2): sparse and isolated, so it
-    # stays a standalone scalar rather than folding into a block, and its role
-    # interval is held by the box.
+def test_mle_isolated_scalar_corr_without_prior_gets_an_interval_box(
+    role_context, compiled_variant, rbc_multishock_test_model_path
+):
+    # corr_zd is left as the sole named Q correlation of three pairs: sparse and
+    # isolated, so it stays a standalone scalar rather than folding into a
+    # block, and its role interval is held by the box.
+    compiled = compiled_variant(
+        rbc_multishock_test_model_path, shock_corr={"e_z, e_d": "corr_zd"}
+    )
+    ctx = role_context(compiled, (3, 3), ["corr_zd"])
+
     assert "Q_corr" not in ctx.est._matrix_blocks
-    assert ctx.codes["rho12"] is TransformCode.IDENTITY
-    assert ctx.box["rho12"] == (-_CORR_LIMIT, _CORR_LIMIT)
+    assert ctx.codes["corr_zd"] is TransformCode.IDENTITY
+    assert ctx.box["corr_zd"] == (-_CORR_LIMIT, _CORR_LIMIT)
 
 
 def test_a_prior_confines_through_its_transform_and_not_through_the_box(

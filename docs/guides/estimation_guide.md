@@ -33,9 +33,9 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
-model, kalman = ModelParser("../../MODELS/POST82.yaml").get_all()
+model = ModelParser("../../MODELS/POST82.yaml").get()
 
-solver = DSGESolver(model, kalman)
+solver = DSGESolver(model)
 comp = solver.compile()
 ```
 
@@ -287,7 +287,10 @@ res.logpost_trace_plot() # (1)!
     - `MCMC`: MCMC is a sampling method aimed to generate a posterior distribution using our prior beliefs and the likelihood. Effectively, MCMC samples multiple parameter sets sampled with respect to priors and computes their likelihood. In this case, we no longer have a maximization problem; we create a sampled distribution and use a point in said distribution as the parameters. This approach often yields more stable parameter compositions and allows more freedom regarding exactly which "point" to select as the parameters.
 
 ???+ warning "Estimating Components of Symmetric Positive Definite Matrices"
-    The model and kalman config provides two covariance matrices specified with parameters for standard deviations and the correlation coefficients. These are `Q` and `R` explaining the covariance of shocks and measurement noise respectively. To ensure estimation of any component in these matrices yields a valid covariance matrix, there's logic implemented around estimation to transform these variables. It is recommended to estimate the correlation block of these marices together using the reserved estimation keys: `<R/Q>_corr`. Standard deviations are estimated as scalars and in cases where they lack a prior, the estimation defaults to a log transform ensuring positivity.
+    The model config provides two covariance matrices specified with parameters for standard deviations and the correlation coefficients. These are `Q` and `R` explaining the covariance of shocks and measurement noise respectively. To ensure estimation of any component in these matrices yields a valid covariance matrix, there's logic implemented around estimation to transform these variables. It is recommended to estimate the correlation block of these marices together using the reserved estimation keys: `<R/Q>_corr`. Standard deviations are estimated as scalars.
+
+    When the specification doesn't guarantee correct boundedness, MLE estimation ensures the positivity of standard deviations with a lower bound; MAP and MCMC use a log transform.
+    Both sides use a CPC transform on correlation blocks to guarantee a valid correlation matrix; Importantly, this is not a priored transformation by default. The LKJ prior is a separate distribution that can be used for priored estimation routines. Estimation of correlation members as scalars is subject to a SPD matrix check and specifications that don't guarantee a valid correlation matrix will raise an error.
 
 ## Further Steps
 

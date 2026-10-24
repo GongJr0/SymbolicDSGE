@@ -7,7 +7,7 @@ import io
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
 
 # Set non-interactive backend before any user code can import pyplot.
 try:
@@ -24,7 +24,6 @@ from ..core import DSGESolver, ModelParser
 from ..core.compiled_model import CompiledModel
 from ..core.config import ModelConfig
 from ..core.solved_model.base import SolvedModel
-from ..kalman.config import KalmanConfig
 
 from .schemas import (
     EstimationRunRequest,
@@ -60,7 +59,6 @@ class ModelSlot:
     source: str | None = None
     raw_yaml: str | None = None
     model_config: ModelConfig | None = None
-    kalman_config: KalmanConfig | None = None
     solver: DSGESolver | None = None
     compiled: CompiledModel | None = None
     solved: SolvedModel | None = None
@@ -194,8 +192,7 @@ class UISession:
         slot.source = source
         slot.raw_yaml = model.config.source_yaml
         slot.model_config = model.config
-        slot.kalman_config = model.kalman_config
-        slot.solver = DSGESolver(model.config, cast(Any, model.kalman_config))
+        slot.solver = DSGESolver(model.config)
         slot.compiled = model.compiled
         slot.solved = model
         return self.model_summary(name)
@@ -223,13 +220,12 @@ class UISession:
             source = "<content>"
             raw_yaml = content
 
-        model, kalman = parser.get_all()
+        model = parser.get()
         slot = self._ensure_slot(model_name)
         slot.source = source
         slot.raw_yaml = raw_yaml
         slot.model_config = model
-        slot.kalman_config = kalman
-        slot.solver = DSGESolver(model, cast(Any, kalman))
+        slot.solver = DSGESolver(model)
         slot.compiled = None
         slot.solved = None
         return self.model_summary(model_name)
@@ -261,8 +257,7 @@ class UISession:
         elif slot.model_config is not None:
             summary = summarize_parsed_model(
                 model_name=name,
-                model=slot.model_config,
-                kalman=slot.kalman_config,
+                config=slot.model_config,
                 source=slot.source,
             )
         else:

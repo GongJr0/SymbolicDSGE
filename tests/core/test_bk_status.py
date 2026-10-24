@@ -15,8 +15,8 @@ MODELS = Path(__file__).resolve().parents[1] / "fixtures" / "models"
 
 
 def _compiled(name: str):
-    model, kalman = ModelParser(MODELS / name).get_all()
-    solver = DSGESolver(model, kalman)
+    model = ModelParser(MODELS / name).get()
+    solver = DSGESolver(model)
     return solver, solver.compile()
 
 

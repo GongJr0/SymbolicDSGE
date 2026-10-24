@@ -210,8 +210,8 @@ from SymbolicDSGE import (
 )
 
 parser = ModelParser("MODELS/POST82.yaml") # (1)!
-model, kalman = parser.get_all()
-solver = DSGESolver(model, kalman)
+model = parser.get()
+solver = DSGESolver(model)
 sol = solver.solve(solver.compile())
 
 bundle_path = (

@@ -40,7 +40,7 @@ MIXED = np.array([0, 1, 1, 1, 0, 1, 1, 0, 0, 0], dtype=np.int8)
 @pytest.fixture(scope="module")
 def solver(parsed_rbc_so):
     """Levels RBC where a bad-TFP regime shuts investment off."""
-    model, kalman = parsed_rbc_so
+    model = parsed_rbc_so
     conf = copy.deepcopy(model)
     _, k, z = conf.variables
     delta = sp.Symbol("delta")
@@ -49,7 +49,7 @@ def solver(parsed_rbc_so):
     conf.equations.regimes = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
-    return DSGESolver(conf, kalman)
+    return DSGESolver(conf)
 
 
 @pytest.fixture(scope="module")
