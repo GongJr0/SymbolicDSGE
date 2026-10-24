@@ -21,7 +21,11 @@ import sympy as sp
 from sympy import Symbol, Function, Eq, Expr
 from sympy.core.relational import Relational
 from sympy.logic.boolalg import And, Or, Not
-from sympy.parsing.sympy_parser import standard_transformations, convert_xor
+from sympy.parsing.sympy_parser import (
+    standard_transformations,
+    convert_xor,
+    factorial_notation,
+)
 from numpy import float64
 
 from .config import (
@@ -37,7 +41,43 @@ from .config import (
     FunctionGetterDict,
 )
 
-_GLOBAL_TRANSFORMATIONS = standard_transformations + (convert_xor,)
+_GLOBAL_TRANSFORMATIONS = tuple(
+    t for t in standard_transformations if t is not factorial_notation
+) + (convert_xor,)
+
+# fmt: off
+_GLOBALS = {
+    # User symbols
+    "Symbol":   sp.Symbol,
+
+    # Numbers
+    "Integer":  sp.Integer,
+    "Float":    sp.Float,
+    "Rational": sp.Rational,
+
+    # Variables: fn(time)
+    "Function": sp.Function,
+
+    # Printer supported operators
+    "exp":      sp.exp,
+    "log":      sp.log,
+    "sqrt":     sp.sqrt,
+
+    # Relationals for conditions
+    "Lt":       sp.Lt, "Le": sp.Le,
+    "Gt":       sp.Gt, "Ge": sp.Ge,
+
+    # Logicals for conditions
+    "And":      sp.And,
+    "Or":       sp.Or,
+    "Not":      sp.Not,
+
+    # block builtins. `eval=True` injects it to globals.
+    # Changes nothing for the allowlist, having the key here
+    # prevents the dict from mutating mid-parse.
+    "__builtins__": {},
+}
+# fmt: on
 
 #: The only fields permitted at the top level of a model config. Any other key
 #: is rejected at parse time (see ``_validate_schema``).
@@ -87,14 +127,11 @@ def _caller_stacklevel() -> int:
 
 
 def _parse_in(text: str, _LOCALS: dict[str, Any]) -> Basic:
-    """Parse ``text`` against the config namespace.
-
-    ``evaluate=False`` preserves the authored form rather than SymPy's
-    canonical rearrangement of it.
-    """
+    """Parse ``text`` against the config namespace and safe globals."""
     return sp.parse_expr(
         text,
         local_dict=_LOCALS,
+        global_dict=_GLOBALS,
         evaluate=True,
         transformations=_GLOBAL_TRANSFORMATIONS,
     )
@@ -264,24 +301,17 @@ class ModelParser:
         """
         for name, eq in conf.equations.model.items():
             unknown_atoms = cls._unknown_atoms(conf, eq)
-            if unknown_atoms:
-                raise ValueError(
-                    f"Equation {name!r} references unknown symbols: "
-                    f"{sorted(str(a) for a in unknown_atoms)}"
-                )
+            raise_if_unk("Equation", name, unknown_atoms)
 
         for name, eq in conf.equations.observables.items():
             unknown_atoms = cls._unknown_atoms(conf, eq)
-            if unknown_atoms:
-                raise ValueError(
-                    f"Observable {str(name)!r} references unknown symbols: "
-                    f"{sorted(str(a) for a in unknown_atoms)}"
-                )
+            raise_if_unk("Observable", name, unknown_atoms)
+
             shock_refs = cls._shock_atoms(conf, eq)
             if shock_refs:
                 raise ValueError(
                     f"Observable {str(name)!r} references shock(s) "
-                    f"{sorted(str(a) for a in shock_refs)}; observables may only "
+                    f"{set_sort(shock_refs)!r}; observables may only "
                     f"reference model variables and parameters."
                 )
 
@@ -341,10 +371,7 @@ class ModelParser:
 
             # Check if inequalities refer to uninitialized variables
             unknown_atoms = cls._unknown_atoms(conf, binds, relaxes)
-            if unknown_atoms:
-                raise ValueError(
-                    f"Constraint '{name}' references unknown symbols: {unknown_atoms}"
-                )
+            raise_if_unk("Constraint", name, unknown_atoms)
 
     @classmethod
     def validate_regimes(cls, conf: ModelConfig) -> None:
@@ -371,8 +398,8 @@ class ModelParser:
         unknown_members = {n for key in regimes for n in key} - declared
         if unknown_members:
             raise ValueError(
-                f"Regime keys name undeclared constraints: {sorted(unknown_members)}; "
-                f"declared: {sorted(declared)}"
+                f"Regime keys name undeclared constraints: {set_sort(unknown_members)}; "
+                f"declared: {set_sort(declared)}"
             )
 
         # Every combination of binding constraints needs its own equation set.
@@ -425,7 +452,7 @@ class ModelParser:
             if unknown_atoms:
                 raise ValueError(
                     f"Replacement for '{target}' in regime '{label}' "
-                    f"references unknown symbols: {unknown_atoms}"
+                    f"references unknown symbol(s): {set_sort(unknown_atoms)!r}"
                 )
 
     @classmethod
@@ -439,20 +466,22 @@ class ModelParser:
 
         """
         params = set(conf.calibration.parameters)
+        declared = set(conf.variables)
         for var, expr in conf.ss_seed.items():
             if expr is None:
                 continue
             applied = expr.atoms(AppliedUndef)
+            # An undeclared call is an unsupported function, not a variable: it
+            # arrives applied because the parse namespace admits no other.
+            unknown_calls = {call.func for call in applied} - declared
+            raise_if_unk("ss_seed for variable", var.__name__, unknown_calls)
             if applied:
                 raise ValueError(
                     f"ss_seed for variable '{var.__name__}' must resolve to a number "
-                    f"but references model variables: {applied}"
+                    f"but references model variable(s): {set_sort(applied)!r}"
                 )
             unknown = expr.free_symbols - params
-            if unknown:
-                raise ValueError(
-                    f"ss_seed for variable '{var.__name__}' references unknown symbols: {unknown}"
-                )
+            raise_if_unk("ss_seed for variable", var.__name__, unknown)
 
     def from_yaml(self) -> tuple[dict, ModelConfig]:
         """Parse a YAML configuration file into a :class:`ModelConfig` object.
@@ -933,6 +962,7 @@ def _resolve_calibration_locals(
     """
     calib = data.get("calibration", {}).get("parameters", {}) or {}
     param_syms = {_LOCALS[name] for name in calib}
+    declared_vars = set(_get_variables(data))
 
     values: dict[Symbol, float64] = {}
     local_subs: dict[Symbol, Expr] = {}
@@ -942,15 +972,20 @@ def _resolve_calibration_locals(
             raise TypeError(
                 f"Calibration entry '{name}' is not a valid SymPy Expr: {raw!r}"
             )
-        if applied := expr.atoms(AppliedUndef):
+        applied = expr.atoms(AppliedUndef)
+        # See validate_ss_seed: an undeclared call is an unsupported function.
+        unknown_calls = {call.func.__name__ for call in applied} - declared_vars
+        raise_if_unk("Calibration entry", name, unknown_calls)
+
+        if applied:
             raise ValueError(
                 f"Calibration entry '{name}' references model variable(s): "
-                f"{sorted(map(str, applied))!r}"
+                f"{set_sort(applied)!r}"
             )
         if unknown := expr.free_symbols - param_syms:
             raise ValueError(
                 f"Calibration entry '{name}' references undeclared "
-                f"parameter(s): {sorted(map(str,unknown))!r}"
+                f"parameter(s): {set_sort(unknown)!r}"
             )
         if expr.free_symbols:
             local_subs[_LOCALS[name]] = expr
@@ -970,7 +1005,7 @@ def _resolve_calibration_locals(
     if cyclic := {s for s, e in local_subs.items() if e.free_symbols & derived}:
         raise ValueError(
             "Calibration entries reference each other in a cycle: "
-            f"{sorted(s.name for s in cyclic)}"
+            f"{set_sort(cyclic)!r}"
         )
 
     return SymbolGetterDict(values), local_subs
@@ -989,7 +1024,7 @@ def _parse_shock_calibration(
     if missing := {shock.name for shock in shock_syms} - set(std_map):
         raise ValueError(
             "Missing standard deviation parameter(s) in calibration.shocks.std "
-            f"for shock(s): {sorted(missing)!r}"
+            f"for shock(s): {set_sort(missing)!r}"
         )
     shock_std: dict[Symbol, str] = {shock: std_map[shock.name] for shock in shock_syms}
 
@@ -1059,7 +1094,7 @@ def _parse_measurement_noise(
     if missing := set(observables) - set(std_param_map):
         raise ValueError(
             "Missing standard deviation parameter(s) in calibration.measurement_noise.std: "
-            f"{sorted(missing)!r}"
+            f"{set_sort(missing)!r}"
         )
 
     corr_param_map = PairGetterDict({})
@@ -1114,18 +1149,18 @@ def _require_calibrated_params(
 
     referenced = {p for p in referenced if isinstance(p, str)}
 
-    unknown = sorted(referenced - params.keys())
+    unknown = referenced - params.keys()
     if unknown:
         raise ValueError(
-            "Config references parameter(s) not declared in `calibration.parameters`: "
-            + ", ".join(unknown)
+            "Config references parameter(s) not declared in "
+            f"`calibration.parameters`: {set_sort(unknown)!r}"
         )
 
     named_locals = referenced & {sym.name for sym in local_subs}
     if named_locals:
         raise ValueError(
             "Shock and measurement cannot reference derived calibration entries: "
-            f"{sorted(named_locals)!r}"
+            f"{set_sort(named_locals)!r}"
         )
 
 
@@ -1155,3 +1190,15 @@ def _raise_if_not_unique(values: Sequence[Any], preamble: str) -> None:
         )
         if duplicates:
             raise ValueError(f"{preamble}" f"\nDuplicate entries: {duplicates}.")
+
+
+def set_sort(s: set[Any]) -> list[Any]:
+    """Return a sorted list of the set's elements."""
+    return sorted(map(str, s))
+
+
+def raise_if_unk(place: str, name: str | Symbol, unk: set[Any]) -> None:
+    if unk:
+        raise ValueError(
+            f"{place} {str(name)!r} references unknown symbol(s): {set_sort(unk)}"
+        )

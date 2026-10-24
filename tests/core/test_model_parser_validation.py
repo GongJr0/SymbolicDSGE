@@ -319,6 +319,59 @@ def test_accepts_an_empty_ss_seed_block():
     assert model.ss_seed["x"] is None
 
 
+# ---------------- the restricted parse namespace ----------------
+
+# A name the config namespace does not carry resolves against ``_GLOBALS``,
+# which admits only the functions a printer renders. Every other SymPy name
+# reaches validation as an ordinary unknown symbol rather than as a constant.
+
+
+@pytest.mark.parametrize("name", ["pi", "E", "I", "oo", "nan", "EulerGamma"])
+def test_rejects_sympy_constants_as_undeclared_symbols(name):
+    text = BASE.replace("rho * x(t) + e", f"rho * x(t) + {name} + e")
+    with pytest.raises(
+        ValueError, match=rf"references unknown symbol\(s\): \['{name}'\]"
+    ):
+        _parse(text)
+
+
+@pytest.mark.parametrize(
+    "call", ["tan(x(t))", "sin(x(t))", "Abs(x(t))", "Max(x(t), 0)"]
+)
+def test_rejects_calls_no_printer_renders(call):
+    name = call.split("(")[0]
+    text = BASE.replace("rho * x(t) + e", f"rho * {call} + e")
+    with pytest.raises(
+        ValueError, match=rf"references unknown symbol\(s\): \['{name}'\]"
+    ):
+        _parse(text)
+
+
+def test_rejects_factorial_notation():
+    text = BASE.replace("rho * x(t)", "rho! * x(t)")
+    with pytest.raises(SyntaxError, match="invalid syntax"):
+        _parse(text)
+
+
+def test_rejects_unrenderable_call_in_ss_seed():
+    text = BASE.replace("variables: [x]", "variables: [x]\nss_seed:\n  x: tan(rho)")
+    with pytest.raises(ValueError, match=r"references unknown symbol\(s\): \['tan'\]"):
+        _parse(text)
+
+
+def test_rejects_model_variable_in_ss_seed():
+    # The declared-variable branch, which the unknown-call guard must not claim.
+    text = BASE.replace("variables: [x]", "variables: [x]\nss_seed:\n  x: x(t)")
+    with pytest.raises(ValueError, match="must resolve to a number"):
+        _parse(text)
+
+
+def test_rejects_unrenderable_call_in_calibration_entry():
+    text = BASE.replace("    sig: 0.1", "    sig: 0.1\n    bad: tan(rho)")
+    with pytest.raises(ValueError, match=r"references unknown symbol\(s\): \['tan'\]"):
+        _parse(text)
+
+
 # ---------------- helper guards with no authored expression ----------------
 
 
@@ -348,3 +401,27 @@ def test_sympy_parsers_relational_and_expr_guards():
     # a relational is not an Expr
     with pytest.raises(TypeError, match="not a valid SymPy Expr"):
         get_expr("x > y")
+
+
+def test_sympy_parsers_accept_spelled_out_conditions():
+    locals_ = {"x": sp.Symbol("x"), "y": sp.Symbol("y")}
+    _get_expr, get_relational, _get_eq = _sympy_parsers(locals_, {})
+
+    assert get_relational("And((x > 0), (y < 1))").func is sp.And
+    assert get_relational("Or((x > 0), (y < 1))").func is sp.Or
+    assert get_relational("Not(x > 0)").rel_op == "<="
+    assert get_relational("Le(x, 0)").rel_op == "<="
+    # An equality has no distance to a boundary, so no printer renders it and
+    # its name is not admitted.
+    with pytest.raises(TypeError, match="not a valid SymPy Relational"):
+        get_relational("Eq(x, 0)")
+
+
+@pytest.mark.parametrize(
+    "text, func",
+    # sqrt lowers to a Pow, which the printer reaches through its exponent.
+    [("exp(x)", sp.exp), ("log(x)", sp.log), ("sqrt(x)", sp.Pow)],
+)
+def test_sympy_parsers_resolve_the_renderable_functions(text, func):
+    get_expr, _get_relational, _get_eq = _sympy_parsers({"x": sp.Symbol("x")}, {})
+    assert get_expr(text).func is func

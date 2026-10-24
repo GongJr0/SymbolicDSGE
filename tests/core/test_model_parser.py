@@ -118,7 +118,7 @@ def test_validate_constraints_errors_on_unknown_symbols(conf):
         "obc": Constraint(bind=ghost(t) < 0, relax=ghost(t) >= 0)
     }
 
-    with pytest.raises(ValueError, match="unknown symbols"):
+    with pytest.raises(ValueError, match=r"unknown symbol\(s\)"):
         ModelParser.validate_constraints(conf)
 
 
@@ -469,7 +469,7 @@ def test_validate_regimes_rejects_unknown_symbols_in_replacements(conf):
         frozenset({"obc"}): {target: sp.Eq(var(t), sp.Symbol("typo_symbol"))}
     }
 
-    with pytest.raises(ValueError, match="references unknown symbols"):
+    with pytest.raises(ValueError, match=r"references unknown symbol\(s\)"):
         ModelParser.validate_regimes(conf)
 
 
@@ -502,7 +502,7 @@ def test_validate_ss_seed_errors_on_undeclared_parameter(conf):
     var = conf.variables[0]
     conf.ss_seed[var] = sp.Symbol("not_a_param")
 
-    with pytest.raises(ValueError, match="references unknown symbols"):
+    with pytest.raises(ValueError, match=r"references unknown symbol\(s\)"):
         ModelParser.validate_ss_seed(conf)
 
 
@@ -520,7 +520,7 @@ def test_parser_rejects_undeclared_ss_seed_symbol(tmp_path, test_model_yaml):
     data["ss_seed"] = {"u": "u_bar"}
     bad = _write_yaml(tmp_path / "bad_ss_seed.yaml", data)
 
-    with pytest.raises(ValueError, match="references unknown symbols"):
+    with pytest.raises(ValueError, match=r"references unknown symbol\(s\)"):
         ModelParser(bad)
 
 
@@ -529,7 +529,7 @@ def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path, test_model_y
     data["calibration"]["parameters"].pop("beta")
     bad = _write_yaml(tmp_path / "missing_declared.yaml", data)
 
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match=r"references unknown symbol\(s\)"):
         ModelParser(bad)
 
 
