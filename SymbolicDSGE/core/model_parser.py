@@ -164,7 +164,7 @@ class ModelParser:
         self.validate_ss_seed(conf)
 
     def get(self) -> ModelConfig:
-        """Return the parsed model config, without the Kalman block.
+        """Return the parsed model config.
 
         Returns
         -------
@@ -527,10 +527,10 @@ class ModelParser:
     ) -> str:
         """Emit the authored configuration as canonical YAML text.
 
-        Re-dumps the retained ``raw_data`` so the Kalman block and the
-        ``(t)``/``(t+1)`` equation grammar round-trip through :class:`ModelParser`
-        unchanged. When ``config`` is given, its calibration is baked in (rounded
-        to ``digits``), capturing e.g. estimated parameter values.
+        Re-dumps the retained ``raw_data`` so the equation grammar round-trip
+        through :class:`ModelParser` unchanged. When ``config`` is given, its
+        calibration is baked in (rounded to ``digits``), capturing e.g. estimated
+        parameter values.
         """
         data_out = copy.deepcopy(self.raw_data)
 

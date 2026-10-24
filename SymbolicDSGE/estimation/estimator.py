@@ -61,7 +61,7 @@ class Estimator:
     joseph_cov : bool
         Whether to use the Joseph form of the covariance update in the Kalman filter.
     R : NDF | None
-        Observation covariance matrix. If none, the model's Kalman configuration must provide a symbolic or scalar R.
+        Observation covariance matrix. If none, the model configuration must provide it.
     P0 : NDF | None
         Initial state covariance matrix for the Kalman filter. If none, the model's stationary state covariance is used.
 
@@ -110,7 +110,7 @@ class Estimator:
         if meas_noise is None and R is None:
             raise ValueError(
                 "R must be provided in symbolic or scalar form, either through the "
-                "model's Kalman configuration or as a parameter override."
+                "model configuration or as a parameter override."
             )
 
         self.observables = observables
