@@ -261,8 +261,6 @@ SolvedModel.save_sdsge(
 ) -> Path
 ```
 
-1. Override the YAML embedded in the bundle. Defaults to `compiled.config.source_yaml` (populated automatically by `#!python ModelParser`).
-
 Write a model-only `.sdsge` bundle around this `#!python SolvedModel`. For bundles that also carry estimation, Monte Carlo, or simulation members, use [`SolvedModel.to_bundle_builder`](#solvedmodelto_bundle_builder) and chain the additions before calling `.write()`.
 
 __Inputs:__
