@@ -17,6 +17,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from SymbolicDSGE import parse_config
 from SymbolicDSGE.monte_carlo import MCPipeline, OpType
 from SymbolicDSGE.monte_carlo.step_factories import (
     add_payload_step,
@@ -301,7 +302,6 @@ def test_transform_pipeline_round_trips_through_bundle(
     from SymbolicDSGE.ui.mc import build_pipeline as build_live_pipeline
     from tests._spec_helpers import as_posted
 
-    yaml_text = test_model_path.read_text(encoding="utf-8")
     # Authored the way the GUI posts it, then lowered through the UI boundary,
     # which is what resolves op kinds, source legs and the wald target field.
     pipeline = as_posted(
@@ -348,7 +348,7 @@ def test_transform_pipeline_round_trips_through_bundle(
 
     target = (
         BundleBuilder(created_by="tx-test")
-        .add_model("reference", yaml_text, compile_kwargs={})
+        .add_model("reference", parse_config(test_model_path), compile_kwargs={})
         .add_mc(build_live_pipeline(pipeline))
         .write(tmp_path / "tx.sdsge")
     )

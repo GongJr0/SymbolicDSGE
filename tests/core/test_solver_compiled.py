@@ -12,7 +12,7 @@ import yaml
 from numpy import float64
 import pytest
 
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver, parse_config
 from SymbolicDSGE._ckernels.core import jacobian_eval, measurement_eval
 
 
@@ -214,7 +214,7 @@ def test_post82_randomized_calibration_still_solves(tmp_path, post82_test_model_
     out = tmp_path / "post82_randomized.yaml"
     out.write_text(yaml.safe_dump(base, sort_keys=False), encoding="utf-8")
 
-    model = ModelParser(out).get()
+    model = parse_config(out)
     solver = DSGESolver(model)
     compiled = solver.compile()
     solved = solver.solve(compiled)

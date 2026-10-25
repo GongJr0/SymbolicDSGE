@@ -161,6 +161,11 @@ class BundleBuilder:
         ``compile_kwargs``/``solve_kwargs`` are recorded so the loader rebuilds an
         identical :class:`SolvedModel`.
         """
+        if not name:
+            raise ValueError(
+                "`name` must be a non-empty string to identify the model in the bundle."
+            )
+
         path = _MODEL_PATH.format(name=name)
         options: dict[str, Any] = {}
         if compile_kwargs:

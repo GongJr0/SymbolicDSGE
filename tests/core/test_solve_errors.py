@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from SymbolicDSGE._ckernels.core._solve_errors import SolveStatus
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver, parse_config
 from SymbolicDSGE.core.solver_backend import (
     _FAILURES,
     DecisionRuleError,
@@ -74,7 +74,7 @@ def _overflowing_residual_yaml() -> str:
 
 
 def _compiled(path: Path):
-    model = ModelParser(path).get()
+    model = parse_config(path)
     solver = DSGESolver(model)
     return solver, solver.compile()
 

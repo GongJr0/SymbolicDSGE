@@ -21,7 +21,7 @@ import sympy as sp
 import yaml
 from sympy.core.function import AppliedUndef
 
-from SymbolicDSGE.core import ModelParser
+from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.desugar import desugar_model
 
 t = sp.Symbol("t", integer=True)
@@ -67,7 +67,7 @@ NATURAL_TIME_MODEL = {
 def _parse(tmp_path, data):
     path = tmp_path / f"model_{len(list(tmp_path.iterdir()))}.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-    return ModelParser(path).get()
+    return parse_config(path)
 
 
 def _deep(tmp_path, **equations: str):

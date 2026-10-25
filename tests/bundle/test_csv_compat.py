@@ -76,11 +76,11 @@ def test_trace_to_csv_rejects_mismatched_lengths() -> None:
 # -- builder writes CSV members ---------------------------------------------
 
 
-def test_builder_writes_observed_with_semantic_headers(test_model_yaml) -> None:
+def test_builder_writes_observed_with_semantic_headers(parsed_test) -> None:
     matrix = np.array([[1.0, 2.0], [3.0, 4.0]])
     builder = (
         BundleBuilder()
-        .add_model("reference", test_model_yaml)
+        .add_model("reference", parsed_test)
         .add_estimation(
             _estimation_source(_estimation_spec(matrix, observables=("gdp", "infl"))),
             as_parquet=False,
@@ -97,7 +97,7 @@ def test_builder_writes_observed_with_semantic_headers(test_model_yaml) -> None:
     assert text.splitlines()[0] == "gdp,infl"
 
 
-def test_builder_writes_posterior_and_mc_traces_as_csv(test_model_yaml) -> None:
+def test_builder_writes_posterior_and_mc_traces_as_csv(parsed_test) -> None:
     result = MCMCResult(
         param_names=["beta", "sigma"],
         samples=np.array([[1.0, 2.0], [3.0, 4.0]]),
@@ -110,7 +110,7 @@ def test_builder_writes_posterior_and_mc_traces_as_csv(test_model_yaml) -> None:
     )
     builder = (
         BundleBuilder()
-        .add_model("reference", test_model_yaml)
+        .add_model("reference", parsed_test)
         .add_estimation(
             _estimation_source(_estimation_spec()), result=result, as_parquet=False
         )
@@ -136,7 +136,7 @@ def test_builder_observable_names_length_must_match_matrix() -> None:
 
 
 def test_csv_mode_round_trips_through_builder_and_loader(
-    tmp_path: Path, test_model_yaml, compiled_test
+    tmp_path: Path, parsed_test, compiled_test
 ) -> None:
     rng = np.random.default_rng(1)
     observed = rng.standard_normal((10, 2))
@@ -158,7 +158,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(
 
     target = (
         BundleBuilder(created_by="csv-test")
-        .add_model("reference", test_model_yaml, compile_kwargs={})
+        .add_model("reference", parsed_test, compile_kwargs={})
         .add_estimation(
             _estimator(compiled_test, observed),
             result=result,

@@ -13,7 +13,8 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE._ckernels.core._core import klein_preprocess
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import parse_config
 from _oracles.core import _approximate_system_numeric
 from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
 from _residual_call import residual_caller
@@ -23,7 +24,7 @@ ATOL = 1e-12
 
 
 def _compiled(path: Path):
-    model = ModelParser(path).get()
+    model = parse_config(path)
     return DSGESolver(model).compile()
 
 

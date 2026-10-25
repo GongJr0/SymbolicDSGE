@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver, parse_config
 from SymbolicDSGE.core.solver_backend import BKStatus
 
 MODELS = Path(__file__).resolve().parents[1] / "fixtures" / "models"
 
 
 def _compiled(name: str):
-    model = ModelParser(MODELS / name).get()
+    model = parse_config(MODELS / name)
     solver = DSGESolver(model)
     return solver, solver.compile()
 

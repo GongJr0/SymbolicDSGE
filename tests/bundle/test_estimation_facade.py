@@ -59,10 +59,10 @@ def _optimization_result() -> MAPResult:
     )
 
 
-def test_facade_flattens_optimization_run(estimator, test_model_yaml) -> None:
+def test_facade_flattens_optimization_run(estimator, parsed_test) -> None:
     builder = (
         BundleBuilder()
-        .add_model("reference", test_model_yaml)
+        .add_model("reference", parsed_test)
         .add_estimation(estimator, result=_optimization_result())
     )
     _, files = builder.build()
@@ -86,7 +86,7 @@ def test_facade_flattens_optimization_run(estimator, test_model_yaml) -> None:
     assert "estimation/observed.parquet" in files
 
 
-def test_facade_flattens_mcmc_run_with_posterior(estimator, test_model_yaml) -> None:
+def test_facade_flattens_mcmc_run_with_posterior(estimator, parsed_test) -> None:
     rng = np.random.default_rng(0)
     mcmc = MCMCResult(
         param_names=[PARAM],
@@ -102,7 +102,7 @@ def test_facade_flattens_mcmc_run_with_posterior(estimator, test_model_yaml) -> 
 
     builder = (
         BundleBuilder()
-        .add_model("reference", test_model_yaml)
+        .add_model("reference", parsed_test)
         .add_estimation(estimator, result=mcmc)
     )
     _, files = builder.build()

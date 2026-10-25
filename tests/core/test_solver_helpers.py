@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 import sympy as sp
 
-from SymbolicDSGE.core import ModelParser
+from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.solver import DSGESolver, _resolve_order
 
 t = sp.Symbol("t")
@@ -112,7 +112,7 @@ def deep_compiled(tmp_path, test_model_path):
     data["equations"]["model"]["u_process"] = "u(t) = rho_u*u(t-3) + e_u"
     path = tmp_path / "deep_test.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-    model = ModelParser(path).get()
+    model = parse_config(path)
     return DSGESolver(model).compile()
 
 

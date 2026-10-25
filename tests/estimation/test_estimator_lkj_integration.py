@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 from sympy import Symbol
 
-from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE import DSGESolver, parse_config
 from SymbolicDSGE.bayesian import make_prior
 from SymbolicDSGE.bayesian.priors import Prior
 from SymbolicDSGE.bayesian.transforms.cholesky_corr import CholeskyCorrTransform
@@ -18,7 +18,7 @@ from SymbolicDSGE.estimation.prior_program import TransformCode
 
 @pytest.fixture(scope="module")
 def dense_lkj_bundle(dense_lkj_test_model_path):
-    model = ModelParser(dense_lkj_test_model_path).get()
+    model = parse_config(dense_lkj_test_model_path)
     solver = DSGESolver(model)
     compiled = solver.compile()
 

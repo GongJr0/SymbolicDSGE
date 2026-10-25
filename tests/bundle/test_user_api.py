@@ -1,44 +1,26 @@
 """Surface tests for the top-level user-facing bundle API.
 
-Covers source-YAML retention on :class:`ModelConfig`, the
-:meth:`SolvedModel.to_bundle_builder` / :meth:`save_sdsge` shortcuts, and the
-re-exports at ``SymbolicDSGE`` root (``load_bundle`` / ``BundleBuilder`` /
-``LoadedBundle``).
+Covers the :meth:`SolvedModel.to_bundle_builder` / :meth:`save_sdsge`
+shortcuts and the re-exports at ``SymbolicDSGE`` root (``load_bundle`` /
+``BundleBuilder`` / ``LoadedBundle``).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 import SymbolicDSGE
 from SymbolicDSGE import (
     BundleBuilder,
-    ModelParser,
     load_bundle,
 )
 from SymbolicDSGE.bundle import LoadedBundle
+from SymbolicDSGE.core.config_emitter import emit_config_yaml
 
 
 def test_top_level_exports_are_importable() -> None:
     assert SymbolicDSGE.load_bundle is load_bundle
     assert SymbolicDSGE.BundleBuilder is BundleBuilder
-
-
-def test_path_based_parser_retains_source_yaml(
-    test_model_path, test_model_yaml
-) -> None:
-    parser = ModelParser(test_model_path)
-    assert parser.config.source_yaml == test_model_yaml
-
-
-def test_from_string_preserves_source_text_exactly(test_model_yaml) -> None:
-    # Includes the temp-file round-trip — the source_yaml field must hold the
-    # caller's exact input, not whatever the temp file ended up with.
-    weird_text = test_model_yaml + "\n# trailing comment\n"
-    parser = ModelParser.from_string(weird_text)
-    assert parser.config.source_yaml == weird_text
 
 
 def test_save_sdsge_round_trips_via_load_bundle(tmp_path: Path, solved_test) -> None:
@@ -66,32 +48,17 @@ def test_to_bundle_builder_returns_chainable_builder(
     assert loaded.models["reference"] is not None
 
 
-def test_save_sdsge_yaml_text_override_takes_precedence(
-    tmp_path: Path, test_model_yaml, solved_test
+def test_save_sdsge_accepts_a_config_with_no_parse_history(
+    tmp_path: Path, solved_test
 ) -> None:
-    solved = solved_test
-    override = test_model_yaml + "\n# explicit override marker\n"
-    target = solved.save_sdsge(
-        tmp_path / "override.sdsge",
-        yaml_text=override,
-        compile_kwargs={},
-    )
+    target = solved_test.save_sdsge(tmp_path / "emitted.sdsge", compile_kwargs={})
     loaded = load_bundle(target)
-    assert loaded.manifest.model_member("reference") is not None
-    # The bundle's embedded YAML is the override, not the retained source.
-    member_path = loaded.manifest.model_member("reference").path
+    member = loaded.manifest.model_member("reference")
+    assert member is not None
+
     from SymbolicDSGE.bundle.container import BundleArchive
 
     archive = BundleArchive.open(target)
-    assert archive.read_text(member_path) == override
-
-
-def test_save_sdsge_raises_without_source_yaml(
-    tmp_path: Path, solved_test, monkeypatch
-) -> None:
-    # Simulate a programmatically constructed config (no parse history). The
-    # model is session-wide, so this is reverted at teardown rather than left
-    # for whatever runs next in the worker.
-    monkeypatch.setattr(solved_test.compiled.config, "source_yaml", None)
-    with pytest.raises(ValueError, match="source YAML"):
-        solved_test.save_sdsge(tmp_path / "nope.sdsge")
+    assert archive.read_text(member.path) == emit_config_yaml(
+        solved_test.compiled.config
+    )

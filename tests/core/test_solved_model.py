@@ -17,7 +17,7 @@ from SymbolicDSGE.core.solved_model import (
     FirstOrderSolvedModel,
     SecondOrderSolvedModel,
 )
-from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE import DSGESolver, parse_config
 from SymbolicDSGE._ckernels.core import (
     affine_observations_into,
     simulate_linear_states_into,
@@ -539,7 +539,7 @@ def test_resolvers_rebuild_symbolic_R_from_current_calibration(
     The three parameters move after the compile, so a prebuilt matrix would
     still report the parsed values here.
     """
-    model = ModelParser(post82_test_model_path).get()
+    model = parse_config(post82_test_model_path)
     solver = DSGESolver(model)
     compiled = solver.compile()
 
@@ -587,7 +587,7 @@ def variant(tmp_path, test_model_path):
         path = tmp_path / f"variant_{len(list(tmp_path.iterdir()))}.yaml"
         path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
-        model = ModelParser(path).get()
+        model = parse_config(path)
         solver = DSGESolver(model)
         compiled = solver.compile()
         return model, compiled, solver.solve(compiled=compiled)
