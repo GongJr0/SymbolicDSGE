@@ -27,14 +27,13 @@ import io
 import numpy as np
 import pandas as pd
 
-from SymbolicDSGE import BundleBuilder, DSGESolver, ModelParser
+from SymbolicDSGE import BundleBuilder, DSGESolver, parse_config
 
 bundle = BundleBuilder(created_by="experiment-1")  # (1)!
+config = parse_config("../../MODELS/POST82.yaml")
 
-parser = ModelParser("../../MODELS/POST82.yaml")  # (2)!
-model = parser.get()
 
-solver = DSGESolver(model)
+solver = DSGESolver(config)
 compiled = solver.compile()
 sol = solver.solve(
     compiled,
@@ -43,7 +42,7 @@ sol = solver.solve(
 
 bundle.add_model(
     "reference",
-    model.source_yaml, # (3)!
+    config,
     solve_kwargs={"ss_seed": [0.0, 0.0, 0.0, 0.0, 0.0]},
 )
 
@@ -53,17 +52,13 @@ bundle.add_model(
 # at build/write time.
 bundle.add_model(
     "dgp",
-    model.source_yaml,  # same model as "reference" here, but could be any model
+    config,  # same model as "reference" here, but could be any model
     solve_kwargs={"ss_seed": [0.0, 0.0, 0.0, 0.0, 0.0]},
 )
 ```
 
 1. We can set `created_by` to any string; it is recorded in the bundle manifest for provenance. Defaults to `"SymbolicDSGE <version>"` when omitted.
-2. `ModelParser` populates `ModelConfig.source_yaml` automatically; the bundle uses it without reading the file again.
-3. The bundle keeps the YAML text originating our model. The loader will respect the solve/compile kwargs and solve the model again to obtain the exact same `SolvedModel` deterministically.
 
-???+ note "Why we solve first"
-    The bundle preserves the YAML and the recorded compile/solve kwargs, then runs them again at load time. Solving here is only required if we want to attach an estimation, an MC pipeline, or a result derived from a `SolvedModel`. Bundles that only carry authored model text do not need a live `SolvedModel`.
 
 ## Specify the estimation tab
 
@@ -229,23 +224,23 @@ unzip -l experiment-1.sdsge
 Archive:  experiment-1.sdsge
   Length      Date    Time    Name
 ---------  ---------- -----   ----
-     3826  24-10-2026 04:36   manifest.json
-     2088  24-10-2026 04:36   model/reference.yaml
-     2088  24-10-2026 04:36   model/dgp.yaml
-      643  24-10-2026 04:36   estimation/spec.json
-     1891  24-10-2026 04:36   estimation/observed.parquet
-    18922  24-10-2026 04:36   estimation/posterior.parquet
-      585  24-10-2026 04:36   estimation/result.json
-     7131  24-10-2026 04:36   shock/table/aadb84934fad3b59.parquet
-     1322  24-10-2026 04:36   montecarlo/pipeline.json
-      564  24-10-2026 04:36   montecarlo/result/meta.json
-      538  24-10-2026 04:36   montecarlo/result/datagen/datagen_steps.json
-      175  24-10-2026 04:36   montecarlo/result/tests/test_steps.json
-     2276  24-10-2026 04:36   montecarlo/result/tests/test_traces.parquet
-      305  24-10-2026 04:36   simulation.json
-     1282  24-10-2026 04:36   data/auxiliary_series.parquet
+     3826  25-10-2026 17:56   manifest.json
+     1292  25-10-2026 17:56   model/reference.yaml
+     1292  25-10-2026 17:56   model/dgp.yaml
+      643  25-10-2026 17:56   estimation/spec.json
+     1891  25-10-2026 17:56   estimation/observed.parquet
+    18922  25-10-2026 17:56   estimation/posterior.parquet
+      585  25-10-2026 17:56   estimation/result.json
+     7131  25-10-2026 17:56   shock/table/aadb84934fad3b59.parquet
+     1322  25-10-2026 17:56   montecarlo/pipeline.json
+      563  25-10-2026 17:56   montecarlo/result/meta.json
+      538  25-10-2026 17:56   montecarlo/result/datagen/datagen_steps.json
+      175  25-10-2026 17:56   montecarlo/result/tests/test_steps.json
+     2276  25-10-2026 17:56   montecarlo/result/tests/test_traces.parquet
+      305  25-10-2026 17:56   simulation.json
+     1282  25-10-2026 17:56   data/auxiliary_series.parquet
 ---------                     -------
-    43636                     15 files
+    42043                     15 files
 ```
 
 For a structured view, decompile it:

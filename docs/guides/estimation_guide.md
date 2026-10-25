@@ -22,7 +22,7 @@ We will cover:
 ## Parse Configs and Compile
 
 ```python
-from SymbolicDSGE import ModelParser, DSGESolver
+from SymbolicDSGE import DSGESolver, parse_config
 from SymbolicDSGE.utils import FRED
 from SymbolicDSGE.utils.math_utils import HP_two_sided, annualized_log_percent
 from SymbolicDSGE.bayesian import make_prior
@@ -33,7 +33,7 @@ from typing import cast
 import numpy as np
 import pandas as pd
 
-model = ModelParser("../../MODELS/POST82.yaml").get()
+model = parse_config("../../MODELS/POST82.yaml")
 
 solver = DSGESolver(model)
 comp = solver.compile()
@@ -129,6 +129,7 @@ res, sol = solver.estimate_and_solve(
     n_draws=100_000, # (6)!
     burn_in=10_000, # (7)!
     thin=1, # (8)!
+    random_state=0, # (9)!
 )
 
 res = cast(MCMCResult, res)
@@ -142,9 +143,10 @@ res = cast(MCMCResult, res)
 6. Effective sample size (retained draws).
 7. Burn-in iterations.
 8. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
+9. Seed the draws for reproducibility. If `None`, the draws are not seeded.
 
 ```text
-MCMC sampling concluded in 6.21 seconds with 17709.52 iterations per second.
+MCMC sampling concluded in 5.96 seconds with 18466.43 iterations per second.
 [Estimator:mcmc] BK stability warnings encountered during search: 0
 ```
 
@@ -197,24 +199,24 @@ pd.Series(
 
 ```text
 beta                0.970
-rho_r               0.820
-rho_g               0.881
+rho_r               0.821
+rho_g               0.879
 rho_z               0.857
-psi_pi              3.124
+psi_pi              3.128
 psi_x               0.335
-kappa               0.477
-tau_inv             1.138
-rho_gz              0.103
-rho_gr             -0.092
-rho_zr              0.086
-meas_rho_ir        -0.137
-sig_r               0.090
-sig_g               0.197
-sig_z               0.638
-meas_infl           1.206
-meas_rate           0.044
-loglik           -228.498
-accept_rate         0.168
+kappa               0.476
+tau_inv             1.158
+rho_gz              0.095
+rho_gr             -0.089
+rho_zr              0.093
+meas_rho_ir        -0.124
+sig_r               0.093
+sig_g               0.201
+sig_z               0.647
+meas_infl           1.194
+meas_rate           0.045
+loglik           -228.579
+accept_rate         0.164
 n_draws        100000.000
 burn_in         10000.000
 thin                1.000
@@ -236,22 +238,22 @@ res.hpd_intervals(alpha=0.05, n_digits=3) # (1)!
 1. `alpha` is the probability mass outside the interval. For example, `alpha=0.05` means we want to compute the 95% HPD interval. `n_digits` is the number of digits to round the output to.
 
 ```text
-{'beta': (np.float64(0.947), np.float64(0.991)),
- 'rho_r': (np.float64(0.771), np.float64(0.866)),
- 'rho_g': (np.float64(0.841), np.float64(0.92)),
- 'rho_z': (np.float64(0.805), np.float64(0.905)),
- 'psi_pi': (np.float64(2.076), np.float64(4.166)),
- 'psi_x': (np.float64(0.125), np.float64(0.549)),
- 'kappa': (np.float64(0.298), np.float64(0.656)),
- 'tau_inv': (np.float64(0.552), np.float64(1.892)),
- 'rho_gz': (np.float64(-0.701), np.float64(0.868)),
- 'rho_gr': (np.float64(-0.747), np.float64(0.584)),
- 'rho_zr': (np.float64(-0.64), np.float64(0.808)),
- 'meas_rho_ir': (np.float64(-0.892), np.float64(0.636)),
- 'sig_r': (np.float64(0.022), np.float64(0.159)),
- 'sig_g': (np.float64(0.076), np.float64(0.308)),
- 'sig_z': (np.float64(0.452), np.float64(0.834)),
- 'meas_infl': (np.float64(0.724), np.float64(1.523)),
+{'beta': (np.float64(0.946), np.float64(0.991)),
+ 'rho_r': (np.float64(0.775), np.float64(0.867)),
+ 'rho_g': (np.float64(0.837), np.float64(0.92)),
+ 'rho_z': (np.float64(0.801), np.float64(0.903)),
+ 'psi_pi': (np.float64(2.14), np.float64(4.165)),
+ 'psi_x': (np.float64(0.147), np.float64(0.549)),
+ 'kappa': (np.float64(0.31), np.float64(0.66)),
+ 'tau_inv': (np.float64(0.497), np.float64(1.915)),
+ 'rho_gz': (np.float64(-0.694), np.float64(0.871)),
+ 'rho_gr': (np.float64(-0.751), np.float64(0.558)),
+ 'rho_zr': (np.float64(-0.636), np.float64(0.815)),
+ 'meas_rho_ir': (np.float64(-0.886), np.float64(0.672)),
+ 'sig_r': (np.float64(0.025), np.float64(0.164)),
+ 'sig_g': (np.float64(0.071), np.float64(0.335)),
+ 'sig_z': (np.float64(0.461), np.float64(0.856)),
+ 'meas_infl': (np.float64(0.716), np.float64(1.529)),
  'meas_rate': (np.float64(0.0), np.float64(0.106))}
 ```
 

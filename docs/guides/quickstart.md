@@ -14,10 +14,10 @@ We will use a pre-defined config file (accessible in the [repository](https://gi
 
 ## Reading Model Configuration
 
-The configuration files are parsed by the `#!python SymbolicDSGE.ModelParser` class.
+The configuration files are parsed by the `#!python SymbolicDSGE.parse_config` function.
 
 ```python
-from SymbolicDSGE import ModelParser, DSGESolver, Shock
+from SymbolicDSGE import DSGESolver, Shock, parse_config
 
 from sympy import Matrix
 from warnings import catch_warnings, simplefilter
@@ -27,7 +27,7 @@ from numpy import ceil, sqrt
 import pandas as pd
 import matplotlib.pyplot as plt
 
-model = ModelParser("../../MODELS/POST82.yaml").get()
+model = parse_config("../../MODELS/POST82.yaml")
 
 with catch_warnings():
     # Equations in a sp.Matrix are deprecated, this is only used as a pretty print function
