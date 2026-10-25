@@ -377,7 +377,6 @@ class SolvedModel(ABC, Generic[Policy]):
         path: "str | Any",
         *,
         name: str = "reference",
-        digits: int | None = None,
         compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,
     ) -> "Any":
