@@ -12,10 +12,10 @@ without writing any code (beyond the YAML model specification).
 from .core import (
     DSGESolver,
     ModelConfig,
-    ModelParser,
     Shock,
     ShockPath,
     SolvedModel,
+    parse_config,
 )
 from .kalman import KalmanFilter
 from .estimation import Estimator
@@ -24,7 +24,7 @@ from . import utils
 
 __all__ = [
     "ModelConfig",
-    "ModelParser",
+    "parse_config",
     "DSGESolver",
     "SolvedModel",
     "KalmanFilter",

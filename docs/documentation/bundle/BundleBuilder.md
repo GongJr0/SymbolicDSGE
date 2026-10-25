@@ -34,8 +34,9 @@ __Methods:__
 ```python
 BundleBuilder.add_model(
     name: str,
-    yaml_text: str,
+    model: SolvedModel | CompiledModel | ModelConfig,
     *,
+    digits: int | None = None,
     compile_kwargs: Mapping[str, Any] | None = None, # (1)!
     solve_kwargs: Mapping[str, Any] | None = None,   # (2)!
 ) -> BundleBuilder
@@ -46,12 +47,12 @@ BundleBuilder.add_model(
 
 Add a model configuration to the bundle. `yaml_text` is the source YAML the loader will re-parse.
 
-| __Name__       |                                                                __Description__ |
-|:---------------|-------------------------------------------------------------------------------:|
-| name           |           Name of the added model, other members refer to a model by its name. |
-| yaml_text      | Source YAML text. Available on a parsed `ModelConfig` at `config.source_yaml`. |
-| compile_kwargs |                      Compile kwargs the loader passes to `DSGESolver.compile`. |
-| solve_kwargs   |                          Solve kwargs the loader passes to `DSGESolver.solve`. |
+| __Name__       |                                                                   __Description__ |
+|:---------------|----------------------------------------------------------------------------------:|
+| name           |              Name of the added model, other members refer to a model by its name. |
+| model          | `ModelConfig` or both model variants that store one. Serialized into YAML format. |
+| compile_kwargs |                          Compile kwargs the loader passes to `DSGESolver.compile`.|
+| solve_kwargs   |                             Solve kwargs the loader passes to `DSGESolver.solve`. |
 
 &nbsp;
 

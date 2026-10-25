@@ -20,10 +20,12 @@ except Exception:
 import numpy as np
 from numpy.typing import NDArray
 
-from ..core import DSGESolver, ModelParser
+from ..core import DSGESolver
 from ..core.compiled_model import CompiledModel
 from ..core.config import ModelConfig
+from ..core.model_parser import ModelParser
 from ..core.solved_model.base import SolvedModel
+from ..core.config_emitter import emit_config_yaml
 
 from .schemas import (
     EstimationRunRequest,
@@ -190,7 +192,7 @@ class UISession:
         """
         slot = self._ensure_slot(name)
         slot.source = source
-        slot.raw_yaml = model.config.source_yaml
+        slot.raw_yaml = emit_config_yaml(model.config)
         slot.model_config = model.config
         slot.solver = DSGESolver(model.config)
         slot.compiled = model.compiled

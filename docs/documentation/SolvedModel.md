@@ -272,7 +272,6 @@ __Returns:__
 SolvedModel.save_sdsge(
     path: str | Path,
     *,
-    yaml_text: str | None = None, # (1)!
     name: str = "reference",
     compile_kwargs: Mapping[str, Any] | None = None,
     solve_kwargs: Mapping[str, Any] | None = None,
@@ -288,13 +287,12 @@ Write a model-only `.sdsge` bundle around this `#!python SolvedModel`. For bundl
 
 __Inputs:__
 
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| path | Output `.sdsge` path. |
-| yaml_text | Explicit YAML override. |
-| name | Name of the model in the bundle. |
-| compile_kwargs | Kwargs the loader will use to rebuild the `#!python SolvedModel`. |
-| solve_kwargs | Kwargs the loader will use at the solve step. |
+| __Name__       |                                                                                               __Description__ |
+|:---------------|--------------------------------------------------------------------------------------------------------------:|
+| path           |                                                                                         Output `.sdsge` path. |
+| name           |                                                                              Name of the model in the bundle. |
+| compile_kwargs |                                             Kwargs the loader will use to rebuild the `#!python SolvedModel`. |
+| solve_kwargs   |                                                                 Kwargs the loader will use at the solve step. |
 
 __Returns:__
 
@@ -310,7 +308,6 @@ __Returns:__
 ```python
 SolvedModel.to_bundle_builder(
     *,
-    yaml_text: str | None = None,
     name: str = "reference",
     compile_kwargs: Mapping[str, Any] | None = None,
     solve_kwargs: Mapping[str, Any] | None = None,
@@ -331,18 +328,17 @@ sol.to_bundle_builder() \
 
 __Inputs:__
 
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| yaml_text | Explicit YAML override; defaults to `compiled.config.source_yaml`. |
-| name | Name of the model in the bundle. |
-| compile_kwargs | Kwargs the loader will use to rebuild the `#!python SolvedModel`. |
-| solve_kwargs | Kwargs the loader will use at the solve step. |
-| created_by | Manifest `created_by` string. |
+| __Name__       |                                                                                               __Description__ |
+|:---------------|--------------------------------------------------------------------------------------------------------------:|
+| name           |                                                                              Name of the model in the bundle. |
+| compile_kwargs |                                             Kwargs the loader will use to rebuild the `#!python SolvedModel`. |
+| solve_kwargs   |                                                                 Kwargs the loader will use at the solve step. |
+| created_by     |                                                                                 Manifest `created_by` string. |
 
 __Returns:__
 
-| __Type__ | __Description__ |
-|:---------|----------------:|
+| __Type__                 |                                          __Description__ |
+|:-------------------------|---------------------------------------------------------:|
 | `#!python BundleBuilder` | A fluent builder with the model member already attached. |
 
 See the [`bundle` module documentation](./bundle/index.md) and the [Bundle Authoring Guide](../guides/bundle_authoring_guide.md) for the complete picture.

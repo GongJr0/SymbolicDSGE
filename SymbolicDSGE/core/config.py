@@ -262,9 +262,6 @@ class ModelConfig:
     calibration : Calib
         :class:`Calib` object containing the model's calibration parameters, shock
         standard deviations, and shock correlations.
-    source_yaml : str | None
-        Optional string containing the source YAML text from which the model
-        configuration was parsed.
     """
 
     name: str
@@ -274,12 +271,6 @@ class ModelConfig:
     observables: list[Symbol]
     equations: Equations
     calibration: Calib
-
-    #: Source YAML text the config was parsed from, retained so a model can be
-    #: round-tripped into a ``.sdsge`` bundle without re-reading from disk
-    #: (avoiding the staleness window between solve and save). ``None`` for
-    #: programmatic construction.
-    source_yaml: str | None = None
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.name})"
