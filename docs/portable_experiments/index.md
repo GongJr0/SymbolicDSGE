@@ -13,7 +13,7 @@ The container exists so a non-coding collaborator can run an experiment by openi
 
 | Component                   | Format             | Source                                                  |
 |-----------------------------|--------------------|---------------------------------------------------------|
-| Model config                | YAML               | `ModelParser` source (path or string)                   |
+| Model config                | YAML               | `ModelConfig` / `CompiledModel` / `SolvedModel`         |
 | Estimator parameters        | JSON               | `EstimatorParams`                                       |
 | Estimation results          | JSON               | `MLEResult` / `MAPResult` / `MCMCResultMeta`            |
 | Observed data               | CSV or Parquet     | `Estimator` inputs                                      |
@@ -38,10 +38,7 @@ There are three ways to produce or consume a `.sdsge`:
 
 ## Determinism
 
-The bundle stores simulation specs and a seed, not simulation results. A run on the receiver's side reproduces the author's intended simulation deterministically (numpy `PCG64` + fixed seed). Re-solving the embedded YAML at load time is also deterministic, so the receiver's policy matrices match the author's.
-
-???+ warning "Source YAML embedding"
-    `SolvedModel.save_sdsge()` requires a source YAML. It is populated automatically when the model was loaded via `ModelParser(path)` or `ModelParser.from_string(text)`. Programmatically constructed `ModelConfig` instances need `yaml_text=` passed explicitly.
+The bundle stores simulation specs and a seed, not simulation results. A run on the receiver's side reproduces the author's intended simulation deterministically (numpy `PCG64` + fixed seed). Re-solving the embedded YAML at load time is also deterministic, so the receiver's policy matrices match the author's. Estimation and Monte Carlo results are stored. Seeded runs also reproduce exactly on a rerun (up to OS, hardware, and dependency versions).
 
 ## Where to next
 

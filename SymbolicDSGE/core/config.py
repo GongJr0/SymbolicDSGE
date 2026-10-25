@@ -16,6 +16,9 @@ from sympy.core.relational import Relational
 from numpy import array, eye, float64, ix_, outer
 from numpy.typing import NDArray
 
+from pathlib import Path
+from .config_emitter import write_config_yaml
+
 KT = TypeVar("KT")
 V = TypeVar("V")
 
@@ -259,9 +262,6 @@ class ModelConfig:
     calibration : Calib
         :class:`Calib` object containing the model's calibration parameters, shock
         standard deviations, and shock correlations.
-    source_yaml : str | None
-        Optional string containing the source YAML text from which the model
-        configuration was parsed.
     """
 
     name: str
@@ -272,11 +272,38 @@ class ModelConfig:
     equations: Equations
     calibration: Calib
 
-    #: Source YAML text the config was parsed from, retained so a model can be
-    #: round-tripped into a ``.sdsge`` bundle without re-reading from disk
-    #: (avoiding the staleness window between solve and save). ``None`` for
-    #: programmatic construction.
-    source_yaml: str | None = None
-
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.name})"
+
+    def to_yaml(self, path: str | Path, *, digits: int | None = None) -> None:
+        """Write the model configuration to a YAML file.
+
+        Parameters
+        ----------
+        path : str | Path
+            Path for the output YAML file.
+        digits : int | None
+            Number of digits to use for plain floats.
+            If ``None``, the default formatting is used.
+
+        """
+        write_config_yaml(self, path, digits=digits)
+
+    @staticmethod
+    def parse_yaml(path: str | Path) -> "ModelConfig":
+        """Parse a model configuration from a YAML file.
+
+        Parameters
+        ----------
+        path : str | Path
+            Path to the input YAML file.
+
+        Returns
+        -------
+        ModelConfig
+            Parsed model configuration.
+
+        """
+        from .model_parser import ModelParser
+
+        return ModelParser(path).get()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Mapping
 
+from ..config import ModelConfig
 from ..compiled_model import CompiledModel
 
 if TYPE_CHECKING:
@@ -35,9 +36,8 @@ def serve(
 
 
 def to_bundle_builder(
-    compiled: CompiledModel,
+    model: SolvedModel | CompiledModel | ModelConfig,
     *,
-    yaml_text: str | None = None,
     name: str = "reference",
     compile_kwargs: Mapping[str, Any] | None = None,
     solve_kwargs: Mapping[str, Any] | None = None,
@@ -46,17 +46,9 @@ def to_bundle_builder(
     """A :class:`BundleBuilder` pre-seeded with the model's YAML."""
     from ...bundle.builder import BundleBuilder
 
-    yaml = yaml_text if yaml_text is not None else compiled.config.source_yaml
-    if yaml is None:
-        raise ValueError(
-            "Cannot create a .sdsge bundle: this model has no source YAML "
-            "attached. Pass yaml_text=... explicitly, or load the model via "
-            "ModelParser(path) / ModelParser.from_string(text) so the "
-            "source is retained on compiled.config.source_yaml."
-        )
     return BundleBuilder(created_by=created_by).add_model(
         name,
-        yaml,
+        model,
         compile_kwargs=compile_kwargs,
         solve_kwargs=solve_kwargs,
     )

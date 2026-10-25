@@ -87,9 +87,9 @@ sdsge-ui
 # Option 2: Serve the GUI with a pre-loaded SolvedModel object
 
 # Read a config and solve the model as usual
-from SymbolicDSGE import ModelParser, DSGESolver
+from SymbolicDSGE import DSGESolver, parse_config
 
-model = ModelParser(...).get()
+model = parse_config(...)
 solver = DSGESolver(model)
 compiled = solver.compile(...)
 sol = solver.solve(compiled, ...)
@@ -115,10 +115,10 @@ Suggestions for improving or extending the documentation are welcome as issues.
 ### Minimal Example
 
 ```python
-from SymbolicDSGE import ModelParser, DSGESolver
+from SymbolicDSGE import DSGESolver, parse_config
 
 # Read the YAML config (Equations, Measurements, Parameters, Optional Filter Spec)
-model = ModelParser("<path-to-config>.yaml").get()
+model = parse_config("<path-to-config>.yaml")
 
 # Compile the model
 solver = DSGESolver(model)

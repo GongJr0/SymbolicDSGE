@@ -272,16 +272,26 @@ class CompiledModel:
     regimes : dict[int, RegimeBlock]
         Regime blocks, keyed by the bitmask of their binding constraints, containing
         replaced rows and their Jacobians.
-    n_var
-    n_state
-    n_ctrl
-    n_exog
-    n_declared
-    n_generated
-    n_par
-    n_obs
-    shock_names
-    shock_idx
+    n_var : int
+        Number of compiled variables, including generated ones.
+    n_state : int
+        Number of state variables.
+    n_ctrl : int
+        Number of control variables.
+    n_exog : int
+        Number of exogenous shocks in the model.
+    n_declared : int
+        Number of declared model variables, excluding any generated ones.
+    n_generated : int
+        Number of generated variables, minted by the compiler to fill in missing lags or leads.
+    n_par : int
+        Number of calibration parameters in the model.
+    n_obs : int
+        Number of observables in the model.
+    shock_names : tuple[str, ...]
+        Names of the shock columns, in order.
+    shock_idx : dict[str, int]
+        Index mapping shock names to their column positions in the shock matrix.
     """
 
     config: ModelConfig

@@ -161,7 +161,6 @@ def test_ui_backend_loads_solves_and_simulates_model(test_model_path) -> None:
     assert loaded_body["loaded"] is True
     assert loaded_body["solved"] is False
     assert loaded_body["name"] == "TEST"
-    assert 'name: "TEST"' in loaded_body["raw_yaml"]
     assert loaded_body["shocks"] == ["e_u", "e_v"]
 
     solved = client.post(

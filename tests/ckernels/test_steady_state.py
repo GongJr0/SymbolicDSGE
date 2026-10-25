@@ -15,7 +15,8 @@ import pytest
 import sympy as sp
 
 from SymbolicDSGE._ckernels.core._core import steady_state_newton
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import parse_config
 from _oracles.core import compiled_residual
 
 
@@ -92,7 +93,7 @@ def test_newton_non_convergence_raises(rbc):
 @pytest.mark.parametrize("model_path", ["test", "post82"], indirect=True)
 def test_newton_linear_model_zero_steady_state(model_path):
     # A (log-)linear model clears at ss = 0; Newton seeded there converges at once.
-    model = ModelParser(model_path).get()
+    model = parse_config(model_path)
     compiled = DSGESolver(model).compile()
     calib = compiled.config.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import copy
 import io
 import re
 import sys
-from io import StringIO
 from itertools import combinations
 from pathlib import Path
 from types import FrameType
@@ -40,6 +38,24 @@ from .config import (
     PairGetterDict,
     FunctionGetterDict,
 )
+
+
+def parse_config(path: str | Path) -> ModelConfig:
+    """Parse a model configuration from YAML into a :class:`ModelConfig` object.
+
+    Parameters
+    ----------
+    path : str | Path
+        Path to the YAML configuration file.
+
+    Returns
+    -------
+    ModelConfig
+        Configuration object holding symbolic model equations, variables, parameters, shocks, and calibration.
+
+    """
+    return ModelParser(path).get()
+
 
 _GLOBAL_TRANSFORMATIONS = tuple(
     t for t in standard_transformations if t is not factorial_notation
@@ -156,16 +172,6 @@ def _check_connective_parens(expr: str) -> None:
             )
 
 
-def _list_representer(dumper: yaml.Dumper, data: list[Any]) -> yaml.Node:
-    return dumper.represent_sequence("tag:yaml.org,2002:seq", data, flow_style=True)
-
-
-class InlineList(list):
-    """Indicatoes a list should be rendered inline in YAML."""
-
-    pass
-
-
 class ModelParser:
     """Parse a model configuration from YAML into a :class:`ModelConfig` object.
 
@@ -189,8 +195,7 @@ class ModelParser:
         self.config_path = config_path
         self._text = text
         self._name = name
-        self.raw_data, self.config = self.from_yaml()
-        self.config.source_yaml = text
+        self.config = self.from_yaml()
         self.__post_init__()
 
     def __post_init__(self) -> None:
@@ -483,7 +488,7 @@ class ModelParser:
             unknown = expr.free_symbols - params
             raise_if_unk("ss_seed for variable", var.__name__, unknown)
 
-    def from_yaml(self) -> tuple[dict, ModelConfig]:
+    def from_yaml(self) -> ModelConfig:
         """Parse a YAML configuration file into a :class:`ModelConfig` object.
 
         Returns
@@ -546,75 +551,7 @@ class ModelParser:
             calibration=calibration,
         )
 
-        return (data, mdl_cfg)
-
-    def to_yaml(
-        self,
-        config: ModelConfig | None = None,
-        *,
-        digits: int = 3,
-    ) -> str:
-        """Emit the authored configuration as canonical YAML text.
-
-        Re-dumps the retained ``raw_data`` so the equation grammar round-trip
-        through :class:`ModelParser` unchanged. When ``config`` is given, its
-        calibration is baked in (rounded to ``digits``), capturing e.g. estimated
-        parameter values.
-        """
-        data_out = copy.deepcopy(self.raw_data)
-
-        if config is not None:
-            # Update in place: derived entries carry no value to write back and
-            # the equations dumped alongside them still reference their names.
-            params_out = data_out.setdefault("calibration", {}).setdefault(
-                "parameters", {}
-            )
-            params_out.update(
-                {
-                    str(k): round(float(v), digits)
-                    for k, v in config.calibration.parameters.items()
-                }
-            )
-
-        # `observables` is deprecated, key kept here so old configs continue
-        # inlining the list.
-        for key in ("variables", "observables"):
-            if isinstance(data_out.get(key), list):
-                data_out[key] = InlineList(data_out[key])
-
-        yaml.add_representer(InlineList, _list_representer)
-        buffer = StringIO()
-        yaml.dump(data_out, buffer, sort_keys=False)
-        return buffer.getvalue()
-
-    def update_calibration_parameters(
-        self,
-        new_config: ModelConfig,
-        digits: int = 3,
-        output_path: str | Path | None = None,
-    ) -> StringIO:
-        """Update a model config calibration with the ones stored in the ``new_config``.
-
-        Parameters
-        ----------
-        new_config : ModelConfig
-            Configuration object containing the new calibration parameters to update.
-        digits : int
-            Precision for rounding the calibration parameters when writing to YAML.
-        output_path : str | Path | None
-            YAML file path to write the updated configuration. If None, the updated configuration is not written to a file.
-
-        Returns
-        -------
-        StringIO
-            In-memory string buffer containing the updated YAML configuration.
-
-        """
-        text = self.to_yaml(new_config, digits=digits)
-        if output_path:
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(text)
-        return StringIO(text)
+        return mdl_cfg
 
 
 # ---------------- helpers ----------------

@@ -15,7 +15,8 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE._ckernels.core import klein_solve1
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.solver_backend import klein_solve
 
 # One model with an empty control block, one with a nonempty one, and one whose
@@ -24,7 +25,7 @@ MODELS = ["rbc_second_order", "test", "post82"]
 
 
 def _model(path):
-    model = ModelParser(path).get()
+    model = parse_config(path)
     compiled = DSGESolver(model).compile()
     calib = compiled.config.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)

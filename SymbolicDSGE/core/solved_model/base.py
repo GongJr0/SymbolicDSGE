@@ -353,26 +353,19 @@ class SolvedModel(ABC, Generic[Policy]):
     def to_bundle_builder(
         self,
         *,
-        yaml_text: str | None = None,
         name: str = "reference",
         compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,
         created_by: str | None = None,
     ) -> "Any":
-        """Return a :class:`BundleBuilder` pre-seeded with this model's YAML.
+        """Return a :class:`BundleBuilder` pre-seeded with this model's config.
 
         Chain estimation/MC/simulation members and call ``.write(path)``::
 
             solved.to_bundle_builder().add_estimation(spec, ...).write("out.sdsge")
-
-        ``yaml_text`` overrides the YAML embedded in the bundle; if not given,
-        the source YAML retained on :attr:`compiled.config.source_yaml` is used.
-        Raises :class:`ValueError` when neither is available (e.g. for models
-        built programmatically without parsing a YAML).
         """
         return export.to_bundle_builder(
-            self.compiled,
-            yaml_text=yaml_text,
+            self,
             name=name,
             compile_kwargs=compile_kwargs,
             solve_kwargs=solve_kwargs,
@@ -383,7 +376,6 @@ class SolvedModel(ABC, Generic[Policy]):
         self,
         path: "str | Any",
         *,
-        yaml_text: str | None = None,
         name: str = "reference",
         compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,
@@ -395,7 +387,6 @@ class SolvedModel(ABC, Generic[Policy]):
         :meth:`to_bundle_builder` directly and chain the additions.
         """
         return self.to_bundle_builder(
-            yaml_text=yaml_text,
             name=name,
             compile_kwargs=compile_kwargs,
             solve_kwargs=solve_kwargs,

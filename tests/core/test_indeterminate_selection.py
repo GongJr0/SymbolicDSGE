@@ -23,7 +23,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.solver_backend import BKStatus
 
 MODELS = Path(__file__).resolve().parents[1] / "fixtures" / "models"
@@ -34,7 +35,7 @@ RHO_G = 0.8
 
 @pytest.fixture(scope="module")
 def indeterminate():
-    model = ModelParser(MODELS / "indeterminate.yaml").get()
+    model = parse_config(MODELS / "indeterminate.yaml")
     solver = DSGESolver(model)
     return solver, solver.compile()
 

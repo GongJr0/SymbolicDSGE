@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Callable, NamedTuple, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+
 from ..estimation.results import MCMCResult
 
 if TYPE_CHECKING:
@@ -34,9 +35,12 @@ from ..estimation.spec import (
     MAPResultSpec,
     MCMCResultMeta,
 )
-from ..core.shock.generators import Shock, ShockPath
-from ..core.shock.spec import _normalized_spec, serialize_shocks
 from ..estimation.results import MLEResult, MAPResult
+
+from ..core import Shock, ShockPath, SolvedModel, ModelConfig
+from ..core.compiled_model import CompiledModel
+from ..core.shock.spec import _normalized_spec, serialize_shocks
+from ..core.config_emitter import emit_config_yaml
 
 from ..monte_carlo.core import MCPipeline
 from ..monte_carlo.spec import PipelineSpec, pipeline_meta
@@ -147,25 +151,33 @@ class BundleBuilder:
     def add_model(
         self,
         name: str,
-        yaml_text: str,
+        model: SolvedModel | CompiledModel | ModelConfig,
         *,
         compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,
     ) -> BundleBuilder:
-        """Add a model config (its source YAML) under ``name``.
+        """Add a model config under ``name``.
 
         ``compile_kwargs``/``solve_kwargs`` are recorded so the loader rebuilds an
         identical :class:`SolvedModel`.
         """
+        if not name:
+            raise ValueError(
+                "`name` must be a non-empty string to identify the model in the bundle."
+            )
+
         path = _MODEL_PATH.format(name=name)
         options: dict[str, Any] = {}
         if compile_kwargs:
             options["compile_kwargs"] = dict(compile_kwargs)
         if solve_kwargs:
             options["solve_kwargs"] = dict(solve_kwargs)
+
+        model = model if isinstance(model, ModelConfig) else model.config
+        yaml = emit_config_yaml(model)
         self._add(
             Member(path=path, kind="model_config", model_name=name, options=options),
-            yaml_text.encode("utf-8"),
+            yaml.encode("utf-8"),
         )
         return self
 

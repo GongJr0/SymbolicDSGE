@@ -25,7 +25,7 @@ This demonstration focuses on the first case where two models are present.
 import numpy as np
 import pandas as pd
 
-from SymbolicDSGE import DSGESolver, ModelParser, Shock
+from SymbolicDSGE import DSGESolver, Shock, parse_config
 from SymbolicDSGE.monte_carlo import (
     MCPipeline,
     custom_transform,
@@ -43,14 +43,14 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 )
 import cProfile
 
-model = ModelParser("../../MODELS/POST82.yaml").get() # (1)!
+model = parse_config("../../MODELS/POST82.yaml") # (1)!
 
 solver = DSGESolver(model)
 compiled = solver.compile()
 ss_seed = np.zeros(5, dtype=np.float64)  # (2)!
 reference = solver.solve(compiled, ss_seed=ss_seed)
 
-dgp_model = ModelParser("../../MODELS/POST82.yaml").get()
+dgp_model = parse_config("../../MODELS/POST82.yaml")
 dgp_model.calibration.parameters.update({"psi_x": 0.2, "psi_pi": 3.0}) # (3)!
 dgp_solver = DSGESolver(dgp_model)
 dgp_comp = dgp_solver.compile()
@@ -325,19 +325,19 @@ mc = pipeline.run(
     The native loop only collects per-step profiling when it is asked to. At any lower verbosity `meta.step_elapsed_s`, `meta.step_counts`, and `meta.step_failures` are empty dictionaries.
 
 ```bash
->>> MC run concluded successfully in 0.03s with 38767.80 it/s.
+>>> MC run concluded successfully in 0.02s with 55924.97 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 45168.13 worker it/s (0.02 worker-s), 38767.80 wall it/s.
-    filter: 0 failures, 4032.96 worker it/s (0.25 worker-s), 38767.80 wall it/s.
-    custom_std: 0 failures, 205495.06 worker it/s (0.00 worker-s), 38767.80 wall it/s.
-    builtin_std: 0 failures, 214224.37 worker it/s (0.00 worker-s), 38767.80 wall it/s.
-    std_innov_mean: 0 failures, 85341.00 worker it/s (0.01 worker-s), 38767.80 wall it/s.
+    datagen: 0 failures, 40978.06 worker it/s (0.02 worker-s), 55924.97 wall it/s.
+    filter: 0 failures, 3872.62 worker it/s (0.26 worker-s), 55924.97 wall it/s.
+    custom_std: 0 failures, 195396.42 worker it/s (0.01 worker-s), 55924.97 wall it/s.
+    builtin_std: 0 failures, 169276.36 worker it/s (0.01 worker-s), 55924.97 wall it/s.
+    std_innov_mean: 0 failures, 92645.78 worker it/s (0.01 worker-s), 55924.97 wall it/s.
 
 Post-processing Report:
 
-    custom_postproc: Succeeded in 0.0026s.
-    builtin_kde: Succeeded in 1.4043s.
+    custom_postproc: Succeeded in 0.0031s.
+    builtin_kde: Succeeded in 1.3813s.
 ```
 
 ???+ note "Worker Time vs Wall Time"

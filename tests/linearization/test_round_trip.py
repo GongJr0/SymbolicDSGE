@@ -21,7 +21,9 @@ import numpy as np
 import pytest
 import sympy as sp
 
-from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE import DSGESolver, parse_config
+from SymbolicDSGE.core.config import ModelConfig
+from SymbolicDSGE.core.model_parser import ModelParser
 from SymbolicDSGE.linearization import Linearizer
 
 #: A single impulse, then nothing. One shock is enough to drive every state,
@@ -67,9 +69,8 @@ class _RoundTrip(NamedTuple):
 
 
 def _round_trip(
-    parser: ModelParser, methods: Mapping[str, str] | None = None
+    model: ModelConfig, methods: Mapping[str, str] | None = None
 ) -> _RoundTrip:
-    model = parser.get()
     solver = DSGESolver(model)
     compiled = solver.compile()
 
@@ -86,26 +87,26 @@ def _round_trip(
 @pytest.fixture(scope="module")
 def rbc(rbc_second_order_test_model_path) -> _RoundTrip:
     """Levels RBC, every variable left in levels."""
-    return _round_trip(ModelParser(rbc_second_order_test_model_path))
+    return _round_trip(parse_config(rbc_second_order_test_model_path))
 
 
 @pytest.fixture(scope="module")
 def rbc_log(rbc_second_order_test_model_path) -> _RoundTrip:
     """The same model, with the two positive variables in logs."""
     return _round_trip(
-        ModelParser(rbc_second_order_test_model_path), {"c": "log", "k": "log"}
+        parse_config(rbc_second_order_test_model_path), {"c": "log", "k": "log"}
     )
 
 
 @pytest.fixture(scope="module")
 def gap(test_model_path) -> _RoundTrip:
     """A model already authored in gaps, so the round trip changes nothing."""
-    return _round_trip(ModelParser(test_model_path))
+    return _round_trip(parse_config(test_model_path))
 
 
 @pytest.fixture(scope="module")
 def aux() -> _RoundTrip:
-    return _round_trip(ModelParser.from_string(AUX_MODEL), {"u": "log"})
+    return _round_trip(ModelParser.from_string(AUX_MODEL).get(), {"u": "log"})
 
 
 # ---------------- the policy ----------------
@@ -240,7 +241,7 @@ def test_a_constrained_model_refuses_to_become_a_config(rbc_occbin_test_model_pa
     # to_config's copy, so the config would pair deviation residuals with level
     # thresholds. The view itself is a sound diagnostic, which is why the guard
     # sits on the conversion rather than on at().
-    model = ModelParser(rbc_occbin_test_model_path).get()
+    model = parse_config(rbc_occbin_test_model_path)
     compiled = DSGESolver(model).compile()
 
     view = Linearizer(compiled).at()

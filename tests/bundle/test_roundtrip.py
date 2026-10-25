@@ -38,7 +38,7 @@ def _estimation_spec(y, *, names=("beta", "sigma")) -> EstimatorSpec:
     )
 
 
-def test_full_bundle_round_trip(tmp_path: Path, test_model_yaml, compiled_test) -> None:
+def test_full_bundle_round_trip(tmp_path: Path, parsed_test, compiled_test) -> None:
     rng = np.random.default_rng(0)
     observed = rng.standard_normal((20, 2))
     posterior = {
@@ -62,7 +62,7 @@ def test_full_bundle_round_trip(tmp_path: Path, test_model_yaml, compiled_test) 
         BundleBuilder(created_by="test-suite")
         .add_model(
             "reference",
-            test_model_yaml,
+            parsed_test,
             compile_kwargs={},
         )
         .add_estimation(_estimator(observed, compiled_test), result=result)
@@ -118,7 +118,7 @@ def test_full_bundle_round_trip(tmp_path: Path, test_model_yaml, compiled_test) 
     assert set(loaded.manifest.checksums) == {m.path for m in loaded.manifest.members}
 
 
-def test_add_estimation_accepts_live_mcmc_result(test_model_yaml) -> None:
+def test_add_estimation_accepts_live_mcmc_result(parsed_test) -> None:
     import json
 
     from SymbolicDSGE.estimation.results import MCMCResult
@@ -138,7 +138,7 @@ def test_add_estimation_accepts_live_mcmc_result(test_model_yaml) -> None:
 
     builder = (
         BundleBuilder()
-        .add_model("reference", test_model_yaml)
+        .add_model("reference", parsed_test)
         .add_estimation(_estimation_source(spec), result=mcmc)
     )
     _, files = builder.build()

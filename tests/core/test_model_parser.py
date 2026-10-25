@@ -8,6 +8,7 @@ import pytest
 import sympy as sp
 import yaml
 
+from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.model_parser import ModelParser, _check_connective_parens
 from SymbolicDSGE.core.config import Constraint, cov_from_spec
 
@@ -380,13 +381,12 @@ def test_path_errors_name_the_file(tmp_path):
     bad.write_text("name: X\nvariables: [x\nshocks: [e]\n", encoding="utf-8")
 
     with pytest.raises(yaml.YAMLError) as exc:
-        ModelParser(bad)
+        parse_config(bad)
     assert str(bad) in str(exc.value)
 
 
-def test_from_string_keeps_the_text_verbatim():
+def test_from_string_names_the_source():
     parser = ModelParser.from_string(_R_ARITHMETIC_MODEL)
-    assert parser.config.source_yaml == _R_ARITHMETIC_MODEL
     assert parser.config_path == "<yaml string>"
 
 
@@ -521,7 +521,7 @@ def test_parser_rejects_undeclared_ss_seed_symbol(tmp_path, test_model_yaml):
     bad = _write_yaml(tmp_path / "bad_ss_seed.yaml", data)
 
     with pytest.raises(ValueError, match=r"references unknown symbol\(s\)"):
-        ModelParser(bad)
+        parse_config(bad)
 
 
 def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path, test_model_yaml):
@@ -530,7 +530,7 @@ def test_uncalibrated_equation_parameter_fails_to_sympify(tmp_path, test_model_y
     bad = _write_yaml(tmp_path / "missing_declared.yaml", data)
 
     with pytest.raises(ValueError, match=r"references unknown symbol\(s\)"):
-        ModelParser(bad)
+        parse_config(bad)
 
 
 def test_require_calibrated_params_rejects_unknown_referenced_parameter(
@@ -541,7 +541,7 @@ def test_require_calibrated_params_rejects_unknown_referenced_parameter(
     bad = _write_yaml(tmp_path / "unknown_ref.yaml", data)
 
     with pytest.raises(ValueError, match="not declared in `calibration.parameters`"):
-        ModelParser(bad)
+        parse_config(bad)
 
 
 def test_require_calibrated_params_rejects_uncalibrated_referenced_parameter(
@@ -553,7 +553,7 @@ def test_require_calibrated_params_rejects_uncalibrated_referenced_parameter(
     bad = _write_yaml(tmp_path / "missing_ref.yaml", data)
 
     with pytest.raises(ValueError, match="not declared in `calibration.parameters`"):
-        ModelParser(bad)
+        parse_config(bad)
 
 
 def test_parser_rejects_model_equation_without_single_equals(tmp_path, test_model_yaml):
@@ -562,7 +562,7 @@ def test_parser_rejects_model_equation_without_single_equals(tmp_path, test_mode
     bad = _write_yaml(tmp_path / "bad_eq.yaml", data)
 
     with pytest.raises(ValueError, match="must contain exactly one '='"):
-        ModelParser(bad)
+        parse_config(bad)
 
 
 def test_parser_builds_variable_metadata_from_mapping(tmp_path, test_model_yaml):
@@ -573,7 +573,7 @@ def test_parser_builds_variable_metadata_from_mapping(tmp_path, test_model_yaml)
     }
     bad = _write_yaml(tmp_path / "variable_metadata.yaml", data)
 
-    conf = ModelParser(bad).get()
+    conf = parse_config(bad)
 
     assert [v.__name__ for v in conf.variables] == [
         "u",

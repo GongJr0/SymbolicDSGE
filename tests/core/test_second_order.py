@@ -14,14 +14,15 @@ from SymbolicDSGE._ckernels.core._core import bicomplex_hessian, klein_preproces
 from SymbolicDSGE.core.compiled_model import _shock_covariance
 from SymbolicDSGE._ckernels.core import second_order
 from SymbolicDSGE._symbolic_printers import ResidualLayout
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.solver_backend import klein_solve
 from _oracles.core import first_order_residual
 
 
 def _drive(path):
     """Compile a model and run the full second-order preproc chain at ss = 0."""
-    model = ModelParser(path).get()
+    model = parse_config(path)
     compiled = DSGESolver(model).compile()
     layout = ResidualLayout.from_compiled(compiled)
     n_eq, n_state = layout.n_var, compiled.n_state

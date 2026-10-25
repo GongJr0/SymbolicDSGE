@@ -1,7 +1,7 @@
 """Rejection tests: malformed configs must not slip through the parser.
 
 Each case starts from a minimal valid model and breaks exactly one field, then
-asserts ``ModelParser.from_string(...).get_all()`` raises with a clear message.
+asserts ``ModelParser.from_string(...).get()`` raises with a clear message.
 The last section calls three parser helpers directly, for guards whose branches
 no authored config can reach.
 """
@@ -11,8 +11,8 @@ from __future__ import annotations
 import pytest
 import sympy as sp
 
-from SymbolicDSGE import ModelParser
 from SymbolicDSGE.core.model_parser import (
+    ModelParser,
     _load_yaml,
     _reject_unknown_keys,
     _sympy_parsers,

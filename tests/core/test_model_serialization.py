@@ -5,11 +5,12 @@ from typing import Any
 import numpy as np
 import pytest
 
+from SymbolicDSGE.core import ModelConfig, parse_config
+from SymbolicDSGE.core.config_emitter import emit_config_yaml
 from SymbolicDSGE.core.model_parser import ModelParser
 
 
-def _model_signature(parser: ModelParser) -> dict[str, Any]:
-    cfg = parser.get()
+def _model_signature(cfg: ModelConfig) -> dict[str, Any]:
     return {
         "name": cfg.name,
         "parameters": sorted(s.name for s in cfg.calibration.parameters.keys()),
@@ -21,20 +22,24 @@ def _model_signature(parser: ModelParser) -> dict[str, Any]:
     }
 
 
-def test_model_config_round_trips_without_mnoise(test_model_path) -> None:
-    parser = ModelParser(test_model_path)
-    rebuilt = ModelParser.from_string(parser.to_yaml())
+def _reparse(cfg: ModelConfig) -> ModelConfig:
+    return ModelParser.from_string(emit_config_yaml(cfg)).get()
 
-    assert _model_signature(rebuilt) == _model_signature(parser)
-    assert rebuilt.get().calibration.measurement_noise is None
+
+def test_model_config_round_trips_without_mnoise(test_model_path) -> None:
+    config = parse_config(test_model_path)
+    rebuilt = _reparse(config)
+
+    assert _model_signature(rebuilt) == _model_signature(config)
+    assert rebuilt.calibration.measurement_noise is None
 
 
 def test_mnoise_config_round_trips_via_reparse(post82_test_model_path) -> None:
-    parser = ModelParser(post82_test_model_path)
-    rebuilt = ModelParser.from_string(parser.to_yaml())
+    config = parse_config(post82_test_model_path)
+    rebuilt = _reparse(config)
 
-    k0 = parser.get().calibration.measurement_noise
-    k1 = rebuilt.get().calibration.measurement_noise
+    k0 = config.calibration.measurement_noise
+    k1 = rebuilt.calibration.measurement_noise
     assert k0 is not None and k1 is not None
 
     # Derived R machinery is rebuilt by the parser, not serialized.
@@ -43,14 +48,18 @@ def test_mnoise_config_round_trips_via_reparse(post82_test_model_path) -> None:
     assert k1.corr == k0.corr
 
 
-def test_to_yaml_bakes_updated_calibration(test_model_path) -> None:
-    parser = ModelParser(test_model_path)
-    config = parser.get()
+def test_emission_carries_an_in_memory_calibration_edit(test_model_path) -> None:
+    config = parse_config(test_model_path)
     target = next(iter(config.calibration.parameters))
     config.calibration.parameters[target] = np.float64(0.123)
 
-    rebuilt = ModelParser.from_string(parser.to_yaml(config))
     rebuilt_calib = {
-        k.name: float(v) for k, v in rebuilt.get().calibration.parameters.items()
+        k.name: float(v) for k, v in _reparse(config).calibration.parameters.items()
     }
     assert rebuilt_calib[target.name] == pytest.approx(0.123)
+
+
+def test_emission_is_idempotent(test_model_path) -> None:
+    config = parse_config(test_model_path)
+    once = emit_config_yaml(config)
+    assert emit_config_yaml(_reparse(config)) == once

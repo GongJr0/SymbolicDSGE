@@ -28,7 +28,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE.core import DSGESolver, ModelParser
+from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import parse_config
 from _oracles import dynare_rbc_occbin as golden
 
 #: Our name for each of the oracle's ``COLUMNS``, in that order.
@@ -47,7 +48,7 @@ _T0 = _CHECK_AHEAD + 1
 @pytest.fixture(scope="module")
 def solved(rbc_occbin_test_model_path):
     """The model a user gets from ``solve``: constraints make it piecewise."""
-    model = ModelParser(rbc_occbin_test_model_path).get()
+    model = parse_config(rbc_occbin_test_model_path)
     solver = DSGESolver(model)
     return solver.solve(solver.compile())
 

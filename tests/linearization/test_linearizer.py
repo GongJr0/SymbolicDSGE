@@ -12,7 +12,8 @@ import pytest
 import sympy as sp
 from sympy.core.function import AppliedUndef
 
-from SymbolicDSGE import DSGESolver, ModelParser
+from SymbolicDSGE import DSGESolver, parse_config
+from SymbolicDSGE.core.model_parser import ModelParser
 from SymbolicDSGE.core.compiled_model import CompiledModel
 from SymbolicDSGE.linearization import Linearizer, linearize_model
 from SymbolicDSGE.linearization.linearizer import (
@@ -59,14 +60,14 @@ T = sp.Symbol("t", integer=True)
 @pytest.fixture(scope="module")
 def rbc(rbc_second_order_test_model_path) -> CompiledModel:
     """Levels RBC: c and k have positive steady states, z sits at zero."""
-    model = ModelParser(rbc_second_order_test_model_path).get()
+    model = parse_config(rbc_second_order_test_model_path)
     return DSGESolver(model).compile()
 
 
 @pytest.fixture(scope="module")
 def gap(test_model_path) -> CompiledModel:
     """A model already authored in gaps, so Newton returns the origin."""
-    model = ModelParser(test_model_path).get()
+    model = parse_config(test_model_path)
     return DSGESolver(model).compile()
 
 
