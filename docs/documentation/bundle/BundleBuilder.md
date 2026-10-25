@@ -36,7 +36,6 @@ BundleBuilder.add_model(
     name: str,
     model: SolvedModel | CompiledModel | ModelConfig,
     *,
-    digits: int | None = None,
     compile_kwargs: Mapping[str, Any] | None = None, # (1)!
     solve_kwargs: Mapping[str, Any] | None = None,   # (2)!
 ) -> BundleBuilder
@@ -45,7 +44,7 @@ BundleBuilder.add_model(
 1. Forwarded to `DSGESolver.compile(...)` when the loader rebuilds the `SolvedModel`.
 2. Forwarded to `DSGESolver.solve(...)` at the same step.
 
-Add a model configuration to the bundle. `yaml_text` is the source YAML the loader will re-parse.
+Add a model configuration to the bundle.
 
 | __Name__       |                                                                   __Description__ |
 |:---------------|----------------------------------------------------------------------------------:|
@@ -206,28 +205,22 @@ Return a `Manifest` describing the currently-accumulated members. Each call rege
 ```python
 from SymbolicDSGE import (
     BundleBuilder,
-    DSGESolver,
-    ModelParser,
+    parse_config,
 )
 
-parser = ModelParser("MODELS/POST82.yaml") # (1)!
-model = parser.get()
-solver = DSGESolver(model)
-sol = solver.solve(solver.compile())
+model = parse_config("MODELS/POST82.yaml")
 
 bundle_path = (
-    BundleBuilder(created_by="experiment-1") # (2)!
+    BundleBuilder(created_by="experiment-1") # (1)!
     .add_model(
         "reference",
-        model.source_yaml, # (3)!
+        model,
     )
     .write("experiment-1.sdsge")
 )
 ```
 
-1. `ModelParser` populates `ModelConfig.source_yaml` automatically.
-2. `created_by` is purely metadata. Defaults to `"SymbolicDSGE <version>"` when omitted.
-3. The loader re-parses this YAML and re-solves with the recorded `compile_kwargs`.
+1. `created_by` is purely metadata. Defaults to `"SymbolicDSGE <version>"` when omitted.
 
 ## See also
 

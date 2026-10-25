@@ -247,23 +247,6 @@ __Returns:__
 | `#!python FilterResult` | `dataclass` containing information on filter state, measurements, and diagnostics. |
 
 &nbsp;
-
-```python
-SolvedModel.to_dict() -> dict[str, Any]
-```
-Dictionary representation of the class instance.
-
-__Inputs:__
-
-`#!python None`
-
-__Returns:__
-
-| __Type__ | __Description__ |
-|:---------|----------------:|
-| `#!python dict[str, Any]` | Dictionary representation of the `#!python SolvedModel` object. |
-
-&nbsp;
 <a id="solvedModelSaveSdsge"></a>
 
 ## `SolvedModel.save_sdsge`
@@ -281,9 +264,6 @@ SolvedModel.save_sdsge(
 1. Override the YAML embedded in the bundle. Defaults to `compiled.config.source_yaml` (populated automatically by `#!python ModelParser`).
 
 Write a model-only `.sdsge` bundle around this `#!python SolvedModel`. For bundles that also carry estimation, Monte Carlo, or simulation members, use [`SolvedModel.to_bundle_builder`](#solvedmodelto_bundle_builder) and chain the additions before calling `.write()`.
-
-???+ warning "Source YAML required"
-    Raises `#!python ValueError` when `compiled.config.source_yaml` is `#!python None` and no `yaml_text=` override is supplied. Loading via `#!python ModelParser(path)` or `#!python ModelParser.from_string(text)` populates `source_yaml` automatically; programmatic `#!python ModelConfig` construction does not.
 
 __Inputs:__
 
