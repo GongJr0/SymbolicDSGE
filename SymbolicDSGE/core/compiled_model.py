@@ -13,6 +13,7 @@ from typing import Any, Mapping, Sequence
 from sympy.logic.boolalg import Boolean
 
 from .config import ModelConfig, cov_from_spec
+from .resolvers import VariableLayout
 from SymbolicDSGE._symbolic_printers import (
     BicomplexOps,
     ConstraintLayout,
@@ -33,63 +34,6 @@ from .._ckernels.core import (
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
 ND = NDArray
-
-
-@dataclass(frozen=True)
-class VariableLayout:
-    """Where every compiled variable sits, and which ones the compiler minted.
-
-    The counts are the model's dimensions, and a consumer sizing an array takes
-    them from here rather than measuring whichever list is nearest. ``n_var`` is
-    the compiled set, ``n_declared`` the model's own variables and
-    ``n_generated`` the minted ones, so ``n_var == n_declared + n_generated``.
-    The first two coincide until the compiler mints something, which is why they
-    are separate numbers and not one: a dense ``ss_seed`` or a parse-time ``P0``
-    spans ``n_declared``, a dense ``x0`` spans ``n_var``. ``n_state`` and
-    ``n_ctrl`` split the canonical order and sum to ``n_var``.
-
-    ``declared_names`` is the model's own declaration order, and nothing else.
-    ``generated_names`` is the compiler's minted names in mint order, which is
-    where they sit in declaration order. Neither carries a position: a name's
-    canonical slot is ``idx``'s answer, and asking one map for two orderings is
-    what lets them drift.
-
-    ``aux_origin`` maps each minted lag or lead to the declared variable it
-    tracks, at every depth, which is what widens a declared-order input over the
-    generated block. An aux sits at its origin some periods away, so it shares
-    the origin's steady state and takes its variance.
-
-    ``state_names`` and ``control_names`` split the canonical order at
-    ``n_state``. A variable is a state when it occurs at ``t-1``, which is what
-    the pencil partition needs.
-
-    ``n_exog`` counts the model's innovations, which is the width of the shock
-    matrix and of ``B``, not a count of variables.
-
-    ``shock_names`` is ordered names of the shock columns.
-
-    ``shock_idx`` is that order as a lookup.
-    """
-
-    n_var: int
-    n_declared: int
-    n_generated: int
-
-    n_exog: int
-    n_state: int
-    n_ctrl: int
-
-    idx: dict[str, int]
-
-    declared_names: tuple[str, ...]
-    canonical_names: tuple[str, ...]
-    state_names: tuple[str, ...]
-    control_names: tuple[str, ...]
-    generated_names: tuple[str, ...] = ()
-
-    aux_origin: dict[str, str] = field(default_factory=dict)
-    shock_names: tuple[str, ...] = ()
-    shock_idx: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -691,32 +635,6 @@ class CompiledModel:
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.config.name})"
-
-
-def _newton_seed(compiled: CompiledModel, parameters: Mapping[Symbol, float]) -> NDF:
-    """The model's own ``ss_seed``, resolved at ``parameters``, in canonical order.
-
-    Omitted variables are zeroed. Raises if any seed expression does not resolve to a number.
-    """
-    import sympy as sp
-
-    seeds = compiled.config.ss_seed
-    values = dict(parameters)
-    seed = np.zeros(compiled.n_var, dtype=float64)
-    for i, name in enumerate(compiled.var_names):
-        origin = compiled.layout.aux_origin.get(name, name)
-        expr = seeds[origin]
-        if expr is None:
-            continue
-        resolved = sp.sympify(expr).subs(values)
-        try:
-            seed[i] = float(resolved)
-        except TypeError as exc:
-            raise ValueError(
-                f"ss_seed for '{name}' did not resolve to a number at these "
-                f"parameters: {resolved}"
-            ) from exc
-    return seed
 
 
 def _shock_covariance(

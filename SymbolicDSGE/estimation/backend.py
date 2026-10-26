@@ -31,7 +31,7 @@ from ..core.compiled_model import (
     _shock_covariance,
     _measurement_covariance,
 )
-from ..core.solver import DSGESolver
+from ..core.resolvers import resolve_ss_seed
 from ..kalman.resolvers import FilterMode, _resolve_P0
 
 NDF = NDArray[np.float64]
@@ -402,7 +402,7 @@ def estim_context(
         if prepared.mode == "unscented"
         else 0
     )
-    ss_seed_vec = DSGESolver._resolve_ss_seed(ss_seed, compiled)
+    ss_vec = resolve_ss_seed(compiled.config, compiled.layout, ss_seed=ss_seed)
     pt, transforms = build_prior_tables(
         param_index=param_index,
         priors=priors,
@@ -428,7 +428,7 @@ def estim_context(
     solve = SolveDTO(
         residual_addr=int(compiled.construct_objective_cfunc().address),
         bc_residual_addr=int(bc_residual_addr),
-        ss_seed=ss_seed_vec,
+        ss_seed=ss_vec,
         incidence=compiled._incidence,
         n_var=compiled.n_var,
         n_state=compiled.n_state,

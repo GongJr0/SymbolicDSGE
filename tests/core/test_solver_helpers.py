@@ -9,6 +9,7 @@ import sympy as sp
 
 from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.solver import DSGESolver, _resolve_order
+from SymbolicDSGE.core.resolvers import resolve_ss_seed
 
 t = sp.Symbol("t")
 c = sp.Function("c")
@@ -104,7 +105,7 @@ def test_resolve_order_rejects_an_unknown_filter_mode():
 
 
 @pytest.fixture
-def deep_compiled(tmp_path, test_model_path):
+def deep_pair(tmp_path, test_model_path):
     """test.yaml with u lagged three deep, so the compiler mints a chain."""
     import yaml
 
@@ -113,12 +114,14 @@ def deep_compiled(tmp_path, test_model_path):
     path = tmp_path / "deep_test.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     model = parse_config(path)
-    return DSGESolver(model).compile()
+    return model, DSGESolver(model).compile()
 
 
-def test_ss_seed_is_written_over_the_declared_variables(compiled_rbc_so):
+def test_ss_seed_is_written_over_the_declared_variables(parsed_rbc_so, compiled_rbc_so):
     # Declared order is c, k, z, which is not the compiled order k, z, c.
-    seed = DSGESolver._resolve_ss_seed([1.9, 28.6, 0.5], compiled_rbc_so)
+    seed = resolve_ss_seed(
+        parsed_rbc_so, compiled_rbc_so.layout, ss_seed=[1.9, 28.6, 0.5]
+    )
 
     idx = compiled_rbc_so.idx
     assert seed[idx["c"]] == 1.9
@@ -126,11 +129,12 @@ def test_ss_seed_is_written_over_the_declared_variables(compiled_rbc_so):
     assert seed[idx["z"]] == 0.5
 
 
-def test_ss_seed_falls_to_the_config_then_to_zero(compiled_rbc_so):
+def test_ss_seed_falls_to_the_config_then_to_zero(parsed_rbc_so, compiled_rbc_so):
     # Per variable: what the dict names wins, what it does not keeps the seed
     # the config declares, and a variable the config skips starts at zero.
-    configured = DSGESolver._resolve_ss_seed(None, compiled_rbc_so)
-    seed = DSGESolver._resolve_ss_seed({"k": 99.0}, compiled_rbc_so)
+    layout = compiled_rbc_so.layout
+    configured = resolve_ss_seed(parsed_rbc_so, layout, ss_seed=None)
+    seed = resolve_ss_seed(parsed_rbc_so, layout, ss_seed={"k": 99.0})
 
     idx = compiled_rbc_so.idx
     assert seed[idx["k"]] == 99.0
@@ -138,23 +142,28 @@ def test_ss_seed_falls_to_the_config_then_to_zero(compiled_rbc_so):
     assert seed[idx["z"]] == configured[idx["z"]] == 0.0
 
 
-def test_ss_seed_of_the_wrong_length_names_the_declaration_order(compiled_rbc_so):
+def test_ss_seed_of_the_wrong_length_names_the_declaration_order(
+    parsed_rbc_so, compiled_rbc_so
+):
     with pytest.raises(ValueError, match=r"expected \(3,\).*\['c', 'k', 'z'\]"):
-        DSGESolver._resolve_ss_seed([0.0, 1.0], compiled_rbc_so)
+        resolve_ss_seed(parsed_rbc_so, compiled_rbc_so.layout, ss_seed=[0.0, 1.0])
 
 
-def test_ss_seed_rejects_an_unknown_variable(compiled_rbc_so):
+def test_ss_seed_rejects_an_unknown_variable(parsed_rbc_so, compiled_rbc_so):
     with pytest.raises(ValueError, match=r"does not have: \['ghost'\]"):
-        DSGESolver._resolve_ss_seed({"k": 1.0, "ghost": 2.0}, compiled_rbc_so)
+        resolve_ss_seed(
+            parsed_rbc_so, compiled_rbc_so.layout, ss_seed={"k": 1.0, "ghost": 2.0}
+        )
 
 
-def test_ss_seed_seeds_a_minted_lag_through_its_origin(deep_compiled):
+def test_ss_seed_seeds_a_minted_lag_through_its_origin(deep_pair):
     # At a steady state every date coincides, so an aux is its origin. It is not
     # separately addressable, and seeding the origin seeds the whole chain.
-    seed = DSGESolver._resolve_ss_seed({"u": 7.0}, deep_compiled)
+    config, compiled = deep_pair
+    seed = resolve_ss_seed(config, compiled.layout, ss_seed={"u": 7.0})
 
-    idx = deep_compiled.idx
+    idx = compiled.idx
     assert seed[idx["u"]] == seed[idx["u_lag1"]] == seed[idx["u_lag2"]] == 7.0
 
     with pytest.raises(ValueError, match="compiler-minted"):
-        DSGESolver._resolve_ss_seed({"u_lag1": 7.0}, deep_compiled)
+        resolve_ss_seed(config, compiled.layout, ss_seed={"u_lag1": 7.0})

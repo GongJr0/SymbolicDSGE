@@ -13,7 +13,8 @@ from sympy import Eq, Expr, Function, Symbol
 from sympy.core.function import AppliedUndef
 
 from .._ckernels.core import steady_state_newton
-from ..core.compiled_model import CompiledModel, _newton_seed
+from ..core.compiled_model import CompiledModel
+from ..core.resolvers import resolve_ss_seed
 from ..core.config import SymbolGetterDict, FunctionGetterDict
 from .view import PointLinearView
 
@@ -280,7 +281,7 @@ def _solve_steady_state(
     residual = compiled.construct_objective_cfunc()
     ss, _ = steady_state_newton(
         residual.address,
-        _newton_seed(compiled, parameters),
+        resolve_ss_seed(compiled.config, compiled.layout, params=parameters),
         _parameter_vector(compiled, parameters),
         compiled.n_exog,
     )

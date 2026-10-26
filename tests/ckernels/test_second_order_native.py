@@ -22,6 +22,7 @@ from SymbolicDSGE.core import DSGESolver
 from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.compiled_model import _shock_covariance
 from SymbolicDSGE.core.solver_backend import klein_solve
+from SymbolicDSGE.core.resolvers import resolve_ss_seed
 from _oracles.core import _solve_second_order_numpy
 
 _BLOCKS = ("gxx", "hxx", "gxu", "hxu", "guu", "huu", "gss", "hss")
@@ -39,7 +40,7 @@ def _drive(path):
 
     # Config steady state, resolved at run time (RBC -> [0, k_ss, c_ss];
     # deviation-form models -> 0). No file I/O at collection time.
-    ss = DSGESolver._resolve_ss_seed(None, compiled)
+    ss = resolve_ss_seed(model, compiled.layout)
 
     a, b, _, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
     sol = klein_solve(compiled, par, ss)
