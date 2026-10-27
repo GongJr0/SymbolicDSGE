@@ -15,6 +15,7 @@ from numpy import asarray, float64, ndarray, generic
 from numpy.linalg import cholesky, LinAlgError, eigh
 from numpy.typing import NDArray
 
+from ..config import ModelConfig
 from ..compiled_model import CompiledModel
 from ..config import cov_from_spec
 
@@ -182,6 +183,7 @@ def _gaussian_factor(cov: ndarray) -> ndarray:
 
 
 def resolve_shock_plan(
+    config: ModelConfig,
     compiled: CompiledModel,
     shocks: ShockSpec,
     T: int | None = None,
@@ -195,7 +197,7 @@ def resolve_shock_plan(
     ``T`` is required only for an entry the kernel cannot draw, which resolves
     its family against a horizon to be drawn in Python.
     """
-    calib = compiled.config.calibration
+    calib = config.calibration
     shock_col = compiled.shock_idx
 
     spec = _normalized_spec(shocks)
@@ -231,7 +233,7 @@ def resolve_shock_plan(
         else:
             if cov is None:
                 cov = cov_from_spec(
-                    compiled.config.shocks,
+                    config.shocks,
                     calib.shocks,
                     calib.parameters,
                 )
@@ -258,6 +260,7 @@ def resolve_shock_plan(
 
 
 def simulation_shock_matrix(
+    config: ModelConfig,
     compiled: CompiledModel,
     T: int,
     shocks: ShockSpec | None = None,
@@ -266,7 +269,7 @@ def simulation_shock_matrix(
     """``(T, n_exog)`` innovations for a spec, or zeros when there is none."""
     if shocks is None:
         return np.zeros((T, compiled.n_exog), dtype=float64)
-    plan = resolve_shock_plan(compiled, shocks, T)
+    plan = resolve_shock_plan(config, compiled, shocks, T)
     return get_native_shock_plan(plan, T, shock_scale).draw(0)
 
 

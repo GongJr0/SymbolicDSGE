@@ -18,7 +18,7 @@ import pandas as pd
 from numpy import asarray, float64, int64
 from numpy.typing import NDArray
 
-from ..core.compiled_model import _shock_covariance, _measurement_covariance
+from ..core.resolvers import shock_covariance, measurement_covariance
 from .._ckernels.kalman import stationary_covariance
 
 if TYPE_CHECKING:
@@ -131,7 +131,7 @@ def resolve_linear_args(
         B=B,
         C=C,
         d=d,
-        Q=_shock_covariance(model.compiled),
+        Q=shock_covariance(model.config),
         R=_build_R(model, R, obs),
         steady_state=model.policy.steady_state,
         y=y_canonical,
@@ -166,7 +166,7 @@ def resolve_extended_args(
         A=A,
         B=B,
         calib_params=_calib_params(model),
-        Q=_shock_covariance(model.compiled),
+        Q=shock_covariance(model.config),
         R=_build_R(model, R, obs),
         steady_state=model.policy.steady_state,
         y=y_canonical,
@@ -214,7 +214,7 @@ def resolve_unscented_args(
         gss=_ukf_array(model, "gss"),
         steady_state=policy.steady_state,
         calib_params=_calib_params(model),
-        Q=_shock_covariance(model.compiled),
+        Q=shock_covariance(model.config),
         R=_build_R(model, R, obs),
         y=y_canonical,
         z0=_build_unscented_z0(model, x0),
@@ -357,7 +357,7 @@ def _build_R(model: SolvedModel, R: NDF | None, observables: Sequence[str]) -> N
     # Assemble from the CURRENT calibration, which may have moved since
     # parse (a re-solved model). The name maps fix the layout at parse;
     # only the values are read live here.
-    return _measurement_covariance(model.compiled, observables=observables)
+    return measurement_covariance(model.config, observables=observables)
 
 
 def _build_default_P0(model: SolvedModel, filter_mode: FilterMode) -> NDF:
@@ -366,7 +366,7 @@ def _build_default_P0(model: SolvedModel, filter_mode: FilterMode) -> NDF:
         err, state_P0 = stationary_covariance(
             model.policy.p,
             model.policy.B[:n_state, :],
-            _shock_covariance(model.compiled),
+            shock_covariance(model.config),
         )
         if err != 0:
             state_P0 = np.eye(n_state, dtype=float64)
@@ -376,7 +376,7 @@ def _build_default_P0(model: SolvedModel, filter_mode: FilterMode) -> NDF:
 
     n_var = model.compiled.n_var
     err, P0 = stationary_covariance(
-        model.policy.A, model.policy.B, _shock_covariance(model.compiled)
+        model.policy.A, model.policy.B, shock_covariance(model.config)
     )
     if err != 0:
         return np.eye(n_var, dtype=float64)

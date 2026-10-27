@@ -55,7 +55,7 @@ FAMILY_SPECS = [
 @pytest.mark.parametrize("rep_idx", [0, 1, 37])
 def test_plan_draw_is_reproducible_per_replication(solved_test, spec, rep_idx):
     """Every family draws one fixed path per replication index."""
-    plan = resolve_shock_plan(solved_test.compiled, spec, T)
+    plan = resolve_shock_plan(solved_test.config, solved_test.compiled, spec, T)
     native = get_native_shock_plan(plan, T, 2.5)
     np.testing.assert_array_equal(
         native.draw(rep_idx),
@@ -67,7 +67,7 @@ def test_plan_draw_is_reproducible_per_replication(solved_test, spec, rep_idx):
 @pytest.mark.parametrize("rep_idx", [0, 1, 37])
 def test_plan_draw_differs_across_replications(solved_test, spec, rep_idx):
     """And a different index is a different path, for every family."""
-    plan = resolve_shock_plan(solved_test.compiled, spec, T)
+    plan = resolve_shock_plan(solved_test.config, solved_test.compiled, spec, T)
     native = get_native_shock_plan(plan, T, 2.5)
     assert not np.array_equal(
         native.draw(rep_idx),
@@ -77,7 +77,7 @@ def test_plan_draw_differs_across_replications(solved_test, spec, rep_idx):
 
 def test_plan_reseeds_independently_across_draws(solved_test):
     spec = {("e_u", "e_v"): Shock(dist="norm", seed=11)}
-    plan = resolve_shock_plan(solved_test.compiled, spec, T)
+    plan = resolve_shock_plan(solved_test.config, solved_test.compiled, spec, T)
     native = get_native_shock_plan(plan, T, 1.0)
 
     first = native.draw(0)
@@ -91,7 +91,10 @@ def test_plan_reseeds_independently_across_draws(solved_test):
 
 def test_unseeded_spec_reproduces_with_the_same_plan(solved_test):
     plan = resolve_shock_plan(
-        solved_test.compiled, {("e_u",): Shock(dist="norm", seed=None)}, T
+        solved_test.config,
+        solved_test.compiled,
+        {("e_u",): Shock(dist="norm", seed=None)},
+        T,
     )
     native = get_native_shock_plan(plan, T, 1.0)
 
@@ -113,7 +116,7 @@ def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
 
     monkeypatch.setattr(shocks_mod, "cov_from_spec", counting_make_Q)
 
-    plan = resolve_shock_plan(solved_test.compiled, spec, T)
+    plan = resolve_shock_plan(solved_test.config, solved_test.compiled, spec, T)
     native = get_native_shock_plan(plan, T, 1.0)
     resolved = calls["n"]
     assert resolved > 0
@@ -127,7 +130,9 @@ def test_plan_resolution_is_reused_not_recomputed(solved_test, monkeypatch):
 
 def test_passthrough_entries_ignore_the_replication_index(solved_test):
     values = np.arange(T, dtype=np.float64)
-    plan = resolve_shock_plan(solved_test.compiled, {("e_u",): values}, T)
+    plan = resolve_shock_plan(
+        solved_test.config, solved_test.compiled, {("e_u",): values}, T
+    )
     native = get_native_shock_plan(plan, T, 1.0)
     np.testing.assert_array_equal(native.draw(0), native.draw(9))
 
@@ -152,10 +157,12 @@ def _t_shock(seed, target):
 def test_entry_draw_does_not_depend_on_its_position_in_the_spec(solved_post82):
     spec = [_t_shock(11, "e_g"), _t_shock(12, "e_z"), _t_shock(13, "e_r")]
 
-    forward = resolve_shock_plan(solved_post82.compiled, spec, T)
+    forward = resolve_shock_plan(solved_post82.config, solved_post82.compiled, spec, T)
     fnative = get_native_shock_plan(forward, T, 1.0).draw(3)
 
-    backward = resolve_shock_plan(solved_post82.compiled, list(reversed(spec)), T)
+    backward = resolve_shock_plan(
+        solved_post82.config, solved_post82.compiled, list(reversed(spec)), T
+    )
     bnative = get_native_shock_plan(backward, T, 1.0).draw(3)
 
     # Columns are addressed by shock, so reordering the spec must move nothing.
@@ -171,9 +178,11 @@ def test_entry_draw_does_not_depend_on_the_rest_of_the_spec(solved_post82):
     pair = [_t_shock(11, "e_g"), _t_shock(12, "e_z")]
     trio = pair + [_t_shock(13, "e_r")]
 
-    without = resolve_shock_plan(solved_post82.compiled, pair, T)
+    without = resolve_shock_plan(solved_post82.config, solved_post82.compiled, pair, T)
     wnative = get_native_shock_plan(without, T, 1.0).draw(3)
-    with_extra = resolve_shock_plan(solved_post82.compiled, trio, T)
+    with_extra = resolve_shock_plan(
+        solved_post82.config, solved_post82.compiled, trio, T
+    )
     wenative = get_native_shock_plan(with_extra, T, 1.0).draw(3)
     # Adding a third seeded entry leaves the first two untouched. Under the old
     # per-replication stride it shifted both at every replication past zero.
@@ -188,7 +197,7 @@ def test_entries_with_congruent_seeds_do_not_share_a_stream(solved_post82):
     # replication 0 both resolved to seed 2. Equal standard deviations made the
     # two columns identical, not merely correlated.
     spec = [_t_shock(0, "e_g"), _t_shock(2, "e_r")]
-    plan = resolve_shock_plan(solved_post82.compiled, spec, T)
+    plan = resolve_shock_plan(solved_post82.config, solved_post82.compiled, spec, T)
     native = get_native_shock_plan(plan, T, 1.0)
     e_g_at_1 = native.draw(1)[:, col["e_g"]]
     e_r_at_0 = native.draw(0)[:, col["e_r"]]
@@ -205,7 +214,9 @@ def test_identically_seeded_independent_copies_are_not_degenerate(solved_post82)
     )
     assert [shock.seed for shock in spec] == [5, 5, 5]
 
-    drawn = simulation_shock_matrix(solved_post82.compiled, T, spec)
+    drawn = simulation_shock_matrix(
+        solved_post82.config, solved_post82.compiled, T, spec
+    )
 
     assert np.linalg.matrix_rank(drawn) == len(spec)
 
@@ -215,7 +226,7 @@ def test_every_entry_and_replication_pair_draws_its_own_stream(solved_post82):
     # Seeds spaced by the seeded-entry count, which is the pattern the old
     # stride collided on: every pairwise difference is a multiple of three.
     spec = [_t_shock(0, "e_g"), _t_shock(3, "e_z"), _t_shock(6, "e_r")]
-    plan = resolve_shock_plan(solved_post82.compiled, spec, T)
+    plan = resolve_shock_plan(solved_post82.config, solved_post82.compiled, spec, T)
     native = get_native_shock_plan(plan, T, 1.0)
     seen: dict[bytes, tuple[str, int]] = {}
     for rep_idx in range(6):

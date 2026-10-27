@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Mapping, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -8,7 +8,7 @@ from numpy import float64
 
 from sympy import Symbol, Expr
 
-from .config import FunctionGetterDict, ModelConfig, SymbolGetterDict
+from .config import FunctionGetterDict, ModelConfig, SymbolGetterDict, cov_from_spec
 
 NDF = NDArray[np.float64]
 
@@ -129,6 +129,58 @@ def resolve_ss_seed(
         config.calibration.parameters if params is None else SymbolGetterDict(params)
     )
     return newton_seed(config.ss_seed, params, layout, overrides)
+
+
+def shock_covariance(
+    config: ModelConfig,
+    params: Mapping[str, float] | SymbolGetterDict[float] | None = None,
+    *,
+    shocks: Sequence[str] | None = None,
+) -> NDF:
+    """``Q`` for a model, at its own calibration unless ``params`` says otherwise.
+
+    ``shocks`` slices the matrix to a subset when specified.
+    """
+    calib = config.calibration
+    return cov_from_spec(
+        config.shocks,
+        calib.shocks,
+        calib.parameters if params is None else params,
+        subset=shocks,
+    )
+
+
+def measurement_covariance(
+    config: ModelConfig,
+    params: Mapping[str, float] | SymbolGetterDict[float] | None = None,
+    *,
+    observables: Sequence[str] | None = None,
+) -> NDF:
+    """``R`` from the named std/correlation maps, over ``observables``.
+
+    Reads the model's own calibration unless ``params`` says otherwise. A
+    config carrying a fixed ``R`` matrix rather than named parameters is the
+    caller's to slice.
+    """
+    calib = config.calibration
+    meas_cov = calib.measurement_noise
+    if meas_cov is None:
+        raise ValueError(
+            "Building R from named parameters requires a `measurement_noise` block in the model's calibration."
+        )
+    if not meas_cov.std:
+        raise ValueError(
+            "`measurement_noise` does not expose named parameter metadata."
+        )
+
+    if params is None:
+        params = calib.parameters
+    return cov_from_spec(
+        config.observables,
+        meas_cov,
+        params,
+        subset=observables,
+    )
 
 
 def _resolve_seed_override(

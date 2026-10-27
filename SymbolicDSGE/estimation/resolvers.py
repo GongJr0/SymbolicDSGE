@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from itertools import combinations
-from typing import Any, Sequence, Mapping
+from typing import Sequence, Mapping
 
 import numpy as np
 from numpy.typing import NDArray
 
 from . import backend as b
 
-from ..core.compiled_model import CompiledModel
+from ..core import ModelConfig, CompiledModel
 from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
 from ..bayesian.support import OutOfSupportError
@@ -59,14 +59,13 @@ def check_parameters(
     compiled: CompiledModel,
     estimated_parameters: Sequence[str],
 ) -> None:
-    base = b.extract_base_params(compiled)
-    allowed = set(base.keys()).union(_RESERVED_MATRIX_KEYS)
+    allowed = set(compiled.calib_params).union(_RESERVED_MATRIX_KEYS)
     seen = set()
     for param in estimated_parameters:
         if param not in allowed:
             raise ValueError(
                 f"Parameter {param!r} is not found in the compiled model specification."
-                f"Available parameters are: {list(base.keys())}"
+                f"Available parameters are: {list(compiled.calib_params)!r}"
             )
         if param in seen:
             raise ValueError(f"Parameter {param!r} is specified multiple times.")
@@ -76,7 +75,7 @@ def check_parameters(
 def resolve_theta_layout(
     requested: Sequence[str],
     priored: Mapping[str, Prior] | None,
-    compiled: CompiledModel,
+    config: ModelConfig,
     observables: list[str],
 ) -> tuple[dict[str, int], dict[str, b.MatrixPriorBlock]]:
     """Resolve the requested names into the theta layout and its CPC blocks.
@@ -94,9 +93,9 @@ def resolve_theta_layout(
         by_key = key in present
         try:
             block = (
-                _resolve_R(compiled, observables=observables)
+                _resolve_R(config, observables=observables)
                 if key == "R_corr"
-                else _resolve_Q(compiled=compiled)
+                else _resolve_Q(config)
             )
         except Exception:
             # Only a key asked for by name owes an explanation; an unresolvable
@@ -148,7 +147,7 @@ def resolve_theta_layout(
             )
 
     if blocks:
-        std_names = _matrix_std_names(compiled, observables)
+        std_names = _matrix_std_names(config, observables)
         for key, block in blocks.items():
             clash = sorted(std_names & set(block.member_names))
             if clash:
@@ -181,7 +180,7 @@ def resolve_theta_layout(
 
 
 def _matrix_std_names(
-    compiled: CompiledModel,
+    config: ModelConfig,
     observables: list[str],
 ) -> set[str]:
     """Std parameter names that reach a cov spec's ``std_slots``, across Q and R.
@@ -189,8 +188,8 @@ def _matrix_std_names(
     R contributes only the stds of the active observables, matching the
     ``obs_list`` the R spec indexes; Q contributes every named shock std.
     """
-    meas_noise = compiled.config.calibration.measurement_noise
-    shocks = compiled.config.calibration.shocks
+    meas_noise = config.calibration.measurement_noise
+    shocks = config.calibration.shocks
 
     active = {str(o) for o in observables}
     out: set[str] = set()
@@ -267,12 +266,12 @@ def _assert_lkj_prior(key: str, prior: Prior, K: int) -> None:
 
 
 def check_estimated_versus_constant_R(
-    requested: Sequence[str], compiled: CompiledModel, R: NDF | None
+    requested: Sequence[str], config: ModelConfig, R: NDF | None
 ) -> None:
     r_block_target = "R_corr" in requested
     r_component_target = False
 
-    meas_noise = compiled.config.calibration.measurement_noise
+    meas_noise = config.calibration.measurement_noise
     if meas_noise is not None:
         r_component_target = any(
             name in requested for name in (meas_noise.param_names or [])
@@ -329,8 +328,8 @@ def _build_matrix_resolution(
     )
 
 
-def _resolve_R(complied: CompiledModel, observables: list[str]) -> b.MatrixPriorBlock:
-    meas_noise = complied.config.calibration.measurement_noise
+def _resolve_R(config: ModelConfig, observables: list[str]) -> b.MatrixPriorBlock:
+    meas_noise = config.calibration.measurement_noise
     if meas_noise is None:
         raise ValueError(
             "Block estimation of R requires `calibration.measurement_noise` to specify symbolic R std/correlation metadata."
@@ -347,9 +346,9 @@ def _resolve_R(complied: CompiledModel, observables: list[str]) -> b.MatrixPrior
     )
 
 
-def _resolve_Q(compiled: CompiledModel) -> b.MatrixPriorBlock:
-    shock_corr = compiled.config.calibration.shocks.corr
-    labels = list(compiled.shock_names)
+def _resolve_Q(config: ModelConfig) -> b.MatrixPriorBlock:
+    shock_corr = config.calibration.shocks.corr
+    labels = list(map(str, config.shocks))
     return _build_matrix_resolution(
         key="Q_corr",
         labels=labels,
@@ -359,34 +358,40 @@ def _resolve_Q(compiled: CompiledModel) -> b.MatrixPriorBlock:
 
 # --- Prior Collection ---
 
+# `type: ignore` reason:
+#
+# `PairGetterDict.get` is overriden (transitively via __getitem__) to
+# coerce tuple(...) -> frozenset(...). Mypy resolves to `.get` of the
+# Mapping protocol and errors out because no explicit redefinition of
+# `.get` exists.
+
 
 def active_Q(
     requested: Sequence[str],
-    compiled: CompiledModel,
+    config: ModelConfig,
 ) -> tuple[set[str], set[str]]:
     """Estimated Q parameters split by role, as ``(stds, correlations)``.
 
     Labels are ``shock_names``, the order the Q covariance spec is built over.
     """
-    calib = compiled.config.calibration
+    calib = config.calibration
     present = set(requested)
-    shocks = compiled.shock_names
+    shocks = config.shocks
 
-    corr_map: Mapping[Any, str | None] = calib.shocks.corr
+    corr_map: PairGetterDict[str | None] = calib.shocks.corr
 
     std = {calib.shocks.std[s] for s in shocks} & present
     corr = {
         name
         for pair in combinations(shocks, 2)
-        if (name := corr_map.get(pair)) is not None  # pyright: ignore
-        and name in present
+        if (name := corr_map.get(pair)) is not None and name in present  # type: ignore
     }
     return std, corr
 
 
 def active_R(
     requested: Sequence[str],
-    compiled: CompiledModel,
+    config: ModelConfig,
     observables: Sequence[str],
 ) -> tuple[set[str], set[str]]:
     """Estimated R parameters split by role, as ``(stds, correlations)``.
@@ -394,13 +399,13 @@ def active_R(
     Labels are the active observables, the order the R covariance spec is built
     over; a name reaching only an inactive observable is not estimated.
     """
-    meas_noise = compiled.config.calibration.measurement_noise
+    meas_noise = config.calibration.measurement_noise
     if meas_noise is None:
         return set(), set()
 
     present = set(requested)
     std_map = meas_noise.std
-    corr_map: Mapping[Any, str | None] | None = meas_noise.corr
+    corr_map: PairGetterDict[str | None] | None = meas_noise.corr
 
     std: set[str] = set()
     if std_map is not None:
@@ -411,14 +416,14 @@ def active_R(
         corr = {
             name
             for pair in combinations(observables, 2)
-            if (name := corr_map.get(pair)) is not None  # pyright: ignore
+            if (name := corr_map.get(pair)) is not None  # type: ignore
             and name in present
         }
     return std, corr
 
 
 def _corr_pairs(
-    compiled: CompiledModel,
+    config: ModelConfig,
     observables: Sequence[str],
 ) -> list[tuple[str, str, frozenset[str]]]:
     """Every active correlation as ``(matrix key, name, the pair it couples)``.
@@ -426,21 +431,21 @@ def _corr_pairs(
     A name is unique within a matrix but not across the two, so an entry is the
     pair rather than the name.
     """
-    shocks = compiled.config.calibration.shocks
-    meas_noise = compiled.config.calibration.measurement_noise
+    shocks = config.calibration.shocks
+    meas_noise = config.calibration.measurement_noise
 
     out: list[tuple[str, str, frozenset[str]]] = []
-    corr_map: Mapping[Any, str | None] = shocks.corr
-    for pair in combinations(compiled.shock_names, 2):
-        if (name := corr_map.get(pair)) is not None:  # pyright: ignore
-            out.append(("Q_corr", name, frozenset(pair)))
+    corr_map: PairGetterDict[str | None] = shocks.corr
+    for pair in combinations(config.shocks, 2):
+        if (name := corr_map.get(pair)) is not None:  # type: ignore
+            out.append(("Q_corr", name, frozenset(map(str, pair))))
 
-    r_map: Mapping[Any, str | None] | None = (
+    r_map: PairGetterDict[str | None] | None = (
         meas_noise.corr if meas_noise is not None else None
     )
     if r_map is not None:
         for pair in combinations(observables, 2):
-            if (name := r_map.get(pair)) is not None:  # pyright: ignore
+            if (name := r_map.get(pair)) is not None:  # type: ignore
                 out.append(("R_corr", name, frozenset(pair)))
     return out
 
@@ -448,7 +453,7 @@ def _corr_pairs(
 def assert_scalar_corr_spd_safe(
     param_index: Mapping[str, int],
     matrix_blocks: Mapping[str, b.MatrixPriorBlock],
-    compiled: CompiledModel,
+    config: ModelConfig,
     observables: Sequence[str],
 ) -> None:
     """Reject a standalone scalar correlation whose region admits a non-SPD matrix.
@@ -461,14 +466,14 @@ def assert_scalar_corr_spd_safe(
     transform does not change that, since every scalar correlation map lands on
     the same open interval, so the rejection is the same on either leg.
     """
-    entries = _corr_pairs(compiled, observables)
+    entries = _corr_pairs(config, observables)
     blocked = {name for block in matrix_blocks.values() for name in block.member_names}
     scalars = [e for e in entries if e[1] in param_index and e[1] not in blocked]
     scalars.sort(key=lambda entry: param_index[entry[1]])
     if not scalars:
         return
 
-    base = b.extract_base_params(compiled)
+    base = config.calibration.parameters
     for key, name, pair in scalars:
         for other_key, other, other_pair in entries:
             if other_key != key or other_pair == pair:

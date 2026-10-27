@@ -12,7 +12,9 @@ from numpy.typing import NDArray
 from .._ckernels.core import INC_LAG, INC_LEAD, klein_solve1, sgu_klein_solve2
 from .._ckernels.core._solve_errors import SolveStatus
 from .._ckernels.occbin import occbin_solve1
-from .compiled_model import CompiledModel, _shock_covariance
+from .compiled_model import CompiledModel
+from .config import ModelConfig
+from .resolvers import shock_covariance
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
@@ -352,7 +354,7 @@ def klein_solve(
 
 
 def sgu_solve(
-    compiled: CompiledModel, params: NDF, ss_seed: NDF
+    config: ModelConfig, compiled: CompiledModel, params: NDF, ss_seed: NDF
 ) -> SecondOrderSolution:
     """Second-order solve of ``compiled`` at ``params``.
 
@@ -385,7 +387,7 @@ def sgu_solve(
         compiled.construct_objective_cfunc_bicomplex().address,
         ss_seed,
         params,
-        _shock_covariance(compiled),
+        shock_covariance(config),
         compiled._incidence,
         compiled.n_state,
         compiled.n_exog,

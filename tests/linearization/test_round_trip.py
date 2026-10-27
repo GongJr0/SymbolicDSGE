@@ -74,7 +74,7 @@ def _round_trip(
     solver = DSGESolver(model)
     compiled = solver.compile()
 
-    view = Linearizer(compiled, methods).at()
+    view = Linearizer(model, compiled, methods).at()
     linear_solver = DSGESolver(view.to_config())
 
     return _RoundTrip(
@@ -244,7 +244,7 @@ def test_a_constrained_model_refuses_to_become_a_config(rbc_occbin_test_model_pa
     model = parse_config(rbc_occbin_test_model_path)
     compiled = DSGESolver(model).compile()
 
-    view = Linearizer(compiled).at()
+    view = Linearizer(model, compiled).at()
     assert view.model
     assert compiled.constraint_names == ("IRR", "INEG")
 

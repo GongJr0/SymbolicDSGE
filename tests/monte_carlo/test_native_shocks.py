@@ -86,7 +86,9 @@ def test_table_spec_runs_natively(solved_test) -> None:
 
     states = _run_states(solved_test, shocks, 3, 1)
     resolved = get_native_shock_plan(
-        resolve_shock_plan(solved_test.compiled, shocks, T), T, shock_scale=1.0
+        resolve_shock_plan(solved_test.config, solved_test.compiled, shocks, T),
+        T,
+        shock_scale=1.0,
     )
     for rep_idx in range(3):
         drawn = resolved.draw(rep_idx)

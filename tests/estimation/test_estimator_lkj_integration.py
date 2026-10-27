@@ -63,6 +63,7 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
     )
     return {
         "solver": solver,
+        "config": model,
         "compiled": compiled,
         "steady": steady,
         "y": y,
@@ -154,6 +155,7 @@ def test_packed_logprior_matches_python_path_with_full_size_estimator_golden(
 ):
     prior_spec = _full_size_prior_spec()
     est = Estimator(
+        config=dense_lkj_bundle["config"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
@@ -201,6 +203,7 @@ def test_mle_interacting_scalar_corrs_without_prior_hit_spd_gate(dense_lkj_bundl
     # per-parameter tanh cannot guarantee joint SPD, so it fails fast toward Q_corr.
     with pytest.raises(ValueError, match="joint positive-definiteness"):
         Estimator(
+            config=dense_lkj_bundle["config"],
             compiled=dense_lkj_bundle["compiled"],
             y=dense_lkj_bundle["y"],
             ss_seed=dense_lkj_bundle["steady"],
@@ -212,6 +215,7 @@ def test_mle_full_dense_q_corr_set_promotes_and_estimates(dense_lkj_bundle):
     # All three dense Q correlations estimated prior-free fold into a Q_corr CPC
     # block (SPD by construction) instead of tripping the gate.
     est = Estimator(
+        config=dense_lkj_bundle["config"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
@@ -238,6 +242,7 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         )
     }
     est = Estimator(
+        config=dense_lkj_bundle["config"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
@@ -275,6 +280,7 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
 
 def test_to_spec_round_trips_matrix_prior(dense_lkj_bundle):
     est = Estimator(
+        config=dense_lkj_bundle["config"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],
@@ -298,7 +304,9 @@ def test_to_spec_round_trips_matrix_prior(dense_lkj_bundle):
     assert json.loads(json.dumps(spec.params)) == spec.params
 
     # And it rebuilds into an equivalent estimator.
-    rebuilt = Estimator.from_spec(spec, dense_lkj_bundle["compiled"])
+    rebuilt = Estimator.from_spec(
+        spec, dense_lkj_bundle["config"], dense_lkj_bundle["compiled"]
+    )
     assert rebuilt.param_names == est.param_names
     assert set(rebuilt._matrix_blocks) == {"R_corr"}
     assert float(rebuilt.loglik()) == float(est.loglik())
@@ -312,6 +320,7 @@ def test_matrix_prior_on_Q_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
         )
     }
     est = Estimator(
+        config=dense_lkj_bundle["config"],
         compiled=dense_lkj_bundle["compiled"],
         y=dense_lkj_bundle["y"],
         ss_seed=dense_lkj_bundle["steady"],

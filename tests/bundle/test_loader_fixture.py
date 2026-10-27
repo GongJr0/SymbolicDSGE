@@ -111,7 +111,7 @@ def test_rebuild_mcmc_result_ok():
     assert res.n_draws == 3 and res.thin == 1
 
 
-def test_load_estimation_optimization_result_dispatch(compiled_test):
+def test_load_estimation_optimization_result_dispatch(parsed_test, compiled_test):
     # A non-mcmc estimation_result routes through _rebuild_optimization_result,
     # with no estimation_data / estimation_trace members present.
     spec_member = SimpleNamespace(path="spec.json", model_name="reference")
@@ -150,7 +150,7 @@ def test_load_estimation_optimization_result_dispatch(compiled_test):
         read_text=lambda path: spec_json if path == "spec.json" else result_json,
         read=lambda path: b"y.0,y.1\n1.0,2.0\n3.0,4.0\n",
     )
-    reference = SimpleNamespace(compiled=compiled_test)
+    reference = SimpleNamespace(compiled=compiled_test, config=parsed_test)
 
     loaded = L._load_estimation(archive, manifest, {"reference": reference})
     assert isinstance(loaded.result, OptimizationResult)

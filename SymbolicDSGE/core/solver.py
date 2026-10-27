@@ -534,7 +534,7 @@ class DSGESolver:
                 "constraints from the model specification."
             )
 
-        conf = compiled.config
+        conf = self.config
         point = parameters if parameters is not None else conf.calibration.parameters
         seed = resolve_ss_seed(conf, compiled.layout, ss_seed=ss_seed, params=point)
         param_vec = np.array(
@@ -550,7 +550,7 @@ class DSGESolver:
             )
         elif order == 2:
             sol = SecondOrderSolvedModel(
-                compiled=compiled, policy=sgu_solve(compiled, param_vec, seed)
+                compiled=compiled, policy=sgu_solve(conf, compiled, param_vec, seed)
             )
         else:
             sol = FirstOrderSolvedModel(
@@ -599,17 +599,7 @@ class DSGESolver:
             jitter=jitter,
             symmetrize=symmetrize,
             R=R,
-        )
-
-    @staticmethod
-    def _sync_calibration_with_params(
-        compiled: CompiledModel, params: Mapping[str, float64]
-    ) -> None:
-        calib = compiled.config.calibration.parameters
-        for key in list(calib.keys()):
-            name = key if isinstance(key, str) else getattr(key, "name", None)
-            if name is not None and name in params:
-                calib[key] = float64(params[name])
+        )  # type: ignore
 
     def estimate(
         self,
@@ -789,7 +779,7 @@ class DSGESolver:
         # Sync writes the estimated values into the calibration, which is where
         # `solve` reads its full parameter vector from; passing them again would
         # only re-supply what was just installed.
-        self._sync_calibration_with_params(compiled, solve_params)
+        self._sync_calibration_with_params(compiled, solve_params)  # type: ignore
         solved = self.solve(
             compiled=compiled,
             order=order,

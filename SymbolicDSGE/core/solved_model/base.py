@@ -226,7 +226,7 @@ class SolvedModel(ABC, Generic[Policy]):
                 f"Unknown shock(s) {unknown}. Model shocks: "
                 f"{list(self.compiled.shock_names)}."
             )
-        conf = self.compiled.config
+        conf = self.config
 
         # An impulse is a literal path, not a draw, which is what ShockPath is
         # for: one entry per shock, each naming its own target.
@@ -292,7 +292,7 @@ class SolvedModel(ABC, Generic[Policy]):
         None
         """
         tr = self.irf(shocks=shocks, T=T, scale=scale, observables=observables)
-        obs_vars = [v.name for v in self.compiled.config.observables]
+        obs_vars = [v.name for v in self.config.observables]
 
         n_vars = tr.X.shape[1] + (tr.y.shape[1] if tr.y is not None else 0)
         fig_square = np.ceil(np.sqrt(n_vars))
@@ -464,7 +464,9 @@ class SolvedModel(ABC, Generic[Policy]):
             d = d - C @ self.policy.steady_state
             return measurement.affine_path(states, C, d, len(y_names), start)
 
-        Y = measurement.non_affine_measurement(self.compiled, y_names, states)
+        Y = measurement.non_affine_measurement(
+            self.config, self.compiled, y_names, states
+        )
         return np.ascontiguousarray(Y[start:], dtype=float64)
 
     def _assemble_simulation(self, path: StatePath, observables: bool) -> SimResult:
@@ -496,7 +498,7 @@ class SolvedModel(ABC, Generic[Policy]):
             return hit
 
         result = measurement.build_C_d_from_obs(
-            self.compiled, y_names, self.policy.steady_state
+            self.config, self.compiled, y_names, self.policy.steady_state
         )
         self._cd_cache[key] = result
         return result
@@ -616,4 +618,4 @@ class SolvedModel(ABC, Generic[Policy]):
         return {}
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.compiled.config.name})"
+        return f"{self.__class__.__name__}({self.config.name})"

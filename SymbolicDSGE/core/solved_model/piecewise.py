@@ -47,10 +47,11 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         reset_check_ahead: bool = False,
     ) -> StatePath:
         pol = self.policy
+        conf = self.config
         comp = self.compiled
         x0_arr = self._initial_state(x0)[: comp.n_state]
 
-        shock_mat = simulation_shock_matrix(comp, T, shocks, shock_scale)
+        shock_mat = simulation_shock_matrix(conf, comp, T, shocks, shock_scale)
 
         constraint = comp.construct_constraint_func()
 

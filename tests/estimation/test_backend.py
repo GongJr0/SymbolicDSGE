@@ -6,9 +6,9 @@ import pandas as pd
 import pytest
 from sympy import Symbol
 
-from SymbolicDSGE.core.compiled_model import (
-    _measurement_covariance,
-    _shock_covariance,
+from SymbolicDSGE.core.resolvers import (
+    measurement_covariance,
+    shock_covariance,
 )
 from SymbolicDSGE.core.config import (
     CovarianceSpec,
@@ -18,20 +18,6 @@ from SymbolicDSGE.core.config import (
 )
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation import backend
-
-
-def test_extract_base_params_reads_the_calibration_by_name():
-    a = Symbol("a")
-    b = Symbol("b")
-    compiled = SimpleNamespace(
-        config=SimpleNamespace(
-            calibration=SimpleNamespace(parameters={a: 1.5, b: 2.5})
-        ),
-        calib_params=[b, a],
-    )
-
-    base = backend.extract_base_params(compiled)
-    assert base == {"a": pytest.approx(1.5), "b": pytest.approx(2.5)}
 
 
 def test_reorder_observables_dataframe_and_ndarray_paths():
@@ -81,10 +67,9 @@ def test_reorder_observables_uses_compiled_default_and_validates_dataframe_colum
         )
 
 
-def test_build_Q_matches_post82_manual_structure(compiled_post82):
-    compiled = compiled_post82
-    params = backend.extract_base_params(compiled)
-    Q = _shock_covariance(compiled, params)
+def test_build_Q_matches_post82_manual_structure(parsed_post82):
+    params = parsed_post82.calibration.parameters
+    Q = shock_covariance(parsed_post82)
 
     sig_g = params["sig_g"]
     sig_z = params["sig_z"]
@@ -102,11 +87,13 @@ def test_build_Q_matches_post82_manual_structure(compiled_post82):
 
 
 def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
-    compiled_post82, solved_post82, y_post82, monkeypatch
+    solved_post82, y_post82, monkeypatch
 ):
-    compiled = compiled_post82
+    config = solved_post82.config
+    compiled = solved_post82.compiled
     compiled_type = type(compiled)
     est = Estimator(
+        config=config,
         compiled=compiled,
         y=y_post82,
         observables=["Infl", "Rate"],
@@ -136,7 +123,7 @@ def test_estimator_loglik_reuses_prepared_measurement_dispatchers(
 
 
 @pytest.fixture
-def injected_measurement_noise(compiled_post82, monkeypatch):
+def injected_measurement_noise(parsed_post82, monkeypatch):
     """Put a hand-built covariance spec on the model's own calibration.
 
     ``_parse_measurement_noise`` requires a std entry per observable, so a
@@ -148,11 +135,11 @@ def injected_measurement_noise(compiled_post82, monkeypatch):
 
     def apply(std, corr=None):
         monkeypatch.setattr(
-            compiled_post82.config.calibration,
+            parsed_post82.calibration,
             "measurement_noise",
             CovarianceSpec(std=SymbolGetterDict(std), corr=PairGetterDict(corr or {})),
         )
-        return compiled_post82
+        return parsed_post82
 
     return apply
 
@@ -187,11 +174,14 @@ def test_build_R_override_and_config_branches(injected_measurement_noise):
         backend._build_R(empty, ["Infl", "Rate"], {})
 
 
-def _post82_estimator(compiled, solved, y, **kwargs):
+def _post82_estimator(solved, y, **kwargs):
     """One estimated parameter held at its calibration, so ``loglik()``
     is the likelihood at the base calibration and can be compared against
     ``SolvedModel.kalman`` on the same data."""
+    config = solved.config
+    compiled = solved.compiled
     return Estimator(
+        config=config,
         compiled=compiled,
         y=y,
         observables=["Infl", "Rate"],
@@ -201,12 +191,8 @@ def _post82_estimator(compiled, solved, y, **kwargs):
     )
 
 
-def test_estimator_loglik_linear_matches_model_kalman(
-    compiled_post82, solved_post82, y_post82
-):
-    est = _post82_estimator(
-        compiled_post82, solved_post82, y_post82, filter_mode="linear"
-    )
+def test_estimator_loglik_linear_matches_model_kalman(solved_post82, y_post82):
+    est = _post82_estimator(solved_post82, y_post82, filter_mode="linear")
     ll_model_lin = solved_post82.kalman(
         y=y_post82,
         filter_mode="linear",
@@ -215,12 +201,8 @@ def test_estimator_loglik_linear_matches_model_kalman(
     assert np.allclose(float(est.loglik()), ll_model_lin, rtol=1e-10, atol=1e-10)
 
 
-def test_estimator_loglik_extended_matches_model_kalman(
-    compiled_post82, solved_post82, y_post82
-):
-    est = _post82_estimator(
-        compiled_post82, solved_post82, y_post82, filter_mode="extended"
-    )
+def test_estimator_loglik_extended_matches_model_kalman(solved_post82, y_post82):
+    est = _post82_estimator(solved_post82, y_post82, filter_mode="extended")
     ll_model_ext = solved_post82.kalman(
         y=y_post82,
         filter_mode="extended",
@@ -230,26 +212,22 @@ def test_estimator_loglik_extended_matches_model_kalman(
 
 
 def test_estimator_loglik_respects_R_override_and_mode_validation(
-    compiled_post82, solved_post82, y_post82
+    solved_post82, y_post82
 ):
     with pytest.raises(ValueError, match="is not a valid FilterMode"):
-        _post82_estimator(
-            compiled_post82, solved_post82, y_post82, filter_mode="bad_mode"
-        )
+        _post82_estimator(solved_post82, y_post82, filter_mode="bad_mode")
 
-    calib = compiled_post82.config.calibration
+    calib = solved_post82.config.calibration
     scaled_R = 2.0 * cov_from_spec(
-        compiled_post82.observable_names,
+        solved_post82.compiled.observable_names,
         calib.measurement_noise,
         calib.parameters,
         subset=["Infl", "Rate"],
     )
     overridden = _post82_estimator(
-        compiled_post82, solved_post82, y_post82, filter_mode="linear", R=scaled_R
+        solved_post82, y_post82, filter_mode="linear", R=scaled_R
     )
-    from_config = _post82_estimator(
-        compiled_post82, solved_post82, y_post82, filter_mode="linear"
-    )
+    from_config = _post82_estimator(solved_post82, y_post82, filter_mode="linear")
     assert not np.isclose(
         float(overridden.loglik()),
         float(from_config.loglik()),
@@ -280,14 +258,14 @@ def test_measurement_covariance_error_branches(injected_measurement_noise):
     # A block that names no standard deviation has nothing to build from.
     no_metadata = injected_measurement_noise(std={})
     with pytest.raises(ValueError, match="does not expose named parameter metadata"):
-        _measurement_covariance(no_metadata, params, observables=["Infl", "Rate"])
+        measurement_covariance(no_metadata, params, observables=["Infl", "Rate"])
 
     # A named parameter absent from the supplied mapping is a hard error.
     missing_param = injected_measurement_noise(
         std={"OutGap": "s_o", "Infl": "s_i", "Rate": "not_in_params"}
     )
     with pytest.raises(KeyError, match="Missing covariance parameter"):
-        _measurement_covariance(missing_param, params, observables=["Infl", "Rate"])
+        measurement_covariance(missing_param, params, observables=["Infl", "Rate"])
 
 
 def test_backend_corr_cov_helpers_and_validation_error_paths():
@@ -359,17 +337,18 @@ def rbc_ukf_y(compiled_rbc_so):
     return c_ss + rng.normal(0.0, 0.05, size=(6, 1))
 
 
-def test_estimator_loglik_unscented_matches_model_kalman(
-    compiled_rbc_so, solved_rbc_so, rbc_ukf_y
-):
+def test_estimator_loglik_unscented_matches_model_kalman(solved_rbc_so, rbc_ukf_y):
     """End-to-end UKF estimation parity: one ``Estimator.loglik`` at the
     calibration point (unscented) must equal ``SolvedModel.kalman`` unscented on
     the same data. Exercises the whole new path in one estimation: the
     ``order=2`` solve, the augmented ``build_unscented_P0``, and the seam's
     unscented branch (``bx``/``z0``/policy tensors -> ``run_unscented_raw``)."""
-    compiled, solved, y = compiled_rbc_so, solved_rbc_so, rbc_ukf_y
+    solved, y = solved_rbc_so, rbc_ukf_y
+    config = solved.config
+    compiled = solved.compiled
 
     est = Estimator(
+        config=config,
         compiled=compiled,
         y=y,
         observables=["c_obs"],
@@ -392,11 +371,13 @@ def test_estimator_loglik_unscented_matches_model_kalman(
     assert ll_est == pytest.approx(ll_ref, rel=1e-9, abs=1e-9)
 
 
-def test_estimator_loglik_unscented_accepts_full_length_x0(compiled_rbc_so, rbc_ukf_y):
+def test_estimator_loglik_unscented_accepts_full_length_x0(solved_rbc_so, rbc_ukf_y):
     """A full n_var x0 exercises the seam's z0 slicing branch (raw[:n_state])."""
-    compiled = compiled_rbc_so
+    config = solved_rbc_so.config
+    compiled = solved_rbc_so.compiled
 
     est = Estimator(
+        config=config,
         compiled=compiled,
         y=rbc_ukf_y,
         observables=["c_obs"],

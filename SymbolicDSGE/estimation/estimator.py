@@ -12,6 +12,7 @@ from numpy import asarray, float64
 from numpy.typing import NDArray
 
 from ..bayesian.priors import Prior
+from ..core.config import ModelConfig
 from ..core.compiled_model import CompiledModel
 
 from .._ckernels.estimation import (
@@ -41,8 +42,10 @@ class Estimator:
 
     Parameters
     ----------
+    config : ModelConfig
+        Model configuration object containing the target model specification.
     compiled : CompiledModel
-        Compiled model object containing the target model's information and configuration.
+        Compiled model object containing the target model's information.
     y : NDF | pd.DataFrame
         Observed data for the estimation procedure. Array in declared observable order or a DataFrame with columns matching the observable names.
     observables : Sequence[str] | None
@@ -90,6 +93,7 @@ class Estimator:
     def __init__(
         self,
         *,
+        config: ModelConfig,
         compiled: CompiledModel,
         y: NDF | pd.DataFrame,
         observables: Sequence[str] | None = None,
@@ -105,9 +109,9 @@ class Estimator:
         self.estimated_params, self.priors = r.get_names_and_priors(
             estimated_params, compiled
         )
+        self.config = config
         self.compiled = compiled
-        meas_noise = compiled.config.calibration.measurement_noise
-        if meas_noise is None and R is None:
+        if config.calibration.measurement_noise is None and R is None:
             raise ValueError(
                 "R must be provided in symbolic or scalar form, either through the "
                 "model configuration or as a parameter override."
@@ -133,20 +137,20 @@ class Estimator:
         r.check_parameters(compiled, self.estimated_params)
         r.check_estimated_versus_constant_R(
             self.estimated_params,
-            self.compiled,
+            self.config,
             self.R,
         )
 
         self._param_index, self._matrix_blocks = r.resolve_theta_layout(
             self.estimated_params,
             self.priors,
-            self.compiled,
+            self.config,
             self._prepared_filter.observables,
         )
         r.assert_scalar_corr_spd_safe(
             self._param_index,
             self._matrix_blocks,
-            self.compiled,
+            self.config,
             self._prepared_filter.observables,
         )
 
@@ -187,7 +191,9 @@ class Estimator:
         )
 
     @classmethod
-    def from_spec(cls, spec: EstimatorSpec, compiled: CompiledModel) -> "Estimator":
+    def from_spec(
+        cls, spec: EstimatorSpec, config: ModelConfig, compiled: CompiledModel
+    ) -> "Estimator":
         """Build an :class:`Estimator` instance from a bundle-format spec and a compiled model.
 
         Parameters
@@ -217,6 +223,7 @@ class Estimator:
         }
         estimated_params = priors if priors else params["estimated_params"]
         return cls(
+            config=config,
             compiled=compiled,
             y=y,
             observables=params["observables"],
@@ -357,6 +364,7 @@ class Estimator:
         driver's own business.
         """
         return estim_context(
+            config=self.config,
             compiled=self.compiled,
             prepared=self._prepared_filter,
             param_names=self.param_names,

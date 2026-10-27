@@ -16,7 +16,7 @@ import numpy as np
 import sympy as sp
 
 from SymbolicDSGE._ckernels.core._core import bicomplex_hessian, klein_preprocess
-from SymbolicDSGE.core.compiled_model import _shock_covariance
+from SymbolicDSGE.core.resolvers import shock_covariance
 from SymbolicDSGE._ckernels.core import second_order
 from _oracles import dynare_rbc_multishock_second_order as golden
 
@@ -127,7 +127,7 @@ def test_multishock_Q_reproduces_the_calibrated_covariance(
 ):
     """The stds scale it and the correlations fill it."""
     compiled = solved_multishock.compiled
-    Q = _shock_covariance(compiled)
+    Q = shock_covariance(solved_multishock.config)
 
     assert Q.shape == (compiled.n_exog, compiled.n_exog)
     np.testing.assert_allclose(Q, _ms_covariance(compiled), rtol=1e-13, atol=0.0)

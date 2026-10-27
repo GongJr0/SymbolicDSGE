@@ -17,10 +17,11 @@ from SymbolicDSGE.estimation import Estimator
 
 
 def _native_loglik(
-    *, compiled, y, observables, filter_mode, estimated, ss_seed, **kwargs
+    *, config, compiled, y, observables, filter_mode, estimated, ss_seed, **kwargs
 ) -> float:
     """The native loglik at the base calibration, through the production path."""
     est = Estimator(
+        config=config,
         compiled=compiled,
         y=y,
         observables=list(observables),
@@ -33,12 +34,13 @@ def _native_loglik(
 
 
 @pytest.mark.parametrize("filter_mode", ["linear", "extended"])
-def test_native_objective_matches_model_kalman(
-    compiled_post82, solved_post82, y_post82, filter_mode
-):
+def test_native_objective_matches_model_kalman(solved_post82, y_post82, filter_mode):
+    config = solved_post82.config
+    compiled = solved_post82.compiled
     obs = ["Infl", "Rate"]
     ll = _native_loglik(
-        compiled=compiled_post82,
+        config=config,
+        compiled=compiled,
         y=y_post82,
         observables=obs,
         filter_mode=filter_mode,
@@ -55,9 +57,7 @@ def test_native_objective_matches_model_kalman(
     np.testing.assert_allclose(ll, float(ll_model), rtol=1e-9, atol=1e-9)
 
 
-def test_native_unscented_objective_matches_model_kalman(
-    compiled_rbc_so, solved_rbc_so
-):
+def test_native_unscented_objective_matches_model_kalman(solved_rbc_so):
     """The second-order RBC is a levels model with a nonzero steady state, which
     the gap model above cannot reach. Both sides read R off the model's own
     kalman block, so neither is handed one."""
@@ -74,8 +74,12 @@ def test_native_unscented_objective_matches_model_kalman(
     )
     y = sim.observables["c_obs"][1:].reshape(-1, 1)
 
+    config = solved_rbc_so.config
+    compiled = solved_rbc_so.compiled
+
     ll = _native_loglik(
-        compiled=compiled_rbc_so,
+        config=config,
+        compiled=compiled,
         y=y,
         observables=obs,
         filter_mode="unscented",

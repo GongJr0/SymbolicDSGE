@@ -318,7 +318,7 @@ def _load_estimation(
     params = cast(EstimatorParams, json.loads(archive.read_text(param_members[0].path)))
     y = _stack_observed(_load_columns(archive, data_members[0]), data_members[0])
     spec = EstimatorSpec(y=y, params=params)
-    estimator = Estimator.from_spec(spec, compiled=model.compiled)
+    estimator = Estimator.from_spec(spec, config=model.config, compiled=model.compiled)
     # Load the posterior first: the MCMC result is rebuilt from metadata + these
     # traces (the optimization result needs no traces).
     posterior: dict[str, NDArray[Any]] | None = None

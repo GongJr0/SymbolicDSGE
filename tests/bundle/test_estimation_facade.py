@@ -18,14 +18,17 @@ OBSERVABLES = ["Infl", "Rate"]
 
 
 @pytest.fixture
-def estimator(compiled_test) -> Estimator:
+def estimator(solved_test) -> Estimator:
     """An estimator over the model the bundle carries, with one estimated parameter.
 
     ``test.yaml`` declares no ``calibration.measurement_noise``, so R is the
     explicit override the constructor requires, and it rides the spec as one.
     """
+    config = solved_test.config
+    compiled = solved_test.compiled
     return Estimator(
-        compiled=compiled_test,
+        config=config,
+        compiled=compiled,
         y=np.zeros((6, len(OBSERVABLES)), dtype=np.float64),
         observables=OBSERVABLES,
         estimated_params={

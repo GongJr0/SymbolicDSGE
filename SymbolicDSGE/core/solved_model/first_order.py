@@ -38,6 +38,7 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
     ) -> StatePath:
         x0_arr = self._initial_state(x0)
         shock_mat = simulation_shock_matrix(
+            self.config,
             self.compiled,
             T=T,
             shocks=shocks,

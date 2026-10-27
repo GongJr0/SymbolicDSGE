@@ -7,7 +7,7 @@ import pytest
 
 import SymbolicDSGE.kalman.resolvers as resolvers
 from SymbolicDSGE.core import DSGESolver
-from SymbolicDSGE.core.compiled_model import _shock_covariance
+from SymbolicDSGE.core.resolvers import shock_covariance
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.resolvers import (
     FilterMode,
@@ -78,7 +78,7 @@ def test_resolve_linear_args_is_a_complete_run_argument_set(solved_multishock, y
     assert np.array_equal(args["d"], d)
     assert np.array_equal(args["A"], model.policy.A)
     assert np.array_equal(args["B"], model.policy.B)
-    assert np.allclose(args["Q"], _shock_covariance(model.compiled))
+    assert np.allclose(args["Q"], shock_covariance(model.config))
     assert np.allclose(args["R"], R_FULL)
     assert np.array_equal(args["steady_state"], model.policy.steady_state)
     # x0 defaults to the steady state, which is a zero deviation.
@@ -402,7 +402,7 @@ def test_filter_classes_shift_only_the_state_series(solved_rbc_order1, levels_rb
     solved, y = solved_rbc_order1, levels_rbc_y
     pol = solved.policy
     C, d = solved._build_C_d_from_obs(["c_obs"])
-    Q = np.asarray(_shock_covariance(solved.compiled), dtype=FLOAT)
+    Q = np.asarray(shock_covariance(solved.config), dtype=FLOAT)
     n_var = solved.compiled.n_var
     args = dict(
         A=np.real(pol.A),

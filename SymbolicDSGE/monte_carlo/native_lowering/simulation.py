@@ -61,6 +61,7 @@ def lower_simulation_step(
     params = _model_params(model)
     shock_scale = float(step.kwargs.get("shock_scale", DEFAULT_SHOCK_SCALE))
     plan = resolve_shock_plan(
+        model.config,
         model.compiled,
         cast(ShockSpec, step.kwargs.get("shocks")),
         T,

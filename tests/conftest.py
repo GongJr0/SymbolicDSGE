@@ -269,7 +269,7 @@ def y_post82(compiled_post82, solved_post82):
 
 
 @pytest.fixture
-def post82_estimator(compiled_post82, solved_post82, y_post82):
+def post82_estimator(solved_post82, y_post82):
     """Factory building an :class:`Estimator` on the shared POST82 model.
 
     Defaults to the two-parameter linear MLE setup the oracle uses; callers
@@ -278,11 +278,15 @@ def post82_estimator(compiled_post82, solved_post82, y_post82):
     """
     from SymbolicDSGE.estimation import Estimator
 
+    config = solved_post82.config
+    compiled = solved_post82.compiled
+
     def _make(mode="linear", estimated_params=("psi_pi", "rho_r")):
         return Estimator(
-            compiled=compiled_post82,
+            config=config,
+            compiled=compiled,
             y=y_post82,
-            observables=compiled_post82.observable_names,
+            observables=compiled.observable_names,
             filter_mode=mode,
             estimated_params=estimated_params,
             ss_seed=solved_post82.policy.steady_state,

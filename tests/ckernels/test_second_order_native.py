@@ -20,9 +20,8 @@ from SymbolicDSGE._ckernels.core._core import (
 )
 from SymbolicDSGE.core import DSGESolver
 from SymbolicDSGE.core import parse_config
-from SymbolicDSGE.core.compiled_model import _shock_covariance
 from SymbolicDSGE.core.solver_backend import klein_solve
-from SymbolicDSGE.core.resolvers import resolve_ss_seed
+from SymbolicDSGE.core.resolvers import resolve_ss_seed, shock_covariance
 from _oracles.core import _solve_second_order_numpy
 
 _BLOCKS = ("gxx", "hxx", "gxu", "hxu", "guu", "huu", "gss", "hss")
@@ -52,7 +51,7 @@ def _drive(path):
         np.real(sol.f),
         np.real(sol.p),
         np.real(sol.B),
-        _shock_covariance(compiled),
+        shock_covariance(model),
         n_state,
     )
 

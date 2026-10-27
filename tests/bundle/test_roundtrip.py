@@ -65,7 +65,7 @@ def test_full_bundle_round_trip(tmp_path: Path, parsed_test, compiled_test) -> N
             parsed_test,
             compile_kwargs={},
         )
-        .add_estimation(_estimator(observed, compiled_test), result=result)
+        .add_estimation(_estimator(observed, parsed_test, compiled_test), result=result)
         .add_mc(pipeline)
         .add_raw_data("series", "a,b\n1,2.5\n3,4.5\n")
         .set_simulation(
@@ -181,13 +181,14 @@ def _estimation_source(spec: EstimatorSpec) -> Any:
     return SimpleNamespace(to_spec=lambda: spec)
 
 
-def _estimator(y: Any, compiled_test) -> Estimator:
+def _estimator(y: Any, parsed_test, compiled_test) -> Estimator:
     """A live estimator over the bundled model, in the shape a loader rebuilds.
 
     ``test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
     explicitly; without one the estimator a bundle describes cannot be built.
     """
     return Estimator(
+        config=parsed_test,
         compiled=compiled_test,
         y=np.asarray(y, dtype=np.float64),
         observables=["Infl", "Rate"],

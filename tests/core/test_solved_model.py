@@ -198,6 +198,7 @@ def test_solved_model_sim_matches_manual_state_recursion(solved_test):
     out = solved_test.sim(T, shocks=shocks, shock_scale=0.5)
 
     shock_mat = simulation_shock_matrix(
+        solved_test.config,
         solved_test.compiled,
         T=T,
         shocks=shocks,
@@ -298,7 +299,7 @@ def test_solved_model_sim_uses_non_affine_measurement_branch(
     obs_names = list(solved.compiled.observable_names)
     assert not all(solved.config.equations.obs_is_affine.values())
 
-    def fake_non_affine(compiled_arg, y_names, state):
+    def fake_non_affine(config, compiled_arg, y_names, state):
         assert list(y_names) == obs_names
         assert state.shape == (3, solved.compiled.n_var)
         T, m = state.shape[0], len(y_names)
@@ -448,7 +449,7 @@ def test_solved_model_non_affine_measurement_matches_reference(solved_test):
         for i, name in enumerate(compiled.observable_names)
     }
 
-    got = non_affine_measurement(solved.compiled, y_names, state)
+    got = non_affine_measurement(solved.config, solved.compiled, y_names, state)
 
     expected = np.empty((state.shape[0], len(y_names)), dtype=np.float64)
     for j, name in enumerate(y_names):

@@ -13,30 +13,32 @@ from numpy import float64
 from numpy.typing import NDArray
 
 from ..._ckernels.core import affine_observations_into, measurement_path
+from ..config import ModelConfig
 from ..compiled_model import CompiledModel
 
 NDF = NDArray[float64]
 
 
 def build_C_d_from_obs(
-    compiled: CompiledModel, y_names: Sequence[str], ss: NDF
+    config: ModelConfig, compiled: CompiledModel, y_names: Sequence[str], ss: NDF
 ) -> Tuple[NDF, NDF]:
     """``(C, d)`` for the declared observables, linearized at ``ss``."""
     return compiled.build_affine_measurement_matrices(
-        compiled.config.calibration.parameters,
+        config.calibration.parameters,
         y_names,
         ss,
     )
 
 
 def non_affine_measurement(
+    config: ModelConfig,
     compiled: CompiledModel,
     y_names: list[str],
     state: NDF,
 ) -> NDF:
     """Observables evaluated along a path, for a non-affine measurement."""
     # ``state`` is (T, n_var) in cur_syms canonical order (checked at compile).
-    params = compiled.config.calibration.parameters
+    params = config.calibration.parameters
     param_vals = np.array(
         [float64(params[p]) for p in compiled.calib_params],
         dtype=float64,

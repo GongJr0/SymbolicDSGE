@@ -99,6 +99,7 @@ def test_estimation_likelihood_runs_on_a_constrained_model(
     # between two configurations is not the claim being made here.
 
     est = Estimator(
+        config=solved.config,
         compiled=solved.compiled,
         y=observations,
         filter_mode="linear",

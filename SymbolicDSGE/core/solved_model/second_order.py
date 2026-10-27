@@ -40,6 +40,7 @@ class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
 
         x0_state = self._initial_state(x0)[:n_state]
         shock_mat = simulation_shock_matrix(
+            self.config,
             self.compiled,
             T=T,
             shocks=shocks,

@@ -106,7 +106,7 @@ def build_workspace(loaded: "LoadedBundle") -> Workspace:
             estimation.view = build_estimation_prefill(
                 spec,
                 loaded.estimation.result,
-                model.compiled,
+                model.config,
             )
         eout = {model_name: estimation}
 
