@@ -31,12 +31,14 @@ ATOL = 1e-14
 
 
 def _plan(solved_test, shocks, shock_scale=1.0):
-    resolved = resolve_shock_plan(solved_test.compiled, shocks, T)
+    resolved = resolve_shock_plan(solved_test.config, solved_test.compiled, shocks, T)
     return get_native_shock_plan(resolved, T, shock_scale)
 
 
 def _entries(solved_test, shocks):
-    return resolve_shock_plan(solved_test.compiled, shocks, T).entries
+    return resolve_shock_plan(
+        solved_test.config, solved_test.compiled, shocks, T
+    ).entries
 
 
 def test_a_spec_with_no_entries_lowers_to_no_plan(solved_test) -> None:

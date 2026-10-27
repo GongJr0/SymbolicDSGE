@@ -69,7 +69,7 @@ def compiled_variant():
         model = ModelParser.from_string(
             yaml.safe_dump(data, sort_keys=False), "<variant>"
         ).get()
-        return DSGESolver(model).compile()
+        return model, DSGESolver(model).compile()
 
     return build
 
@@ -85,8 +85,9 @@ def role_context():
     active set, which is what sizes a resolved R block.
     """
 
-    def _build(compiled, y_shape, estimated_params, observables=None, R=None):
+    def _build(config, compiled, y_shape, estimated_params, observables=None, R=None):
         est = Estimator(
+            config=config,
             compiled=compiled,
             y=np.zeros(y_shape, dtype=np.float64),
             observables=observables,
@@ -98,13 +99,13 @@ def role_context():
             param_index=est._param_index,
             priors=est.priors,
             matrix_blocks=est._matrix_blocks,
-            compiled=est.compiled,
+            config=est.config,
             observables=observables,
         )
         roles = None
         if est.priors is None:
-            std_q, corr_q = active_Q(est.param_names, est.compiled)
-            std_r, corr_r = active_R(est.param_names, est.compiled, observables)
+            std_q, corr_q = active_Q(est.param_names, est.config)
+            std_r, corr_r = active_R(est.param_names, est.config, observables)
             roles = (std_q | std_r, corr_q | corr_r)
         lo, hi = resolve_bounds(
             None, est._param_index, est._matrix_blocks, transforms, roles
@@ -125,16 +126,12 @@ def role_context():
     return _build
 
 
-def test_to_spec_captures_construction_state(compiled_post82, solved_post82, y_post82):
+def test_to_spec_captures_construction_state(
+    compiled_post82, y_post82, post82_estimator
+):
     from SymbolicDSGE.estimation.spec import EstimatorSpec
 
-    est = Estimator(
-        compiled=compiled_post82,
-        y=y_post82,
-        observables=compiled_post82.observable_names,
-        estimated_params=["psi_pi"],
-        ss_seed=solved_post82.policy.steady_state,
-    )
+    est = post82_estimator(estimated_params=["psi_pi"])
 
     spec = est.to_spec()
 
@@ -148,14 +145,10 @@ def test_to_spec_captures_construction_state(compiled_post82, solved_post82, y_p
     assert "method" not in spec.params
 
 
-def test_to_spec_reverses_live_scalar_priors(compiled_post82, solved_post82, y_post82):
+def test_to_spec_reverses_live_scalar_priors(post82_estimator):
     from SymbolicDSGE.bayesian.priors import make_prior
 
-    est = Estimator(
-        compiled=compiled_post82,
-        y=y_post82,
-        observables=compiled_post82.observable_names,
-        ss_seed=solved_post82.policy.steady_state,
+    est = post82_estimator(
         estimated_params={
             "psi_pi": make_prior(
                 distribution="normal",
@@ -163,7 +156,7 @@ def test_to_spec_reverses_live_scalar_priors(compiled_post82, solved_post82, y_p
                 transform="identity",
                 transform_kwargs={},
             )
-        },
+        }
     )
 
     spec = est.to_spec()  # live Prior objects reversed to their specs
@@ -596,13 +589,16 @@ def test_estimation_reports_warning_count_once(post82_estimator, capsys):
     assert len(lines) == 1
 
 
-def test_forward_map_applies_the_prior_transform(compiled_post82, role_context):
+def test_forward_map_applies_the_prior_transform(solved_post82, role_context):
     prior = make_prior(
         distribution="log_normal",
         parameters={"mean": 0.0, "std": 0.5},
         transform="log",
     )
-    ctx = role_context(compiled_post82, (3, 3), {"psi_pi": prior})
+
+    config = solved_post82.config
+    compiled = solved_post82.compiled
+    ctx = role_context(config, compiled, (3, 3), {"psi_pi": prior})
 
     theta = theta_from_params(
         np.array([np.e], dtype=np.float64),
@@ -614,7 +610,7 @@ def test_forward_map_applies_the_prior_transform(compiled_post82, role_context):
 
 
 def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block(
-    compiled_post82, role_context
+    solved_post82, role_context
 ):
     # Two observables leave R one pair, where the CPC map is exactly tanh and the
     # expected theta has a closed form. The full three-observable block is
@@ -623,8 +619,10 @@ def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block(
         dist=LKJChol(eta=2.0, K=2, random_state=None),
         transform=CholeskyCorrTransform(K=2),
     )
+    config = solved_post82.config
+    compiled = solved_post82.compiled
     ctx = role_context(
-        compiled_post82, (4, 2), {"R_corr": prior}, observables=["Infl", "Rate"]
+        config, compiled, (4, 2), {"R_corr": prior}, observables=["Infl", "Rate"]
     )
     est = ctx.est
 
@@ -644,20 +642,14 @@ def test_matrix_prior_on_R_reparameterizes_pairwise_correlation_block(
 
 
 def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform(
-    compiled_post82, solved_post82, y_post82
+    post82_estimator,
 ):
     prior = make_prior(
         distribution="lkj_chol",
         parameters={"eta": 2.0, "K": 3},
         transform="cholesky_corr",
     )
-    est = Estimator(
-        compiled=compiled_post82,
-        y=y_post82,
-        observables=compiled_post82.observable_names,
-        ss_seed=solved_post82.policy.steady_state,
-        estimated_params={"R_corr": prior},
-    )
+    est = post82_estimator(estimated_params={"R_corr": prior})
 
     # make_prior reconciles the distribution's K with the transform's, which is
     # what the block resolution then checks against the resolved dimension.
@@ -666,41 +658,29 @@ def test_matrix_prior_created_via_make_prior_uses_cholesky_corr_transform(
     assert est._matrix_blocks["R_corr"].K == 3
 
 
-def test_matrix_key_in_estimated_params_expands_to_member_names(
-    compiled_post82, solved_post82, y_post82
-):
-    est = Estimator(
-        compiled=compiled_post82,
-        y=y_post82,
-        observables=compiled_post82.observable_names,
-        ss_seed=solved_post82.policy.steady_state,
+def test_matrix_key_in_estimated_params_expands_to_member_names(post82_estimator):
+    est = post82_estimator(
         estimated_params={
             "R_corr": Prior(
                 dist=LKJChol(eta=2.0, K=3, random_state=None),
                 transform=CholeskyCorrTransform(K=3),
             )
-        },
+        }
     )
 
     assert est.param_names == ["meas_rho_gi", "meas_rho_gr", "meas_rho_ir"]
     assert list(est.priors.keys()) == ["R_corr"]
 
 
-def test_a_mapping_carries_the_priors_of_the_names_it_lists(
-    compiled_post82, solved_post82, y_post82
-):
-    est = Estimator(
-        compiled=compiled_post82,
-        y=y_post82,
-        observables=compiled_post82.observable_names,
-        ss_seed=solved_post82.policy.steady_state,
+def test_a_mapping_carries_the_priors_of_the_names_it_lists(post82_estimator):
+    est = post82_estimator(
         estimated_params={
             "R_corr": Prior(
                 dist=LKJChol(eta=2.0, K=3, random_state=None),
                 transform=CholeskyCorrTransform(K=3),
             ),
             "meas_infl": make_prior("log_normal", {"mean": 0.0, "std": 1.0}, "log"),
-        },
+        }
     )
 
     assert est.param_names == ["meas_rho_gi", "meas_rho_gr", "meas_rho_ir"] + [
@@ -718,15 +698,9 @@ def test_none_estimates_every_calibrated_parameter_without_priors(
     assert est.priors is None
 
 
-def test_matrix_prior_overlap_with_scalar_component_prior_raises(
-    compiled_post82, solved_post82, y_post82
-):
+def test_matrix_prior_overlap_with_scalar_component_prior_raises(post82_estimator):
     with pytest.raises(ValueError, match="meas_rho_ir"):
-        Estimator(
-            compiled=compiled_post82,
-            y=y_post82,
-            observables=compiled_post82.observable_names,
-            ss_seed=solved_post82.policy.steady_state,
+        post82_estimator(
             estimated_params={
                 "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=3, random_state=None),
@@ -735,7 +709,7 @@ def test_matrix_prior_overlap_with_scalar_component_prior_raises(
                 "meas_rho_ir": make_prior(
                     "normal", {"mean": 0.0, "std": 1.0}, "identity"
                 ),
-            },
+            }
         )
 
 
@@ -754,6 +728,7 @@ def test_sparse_q_block_for_lkj_prior_raises_descriptive_error(
     compiled = DSGESolver(model).compile()
     with pytest.raises(ValueError, match="dense correlation block") as excinfo:
         Estimator(
+            config=model,
             compiled=compiled,
             y=np.zeros((4, 2), dtype=np.float64),
             estimated_params={
@@ -809,23 +784,13 @@ def test_loglik_is_unchanged_by_the_parameter_transform(post82_estimator):
 
 
 def test_estimator_constructor_and_lkj_prior_validation_error_branches(
-    compiled_post82, solved_post82, y_post82
+    post82_estimator,
 ):
     with pytest.raises(ValueError, match="is not found in the compiled model"):
-        Estimator(
-            compiled=compiled_post82,
-            y=y_post82,
-            observables=compiled_post82.observable_names,
-            ss_seed=solved_post82.policy.steady_state,
-            estimated_params=["ghost"],
-        )
+        post82_estimator(estimated_params=["ghost"])
 
     with pytest.raises(ValueError, match="Estimate the block or its members"):
-        Estimator(
-            compiled=compiled_post82,
-            y=y_post82,
-            observables=compiled_post82.observable_names,
-            ss_seed=solved_post82.policy.steady_state,
+        post82_estimator(
             estimated_params={
                 "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=3, random_state=None),
@@ -834,15 +799,11 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches(
                 "meas_rho_ir": make_prior(
                     "normal", {"mean": 0.0, "std": 1.0}, "identity"
                 ),
-            },
+            }
         )
 
     with pytest.raises(ValueError, match="CholeskyCorrTransform"):
-        Estimator(
-            compiled=compiled_post82,
-            y=y_post82,
-            observables=compiled_post82.observable_names,
-            ss_seed=solved_post82.policy.steady_state,
+        post82_estimator(
             estimated_params={
                 # Support-valid but not a CholeskyCorrTransform: exercises the
                 # estimator's LKJ-transform check (AffineLogit(-1,1) matches the
@@ -851,45 +812,38 @@ def test_estimator_constructor_and_lkj_prior_validation_error_branches(
                     dist=LKJChol(eta=2.0, K=3, random_state=None),
                     transform=AffineLogitTransform(low=-1.0, high=1.0),
                 )
-            },
+            }
         )
 
     with pytest.raises(ValueError, match="matching K between"):
-        Estimator(
-            compiled=compiled_post82,
-            y=y_post82,
-            observables=compiled_post82.observable_names,
-            ss_seed=solved_post82.policy.steady_state,
+        post82_estimator(
             estimated_params={
                 "R_corr": Prior(
                     dist=LKJChol(eta=2.0, K=2, random_state=None),
                     transform=CholeskyCorrTransform(K=3),
                 )
-            },
+            }
         )
 
     with pytest.raises(ValueError, match="requires a LKJChol distribution"):
-        Estimator(
-            compiled=compiled_post82,
-            y=y_post82,
-            observables=compiled_post82.observable_names,
-            ss_seed=solved_post82.policy.steady_state,
+        post82_estimator(
             estimated_params={
                 "R_corr": make_prior("normal", {"mean": 0.0, "std": 1.0}, "identity")
-            },
+            }
         )
 
 
 def test_resolve_r_and_effective_observables_error_paths(
-    compiled_post82, solved_post82, y_post82, compiled_test
+    solved_post82, y_post82, solved_test
 ):
     # A model with no `calibration.measurement_noise` has nothing to build R
     # from, so the estimator fails fast at construction rather than lazily when
     # the R block is resolved. P0 has a default and is not part of the demand.
-    assert compiled_test.config.calibration.measurement_noise is None
+    assert solved_test.config.calibration.measurement_noise is None
     with pytest.raises(ValueError, match="R must be provided"):
         Estimator(
-            compiled=compiled_test,
+            config=solved_test.config,
+            compiled=solved_test.compiled,
             y=np.zeros((3, 2), dtype=np.float64),
             estimated_params=["beta"],
         )
@@ -897,7 +851,8 @@ def test_resolve_r_and_effective_observables_error_paths(
     # Unknown observables are now rejected at construction by the filter prep.
     with pytest.raises(ValueError, match="Unknown observables"):
         Estimator(
-            compiled=compiled_post82,
+            config=solved_post82.config,
+            compiled=solved_post82.compiled,
             y=y_post82,
             observables=["ghost"],
             estimated_params=["psi_pi"],
@@ -905,11 +860,12 @@ def test_resolve_r_and_effective_observables_error_paths(
         )
 
 
-def test_forward_map_rejects_a_mismatched_parameter_vector(
-    compiled_post82, role_context
-):
+def test_forward_map_rejects_a_mismatched_parameter_vector(solved_post82, role_context):
+    config = solved_post82.config
+    compiled = solved_post82.compiled
     ctx = role_context(
-        compiled_post82,
+        config,
+        compiled,
         (3, 3),
         {"psi_pi": make_prior("normal", {"mean": 0.0, "std": 1.0}, "identity")},
     )
@@ -932,28 +888,20 @@ def test_evaluators_reject_a_bad_parameter_mapping(post82_estimator):
         est.loglik({"rho_r": 0.8})
 
 
-def test_mcmc_validation_branches(
-    compiled_post82, solved_post82, y_post82, post82_estimator
-):
+def test_mcmc_validation_branches(post82_estimator):
     with pytest.raises(ValueError, match="requires priors"):
         post82_estimator().mcmc(n_draws=1)
 
     # An empty target set never reaches a routine: the constructor is where it
     # is refused, so mcmc's own emptiness guard is no longer reachable.
     with pytest.raises(ValueError, match="at least one parameter"):
-        Estimator(
-            compiled=compiled_post82,
-            y=y_post82,
-            observables=compiled_post82.observable_names,
-            ss_seed=solved_post82.policy.steady_state,
-            estimated_params=[],
-        )
+        post82_estimator(estimated_params=[])
 
 
-def test_resolve_q_reports_the_missing_pair_of_a_sparse_block(compiled_test):
+def test_resolve_q_reports_the_missing_pair_of_a_sparse_block(parsed_test):
     # ``test.yaml`` names two shocks and correlates neither, so the one pair the
     # block expects is the one the resolution has to report as absent.
-    block = _resolve_Q(compiled_test)
+    block = _resolve_Q(parsed_test)
 
     present = {(int(r), int(c)) for r, c in block.positions}
     missing = [
@@ -980,6 +928,7 @@ def test_reserved_block_key_rejects_a_one_dimensional_matrix(nk_zlb_test_model_p
     compiled = DSGESolver(model).compile()
     with pytest.raises(ValueError, match="dimension at least 2"):
         Estimator(
+            config=model,
             compiled=compiled,
             y=np.zeros((4, 1), dtype=np.float64),
             estimated_params=["R_corr"],
@@ -996,7 +945,7 @@ def test_a_corr_name_in_both_matrices_is_checked_against_each(
     it stays too sparse to promote into a block. ``rho2`` is the nonzero Q
     sibling over the shared shock.
     """
-    compiled = compiled_variant(
+    config, compiled = compiled_variant(
         rbc_multishock_test_model_path,
         parameters={"rho": 0.1, "rho2": 0.3},
         shock_corr={"e_z, e_d": "rho", "e_z, e_g": "rho2"},
@@ -1008,6 +957,7 @@ def test_a_corr_name_in_both_matrices_is_checked_against_each(
 
     with pytest.raises(ValueError, match="couples the same variable 'e_z' in 'Q'"):
         Estimator(
+            config=config,
             compiled=compiled,
             y=np.zeros((4, 3), dtype=np.float64),
             estimated_params=["rho"],
@@ -1017,7 +967,7 @@ def test_a_corr_name_in_both_matrices_is_checked_against_each(
 def test_reserved_block_keys_reject_a_shared_member(compiled_variant, test_model_path):
     # Two shocks and two observables leave each matrix one pair, so one name on
     # both makes the two blocks complete and overlapping at once.
-    compiled = compiled_variant(
+    config, compiled = compiled_variant(
         test_model_path,
         parameters={"rho_shared": 0.2, "meas_infl": 0.3, "meas_rate": 0.4},
         shock_corr={"e_u, e_v": "rho_shared"},
@@ -1029,24 +979,17 @@ def test_reserved_block_keys_reject_a_shared_member(compiled_variant, test_model
 
     with pytest.raises(ValueError, match="cannot share member parameters"):
         Estimator(
+            config=config,
             compiled=compiled,
             y=np.zeros((4, 2), dtype=np.float64),
             estimated_params={"R_corr": _lkj(2), "Q_corr": _lkj(2)},
         )
 
 
-def test_lkj_prior_k_must_match_the_resolved_block(
-    compiled_post82, solved_post82, y_post82
-):
+def test_lkj_prior_k_must_match_the_resolved_block(post82_estimator):
     # POST82's R resolves to K=3, so the mismatch is a K=2 prior.
     with pytest.raises(ValueError, match="has K=2"):
-        Estimator(
-            compiled=compiled_post82,
-            y=y_post82,
-            observables=compiled_post82.observable_names,
-            ss_seed=solved_post82.policy.steady_state,
-            estimated_params={"R_corr": _lkj(2)},
-        )
+        post82_estimator(estimated_params={"R_corr": _lkj(2)})
 
 
 def test_matrix_resolution_rejects_a_reused_correlation_name():
@@ -1070,9 +1013,11 @@ def test_matrix_resolution_rejects_a_reused_correlation_name():
 
 
 def test_mle_std_member_without_prior_gets_a_positivity_box(
-    compiled_post82, role_context
+    solved_post82, role_context
 ):
-    ctx = role_context(compiled_post82, (4, 3), ["meas_infl"])
+    config = solved_post82.config
+    compiled = solved_post82.compiled
+    ctx = role_context(config, compiled, (4, 3), ["meas_infl"])
     # A variance estimated prior-free is positivity-constrained by role, and
     # with no transform to carry that, the box is what holds the floor.
     assert ctx.codes["meas_infl"] is TransformCode.IDENTITY
@@ -1085,10 +1030,10 @@ def test_mle_isolated_scalar_corr_without_prior_gets_an_interval_box(
     # corr_zd is left as the sole named Q correlation of three pairs: sparse and
     # isolated, so it stays a standalone scalar rather than folding into a
     # block, and its role interval is held by the box.
-    compiled = compiled_variant(
+    config, compiled = compiled_variant(
         rbc_multishock_test_model_path, shock_corr={"e_z, e_d": "corr_zd"}
     )
-    ctx = role_context(compiled, (3, 3), ["corr_zd"])
+    ctx = role_context(config, compiled, (3, 3), ["corr_zd"])
 
     assert "Q_corr" not in ctx.est._matrix_blocks
     assert ctx.codes["corr_zd"] is TransformCode.IDENTITY
@@ -1129,7 +1074,7 @@ def test_bounds_tighter_than_the_transform_bind_in_parameter_space(post82_estima
 
 
 def test_spd_std_member_warns_on_conflicting_prior_transform(
-    compiled_post82, role_context
+    solved_post82, role_context
 ):
     # An Identity-transform prior on a variance would map onto R, not (0, inf),
     # so the role default is substituted, and the table build that resolves the
@@ -1139,17 +1084,21 @@ def test_spd_std_member_warns_on_conflicting_prior_transform(
         parameters={"mean": 0.0, "std": 1.0},
         transform="identity",
     )
+    config = solved_post82.config
+    compiled = solved_post82.compiled
     with pytest.warns(UserWarning, match="replaced with `LogTransform`"):
-        ctx = role_context(compiled_post82, (4, 3), {"meas_infl": prior})
+        ctx = role_context(config, compiled, (4, 3), {"meas_infl": prior})
     assert ctx.codes["meas_infl"] is TransformCode.LOG
 
 
-def test_spd_member_without_prior_warns_nothing(compiled_post82, role_context):
+def test_spd_member_without_prior_warns_nothing(solved_post82, role_context):
     # No prior means no density for a role transform to disagree with, and the
     # prior-free leg carries no transform to substitute, so nothing is said.
+    config = solved_post82.config
+    compiled = solved_post82.compiled
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        ctx = role_context(compiled_post82, (4, 3), ["meas_infl"])
+        ctx = role_context(config, compiled, (4, 3), ["meas_infl"])
     assert not [w for w in caught if "replaced with" in str(w.message)]
     assert ctx.codes["meas_infl"] is TransformCode.IDENTITY
 

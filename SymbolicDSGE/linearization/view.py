@@ -34,6 +34,6 @@ class PointLinearView:
         )
 
         new.calibration.parameters = SymbolGetterDict(self.parameters)
-        new.ss_seed = FunctionGetterDict({var: 0.0 for var in self.steady_state})
+        new.ss_seed = FunctionGetterDict({var: None for var in self.steady_state})
 
         return new

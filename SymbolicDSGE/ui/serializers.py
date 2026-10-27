@@ -63,6 +63,7 @@ def summarize_solved_model(
     model: SolvedModel,
     source: str | None,
 ) -> dict[str, Any]:
+    config = model.config
     compiled = model.compiled
     layout = compiled.layout
     policy = model.policy
@@ -71,14 +72,14 @@ def summarize_solved_model(
         "loaded": True,
         "solved": True,
         "source": source,
-        "name": compiled.config.name,
+        "name": config.name,
         "variables": list(compiled.var_names),
         "observables": list(compiled.observable_names),
         "parameters": compiled.calib_params,
-        "parameter_values": _parameter_values(compiled.config),
-        "shocks": _symbol_names(compiled.config.shocks),
-        "n_state": int(compiled.n_state),
-        "n_exog": int(compiled.n_exog),
+        "parameter_values": _parameter_values(config),
+        "shocks": _symbol_names(config.shocks),
+        "n_state": int(layout.n_state),
+        "n_exog": int(layout.n_exog),
         "A_shape": list(policy.A.shape),
         "B_shape": list(policy.B.shape),
         "policy": {"stab": _coerce_json_scalar(policy.stab)},

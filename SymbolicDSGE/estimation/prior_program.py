@@ -39,7 +39,7 @@ from ..bayesian.transforms import (
 from ..bayesian.priors import Prior
 from ..bayesian.transforms import Transform
 from ..bayesian.support import Support
-from ..core.compiled_model import CompiledModel
+from ..core import ModelConfig
 from .resolvers import active_Q, active_R
 
 NDF = NDArray[np.float64]
@@ -125,7 +125,7 @@ def build_prior_tables(
     param_index: Mapping[str, int],
     priors: Mapping[str, Any] | None,
     matrix_blocks: Mapping[str, Any],
-    compiled: CompiledModel,
+    config: ModelConfig,
     observables: Sequence[str],
 ) -> tuple[PyPriorTables, list[Transform]]:
     """Pack the transform and density columns for one theta layout.
@@ -177,8 +177,8 @@ def build_prior_tables(
         )
     else:
         names = list(param_index)
-        stdQ, corrQ = active_Q(names, compiled)
-        stdR, corrR = active_R(names, compiled, observables)
+        stdQ, corrQ = active_Q(names, config)
+        stdR, corrR = active_R(names, config, observables)
         std = stdQ | stdR
         corr = corrQ | corrR
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import warnings
 
 import sympy as sp
@@ -21,12 +22,11 @@ if TYPE_CHECKING:
     from ..estimation.results import MLEResult, MAPResult, MCMCResult
     from ..bayesian.priors import Prior
 
-from .config import ModelConfig
+from .config import ModelConfig, SymbolGetterDict
+from .resolvers import VariableLayout, resolve_ss_seed
 from .compiled_model import (
     CompiledModel,
-    VariableLayout,
     RegimeBlock,
-    _newton_seed,
 )
 from sympy.core.function import AppliedUndef
 
@@ -79,7 +79,7 @@ class DSGESolver:
                 "linearized at one constant point, pass `PointLinearView.to_config(). "
             )
 
-        self.config = config
+        self.config = deepcopy(config)
         self.t = sp.Symbol("t", integer=True)
 
     def compile(
@@ -107,7 +107,6 @@ class DSGESolver:
 
         # Convert model to {-1, 0, 1} offsets with auxiliary variables for lags and leads.
         desugared = desugar_model(conf)
-        conf = deepcopy(self.config)
         t = self.t
         ordered_variables = desugared.variables
 
@@ -184,7 +183,7 @@ class DSGESolver:
         ]
 
         return CompiledModel(
-            config=conf,
+            name=conf.name,
             cur_syms=cur_syms,
             layout=layout,
             var_names=var_order,
@@ -535,32 +534,41 @@ class DSGESolver:
                 "constraints from the model specification."
             )
 
-        conf = compiled.config
-        seed = self._resolve_ss_seed(ss_seed, compiled)
+        conf = self.config
+        conf = replace(
+            conf,
+            calibration=replace(
+                conf.calibration,
+                parameters=SymbolGetterDict(conf.calibration.parameters),
+            ),
+        )
 
-        if parameters is None:
-            param_vec = np.array(
-                [conf.calibration.parameters[p] for p in compiled.calib_params],
-                dtype=float64,
-            )
-        else:
-            param_vec = np.array(
-                [parameters[p] for p in compiled.calib_params], dtype=float64
-            )
+        point = parameters if parameters is not None else conf.calibration.parameters
+        seed = resolve_ss_seed(conf, compiled.layout, ss_seed=ss_seed, params=point)
+        param_vec = np.array(
+            [point[p] for p in compiled.calib_params],
+            dtype=float64,
+        )
 
         sol: SolvedModel[Any]
 
         if piecewise:
             sol = PiecewiseSolvedModel(
-                compiled=compiled, policy=piecewise_solve(compiled, param_vec, seed)
+                config=conf,
+                compiled=compiled,
+                policy=piecewise_solve(compiled, param_vec, seed),
             )
         elif order == 2:
             sol = SecondOrderSolvedModel(
-                compiled=compiled, policy=sgu_solve(compiled, param_vec, seed)
+                config=conf,
+                compiled=compiled,
+                policy=sgu_solve(conf, compiled, param_vec, seed),
             )
         else:
             sol = FirstOrderSolvedModel(
-                compiled=compiled, policy=klein_solve(compiled, param_vec, seed)
+                config=conf,
+                compiled=compiled,
+                policy=klein_solve(compiled, param_vec, seed),
             )
 
         if not sol.is_determinate:
@@ -571,64 +579,6 @@ class DSGESolver:
                 stacklevel=2,
             )
         return sol
-
-    @staticmethod
-    def _resolve_ss_seed(
-        ss_seed: list[float] | ndarray | dict[str, float] | None,
-        compiled: CompiledModel,
-    ) -> NDF:
-        """Newton seed for the steady state, in canonical variable order.
-
-        Resolved per variable: an explicit ``ss_seed`` if it names the variable,
-        else the config's ``ss_seed`` expression, else zero. Newton resolves
-        ``F(ss, ss) = 0`` from here, so a gap model seeds at 0 and converges in
-        one step while a level model that declares its seed seeds itself.
-
-        An explicit seed names the model's own variables, as a mapping or as a
-        dense sequence in declaration order. Compiler-minted variables are not
-        addressable: at a steady state every date coincides, so an aux equals
-        its origin identically and has no seed of its own to give.
-        """
-        layout = compiled.layout
-        declared = layout.declared_names
-        params = compiled.config.calibration.parameters
-
-        seed = _newton_seed(compiled, params)
-        if ss_seed is None:
-            return seed
-
-        if isinstance(ss_seed, Mapping):
-            by_name = {str(name): float(value) for name, value in ss_seed.items()}
-            minted = sorted(set(by_name) & set(layout.generated_names))
-            if minted:
-                raise ValueError(
-                    f"ss_seed names compiler-minted variable(s) {minted}, which "
-                    f"take their origin's seed. Seed the origin instead."
-                )
-            unknown = sorted(set(by_name) - set(declared))
-            if unknown:
-                raise ValueError(
-                    f"ss_seed names variables the model does not have: {unknown}. "
-                    f"Model variables: {list(declared)}."
-                )
-        else:
-            values = asarray(ss_seed, dtype=float64)
-            if values.shape != (len(declared),):
-                raise ValueError(
-                    f"ss_seed has shape {values.shape}, expected "
-                    f"({len(declared)},) for the model's variables in declaration "
-                    f"order: {list(declared)}. Name the variables in a dict to "
-                    f"seed only some of them."
-                )
-            by_name = dict(zip(declared, (float(v) for v in values)))
-
-        # An aux follows its origin here too, so seeding the origin seeds the
-        # whole chain off it.
-        for i, name in enumerate(compiled.var_names):
-            origin = layout.aux_origin.get(name, name)
-            if origin in by_name:
-                seed[i] = by_name[origin]
-        return seed
 
     def _estimator(
         self,
@@ -649,6 +599,7 @@ class DSGESolver:
         from ..estimation import Estimator
 
         return Estimator(
+            config=self.config,
             compiled=compiled,
             y=y,
             observables=observables,
@@ -664,16 +615,6 @@ class DSGESolver:
             symmetrize=symmetrize,
             R=R,
         )
-
-    @staticmethod
-    def _sync_calibration_with_params(
-        compiled: CompiledModel, params: Mapping[str, float64]
-    ) -> None:
-        calib = compiled.config.calibration.parameters
-        for key in list(calib.keys()):
-            name = key if isinstance(key, str) else getattr(key, "name", None)
-            if name is not None and name in params:
-                calib[key] = float64(params[name])
 
     def estimate(
         self,
@@ -853,7 +794,7 @@ class DSGESolver:
         # Sync writes the estimated values into the calibration, which is where
         # `solve` reads its full parameter vector from; passing them again would
         # only re-supply what was just installed.
-        self._sync_calibration_with_params(compiled, solve_params)
+        self.config.update_parameters(solve_params)
         solved = self.solve(
             compiled=compiled,
             order=order,

@@ -10,6 +10,7 @@ from .base import SolvedModel
 from ..shock.spec import ShockSpec, simulation_shock_matrix
 from ..solver_backend import FirstOrderSolution
 from ..compiled_model import CompiledModel
+from ..config import ModelConfig
 from ..sim_result import StatePath
 
 from ..._ckernels.core import simulate_linear_states_into
@@ -26,8 +27,10 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
         The first-order decision rule solution.
     """
 
-    def __init__(self, compiled: CompiledModel, policy: FirstOrderSolution) -> None:
-        super().__init__(compiled, policy)
+    def __init__(
+        self, config: ModelConfig, compiled: CompiledModel, policy: FirstOrderSolution
+    ) -> None:
+        super().__init__(config, compiled, policy)
 
     def _simulate_state_matrix(
         self,
@@ -38,6 +41,7 @@ class FirstOrderSolvedModel(SolvedModel[FirstOrderSolution]):
     ) -> StatePath:
         x0_arr = self._initial_state(x0)
         shock_mat = simulation_shock_matrix(
+            self.config,
             self.compiled,
             T=T,
             shocks=shocks,

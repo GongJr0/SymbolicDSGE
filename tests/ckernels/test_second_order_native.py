@@ -20,8 +20,8 @@ from SymbolicDSGE._ckernels.core._core import (
 )
 from SymbolicDSGE.core import DSGESolver
 from SymbolicDSGE.core import parse_config
-from SymbolicDSGE.core.compiled_model import _shock_covariance
 from SymbolicDSGE.core.solver_backend import klein_solve
+from SymbolicDSGE.core.resolvers import resolve_ss_seed, shock_covariance
 from _oracles.core import _solve_second_order_numpy
 
 _BLOCKS = ("gxx", "hxx", "gxu", "hxu", "guu", "huu", "gss", "hss")
@@ -32,14 +32,14 @@ def _drive(path):
     compiled = DSGESolver(model).compile()
     n_eq = len(compiled.var_names)
     n_state = compiled.n_state
-    calib = compiled.config.calibration.parameters
+    calib = model.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     cf = compiled.construct_objective_cfunc()
     cf_bc = compiled.construct_objective_cfunc_bicomplex()
 
     # Config steady state, resolved at run time (RBC -> [0, k_ss, c_ss];
     # deviation-form models -> 0). No file I/O at collection time.
-    ss = DSGESolver._resolve_ss_seed(None, compiled)
+    ss = resolve_ss_seed(model, compiled.layout)
 
     a, b, _, _ = klein_preprocess(cf.address, ss, par, n_eq, compiled.n_exog)
     sol = klein_solve(compiled, par, ss)
@@ -51,7 +51,7 @@ def _drive(path):
         np.real(sol.f),
         np.real(sol.p),
         np.real(sol.B),
-        _shock_covariance(compiled),
+        shock_covariance(model),
         n_state,
     )
 

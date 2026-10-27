@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Mapping
 
 from ..config import ModelConfig
-from ..compiled_model import CompiledModel
 
 if TYPE_CHECKING:
     from .base import SolvedModel
@@ -36,7 +35,7 @@ def serve(
 
 
 def to_bundle_builder(
-    model: SolvedModel | CompiledModel | ModelConfig,
+    model: SolvedModel | ModelConfig,
     *,
     name: str = "reference",
     compile_kwargs: Mapping[str, Any] | None = None,

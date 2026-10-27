@@ -110,25 +110,22 @@ def test_ipow_complex_step_correct_for_negative_base(expr_factory, analytic):
 
 def _compiled(path: Path):
     model = parse_config(path)
-    return DSGESolver(model).compile()
+    return model, DSGESolver(model).compile()
 
 
-def _param_vector(compiled, dtype):
+def _param_vector(config, compiled, dtype):
     return np.array(
-        [
-            float(compiled.config.calibration.parameters[p])
-            for p in compiled.calib_params
-        ],
+        [float(config.calibration.parameters[p]) for p in compiled.calib_params],
         dtype=dtype,
     )
 
 
 @pytest.mark.parametrize("model_path", ["test", "post82"], indirect=True)
 def test_printer_matches_reference_residual_values(model_path):
-    compiled = _compiled(model_path)
+    model, compiled = _compiled(model_path)
     layout = ResidualLayout.from_compiled(compiled)
     fn = residual_caller(compiled.objective_eqs, layout)
-    par = _param_vector(compiled, C)
+    par = _param_vector(model, compiled, C)
 
     rng = np.random.default_rng(1)
     n = layout.n_var
@@ -152,12 +149,12 @@ def test_printer_matches_reference_residual_values(model_path):
 
 @pytest.mark.parametrize("model_path", ["test", "post82"], indirect=True)
 def test_printer_linearization_matches_reference(model_path):
-    compiled = _compiled(model_path)
+    model, compiled = _compiled(model_path)
     layout = ResidualLayout.from_compiled(compiled)
     fn = residual_caller(compiled.objective_eqs, layout)
 
     ss = np.zeros(layout.n_var, dtype=np.float64)
-    par = _param_vector(compiled, np.float64)
+    par = _param_vector(model, compiled, np.float64)
 
     # Native cfunc linearization (klein_preproc complex-step) is the reference;
     # the same cfunc complex-stepped through the oracle must match.

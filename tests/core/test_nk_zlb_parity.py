@@ -149,7 +149,7 @@ def test_the_bound_holds_exactly_while_it_binds(solved, result):
     # near it. Anything else means the patched row is not the one being solved.
     binds = result.regimes[:, 0] == 1
     rate = result.X[:, solved.compiled.layout.idx["r"]]
-    zlb = solved.compiled.config.calibration.parameters["ZLB"]
+    zlb = solved.config.calibration.parameters["ZLB"]
 
     assert binds.any()
     np.testing.assert_array_equal(rate[binds], np.full(binds.sum(), zlb))

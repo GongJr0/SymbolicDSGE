@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE._ckernels.core._core import bicomplex_hessian, klein_preprocess
-from SymbolicDSGE.core.compiled_model import _shock_covariance
+from SymbolicDSGE.core.resolvers import shock_covariance
 from SymbolicDSGE._ckernels.core import second_order
 from SymbolicDSGE._symbolic_printers import ResidualLayout
 from SymbolicDSGE.core import DSGESolver
@@ -29,10 +29,7 @@ def _drive(path):
 
     ss = np.zeros(layout.n_var, dtype=np.float64)
     par = np.array(
-        [
-            float(compiled.config.calibration.parameters[p])
-            for p in compiled.calib_params
-        ],
+        [float(model.calibration.parameters[p]) for p in compiled.calib_params],
         dtype=np.float64,
     )
     cf = compiled.construct_objective_cfunc()
@@ -49,7 +46,7 @@ def _drive(path):
         np.real(sol.f),
         np.real(sol.p),
         np.real(sol.B),
-        _shock_covariance(compiled),
+        shock_covariance(model),
         n_state,
     )
 

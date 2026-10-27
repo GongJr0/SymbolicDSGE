@@ -82,8 +82,8 @@ def compiled(solver):
 
 
 @pytest.fixture(scope="module")
-def par(compiled):
-    calib = compiled.config.calibration.parameters
+def par(solver, compiled):
+    calib = solver.config.calibration.parameters
     return np.array([float(calib[p]) for p in compiled.calib_params])
 
 

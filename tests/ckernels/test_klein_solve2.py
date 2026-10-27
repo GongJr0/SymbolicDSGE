@@ -24,7 +24,7 @@ from SymbolicDSGE._ckernels.core import (
 )
 from SymbolicDSGE.core import DSGESolver
 from SymbolicDSGE.core import parse_config
-from SymbolicDSGE.core.compiled_model import _shock_covariance
+from SymbolicDSGE.core.resolvers import resolve_ss_seed, shock_covariance
 
 # The three (n_var, n_state, n_ctrl, n_exog) shapes test_klein_solve1 covers.
 MODELS = ["rbc_second_order", "test", "post82"]
@@ -51,11 +51,11 @@ OUTPUTS = (
 def _model(path):
     model = parse_config(path)
     compiled = DSGESolver(model).compile()
-    calib = compiled.config.calibration.parameters
+    calib = model.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
-    seed = DSGESolver._resolve_ss_seed(None, compiled)
-    Q = _shock_covariance(compiled)
-    return compiled, par, seed, Q
+    seed = resolve_ss_seed(model, compiled.layout)
+    Q = shock_covariance(model)
+    return model, compiled, par, seed, Q
 
 
 def _staged(compiled, par, seed, Q):
@@ -86,7 +86,7 @@ def _assert_same(got, want):
 
 @pytest.mark.parametrize("model_path", MODELS, indirect=True)
 def test_matches_the_staged_shims_exactly(model_path):
-    compiled, par, seed, Q = _model(model_path)
+    _, compiled, par, seed, Q = _model(model_path)
 
     _, *got = sgu_klein_solve2(
         compiled.construct_objective_cfunc().address,
@@ -107,8 +107,8 @@ def test_python_wrapper_carries_the_native_outputs(model_path):
     """``sgu_solve`` must hand back the tensors and state space it was given."""
     from SymbolicDSGE.core.solver_backend import sgu_solve
 
-    compiled, par, seed, Q = _model(model_path)
-    pert = sgu_solve(compiled, par, seed)
+    model, compiled, par, seed, Q = _model(model_path)
+    pert = sgu_solve(model, compiled, par, seed)
 
     assert pert.order == 2
     got = (
@@ -134,7 +134,7 @@ def test_python_wrapper_carries_the_native_outputs(model_path):
 @pytest.mark.parametrize("model_path", MODELS, indirect=True)
 def test_first_order_block_matches_the_first_order_solve(model_path):
     """The second-order solve must not perturb the first order it is built on."""
-    compiled, par, seed, Q = _model(model_path)
+    _, compiled, par, seed, Q = _model(model_path)
 
     _, ss1, f1, p1, stab1, eig1, A1, B1 = klein_solve1(
         compiled.construct_objective_cfunc().address,
@@ -173,7 +173,7 @@ def test_rejects_a_covariance_of_the_wrong_shape(post82_test_model_path):
     """Q is read at (n_exog, n_exog); a mismatch would walk off its buffer. A
     singular Q is not rejected: the risk correction integrates against the
     covariance rather than factoring it, so a zero Q simply means no risk."""
-    compiled, par, seed, Q = _model(post82_test_model_path)
+    _, compiled, par, seed, Q = _model(post82_test_model_path)
 
     with pytest.raises(ValueError, match=r"shape \(n_exog, n_exog\)"):
         sgu_klein_solve2(

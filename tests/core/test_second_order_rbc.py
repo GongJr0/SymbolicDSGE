@@ -47,9 +47,9 @@ def _dynare_ghuu() -> np.ndarray:
     return np.reshape(golden.GHUU, (N_VAR, 1, 1))
 
 
-def _levels_steady_state(compiled) -> np.ndarray:
+def _levels_steady_state(config, compiled) -> np.ndarray:
     """The RBC expansion point over the compiled layout."""
-    calib = compiled.config.calibration.parameters
+    calib = config.calibration.parameters
     known = {"k": calib["k_ss"], "c": calib["c_ss"]}
     return np.array([known.get(n, 0.0) for n in compiled.var_names], dtype=np.float64)
 
@@ -69,7 +69,7 @@ def _golden_x0(solved) -> dict[str, float]:
     The generator seeds Dynare's own y0 with ``z0 / rho`` so that its first
     simulated z is the printed ``z0``; our x0 is that same y0 state.
     """
-    rho = float(solved.compiled.config.calibration.parameters[sp.Symbol("rho")])
+    rho = float(solved.config.calibration.parameters[sp.Symbol("rho")])
     z0, k0 = golden.SIM_X0
     return {"k": float(k0), "z": float(z0) / rho}
 
@@ -131,7 +131,7 @@ def test_solve_order2_wiring(rbc_so_bundle):
     pol = solved.policy
     assert pol.order == 2
 
-    ss = _levels_steady_state(compiled)
+    ss = _levels_steady_state(solved.config, compiled)
     np.testing.assert_allclose(pol.steady_state, ss, rtol=1e-6, atol=1e-8)
     np.testing.assert_allclose(
         _stack(pol.hxx, pol.gxx), _dynare_ghxx(), rtol=5e-6, atol=2e-7

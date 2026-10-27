@@ -38,7 +38,6 @@ from ..estimation.spec import (
 from ..estimation.results import MLEResult, MAPResult
 
 from ..core import Shock, ShockPath, SolvedModel, ModelConfig
-from ..core.compiled_model import CompiledModel
 from ..core.shock.spec import _normalized_spec, serialize_shocks
 from ..core.config_emitter import emit_config_yaml
 
@@ -151,7 +150,7 @@ class BundleBuilder:
     def add_model(
         self,
         name: str,
-        model: SolvedModel | CompiledModel | ModelConfig,
+        model: SolvedModel | ModelConfig,
         *,
         compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,

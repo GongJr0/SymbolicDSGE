@@ -275,6 +275,28 @@ class ModelConfig:
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.name})"
 
+    def update_parameters(
+        self, new_params: Mapping[str, float] | Mapping[Symbol, float]
+    ) -> None:
+        """Update the model's calibration parameters with the given overrides.
+
+        Parameters
+        ----------
+        new_params : Mapping[str, float] | Mapping[Symbol, float]
+            Values to override existing calibration parameters with.
+            All keys must already exist in the model's calibration parameters.
+
+        """
+        if missing_keys := [
+            str(k) for k in new_params if k not in self.calibration.parameters
+        ]:
+            raise KeyError(
+                "Cannot update parameters. "
+                f"The following keys are missing from the model's calibration parameters: {missing_keys}"
+            )
+
+        self.calibration.parameters.update(new_params)
+
     def to_yaml(self, path: str | Path, *, digits: int | None = None) -> None:
         """Write the model configuration to a YAML file.
 

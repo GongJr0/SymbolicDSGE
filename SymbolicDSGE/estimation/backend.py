@@ -26,12 +26,14 @@ from .prior_program import (
     PyPriorTables,
 )
 from . import resolvers as r
-from ..core.compiled_model import (
-    CompiledModel,
-    _shock_covariance,
-    _measurement_covariance,
+from ..core.compiled_model import CompiledModel
+from ..core.config import ModelConfig, SymbolGetterDict
+from ..core.resolvers import (
+    VariableLayout,
+    resolve_ss_seed,
+    shock_covariance,
+    measurement_covariance,
 )
-from ..core.solver import DSGESolver
 from ..kalman.resolvers import FilterMode, _resolve_P0
 
 NDF = NDArray[np.float64]
@@ -213,6 +215,7 @@ def build_calib_index(compiled: CompiledModel) -> dict[str, int]:
 
 def build_param_map(
     *,
+    config: ModelConfig,
     compiled: CompiledModel,
     param_names: Sequence[str],
     calib_index: Mapping[str, int] | None = None,
@@ -229,9 +232,9 @@ def build_param_map(
         calib_index = build_calib_index(compiled)
 
     base_params = np.empty(len(calib_index), dtype=float64)
-    base_dict = extract_base_params(compiled)
+
     for name, idx in calib_index.items():
-        base_params[idx] = base_dict[name]
+        base_params[idx] = config.calibration.parameters[name]
 
     return PyParamMap(
         base_params=base_params,
@@ -243,11 +246,12 @@ def build_param_map(
 
 def _build_q_spec(
     *,
-    compiled: CompiledModel,
+    config: ModelConfig,
+    layout: VariableLayout,
     calib_index: Mapping[str, int],
     param_index: Mapping[str, int],
     matrix_blocks: Mapping[str, MatrixPriorBlock],
-    base_dict: Mapping[str, float64],
+    base_dict: SymbolGetterDict[float],
 ) -> PyCovSpec:
     """Covariance spec for Q (shock covariance), mirroring :func:`build_Q`.
 
@@ -256,16 +260,16 @@ def _build_q_spec(
     symbol for that shock pair (absent pairs stay zero). A ``Q_corr`` CPC block
     takes the ``corr_from_block`` regime.
     """
-    calib = compiled.config.calibration
+    calib = config.calibration
     shock_std = calib.shocks.std
     shock_corr = calib.shocks.corr
-    std_names = [shock_std[s] for s in compiled.config.shocks]
+    std_names = [shock_std[s] for s in config.shocks]
 
     corr_pairs: list[tuple[int, int, str]] = []
     for pair, pname in shock_corr.items():
         if pname is None:
             continue
-        i, j = (compiled.shock_idx[s.name] for s in pair)
+        i, j = (layout.shock_idx[s.name] for s in pair)
         corr_pairs.append((i, j, pname))
 
     block = matrix_blocks.get("Q_corr")
@@ -277,11 +281,9 @@ def _build_q_spec(
     theta_slice = block.theta_slice if block is not None else slice(0, 0)
 
     return PyCovSpec(
-        K=compiled.n_exog,
+        K=layout.n_exog,
         is_constant=is_constant,
-        constant=(
-            _shock_covariance(compiled, params=base_dict) if is_constant else None
-        ),
+        constant=(shock_covariance(config, params=base_dict) if is_constant else None),
         std_slots=np.asarray([calib_index[n] for n in std_names], dtype=np.int64),
         corr_from_block=block is not None,
         block_theta_off=int(theta_slice.start),
@@ -296,12 +298,12 @@ def _build_q_spec(
 
 def _build_r_spec(
     *,
-    compiled: CompiledModel,
+    config: ModelConfig,
     observables: Sequence[str],
     calib_index: Mapping[str, int],
     param_index: Mapping[str, int],
     matrix_blocks: Mapping[str, Any],
-    base_dict: Mapping[str, float64],
+    base_dict: SymbolGetterDict[float],
     R_override: NDF | None = None,
 ) -> PyCovSpec:
     """Covariance spec for R (measurement covariance), mirroring :func:`_build_R`.
@@ -319,7 +321,7 @@ def _build_r_spec(
     n_obs = len(observables)
     obs_list = list(observables)
 
-    meas_noise = compiled.config.calibration.measurement_noise
+    meas_noise = config.calibration.measurement_noise
 
     std_map = meas_noise.std if meas_noise is not None else None
     corr_map: Mapping[Any, str | None] | None = (
@@ -347,7 +349,7 @@ def _build_r_spec(
         K=n_obs,
         is_constant=is_constant,
         constant=(
-            _build_R(compiled, obs_list, base_dict, R_override=R_override)
+            _build_R(config, obs_list, base_dict, R_override=R_override)
             if is_constant
             else None
         ),
@@ -365,6 +367,7 @@ def _build_r_spec(
 
 def estim_context(
     *,
+    config: ModelConfig,
     compiled: CompiledModel,
     prepared: FilterDTO,
     param_names: Sequence[str],
@@ -395,22 +398,22 @@ def estim_context(
     the composer's job, not here.
     """
     calib_index = build_calib_index(compiled)
-    base_dict = extract_base_params(compiled)
 
     bc_residual_addr = (
         compiled.construct_objective_cfunc_bicomplex().address
         if prepared.mode == "unscented"
         else 0
     )
-    ss_seed_vec = DSGESolver._resolve_ss_seed(ss_seed, compiled)
+    ss_vec = resolve_ss_seed(config, compiled.layout, ss_seed=ss_seed)
     pt, transforms = build_prior_tables(
         param_index=param_index,
         priors=priors,
         matrix_blocks=matrix_blocks,
-        compiled=compiled,
+        config=config,
         observables=prepared.observables,
     )
 
+    base_dict = config.calibration.parameters
     theta = r.theta_from_params(
         _seed_params(theta0, param_names, base_dict),
         param_names,
@@ -420,15 +423,15 @@ def estim_context(
 
     roles = None
     if priors is None:
-        stdQ, corrQ = r.active_Q(param_names, compiled)
-        stdR, corrR = r.active_R(param_names, compiled, prepared.observables)
+        stdQ, corrQ = r.active_Q(param_names, config)
+        stdR, corrR = r.active_R(param_names, config, prepared.observables)
         roles = (stdQ | stdR, corrQ | corrR)
     lo, hi = r.resolve_bounds(bounds, param_index, matrix_blocks, transforms, roles)
 
     solve = SolveDTO(
         residual_addr=int(compiled.construct_objective_cfunc().address),
         bc_residual_addr=int(bc_residual_addr),
-        ss_seed=ss_seed_vec,
+        ss_seed=ss_vec,
         incidence=compiled._incidence,
         n_var=compiled.n_var,
         n_state=compiled.n_state,
@@ -441,19 +444,21 @@ def estim_context(
         solve_ctx=solve,
         filter_ctx=prepared,
         pmap=build_param_map(
+            config=config,
             compiled=compiled,
             param_names=param_names,
             calib_index=calib_index,
         ),
         q_spec=_build_q_spec(
-            compiled=compiled,
+            config=config,
+            layout=compiled.layout,
             calib_index=calib_index,
             param_index=param_index,
             matrix_blocks=matrix_blocks,
             base_dict=base_dict,
         ),
         r_spec=_build_r_spec(
-            compiled=compiled,
+            config=config,
             observables=prepared.observables,
             calib_index=calib_index,
             param_index=param_index,
@@ -470,7 +475,7 @@ def estim_context(
 def _seed_params(
     theta0: Mapping[str, float] | None,
     param_names: Sequence[str],
-    base_dict: Mapping[str, float64],
+    base_dict: SymbolGetterDict[float],
 ) -> NDF:
     """The parameter-space seed in theta order.
 
@@ -500,11 +505,6 @@ def _seed_params(
         ],
         dtype=float64,
     )
-
-
-def extract_base_params(compiled: CompiledModel) -> dict[str, float64]:
-    params = compiled.config.calibration.parameters
-    return {str(k): float64(v) for k, v in params.items()}
 
 
 def reorder_observables(
@@ -559,9 +559,9 @@ def reorder_observables(
 
 
 def _build_R(
-    compiled: CompiledModel,
+    config: ModelConfig,
     observables: list[str],
-    params: Mapping[str, float64],
+    params: SymbolGetterDict[float],
     *,
     R_override: NDF | None = None,
 ) -> NDF:
@@ -580,15 +580,15 @@ def _build_R(
             raise ValueError(f"Provided R has shape {R.shape}, expected ({m}, {m}).")
         return R
 
-    meas_noise = compiled.config.calibration.measurement_noise
+    meas_noise = config.calibration.measurement_noise
     if not meas_noise or not meas_noise.std:
         raise ValueError(
             "`calibration.measurement_noise` is required to build R from config parameters."
             "Supply an R override or add a measurement noise block to the model specification."
         )
 
-    return _measurement_covariance(
-        compiled,
+    return measurement_covariance(
+        config,
         params,
         observables=observables,
     )

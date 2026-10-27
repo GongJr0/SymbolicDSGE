@@ -22,7 +22,7 @@ from ..._ckernels.monte_carlo._runner import (
     filter_unscented_step,
 )
 from ...core.solved_model import SolvedModel
-from ...core.compiled_model import _shock_covariance
+from ...core.resolvers import shock_covariance
 from ..allocation import BufferPlan, get_target_model
 from ..defaults import DEFAULT_FILTER_MODE
 from ..mc_constructs import MCStep
@@ -95,7 +95,7 @@ def lower_filter_step(
     ).foffset
 
     R = _build_R(model, step.kwargs.get("R"), canonical_names)
-    Q = _shock_covariance(model.compiled)
+    Q = shock_covariance(model.config)
     P0 = _build_P0(model, mode, step.kwargs.get("P0"))
 
     if mode == "linear":

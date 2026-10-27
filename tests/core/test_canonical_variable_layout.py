@@ -7,7 +7,7 @@ import yaml
 
 from SymbolicDSGE.core import DSGESolver
 from SymbolicDSGE.core import parse_config
-from SymbolicDSGE.core.compiled_model import _shock_covariance
+from SymbolicDSGE.core.resolvers import shock_covariance
 from SymbolicDSGE._ckernels.core import jacobian_eval, measurement_eval
 
 # States then controls, each in declaration order. test.yaml lags u, v and r,
@@ -33,13 +33,13 @@ def _compile_misordered_test_model(tmp_path, test_model_path):
     path = _write_misordered_test_model(tmp_path, test_model_path)
     model = parse_config(path)
     solver = DSGESolver(model)
-    return solver.compile()
+    return model, solver.compile()
 
 
 def test_compile_default_layout_canonicalizes_misordered_yaml_variables(
     tmp_path, test_model_path
 ):
-    compiled = _compile_misordered_test_model(tmp_path, test_model_path)
+    _, compiled = _compile_misordered_test_model(tmp_path, test_model_path)
 
     assert compiled.var_names == EXPECTED_CANONICAL_ORDER
     assert compiled.idx == EXPECTED_IDX
@@ -54,7 +54,7 @@ def test_compile_default_layout_canonicalizes_misordered_yaml_variables(
 def test_a_single_depth_model_generates_no_variables(tmp_path, test_model_path):
     # Nothing here is displaced past one date, so the compiled set is the
     # declared set and the whole generated block is empty.
-    compiled = _compile_misordered_test_model(tmp_path, test_model_path)
+    _, compiled = _compile_misordered_test_model(tmp_path, test_model_path)
 
     assert compiled.layout.generated_names == ()
     assert compiled.layout.aux_origin == {}
@@ -64,7 +64,7 @@ def test_a_single_depth_model_generates_no_variables(tmp_path, test_model_path):
 def test_shock_columns_are_named_by_shock_in_declaration_order(
     tmp_path, test_model_path
 ):
-    compiled = _compile_misordered_test_model(tmp_path, test_model_path)
+    _, compiled = _compile_misordered_test_model(tmp_path, test_model_path)
 
     assert compiled.shock_names == ("e_u", "e_v")
     assert compiled.shock_idx == {"e_u": 0, "e_v": 1}
@@ -73,9 +73,9 @@ def test_shock_columns_are_named_by_shock_in_declaration_order(
 def test_measurement_dispatchers_accept_canonical_state_order_after_yaml_reorder(
     tmp_path, test_model_path
 ):
-    compiled = _compile_misordered_test_model(tmp_path, test_model_path)
+    config, compiled = _compile_misordered_test_model(tmp_path, test_model_path)
     params = np.array(
-        [compiled.config.calibration.parameters[p] for p in compiled.calib_params],
+        [config.calibration.parameters[p] for p in compiled.calib_params],
         dtype=np.float64,
     )
     state = np.zeros(N_VAR, dtype=np.float64)
@@ -105,10 +105,10 @@ def test_measurement_dispatchers_accept_canonical_state_order_after_yaml_reorder
 def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(
     tmp_path, test_model_path
 ):
-    compiled = _compile_misordered_test_model(tmp_path, test_model_path)
+    config, compiled = _compile_misordered_test_model(tmp_path, test_model_path)
 
     np.testing.assert_allclose(
-        _shock_covariance(compiled),
+        shock_covariance(config),
         np.diag([0.50**2, 0.25**2]).astype(np.float64),
     )
 

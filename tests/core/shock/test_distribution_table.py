@@ -262,12 +262,14 @@ def test_a_tabulated_shock_drives_a_simulation_deterministically(solved_test) ->
 
 
 def test_the_resolved_entry_points_at_the_table_it_was_built_from(
-    compiled_test,
+    solved_test,
 ) -> None:
     # One table serves every entry that names it; the plan carries the reference
     # rather than a copy, which is what the bundle's pooling relies on.
     shock = Shock.from_ppf(laplace, seed=1).joint("e_u")
-    (entry,) = resolve_shock_plan(compiled_test, [shock], 8).entries
+    (entry,) = resolve_shock_plan(
+        solved_test.config, solved_test.compiled, [shock], 8
+    ).entries
     assert entry.table is shock.dist
 
 

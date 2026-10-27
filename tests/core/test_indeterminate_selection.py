@@ -40,10 +40,9 @@ def indeterminate():
     return solver, solver.compile()
 
 
-def _params(compiled, **overrides) -> dict[str, float]:
+def _params(config, **overrides) -> dict[str, float]:
     params = {
-        str(name): float(value)
-        for name, value in compiled.config.calibration.parameters.items()
+        str(name): float(value) for name, value in config.calibration.parameters.items()
     }
     params.update(overrides)
     return params
@@ -84,7 +83,7 @@ def test_the_selection_spans_the_state_on_either_side_of_the_taylor_principle(
     indeterminate, psi_pi, stab, n_stable
 ):
     solver, compiled = indeterminate
-    par = _params(compiled, psi_pi=psi_pi)
+    par = _params(solver.config, psi_pi=psi_pi)
 
     warns = (
         pytest.warns(UserWarning, match="INDETERMINATE")
@@ -119,8 +118,8 @@ def test_the_indeterminate_rule_is_the_determinate_one_continued(indeterminate):
     rule has to satisfy, so the two calibrations differ only through ``psi_pi``.
     """
     solver, compiled = indeterminate
-    passive = _params(compiled, psi_pi=0.8)
-    active = _params(compiled, psi_pi=1.5)
+    passive = _params(solver.config, psi_pi=0.8)
+    active = _params(solver.config, psi_pi=1.5)
 
     with pytest.warns(UserWarning, match="INDETERMINATE"):
         solved_passive = solver.solve(compiled, parameters=passive, order=1)

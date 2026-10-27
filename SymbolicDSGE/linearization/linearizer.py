@@ -13,7 +13,9 @@ from sympy import Eq, Expr, Function, Symbol
 from sympy.core.function import AppliedUndef
 
 from .._ckernels.core import steady_state_newton
-from ..core.compiled_model import CompiledModel, _newton_seed
+from ..core.compiled_model import CompiledModel
+from ..core.config import ModelConfig
+from ..core.resolvers import resolve_ss_seed
 from ..core.config import SymbolGetterDict, FunctionGetterDict
 from .view import PointLinearView
 
@@ -52,6 +54,7 @@ class Linearizer:
 
     def __init__(
         self,
+        config: ModelConfig,
         compiled: CompiledModel,
         methods: Mapping[str, Annotated[str, Literal["log", "level"]]] | None = None,
         *,
@@ -71,6 +74,7 @@ class Linearizer:
                 f"Model variables: {list(layout.declared_names)}."
             )
 
+        self._config = config
         self._compiled = compiled
         self._methods = {
             name: LinearizationMethod(
@@ -102,12 +106,13 @@ class Linearizer:
         a point-linearized model whose original equations are in levels.
         """
         compiled = self._compiled
-        parameters = _resolve_parameters(compiled, params)
-        point = _solve_steady_state(compiled, parameters)
+        config = self._config
+        parameters = _resolve_parameters(config, compiled, params)
+        point = _solve_steady_state(config, compiled, parameters)
         _reject_nonpositive_log_point(self._methods, point)
 
-        shocks = frozenset(compiled.config.shocks)
-        equations = compiled.config.equations
+        shocks = frozenset(self._config.shocks)
+        equations = self._config.equations
 
         return PointLinearView(
             model={
@@ -124,11 +129,12 @@ class Linearizer:
             steady_state=FunctionGetterDict(
                 {Function(name): point[name] for name in compiled.layout.declared_names}
             ),
-            _config=compiled.config,
+            _config=self._config,
         )
 
 
 def linearize_model(
+    config: ModelConfig,
     compiled: CompiledModel,
     methods: Mapping[str, Annotated[str, Literal["log", "level"]]] | None = None,
     *,
@@ -138,6 +144,8 @@ def linearize_model(
 
     Parameters
     ----------
+    config : ModelConfig
+        Model specification.
     compiled : CompiledModel
         Compiled model to linearize.
     methods : Mapping[str, Literal["log", "level"]] | None
@@ -159,7 +167,7 @@ def linearize_model(
     estimating a model numerically linearized per parameter vector is not equivalent to estimating
     a point-linearized model whose original equations are in levels.
     """
-    return Linearizer(compiled, methods, default=default).at()
+    return Linearizer(config, compiled, methods, default=default).at()
 
 
 def _linearize_equation(
@@ -257,9 +265,9 @@ def _reject_nonpositive_log_point(
 
 
 def _resolve_parameters(
-    compiled: CompiledModel, params: Mapping[str, float] | None
+    config: ModelConfig, compiled: CompiledModel, params: Mapping[str, float] | None
 ) -> SymbolGetterDict[float]:
-    calibration = compiled.config.calibration.parameters
+    calibration = config.calibration.parameters
     overrides = {str(name): value for name, value in (params or {}).items()}
     if unknown := sorted(set(overrides) - set(compiled.calib_params)):
         raise ValueError(
@@ -275,12 +283,12 @@ def _resolve_parameters(
 
 
 def _solve_steady_state(
-    compiled: CompiledModel, parameters: Mapping[Symbol, float]
+    config: ModelConfig, compiled: CompiledModel, parameters: Mapping[Symbol, float]
 ) -> dict[str, float]:
     residual = compiled.construct_objective_cfunc()
     ss, _ = steady_state_newton(
         residual.address,
-        _newton_seed(compiled, parameters),
+        resolve_ss_seed(config, compiled.layout, params=parameters),
         _parameter_vector(compiled, parameters),
         compiled.n_exog,
     )

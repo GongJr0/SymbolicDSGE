@@ -31,9 +31,8 @@ OVER_ON, OVER_BOTH, OVER_OFF = -2.0, 0.0, 2.0
 
 
 @pytest.fixture(scope="module")
-def compiled(parsed_post82):
-    model = parsed_post82
-    conf = copy.deepcopy(model)
+def solver(parsed_post82):
+    conf = copy.deepcopy(parsed_post82)
     by_name = {v.__name__: v for v in conf.variables}
     g, z = by_name["g"], by_name["z"]
 
@@ -50,16 +49,18 @@ def compiled(parsed_post82):
             frozenset({"band", "over"}),
         )
     }
-    return DSGESolver(conf).compile()
+    return DSGESolver(conf)
 
 
 @pytest.fixture(scope="module")
-def par(compiled):
+def compiled(solver):
+    return solver.compile()
+
+
+@pytest.fixture(scope="module")
+def par(solver, compiled):
     return np.array(
-        [
-            float(compiled.config.calibration.parameters[p])
-            for p in compiled.calib_params
-        ],
+        [float(solver.config.calibration.parameters[p]) for p in compiled.calib_params],
         dtype=np.float64,
     )
 

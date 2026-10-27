@@ -10,8 +10,7 @@ from ..bayesian.transforms.transform_dispatch import (
     TRANSFORM_METHOD_DISPATCH,
 )
 from ..bayesian.priors import Prior, make_prior
-from ..core.compiled_model import CompiledModel
-from ..estimation.backend import extract_base_params
+from ..core.config import ModelConfig
 from ..estimation.results import MLEResult, MAPResult, MCMCResult, OptimizationResult
 from ..estimation.spec import EstimatorSpec
 
@@ -348,7 +347,7 @@ def estimator_spec_wire(spec: EstimatorSpec) -> dict[str, Any]:
 def build_estimation_prefill(
     spec: EstimatorSpec,
     result: MLEResult | MAPResult | MCMCResult | None,
-    compiled: CompiledModel,
+    config: ModelConfig,
 ) -> dict[str, Any]:
     """Seed the estimation form from a bundle's stored run.
 
@@ -363,13 +362,13 @@ def build_estimation_prefill(
     arrives over its own defaults, so a key a run never recorded is left out
     rather than invented here.
     """
-    config = _run_config(result)
+    run_conf = _run_config(result)
     params = spec.params
     estimated = list(params["estimated_params"] or [])
     priors = dict(params["priors"] or {})
-    bounds = dict(config.get("bounds") or {})
-    theta0 = dict(config.get("theta0") or {})
-    base = extract_base_params(compiled)
+    bounds = dict(run_conf.get("bounds") or {})
+    theta0 = dict(run_conf.get("theta0") or {})
+    base = {str(n): float(v) for n, v in config.calibration.parameters.items()}
 
     rows: list[dict[str, Any]] = []
     for name, value in base.items():

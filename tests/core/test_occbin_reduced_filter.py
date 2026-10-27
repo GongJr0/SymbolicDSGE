@@ -57,7 +57,7 @@ def observations(solved):
 @pytest.fixture(scope="module")
 def reference(solved):
     """The reference regime as the first-order model it already is."""
-    return FirstOrderSolvedModel(solved.compiled, solved.policy.ref)
+    return FirstOrderSolvedModel(solved.config, solved.compiled, solved.policy.ref)
 
 
 @pytest.mark.parametrize("filter_mode", ["linear", "extended"])
@@ -99,6 +99,7 @@ def test_estimation_likelihood_runs_on_a_constrained_model(
     # between two configurations is not the claim being made here.
 
     est = Estimator(
+        config=solved.config,
         compiled=solved.compiled,
         y=observations,
         filter_mode="linear",

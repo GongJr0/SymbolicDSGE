@@ -15,6 +15,7 @@ from sympy.core.function import AppliedUndef
 from SymbolicDSGE import DSGESolver, parse_config
 from SymbolicDSGE.core.model_parser import ModelParser
 from SymbolicDSGE.core.compiled_model import CompiledModel
+from SymbolicDSGE.core.config import ModelConfig
 from SymbolicDSGE.linearization import Linearizer, linearize_model
 from SymbolicDSGE.linearization.linearizer import (
     LinearizationMethod,
@@ -58,33 +59,33 @@ T = sp.Symbol("t", integer=True)
 
 
 @pytest.fixture(scope="module")
-def rbc(rbc_second_order_test_model_path) -> CompiledModel:
+def rbc(rbc_second_order_test_model_path) -> tuple[ModelConfig, CompiledModel]:
     """Levels RBC: c and k have positive steady states, z sits at zero."""
     model = parse_config(rbc_second_order_test_model_path)
-    return DSGESolver(model).compile()
+    return model, DSGESolver(model).compile()
 
 
 @pytest.fixture(scope="module")
-def gap(test_model_path) -> CompiledModel:
+def gap(test_model_path) -> tuple[ModelConfig, CompiledModel]:
     """A model already authored in gaps, so Newton returns the origin."""
     model = parse_config(test_model_path)
-    return DSGESolver(model).compile()
+    return model, DSGESolver(model).compile()
 
 
 @pytest.fixture(scope="module")
-def aux() -> CompiledModel:
+def aux() -> tuple[ModelConfig, CompiledModel]:
     model = ModelParser.from_string(AUX_MODEL).get()
-    return DSGESolver(model).compile()
+    return model, DSGESolver(model).compile()
 
 
 @pytest.fixture(scope="module")
-def rbc_log(rbc: CompiledModel) -> PointLinearView:
-    return Linearizer(rbc, {"c": "log", "k": "log"}).at()
+def rbc_log(rbc: tuple[ModelConfig, CompiledModel]) -> PointLinearView:
+    return Linearizer(*rbc, {"c": "log", "k": "log"}).at()
 
 
 @pytest.fixture(scope="module")
-def gap_linear(gap: CompiledModel) -> PointLinearView:
-    return Linearizer(gap).at()
+def gap_linear(gap: tuple[ModelConfig, CompiledModel]) -> PointLinearView:
+    return Linearizer(*gap).at()
 
 
 # ---------------- methods ----------------
@@ -92,19 +93,19 @@ def gap_linear(gap: CompiledModel) -> PointLinearView:
 
 def test_rejects_an_undeclared_variable(rbc):
     with pytest.raises(ValueError, match="does not have"):
-        Linearizer(rbc, {"nope": "log"})
+        Linearizer(*rbc, {"nope": "log"})
 
 
 def test_rejects_a_minted_variable(aux):
-    assert aux.layout.generated_names == ("u_lag1",)
+    assert aux[1].layout.generated_names == ("u_lag1",)
 
     with pytest.raises(ValueError, match="compiler-minted"):
-        Linearizer(aux, {"u_lag1": "log"})
+        Linearizer(*aux, {"u_lag1": "log"})
 
 
 def test_an_invalid_method_names_the_valid_ones(rbc):
     with pytest.raises(ValueError, match=r"Valid options are: \['log', 'level'\]"):
-        Linearizer(rbc, {"c": "taylor"})
+        Linearizer(*rbc, {"c": "taylor"})
 
 
 # ---------------- the expansion point ----------------
@@ -127,14 +128,14 @@ def test_log_rejects_a_nonpositive_point(rbc):
     # z is an AR(1) in gaps, so its steady state is exactly zero and no
     # log deviation exists to expand in.
     with pytest.raises(ValueError, match="positive steady state"):
-        Linearizer(rbc, {"z": "log"}).at()
+        Linearizer(*rbc, {"z": "log"}).at()
 
 
 # ---------------- parameters ----------------
 
 
 def test_params_override_the_calibration(rbc):
-    view = Linearizer(rbc, {"c": "log", "k": "log"}).at({"beta": 0.985})
+    view = Linearizer(*rbc, {"c": "log", "k": "log"}).at({"beta": 0.985})
 
     assert float(view.parameters["beta"]) == 0.985
     assert float(view.parameters["alpha"]) == 0.33
@@ -144,7 +145,7 @@ def test_params_override_the_calibration(rbc):
 
 def test_params_rejects_an_undeclared_parameter(rbc):
     with pytest.raises(ValueError, match="does not have"):
-        Linearizer(rbc).at({"nope": 1.0})
+        Linearizer(*rbc).at({"nope": 1.0})
 
 
 # ---------------- equations and observables ----------------
@@ -154,7 +155,8 @@ def test_a_gap_model_keeps_every_coefficient(gap, gap_linear):
     # Every variable sits at the origin and the model is already linear, so the
     # expansion cannot touch a slope. Only the constant can move, which is what
     # the next test pins down.
-    authored = gap.config.equations.model
+
+    authored = gap[0].equations.model
     assert list(gap_linear.model) == list(authored)
 
     for name, equation in gap_linear.model.items():
@@ -168,7 +170,7 @@ def test_the_value_at_the_expansion_point_is_subtracted_from_each_side(gap, gap_
     # taylor reads r_star(t) = rbar + ..., so rbar is part of the right side's
     # value at the point and comes off with it. Parameters are never substituted
     # numerically, so it comes off as a symbol.
-    authored = gap.config.equations.model["taylor"]
+    authored = gap[0].equations.model["taylor"]
     linear = gap_linear.model["taylor"]
 
     difference = (linear.lhs - linear.rhs) - (authored.lhs - authored.rhs)
@@ -178,7 +180,7 @@ def test_the_value_at_the_expansion_point_is_subtracted_from_each_side(gap, gap_
     # rule's own feedback puts the point at -0.325 rather than the origin, and the
     # emitted equation is the same one. So estimating rbar on a to_config() model
     # cannot move this equation, while on the original it relocates the point.
-    shifted = Linearizer(gap).at({"rbar": 0.5})
+    shifted = Linearizer(*gap).at({"rbar": 0.5})
 
     assert float(shifted.steady_state["r_star"]) == pytest.approx(-0.32520325, rel=1e-6)
     assert shifted.model["taylor"] == linear
@@ -198,7 +200,7 @@ def test_observables_keep_their_intercept(gap_linear, rbc_log):
 def test_a_nonlinear_observable_comes_out_affine(aux):
     # log(ubar*exp(u_hat)) is log(ubar) + u_hat, which is the whole point of the
     # pass: the measurement equation stops being nonlinear.
-    view = Linearizer(aux, {"u": "log"}).at()
+    view = Linearizer(*aux, {"u": "log"}).at()
     log_u_obs = view.observables["log_u_obs"]
 
     assert float(log_u_obs.coeff(sp.Function("u")(T))) == pytest.approx(1.0)
@@ -216,10 +218,10 @@ def test_log_expansion_agrees_with_the_helper(rbc, rbc_log):
         "z": LinearizationMethod.LEVEL,
     }
     point = {str(name): float(value) for name, value in rbc_log.steady_state.items()}
-    shocks = frozenset(rbc.config.shocks)
+    shocks = frozenset(rbc[0].shocks)
 
     expected = _linearize_equation(
-        rbc.config.equations.model["euler"], methods, point, shocks
+        rbc[0].equations.model["euler"], methods, point, shocks
     )
     emitted = rbc_log.model["euler"]
     difference = (emitted.lhs - emitted.rhs) - (expected.lhs - expected.rhs)
@@ -231,20 +233,20 @@ def test_log_expansion_agrees_with_the_helper(rbc, rbc_log):
 
 
 def test_to_config_keeps_the_equation_key_order(rbc, rbc_log):
-    assert list(rbc_log.to_config().equations.model) == list(rbc.config.equations.model)
+    assert list(rbc_log.to_config().equations.model) == list(rbc[0].equations.model)
 
 
-def test_to_config_zeroes_every_seed(rbc_log):
+def test_to_config_nulls_every_seed(rbc_log):
     # The deviation system clears at the origin. Left alone, the authored k_ss
     # would seed Newton at exp(k_ss) times the level it was written for.
     seeds = rbc_log.to_config().ss_seed
 
     assert set(seeds) == set(rbc_log.steady_state)
-    assert all(float(value) == 0.0 for value in seeds.values())
+    assert all(value is None for value in seeds.values())
 
 
 def test_to_config_carries_the_override_parameters(rbc):
-    config = Linearizer(rbc, {"c": "log", "k": "log"}).at({"beta": 0.985}).to_config()
+    config = Linearizer(*rbc, {"c": "log", "k": "log"}).at({"beta": 0.985}).to_config()
 
     assert float(config.calibration.parameters["beta"]) == 0.985
 
@@ -252,7 +254,7 @@ def test_to_config_carries_the_override_parameters(rbc):
 def test_to_config_marks_every_observable_affine(aux):
     # Both methods emit an affine observable, so the non-affine measurement path
     # in solved_model has nothing left to evaluate.
-    config = Linearizer(aux, {"u": "log"}).at().to_config()
+    config = Linearizer(*aux, {"u": "log"}).at().to_config()
 
     assert all(config.equations.obs_is_affine.values())
 
@@ -273,7 +275,7 @@ def test_to_config_does_not_alias_the_view(rbc_log):
 
 
 def test_linearize_model_matches_the_class_at_base_calibration(rbc, rbc_log):
-    view = linearize_model(rbc, {"c": "log", "k": "log"})
+    view = linearize_model(*rbc, {"c": "log", "k": "log"})
 
     assert view.model == rbc_log.model
     assert dict(view.steady_state) == dict(rbc_log.steady_state)

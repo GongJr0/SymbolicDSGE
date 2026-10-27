@@ -234,13 +234,13 @@ def test_an_equality_condition_has_no_distance(parsed_post82):
         compiled.construct_constraint_func()
 
 
-def _params(compiled):
-    calib = compiled.config.calibration.parameters
+def _params(config, compiled):
+    calib = config.calibration.parameters
     return np.array([float(calib[p]) for p in compiled.calib_params])
 
 
 def _shock_syms(compiled):
-    return list(compiled.config.shocks)
+    return [sp.Symbol(name) for name in compiled.layout.shock_names]
 
 
 def _fold_to_cur(compiled):
@@ -284,12 +284,12 @@ def _symbolic_pencil(compiled, residuals):
     return a, b, c, d
 
 
-def _assert_pencil_parity(compiled, ss, scale):
+def _assert_pencil_parity(config, compiled, ss, scale):
     # Regime blocks are row patches onto this pencil, so the procedure has to
     # reproduce the reference sweep on every row before a patch of it means
     # anything. Checked off the expansion point as well.
     residuals = compiled.objective_eqs
-    par = _params(compiled)
+    par = _params(config, compiled)
     n_var = len(compiled.var_names)
     n_row, n_exog = len(residuals), compiled.n_exog
     addr = compiled.construct_objective_cfunc().address
@@ -314,9 +314,9 @@ def _assert_pencil_parity(compiled, ss, scale):
             )
 
 
-def test_symbolic_pencil_matches_the_reference_sweep(compiled_post82):
+def test_symbolic_pencil_matches_the_reference_sweep(parsed_post82, compiled_post82):
     _assert_pencil_parity(
-        compiled_post82, np.zeros(len(compiled_post82.var_names)), 0.3
+        parsed_post82, compiled_post82, np.zeros(len(compiled_post82.var_names)), 0.3
     )
 
 
@@ -354,7 +354,9 @@ def compiled_lead_regime(parsed_post82):
     return solver.compile()
 
 
-def test_regime_pencil_rows_match_the_complex_step_sweep(compiled_lead_regime):
+def test_regime_pencil_rows_match_the_complex_step_sweep(
+    parsed_post82, compiled_lead_regime
+):
     # The blocks replace a complex-step sweep of the regime, so they have to
     # reproduce it on the replaced rows. Checked away from the steady state too:
     # a gap model sits at ss = 0, where a wrong block can still read as right.
@@ -362,7 +364,7 @@ def test_regime_pencil_rows_match_the_complex_step_sweep(compiled_lead_regime):
     block = compiled.regimes[1]
     n_var = len(compiled.var_names)
     n_row = len(block.rows)
-    par = _params(compiled)
+    par = _params(parsed_post82, compiled)
     cfunc = _regime_cfuncs(compiled)[1]
 
     n_exog = compiled.n_exog
@@ -420,13 +422,13 @@ def _call_pencil(func, mask, cur, par):
     return (*dates, shock.reshape(n_row, n_exog), out[-n_row:])
 
 
-def test_regime_pencil_cfunc_writes_every_block(compiled_lead_regime):
+def test_regime_pencil_cfunc_writes_every_block(parsed_post82, compiled_lead_regime):
     # One call has to reproduce the regime's own complex-step sweep on the
     # replaced rows, the three dates then the innovations, plus its residual at
     # the same point, so every block patches a reference pencil copy unchanged.
     compiled = compiled_lead_regime
     func = compiled.construct_regime_pencil_func()
-    par = _params(compiled)
+    par = _params(parsed_post82, compiled)
     n_var, n_exog = len(compiled.var_names), compiled.n_exog
     rows = func.rows[1]
     cfunc = _regime_cfuncs(compiled)[1]
@@ -571,15 +573,10 @@ def test_regime_cfuncs_cover_every_regime(compiled_regimes):
     assert sorted(_regime_cfuncs(compiled_regimes)) == [1, 2, 3]
 
 
-def test_regime_pencils_swap_only_the_replaced_row(compiled_regimes):
+def test_regime_pencils_swap_only_the_replaced_row(parsed_post82, compiled_regimes):
     # The constant is the whole OccBin mechanism: regimes linearize at the
     # reference steady state, where they do not hold, and c_r is that failure.
-    par = np.array(
-        [
-            float(compiled_regimes.config.calibration.parameters[p])
-            for p in compiled_regimes.calib_params
-        ]
-    )
+    par = _params(parsed_post82, compiled_regimes)
     n_eq = len(compiled_regimes.var_names)
     ref_cfunc = compiled_regimes.construct_objective_cfunc()
     n_exog = compiled_regimes.n_exog
@@ -591,7 +588,7 @@ def test_regime_pencils_swap_only_the_replaced_row(compiled_regimes):
     ).real
     np.testing.assert_allclose(c_ref, 0.0, atol=1e-12)
 
-    beta = float(compiled_regimes.config.calibration.parameters[sp.Symbol("beta")])
+    beta = float(parsed_post82.calibration.parameters[sp.Symbol("beta")])
     expected_c = {1: 0.0, 2: -beta, 3: -2 * beta}
 
     for mask, cfunc in _regime_cfuncs(compiled_regimes).items():
@@ -626,14 +623,14 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
     )
 
     compiled = solver.compile()
-    names = list(compiled.config.equations.model)
+    names = list(model.equations.model)
 
     assert "Pi_lag1" in compiled.var_names
     assert compiled.regimes[1].rows == [names.index("taylor")]
 
     # The rows the pencil actually moves are the rows we recorded, which is the
     # part an index shift would break.
-    par = _params(compiled)
+    par = _params(model, compiled)
     n_eq = len(compiled.var_names)
     ref_cfunc = compiled.construct_objective_cfunc()
     ss_ref, _ = steady_state_newton(
@@ -677,13 +674,13 @@ def compiled_rbc_obc(parsed_rbc_so):
     return DSGESolver(conf).compile()
 
 
-def _rbc_seed(compiled):
+def _rbc_seed(config, compiled):
     """Newton seed over the compiled layout, generated variables included.
 
     A lag aux starts where its origin does, so the suffix is stripped before the
     `<name>_ss` lookup; an unseeded variable starts at zero.
     """
-    calib = compiled.config.calibration.parameters
+    calib = config.calibration.parameters
     seeds = []
     for name in compiled.var_names:
         origin = re.sub(r"_lag\d+$", "", name)
@@ -692,34 +689,37 @@ def _rbc_seed(compiled):
     return np.array(seeds)
 
 
-def _rbc_steady_state(compiled):
+def _rbc_steady_state(config, compiled):
     ss, _ = steady_state_newton(
         compiled.construct_objective_cfunc().address,
-        _rbc_seed(compiled),
-        _params(compiled),
+        _rbc_seed(config, compiled),
+        _params(config, compiled),
         compiled.n_exog,
     )
     return ss
 
 
-def test_symbolic_pencil_matches_the_reference_sweep_in_levels(compiled_rbc_obc):
+def test_symbolic_pencil_matches_the_reference_sweep_in_levels(
+    parsed_rbc_so, compiled_rbc_obc
+):
     # POST82 sits at ss = 0, where a pencil can read as right for the wrong
     # reason. Here the expansion point is nonzero and the equations are
     # genuinely nonlinear, so the derivatives carry state.
-    ss = _rbc_steady_state(compiled_rbc_obc)
+    ss = _rbc_steady_state(parsed_rbc_so, compiled_rbc_obc)
     assert np.abs(ss).max() > 1.0
-    _assert_pencil_parity(compiled_rbc_obc, ss, 0.05)
+    _assert_pencil_parity(parsed_rbc_so, compiled_rbc_obc, ss, 0.05)
 
 
-def test_levels_regime_constant_is_the_steady_state_residual(compiled_rbc_obc):
-    calib = compiled_rbc_obc.config.calibration.parameters
-    par = np.array([float(calib[p]) for p in compiled_rbc_obc.calib_params])
+def test_levels_regime_constant_is_the_steady_state_residual(
+    parsed_rbc_so, compiled_rbc_obc
+):
+    par = _params(parsed_rbc_so, compiled_rbc_obc)
     n_eq = len(compiled_rbc_obc.var_names)
 
     ref_cfunc = compiled_rbc_obc.construct_objective_cfunc()
     n_exog = compiled_rbc_obc.n_exog
     ss_ref, _ = steady_state_newton(
-        ref_cfunc.address, _rbc_seed(compiled_rbc_obc), par, n_exog
+        ref_cfunc.address, _rbc_seed(parsed_rbc_so, compiled_rbc_obc), par, n_exog
     )
 
     # The whole point of a levels fixture: the expansion point is not the origin.
@@ -732,7 +732,8 @@ def test_levels_regime_constant_is_the_steady_state_residual(compiled_rbc_obc):
     # `euler` is row 0; the replacement k(t+1) = (1 - delta) k(t) leaves a
     # residual of delta * k_ss at the reference steady state.
     k_idx = compiled_rbc_obc.var_names.index("k")
-    expected = float(calib[sp.Symbol("delta")]) * ss_ref[k_idx]
+    delta = parsed_rbc_so.calibration.parameters[sp.Symbol("delta")]
+    expected = float(delta) * ss_ref[k_idx]
     assert expected > 0.5
 
     cfunc = _regime_cfuncs(compiled_rbc_obc)[1]

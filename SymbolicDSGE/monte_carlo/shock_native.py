@@ -39,7 +39,7 @@ def replication_shocks(
     if not shocks:
         raise ValueError("The simulation step draws no shocks.")
 
-    plan = resolve_shock_plan(model.compiled, shocks, T)
+    plan = resolve_shock_plan(model.config, model.compiled, shocks, T)
     drawn = get_native_shock_plan(plan, T, scale).draw(rep_idx)
 
     out = {}

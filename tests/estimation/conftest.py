@@ -20,12 +20,12 @@ from SymbolicDSGE.core.config import SymbolGetterDict
 def post82_restore(post82_bundle):
     """The session bundle, with its calibration put back afterwards.
 
-    ``estimate_and_solve`` syncs the estimated point into the model's
+    ``estimate_and_solve`` syncs the estimated point into the solver's
     calibration, and the bundle is shared with the whole suite, so a test that
     runs one reaches the model through here rather than through
-    ``compiled_post82``.
+    ``solver_post82``.
     """
-    calibration = post82_bundle["compiled"].config.calibration
+    calibration = post82_bundle["solver"].config.calibration
     entered = SymbolGetterDict(calibration.parameters)
     try:
         yield post82_bundle

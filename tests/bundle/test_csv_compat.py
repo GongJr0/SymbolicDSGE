@@ -160,7 +160,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(
         BundleBuilder(created_by="csv-test")
         .add_model("reference", parsed_test, compile_kwargs={})
         .add_estimation(
-            _estimator(compiled_test, observed),
+            _estimator(parsed_test, compiled_test, observed),
             result=result,
             as_parquet=False,
         )
@@ -179,7 +179,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(
 
 
 def test_loader_reads_hand_built_csv_only_bundle(
-    tmp_path: Path, test_model_yaml, compiled_test
+    tmp_path: Path, test_model_yaml, parsed_test, compiled_test
 ) -> None:
     """A hand-zipped bundle with CSV members (no Parquet) is a valid archive."""
     observed_csv = b"Infl,Rate\n0.1,0.2\n0.3,0.4\n0.5,0.6\n"
@@ -190,7 +190,7 @@ def test_loader_reads_hand_built_csv_only_bundle(
         }
     )
 
-    spec = _estimator(compiled_test).to_spec()
+    spec = _estimator(parsed_test, compiled_test).to_spec()
     manifest = Manifest(
         created_by="hand-zipped",
         members=[
@@ -284,7 +284,11 @@ def _estimation_source(spec: EstimatorSpec) -> Any:
 
 
 def _estimator(
-    compiled_test, y: Any = None, *, observables: tuple[str, ...] = ("Infl", "Rate")
+    parsed_test,
+    compiled_test,
+    y: Any = None,
+    *,
+    observables: tuple[str, ...] = ("Infl", "Rate"),
 ) -> Estimator:
     """A live estimator over the bundled model, in the shape a loader rebuilds.
 
@@ -297,6 +301,7 @@ def _estimator(
         else np.asarray(y, dtype=np.float64)
     )
     return Estimator(
+        config=parsed_test,
         compiled=compiled_test,
         y=matrix,
         observables=list(observables),

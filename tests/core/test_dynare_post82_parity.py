@@ -52,8 +52,7 @@ import numpy as np
 import pytest
 from scipy.linalg import solve_discrete_lyapunov
 
-from SymbolicDSGE.core.compiled_model import _shock_covariance
-from SymbolicDSGE.estimation import backend
+from SymbolicDSGE.core.resolvers import shock_covariance
 from SymbolicDSGE.kalman.filter import KalmanFilter
 
 from _oracles import dynare_post82_first_order as dyn
@@ -91,12 +90,14 @@ def _shocks(block: np.ndarray) -> dict[str, np.ndarray]:
     return {name: block[:, j] for j, name in enumerate(dyn.EXO_COLUMNS)}
 
 
-def _measurement(compiled):
-    params = backend.extract_base_params(compiled)
+def _measurement(config, compiled):
+    params = config.calibration.parameters
     C, d = compiled.build_affine_measurement_matrices(
-        params, list(compiled.observable_names), np.zeros(len(compiled.var_names))
+        params,
+        list(compiled.observable_names),
+        np.zeros(len(compiled.var_names)),
     )
-    return _shock_covariance(compiled, params), C, d
+    return shock_covariance(config, params), C, d
 
 
 # --- ordering ---------------------------------------------------------------
@@ -138,8 +139,8 @@ def test_impact_on_declared_variables_matches_ghu(solved_post82):
     assert r_row[dyn.EXO_COLUMNS.index("e_g")] == pytest.approx(0.34702357, abs=1e-8)
 
 
-def test_shock_covariance_matches_dynare(compiled_post82):
-    Q, _, _ = _measurement(compiled_post82)
+def test_shock_covariance_matches_dynare(parsed_post82, compiled_post82):
+    Q, _, _ = _measurement(parsed_post82, compiled_post82)
 
     assert np.abs(Q - dyn.SIGMA_E).max() < TOL
 
@@ -202,16 +203,16 @@ def test_unit_innovation_response_matches_dynare(solved_post82, shock):
 # --- measurement and filter -------------------------------------------------
 
 
-def test_measurement_matrices_match_dynare(compiled_post82):
+def test_measurement_matrices_match_dynare(parsed_post82, compiled_post82):
     compiled = compiled_post82
-    _, C, d = _measurement(compiled)
+    _, C, d = _measurement(parsed_post82, compiled)
 
     assert np.abs(C[:, _declared(compiled)] - dyn.KF_Z).max() < TOL
     assert np.abs(d - dyn.KF_D).max() < TOL
 
 
 def _filter(solution, P0):
-    Q, C, d = _measurement(solution.compiled)
+    Q, C, d = _measurement(solution.config, solution.compiled)
     return KalmanFilter.run(
         np.real(solution.policy.A),
         np.real(solution.policy.B),
@@ -228,7 +229,7 @@ def _filter(solution, P0):
 
 def _unconditional_P0(solution):
     A, B = np.real(solution.policy.A), np.real(solution.policy.B)
-    Q, _, _ = _measurement(solution.compiled)
+    Q, _, _ = _measurement(solution.config, solution.compiled)
     P0 = solve_discrete_lyapunov(A, B @ Q @ B.T)
     return 0.5 * (P0 + P0.T)
 

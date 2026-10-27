@@ -50,9 +50,9 @@ def _nonlinear_compile_yaml() -> str:
     )
 
 
-def test_compile_builds_expected_structures(compiled_test):
+def test_compile_builds_expected_structures(parsed_test, compiled_test):
     c = compiled_test
-    n_vars = len(c.config.variables)
+    n_vars = len(parsed_test.variables)
 
     # test.yaml lags u, v and r, so those three are the states; its two shocks
     # are innovations rather than variables.
@@ -60,16 +60,18 @@ def test_compile_builds_expected_structures(compiled_test):
     assert c.n_exog == 2
     assert len(c.var_names) == n_vars
     assert len(c.cur_syms) == n_vars
-    assert len(c.objective_eqs) == len(c.config.equations.model)
+    assert len(c.objective_eqs) == len(parsed_test.equations.model)
     assert set(c.idx.keys()) == set(c.var_names)
     assert set(c.observable_names) == {"Infl", "Rate"}
 
 
-def test_compiled_parameters_accept_dict_and_vector_forms(compiled_test):
+def test_compiled_parameters_accept_dict_and_vector_forms(parsed_test, compiled_test):
     c = compiled_test
     ss = np.zeros(len(c.var_names))
 
-    par_dict = {p: float64(c.config.calibration.parameters[p]) for p in c.calib_params}
+    par_dict = {
+        p: float64(parsed_test.calibration.parameters[p]) for p in c.calib_params
+    }
     par_vec = np.array([par_dict[p] for p in c.calib_params])
 
     C_dict, d_dict = c.build_affine_measurement_matrices(
@@ -91,14 +93,16 @@ def test_compiled_parameters_reject_bad_vector_length(compiled_test):
         )
 
 
-def test_measurement_array_dispatchers_match_lambdify_reference(compiled_test):
+def test_measurement_array_dispatchers_match_lambdify_reference(
+    parsed_test, compiled_test
+):
     # The native measurement/jacobian cfuncs must agree with an independent
     # sympy.lambdify evaluation of the stored observable exprs (the reference the
     # printer replaced).
     c = compiled_test
     state = np.linspace(0.05, 0.05 * len(c.cur_syms), len(c.cur_syms), dtype=float64)
     params = np.array(
-        [float64(c.config.calibration.parameters[p]) for p in c.calib_params],
+        [float64(parsed_test.calibration.parameters[p]) for p in c.calib_params],
         dtype=float64,
     )
     n_var = len(c.cur_syms)
@@ -122,12 +126,12 @@ def test_measurement_array_dispatchers_match_lambdify_reference(compiled_test):
     assert np.allclose(array_jac, scalar_jac)
 
 
-def test_measurement_cfunc_matches_array_dispatcher(compiled_test):
+def test_measurement_cfunc_matches_array_dispatcher(parsed_test, compiled_test):
     c = compiled_test
     observables = list(reversed(c.observable_names))
     state = np.linspace(0.05, 0.05 * len(c.cur_syms), len(c.cur_syms), dtype=float64)
     params = np.array(
-        [float64(c.config.calibration.parameters[p]) for p in c.calib_params],
+        [float64(parsed_test.calibration.parameters[p]) for p in c.calib_params],
         dtype=float64,
     )
 

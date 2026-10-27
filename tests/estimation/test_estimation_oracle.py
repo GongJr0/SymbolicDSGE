@@ -34,11 +34,14 @@ _TH0 = {"psi_pi": 2.0, "rho_r": 0.8}
 _BNDS = {"psi_pi": (1.0, 5.0), "rho_r": (0.0, 0.99)}
 
 
-def _mle_estimator(compiled, solved, y, mode: str) -> Estimator:
+def _mle_estimator(solved, y, mode: str) -> Estimator:
     P0 = None
+    compiled = solved.compiled
+    config = solved.config
     if mode == "unscented":
         P0 = np.eye(len(compiled.var_names), dtype=np.float64)
     return Estimator(
+        config=config,
         compiled=compiled,
         y=y,
         observables=compiled.observable_names,
@@ -69,30 +72,33 @@ def _assert_mle_packing(est: Estimator, res: MLEResult) -> None:
         ("unscented", 205.1999554164),
     ],
 )
-def test_mle_lbfgsb_oracle(compiled_post82, solved_post82, y_post82, mode, golden_fun):
-    est = _mle_estimator(compiled_post82, solved_post82, y_post82, mode)
+def test_mle_lbfgsb_oracle(solved_post82, y_post82, mode, golden_fun):
+    est = _mle_estimator(solved_post82, y_post82, mode)
     res = est.mle(theta0=_TH0, bounds=_BNDS)
     assert res.fun == pytest.approx(golden_fun, abs=1e-3)
     _assert_mle_packing(est, res)
 
 
-def test_mle_nelder_mead_oracle(compiled_post82, solved_post82, y_post82):
-    est = _mle_estimator(compiled_post82, solved_post82, y_post82, "linear")
+def test_mle_nelder_mead_oracle(solved_post82, y_post82):
+    est = _mle_estimator(solved_post82, y_post82, "linear")
     res = est.mle(theta0=_TH0, bounds=_BNDS, method="Nelder-Mead")
     assert res.fun == pytest.approx(203.5359358684, abs=1e-3)
     _assert_mle_packing(est, res)
 
 
-def test_map_lbfgsb_oracle(compiled_post82, solved_post82, y_post82):
+def test_map_lbfgsb_oracle(solved_post82, y_post82):
     prior = make_prior(
         distribution="normal",
         parameters={"mean": 2.0, "std": 0.5},
         transform="identity",
     )
+    config = solved_post82.config
+    compiled = solved_post82.compiled
     est = Estimator(
-        compiled=compiled_post82,
+        config=config,
+        compiled=compiled,
         y=y_post82,
-        observables=compiled_post82.observable_names,
+        observables=compiled.observable_names,
         filter_mode="linear",
         estimated_params={"psi_pi": prior},
         ss_seed=solved_post82.policy.steady_state,
