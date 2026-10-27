@@ -73,7 +73,10 @@ class SolvedModel(ABC, Generic[Policy]):
         The compiled model's symbolic configuration.
     """
 
-    def __init__(self, compiled: CompiledModel, policy: Policy) -> None:
+    def __init__(
+        self, config: ModelConfig, compiled: CompiledModel, policy: Policy
+    ) -> None:
+        self.config = config
         self.compiled = compiled
         self.policy = policy
 
@@ -607,11 +610,6 @@ class SolvedModel(ABC, Generic[Policy]):
     def is_determinate(self) -> bool:
         """Whether the model's policy solution is determinate (stable and unique)."""
         return self.policy.is_determinate
-
-    @property
-    def config(self) -> ModelConfig:
-        """Model configuration, including calibration, equations, and metadata."""
-        return self.compiled.config
 
     @cached_property
     def _cd_cache(self) -> dict[tuple, Tuple[NDF, NDF]]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import warnings
 
 import sympy as sp
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
     from ..estimation.results import MLEResult, MAPResult, MCMCResult
     from ..bayesian.priors import Prior
 
-from .config import ModelConfig
+from .config import ModelConfig, SymbolGetterDict
 from .resolvers import VariableLayout, resolve_ss_seed
 from .compiled_model import (
     CompiledModel,
@@ -78,7 +79,7 @@ class DSGESolver:
                 "linearized at one constant point, pass `PointLinearView.to_config(). "
             )
 
-        self.config = config
+        self.config = deepcopy(config)
         self.t = sp.Symbol("t", integer=True)
 
     def compile(
@@ -106,7 +107,6 @@ class DSGESolver:
 
         # Convert model to {-1, 0, 1} offsets with auxiliary variables for lags and leads.
         desugared = desugar_model(conf)
-        conf = deepcopy(self.config)
         t = self.t
         ordered_variables = desugared.variables
 
@@ -183,7 +183,7 @@ class DSGESolver:
         ]
 
         return CompiledModel(
-            config=conf,
+            name=conf.name,
             cur_syms=cur_syms,
             layout=layout,
             var_names=var_order,
@@ -535,6 +535,14 @@ class DSGESolver:
             )
 
         conf = self.config
+        conf = replace(
+            conf,
+            calibration=replace(
+                conf.calibration,
+                parameters=SymbolGetterDict(conf.calibration.parameters),
+            ),
+        )
+
         point = parameters if parameters is not None else conf.calibration.parameters
         seed = resolve_ss_seed(conf, compiled.layout, ss_seed=ss_seed, params=point)
         param_vec = np.array(
@@ -546,15 +554,21 @@ class DSGESolver:
 
         if piecewise:
             sol = PiecewiseSolvedModel(
-                compiled=compiled, policy=piecewise_solve(compiled, param_vec, seed)
+                config=conf,
+                compiled=compiled,
+                policy=piecewise_solve(compiled, param_vec, seed),
             )
         elif order == 2:
             sol = SecondOrderSolvedModel(
-                compiled=compiled, policy=sgu_solve(conf, compiled, param_vec, seed)
+                config=conf,
+                compiled=compiled,
+                policy=sgu_solve(conf, compiled, param_vec, seed),
             )
         else:
             sol = FirstOrderSolvedModel(
-                compiled=compiled, policy=klein_solve(compiled, param_vec, seed)
+                config=conf,
+                compiled=compiled,
+                policy=klein_solve(compiled, param_vec, seed),
             )
 
         if not sol.is_determinate:
@@ -585,6 +599,7 @@ class DSGESolver:
         from ..estimation import Estimator
 
         return Estimator(
+            config=self.config,
             compiled=compiled,
             y=y,
             observables=observables,
@@ -599,7 +614,7 @@ class DSGESolver:
             jitter=jitter,
             symmetrize=symmetrize,
             R=R,
-        )  # type: ignore
+        )
 
     def estimate(
         self,
@@ -779,7 +794,7 @@ class DSGESolver:
         # Sync writes the estimated values into the calibration, which is where
         # `solve` reads its full parameter vector from; passing them again would
         # only re-supply what was just installed.
-        self._sync_calibration_with_params(compiled, solve_params)  # type: ignore
+        self.config.update_parameters(solve_params)
         solved = self.solve(
             compiled=compiled,
             order=order,

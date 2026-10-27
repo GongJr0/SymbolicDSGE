@@ -57,7 +57,7 @@ def observations(solved):
 @pytest.fixture(scope="module")
 def reference(solved):
     """The reference regime as the first-order model it already is."""
-    return FirstOrderSolvedModel(solved.compiled, solved.policy.ref)
+    return FirstOrderSolvedModel(solved.config, solved.compiled, solved.policy.ref)
 
 
 @pytest.mark.parametrize("filter_mode", ["linear", "extended"])

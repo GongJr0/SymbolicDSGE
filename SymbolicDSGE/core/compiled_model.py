@@ -12,7 +12,6 @@ from typing import Any, Mapping, Sequence
 
 from sympy.logic.boolalg import Boolean
 
-from .config import ModelConfig
 from .resolvers import VariableLayout
 from SymbolicDSGE._symbolic_printers import (
     BicomplexOps,
@@ -186,8 +185,8 @@ class CompiledModel:
 
     Attributes
     ----------
-    config : ModelConfig
-        Symbolic model configuration, including calibration and solver settings.
+    name : str
+        Name of the model specification that produced this compiled model.
     cur_syms : list[Symbol]
         Post-compile generated time-t model variables, in canonical order, as sympy
         symbols.
@@ -238,7 +237,7 @@ class CompiledModel:
         Index mapping shock names to their column positions in the shock matrix.
     """
 
-    config: ModelConfig
+    name: str
 
     cur_syms: list[Symbol]
 
@@ -634,4 +633,4 @@ class CompiledModel:
         return cache[obs]
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.config.name})"
+        return f"{self.__class__.__name__}({self.name})"

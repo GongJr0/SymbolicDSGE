@@ -26,14 +26,12 @@ _MS_SHOCKS = ("e_z", "e_d", "e_g")
 _MS_AR_STATES = ("z", "d", "g")
 
 
-def _ms_preproc(solved, compiled):
+def _ms_preproc(solved):
     """(a, b, f_xx) at the solved steady state, enough to re-run the solve with a
     covariance of our choosing."""
+    compiled = solved.compiled
     par = np.array(
-        [
-            float(compiled.config.calibration.parameters[p])
-            for p in compiled.calib_params
-        ],
+        [float(solved.config.calibration.parameters[p]) for p in compiled.calib_params],
         dtype=np.float64,
     )
     n_eq = len(compiled.var_names)
@@ -44,10 +42,10 @@ def _ms_preproc(solved, compiled):
     return a, b, bicomplex_hessian(cf_bc.address, ss, par, compiled.n_exog, n_eq)
 
 
-def _ms_covariance(compiled) -> np.ndarray:
+def _ms_covariance(solved) -> np.ndarray:
     """The 3x3 innovation covariance the yaml calibrates, read straight off the
     parameters."""
-    calib = compiled.config.calibration.parameters
+    calib = solved.config.calibration.parameters
     stds = np.array([float(calib[sp.Symbol(s)]) for s in _MS_STDS])
     corr = np.eye(3)
     for (i, j), name in _MS_CORRS.items():
@@ -130,7 +128,9 @@ def test_multishock_Q_reproduces_the_calibrated_covariance(
     Q = shock_covariance(solved_multishock.config)
 
     assert Q.shape == (compiled.n_exog, compiled.n_exog)
-    np.testing.assert_allclose(Q, _ms_covariance(compiled), rtol=1e-13, atol=0.0)
+    np.testing.assert_allclose(
+        Q, _ms_covariance(solved_multishock), rtol=1e-13, atol=0.0
+    )
 
 
 def test_multishock_risk_correction_reads_the_off_diagonals(
@@ -139,12 +139,12 @@ def test_multishock_risk_correction_reads_the_off_diagonals(
     """The correlations have to reach g_ss. Zeroing the off-diagonals moves it,
     so the covariance is not being read as a diagonal."""
     solved, compiled = solved_multishock, solved_multishock.compiled
-    a, b, f_xx = _ms_preproc(solved, compiled)
+    a, b, f_xx = _ms_preproc(solved)
     n_state = compiled.n_state
     pol = solved.policy
     bu = np.real(pol.B)
 
-    cov = _ms_covariance(compiled)
+    cov = _ms_covariance(solved)
     gss = second_order(a, b, f_xx, pol.f, pol.p, bu, cov, n_state)[6]
     gss_diag = second_order(
         a, b, f_xx, pol.f, pol.p, bu, np.diag(np.diag(cov)), n_state
@@ -205,7 +205,7 @@ def _ms_golden_x0(solved) -> dict[str, float]:
     The generator seeds Dynare's own y0 with each process one AR step back so
     that its first simulated value is the printed one; our x0 is that y0 state.
     """
-    calib = solved.compiled.config.calibration.parameters
+    calib = solved.config.calibration.parameters
     rho_z, rho_d, rho_g = (
         float(calib[sp.Symbol(n)]) for n in ("rho_z", "rho_d", "rho_g")
     )

@@ -21,10 +21,10 @@ from _oracles.core import compiled_residual
 
 
 @pytest.fixture(scope="module")
-def rbc(compiled_rbc_so):
+def rbc(parsed_rbc_so, compiled_rbc_so):
     """``(compiled, par, cfunc, residual, true_ss)`` for the levels RBC."""
     compiled = compiled_rbc_so
-    calib = compiled.config.calibration.parameters
+    calib = parsed_rbc_so.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     cf = compiled.construct_objective_cfunc()
     eq = compiled_residual(compiled)
@@ -95,7 +95,7 @@ def test_newton_linear_model_zero_steady_state(model_path):
     # A (log-)linear model clears at ss = 0; Newton seeded there converges at once.
     model = parse_config(model_path)
     compiled = DSGESolver(model).compile()
-    calib = compiled.config.calibration.parameters
+    calib = model.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     cf = compiled.construct_objective_cfunc()
     seed = np.zeros(len(compiled.var_names), dtype=np.float64)

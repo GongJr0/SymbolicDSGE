@@ -59,6 +59,4 @@ def test_save_sdsge_accepts_a_config_with_no_parse_history(
     from SymbolicDSGE.bundle.container import BundleArchive
 
     archive = BundleArchive.open(target)
-    assert archive.read_text(member.path) == emit_config_yaml(
-        solved_test.compiled.config
-    )
+    assert archive.read_text(member.path) == emit_config_yaml(solved_test.config)

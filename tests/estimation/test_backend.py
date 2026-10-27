@@ -324,7 +324,7 @@ def test_unconstrained_from_corr_chol_clips_extreme_cpc_values():
 
 
 @pytest.fixture(scope="module")
-def rbc_ukf_y(compiled_rbc_so):
+def rbc_ukf_y(parsed_rbc_so):
     """Pure RNG around the consumption steady state. Parity compares two filter
     implementations on the same data, so it need not be model-consistent.
 
@@ -332,7 +332,7 @@ def rbc_ukf_y(compiled_rbc_so):
     single column under copy-on-write, which ``ukf_hot_loop`` rejects on the
     standalone interface path.
     """
-    c_ss = float(compiled_rbc_so.config.calibration.parameters[Symbol("c_ss")])
+    c_ss = float(parsed_rbc_so.calibration.parameters[Symbol("c_ss")])
     rng = np.random.default_rng(20260713)
     return c_ss + rng.normal(0.0, 0.05, size=(6, 1))
 

@@ -47,10 +47,9 @@ def _regime_cfuncs(compiled):
 
 
 @pytest.fixture(scope="module")
-def compiled(parsed_rbc_so):
+def solver(parsed_rbc_so):
     """Levels RBC where a bad-TFP regime shuts investment off."""
-    model = parsed_rbc_so
-    conf = copy.deepcopy(model)
+    conf = copy.deepcopy(parsed_rbc_so)
     _, k, z = conf.variables
     delta = sp.Symbol("delta")
 
@@ -58,23 +57,28 @@ def compiled(parsed_rbc_so):
     conf.equations.regimes = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
-    return DSGESolver(conf).compile()
+    return DSGESolver(conf)
 
 
 @pytest.fixture(scope="module")
-def par(compiled):
-    calib = compiled.config.calibration.parameters
+def compiled(solver):
+    return solver.compile()
+
+
+@pytest.fixture(scope="module")
+def par(solver, compiled):
+    calib = solver.config.calibration.parameters
     return np.array([float(calib[p]) for p in compiled.calib_params])
 
 
 @pytest.fixture(scope="module")
-def ss_ref(compiled, par):
+def ss_ref(solver, compiled, par):
     """Reference steady state, which every regime linearizes around.
 
     A lag aux starts where its origin does, so the suffix is stripped before the
     `<name>_ss` lookup; an unseeded variable starts at zero.
     """
-    calib = compiled.config.calibration.parameters
+    calib = solver.config.calibration.parameters
     seed = []
     for name in compiled.var_names:
         origin = re.sub(r"_lag\d+$", "", name)

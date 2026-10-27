@@ -250,7 +250,7 @@ def y_post82(compiled_post82, solved_post82):
     import numpy as np
     import pandas as pd
 
-    calib = compiled_post82.config.calibration.parameters
+    calib = solved_post82.config.calibration.parameters
     T = 48
     rng = np.random.default_rng(20260724)
     sim = solved_post82.sim(

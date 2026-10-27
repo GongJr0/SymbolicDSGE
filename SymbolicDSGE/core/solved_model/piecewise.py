@@ -11,6 +11,7 @@ from ..shock.generators import Shock, ShockPath
 from ..shock.spec import ShockSpec, simulation_shock_matrix
 from ..solver_backend import PiecewiseSolution
 from ..compiled_model import CompiledModel
+from ..config import ModelConfig
 from ..sim_result import OccBinDiagnostics, SimResult, StatePath
 from ..._ckernels.occbin import occbin_sim
 
@@ -28,8 +29,10 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         The piecewise decision rule solution, carrying one rule per date and regime.
     """
 
-    def __init__(self, compiled: CompiledModel, policy: PiecewiseSolution) -> None:
-        super().__init__(compiled, policy)
+    def __init__(
+        self, config: ModelConfig, compiled: CompiledModel, policy: PiecewiseSolution
+    ) -> None:
+        super().__init__(config, compiled, policy)
 
     def _simulate_state_matrix(
         self,
@@ -63,7 +66,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             cst=pol.cst,
             ghx_ref=pol.ghx_ref,
             ss=pol.steady_state,
-            par=comp._coerce_param_vector(comp.config.calibration.parameters),
+            par=comp._coerce_param_vector(self.config.calibration.parameters),
             cond_addr=constraint.address,
             inclusive=constraint.inclusive,
             n_constraint=constraint.n_constraint,
@@ -222,6 +225,6 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         x0: Mapping[str, float] | list[float] | ndarray | None = None,
         observables: bool = False,
     ) -> SimResult:
-        return FirstOrderSolvedModel(self.compiled, self.policy.ref).sim(
+        return FirstOrderSolvedModel(self.config, self.compiled, self.policy.ref).sim(
             T, shocks, shock_scale, x0=x0, observables=observables
         )

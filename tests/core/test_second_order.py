@@ -29,10 +29,7 @@ def _drive(path):
 
     ss = np.zeros(layout.n_var, dtype=np.float64)
     par = np.array(
-        [
-            float(compiled.config.calibration.parameters[p])
-            for p in compiled.calib_params
-        ],
+        [float(model.calibration.parameters[p]) for p in compiled.calib_params],
         dtype=np.float64,
     )
     cf = compiled.construct_objective_cfunc()

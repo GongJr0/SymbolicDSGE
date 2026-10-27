@@ -9,6 +9,7 @@ from .base import SolvedModel
 from ..shock.spec import ShockSpec, simulation_shock_matrix
 from ..solver_backend import SecondOrderSolution
 from ..compiled_model import CompiledModel
+from ..config import ModelConfig
 from ..sim_result import StatePath
 from ..._ckernels.core import simulate_second_order_pruned
 
@@ -24,8 +25,10 @@ class SecondOrderSolvedModel(SolvedModel[SecondOrderSolution]):
         The second-order decision rule solution.
     """
 
-    def __init__(self, compiled: CompiledModel, policy: SecondOrderSolution) -> None:
-        super().__init__(compiled, policy)
+    def __init__(
+        self, config: ModelConfig, compiled: CompiledModel, policy: SecondOrderSolution
+    ) -> None:
+        super().__init__(config, compiled, policy)
 
     def _simulate_state_matrix(
         self,

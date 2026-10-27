@@ -439,7 +439,7 @@ def test_solved_model_non_affine_measurement_matches_reference(solved_test):
     args = [*compiled.cur_syms, *compiled.calib_params]
     par = np.array(
         [
-            np.float64(compiled.config.calibration.parameters[p])
+            np.float64(solved.config.calibration.parameters[p])
             for p in compiled.calib_params
         ],
         dtype=np.float64,
@@ -544,9 +544,9 @@ def test_resolvers_rebuild_symbolic_R_from_current_calibration(
     solver = DSGESolver(model)
     compiled = solver.compile()
 
-    compiled.config.calibration.parameters[Symbol("meas_infl")] = 2.0
-    compiled.config.calibration.parameters[Symbol("meas_rate")] = 3.0
-    compiled.config.calibration.parameters[Symbol("meas_rho_ir")] = 0.1
+    solver.config.calibration.parameters[Symbol("meas_infl")] = 2.0
+    solver.config.calibration.parameters[Symbol("meas_rate")] = 3.0
+    solver.config.calibration.parameters[Symbol("meas_rho_ir")] = 0.1
 
     solved = solver.solve(compiled)
     y = pd.DataFrame({"Infl": [0.0, 0.0], "Rate": [0.0, 0.0]})

@@ -17,7 +17,7 @@ MODELS = Path(__file__).resolve().parents[1] / "fixtures" / "models"
 def _compiled(name: str):
     model = parse_config(MODELS / name)
     solver = DSGESolver(model)
-    return solver, solver.compile()
+    return solver, model, solver.compile()
 
 
 @pytest.fixture(scope="module")
@@ -25,10 +25,9 @@ def gali():
     return _compiled("gali_2015.yaml")
 
 
-def _params(compiled, **overrides) -> dict[str, float]:
+def _params(config, **overrides) -> dict[str, float]:
     params = {
-        str(name): float(value)
-        for name, value in compiled.config.calibration.parameters.items()
+        str(name): float(value) for name, value in config.calibration.parameters.items()
     }
     params.update(overrides)
     return params
@@ -36,10 +35,10 @@ def _params(compiled, **overrides) -> dict[str, float]:
 
 @pytest.mark.parametrize("order", [1, 2])
 def test_determinate_solve_is_silent(gali, order):
-    solver, compiled = gali
+    solver, config, compiled = gali
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
-        solved = solver.solve(compiled, parameters=_params(compiled), order=order)
+        solved = solver.solve(compiled, parameters=_params(config), order=order)
     assert solved.policy.stab is BKStatus.DETERMINATE
     assert solved.is_determinate is True
     assert "unique and stable" in solved.policy.stab.message
@@ -49,10 +48,10 @@ def test_determinate_solve_is_silent(gali, order):
 # forward-looking variable unpinned, one violation off one parameter.
 @pytest.mark.parametrize("order", [1, 2])
 def test_indeterminacy_warns_and_returns(gali, order):
-    solver, compiled = gali
+    solver, config, compiled = gali
     with pytest.warns(UserWarning, match="INDETERMINATE") as record:
         solved = solver.solve(
-            compiled, parameters=_params(compiled, phi_pi=0.5), order=order
+            compiled, parameters=_params(config, phi_pi=0.5), order=order
         )
     assert BKStatus.INDETERMINATE.message in str(record[0].message)
     assert solved.policy.stab is BKStatus.INDETERMINATE

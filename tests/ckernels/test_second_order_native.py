@@ -32,7 +32,7 @@ def _drive(path):
     compiled = DSGESolver(model).compile()
     n_eq = len(compiled.var_names)
     n_state = compiled.n_state
-    calib = compiled.config.calibration.parameters
+    calib = model.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     cf = compiled.construct_objective_cfunc()
     cf_bc = compiled.construct_objective_cfunc_bicomplex()
