@@ -422,6 +422,7 @@ class UISession:
             )
 
         common: dict[str, Any] = {
+            "config": slot.model_config,
             "compiled": slot.compiled,
             "y": y,
             "routine": request["routine"],
