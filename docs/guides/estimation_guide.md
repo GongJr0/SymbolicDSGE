@@ -22,7 +22,8 @@ We will cover:
 ## Parse Configs and Compile
 
 ```python
-from SymbolicDSGE import DSGESolver, parse_config
+from SymbolicDSGE import parse_config
+from SymbolicDSGE.core.solver import estimate_and_solve
 from SymbolicDSGE.utils import FRED
 from SymbolicDSGE.utils.math_utils import HP_two_sided, annualized_log_percent
 from SymbolicDSGE.bayesian import make_prior
@@ -34,12 +35,7 @@ import numpy as np
 import pandas as pd
 
 model = parse_config("../../MODELS/POST82.yaml")
-
-solver = DSGESolver(model)
-comp = solver.compile()
 ```
-
-`compile()` infers the solver variable layout from the model config. If you supply `#!python variable_order`, `#!python n_state`, or `#!python n_exog`, they are checked against the inferred layout and a mismatch raises before the model is solved.
 
 ???+ note "Data Input"
     The companion notebook retrieves FRED data, constructs the POST82 gap variables, and supplies inflation and the policy rate as level observables. It sets `FRED_KEY` in the environment or a `.env` file. This guide assumes the resulting `observed` `DataFrame` is already available.
@@ -117,8 +113,8 @@ estimated = {
 The estimation process is carried out by `DSGESolver.estimate()` and `DSGESolver.estimate_and_solve`. The former returns the estimation results, but does not provide a `SolvedModel` using said estimation output. Conversely, the latter provides both the results, and an immediately usable `SolvedModel` object derived from the results.
 
 ```python
-res, sol = solver.estimate_and_solve(
-    compiled=comp,
+res, sol = estimate_and_solve(
+    config=model,
     filter_mode="linear", # (1)!
     y=observed.loc[observed.index >= "1984-01-01", :], # (2)!
     observables=["Infl", "Rate"], # (3)!
@@ -146,7 +142,7 @@ res = cast(MCMCResult, res)
 9. Seed the draws for reproducibility. If `None`, the draws are not seeded.
 
 ```text
-MCMC sampling concluded in 5.96 seconds with 18466.43 iterations per second.
+MCMC sampling concluded in 5.92 seconds with 18573.03 iterations per second.
 [Estimator:mcmc] BK stability warnings encountered during search: 0
 ```
 

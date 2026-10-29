@@ -25,7 +25,7 @@ This demonstration focuses on the first case where two models are present.
 import numpy as np
 import pandas as pd
 
-from SymbolicDSGE import DSGESolver, Shock, parse_config
+from SymbolicDSGE import Shock, parse_config, solve_model
 from SymbolicDSGE.monte_carlo import (
     MCPipeline,
     custom_transform,
@@ -41,25 +41,20 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     transform_step,
     wald_test_step,
 )
-import cProfile
 
-model = parse_config("../../MODELS/POST82.yaml") # (1)!
+ss_seed = np.zeros(5, dtype=np.float64)  # (1)!
 
-solver = DSGESolver(model)
-compiled = solver.compile()
-ss_seed = np.zeros(5, dtype=np.float64)  # (2)!
-reference = solver.solve(compiled, ss_seed=ss_seed)
+model = parse_config("../../MODELS/POST82.yaml") # (2)!
+reference = solve_model(model, ss_seed=ss_seed)
 
 dgp_model = parse_config("../../MODELS/POST82.yaml")
 dgp_model.calibration.parameters.update({"psi_x": 0.2, "psi_pi": 3.0}) # (3)!
-dgp_solver = DSGESolver(dgp_model)
-dgp_comp = dgp_solver.compile()
-dgp = dgp_sol.solve(dgp_comp, ss_seed=ss_seed)
+dgp = solve_model(dgp_model, ss_seed=ss_seed)
 
 ```
 
-1. This is the reference model configuration.
-2. Both models use the same steady-state seed.
+1. Both models use the same steady-state seed.
+2. This is the reference model configuration.
 3. Update some parameters so DGP is not exactly equal to the reference. This creates some mild misspecification and makes the tests non-trivial.
 
 Now, we have two models to compare in a Monte Carlo experiment.
@@ -75,7 +70,7 @@ We will determine whether the reference model is misspecified relative to the DG
 from SymbolicDSGE.monte_carlo import MCPipeline
 
 T = 200  # (1)!
-n_obs = len(reference.compiled.observable_names)  # (2)!
+n_obs = reference.compiled.n_obs  # (2)!
 
 pipeline = MCPipeline(
     replication_steps=[...],  # (3)!
@@ -325,19 +320,19 @@ mc = pipeline.run(
     The native loop only collects per-step profiling when it is asked to. At any lower verbosity `meta.step_elapsed_s`, `meta.step_counts`, and `meta.step_failures` are empty dictionaries.
 
 ```bash
->>> MC run concluded successfully in 0.02s with 55924.97 it/s.
+>>> MC run concluded successfully in 0.02s with 58602.22 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 40978.06 worker it/s (0.02 worker-s), 55924.97 wall it/s.
-    filter: 0 failures, 3872.62 worker it/s (0.26 worker-s), 55924.97 wall it/s.
-    custom_std: 0 failures, 195396.42 worker it/s (0.01 worker-s), 55924.97 wall it/s.
-    builtin_std: 0 failures, 169276.36 worker it/s (0.01 worker-s), 55924.97 wall it/s.
-    std_innov_mean: 0 failures, 92645.78 worker it/s (0.01 worker-s), 55924.97 wall it/s.
+    datagen: 0 failures, 41868.16 worker it/s (0.02 worker-s), 58602.22 wall it/s.
+    filter: 0 failures, 3944.12 worker it/s (0.25 worker-s), 58602.22 wall it/s.
+    custom_std: 0 failures, 186216.28 worker it/s (0.01 worker-s), 58602.22 wall it/s.
+    builtin_std: 0 failures, 168466.45 worker it/s (0.01 worker-s), 58602.22 wall it/s.
+    std_innov_mean: 0 failures, 91945.57 worker it/s (0.01 worker-s), 58602.22 wall it/s.
 
 Post-processing Report:
 
     custom_postproc: Succeeded in 0.0031s.
-    builtin_kde: Succeeded in 1.3813s.
+    builtin_kde: Succeeded in 1.4295s.
 ```
 
 ???+ note "Worker Time vs Wall Time"
@@ -387,7 +382,7 @@ Regression results are accessed similarly in `MCPipelineResult.regression_summar
     `MCPipeline.validate_memory_requirements` takes the arguments `run` takes and reports what they would allocate, broken down by step. `run` performs the same check unless `check_memory_availability=False`. If a run is provably too large (meaning your RAM and swap combined are smaller than the required allocation), a `MemoryError` will block the run instead of seeing it crash hours later. `check_memory_availability=False` also disables this behavior.
 
     ```python
-    print(pipeline.validate_memory_requirements(models={"reference": reference, "dgp": dgp}, n_rep=400_000, n_jobs=-1))
+    pipeline.validate_memory_requirements(models={"reference": reference, "dgp": dgp}, n_rep=400_000, n_jobs=-1)
     ```
 
     ```bash

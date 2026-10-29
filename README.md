@@ -115,30 +115,14 @@ Suggestions for improving or extending the documentation are welcome as issues.
 ### Minimal Example
 
 ```python
-from SymbolicDSGE import DSGESolver, parse_config
+from SymbolicDSGE import parse_config, solve_model
 
 # Read the YAML config (Equations, Measurements, Parameters, Optional Filter Spec)
 model = parse_config("<path-to-config>.yaml")
 
-# Compile the model
-solver = DSGESolver(model)
-compiled = solver.compile()
-
-print("Equations with symbols removed: \n", "\n".join(map(str, compiled.objective_eqs)), "\n")
-```
-```text
->>> Equations with symbols removed:
- -beta*fwd_Pi + cur_Pi - cur_x*kappa - cur_z
--cur_g + cur_x - fwd_x + tau_inv*(cur_r - fwd_Pi)
--cur_r*rho_r - e_R + fwd_r + (rho_r - 1)*(fwd_Pi*psi_pi + fwd_x*psi_x)
--cur_g*rho_g - e_g + fwd_g
--cur_z*rho_z - e_z + fwd_z
-```
-```python
-# Solve the compiled model
-sol = solver.solve(
-    compiled,
-    parameters=None,
+# Numericalize the model and solve
+sol = solve_model(
+    model,
     ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
 )
 print("Is determinate: ", sol.is_determinate)
