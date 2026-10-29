@@ -9,27 +9,22 @@ free variables, which a residual on the ``(n_var, n_state + n_exog + 1)`` block
 tests directly and without an oracle. The date-``T`` closure is the same
 substitution with ``ghx_ref``, no innovation and a zero constant.
 
-The fixture is the levels RBC of ``test_regime_pencil``, whose binding regime
-carries a nonzero constant. A gap model would pass the constant column for free.
+The model is the shared levels RBC whose binding regime carries a nonzero
+constant. A gap model would pass the constant column for free.
 """
 
 from __future__ import annotations
 
-import copy
 import re
 
 import numpy as np
 import pytest
-import sympy as sp
 
 from SymbolicDSGE._ckernels.occbin._occbin import (
     occbin_recursion,
     occbin_recursion_arena_size,
 )
-from SymbolicDSGE.core import compile_model, solve_model
-from SymbolicDSGE.core.config import Constraint
-
-t = sp.Symbol("t", integer=True)
+from SymbolicDSGE.core import solve_model
 
 LOW = 0b1
 
@@ -38,34 +33,14 @@ MIXED = np.array([0, 1, 1, 1, 0, 1, 1, 0, 0, 0], dtype=np.int8)
 
 
 @pytest.fixture(scope="module")
-def mod_rbc_so(parsed_rbc_so):
-    """Levels RBC where a bad-TFP regime shuts investment off."""
-    model = parsed_rbc_so
-    conf = copy.deepcopy(model)
-    _, k, z = conf.variables
-    delta = sp.Symbol("delta")
-
-    conf.equations.constraints = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
-    conf.equations.regimes = {
-        frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
-    }
-    return conf
-
-
-@pytest.fixture(scope="module")
-def compiled(mod_rbc_so):
-    return compile_model(mod_rbc_so)
-
-
-@pytest.fixture(scope="module")
-def policy(mod_rbc_so, compiled):
+def policy(parsed_rbc_obc, compiled_rbc_obc):
     """The piecewise solve at the calibration.
 
     A constrained model solves to a ``PiecewiseSolution``, which is where the
     regime pencils and the reference rule come from: the kernel under test
     consumes exactly what the production path hands it.
     """
-    pol = solve_model(mod_rbc_so, compiled=compiled).policy
+    pol = solve_model(parsed_rbc_obc, compiled=compiled_rbc_obc).policy
     # The whole point of a levels fixture: the expansion point is not the origin.
     assert np.abs(pol.steady_state).max() > 1.0
     return pol
@@ -191,10 +166,14 @@ def test_an_empty_guess_returns_an_empty_stack(table, policy):
     assert out.shape == (0, a.shape[1], ghx.shape[1] + d.shape[2] + 1)
 
 
-def test_the_arena_holds_the_pencil_the_rhs_and_the_seed(table, compiled):
+def test_the_arena_holds_the_pencil_the_rhs_and_the_seed(table, compiled_rbc_obc):
     # Three blocks and the pivots. The sizer is the only statement of that
     # layout the kernel does not make itself, so it is pinned here.
-    n_var, n_state, n_exog = compiled.n_var, compiled.n_state, compiled.n_exog
+    n_var, n_state, n_exog = (
+        compiled_rbc_obc.n_var,
+        compiled_rbc_obc.n_state,
+        compiled_rbc_obc.n_exog,
+    )
     n_rhs = n_state + n_exog + 1
 
     n_float, n_int = occbin_recursion_arena_size(n_var, n_state, n_exog)
@@ -203,12 +182,12 @@ def test_the_arena_holds_the_pencil_the_rhs_and_the_seed(table, compiled):
     assert n_int == n_var
 
 
-def test_the_recursion_stays_inside_its_arena(table, policy, compiled):
+def test_the_recursion_stays_inside_its_arena(table, policy, compiled_rbc_obc):
     # Sized exactly and followed by sentinels: an overrun lands in the guard
     # instead of in whatever the live path put after the arena.
     ghx = policy.ghx_ref
     n_float, n_int = occbin_recursion_arena_size(
-        compiled.n_var, compiled.n_state, compiled.n_exog
+        compiled_rbc_obc.n_var, compiled_rbc_obc.n_state, compiled_rbc_obc.n_exog
     )
     guard, fill, ifill = 8, -1.5e300, -(2**60)
 
@@ -223,10 +202,10 @@ def test_the_recursion_stays_inside_its_arena(table, policy, compiled):
     np.testing.assert_array_equal(out, occbin_recursion(*table, MIXED, ghx))
 
 
-def test_a_short_arena_is_rejected(table, policy, compiled):
+def test_a_short_arena_is_rejected(table, policy, compiled_rbc_obc):
     ghx = policy.ghx_ref
     n_float, _ = occbin_recursion_arena_size(
-        compiled.n_var, compiled.n_state, compiled.n_exog
+        compiled_rbc_obc.n_var, compiled_rbc_obc.n_state, compiled_rbc_obc.n_exog
     )
 
     with pytest.raises(ValueError, match="needs"):

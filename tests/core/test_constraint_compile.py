@@ -4,7 +4,6 @@ from __future__ import annotations
 import copy
 import ctypes
 import dataclasses
-import re
 
 import numpy as np
 import pytest
@@ -659,91 +658,49 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
     assert np.flatnonzero(changed).tolist() == compiled.regimes[1].rows
 
 
-@pytest.fixture(scope="module")
-def compiled_rbc_obc(parsed_rbc_so):
-    """Levels RBC where a bad-TFP regime shuts investment off.
-
-    POST82 is a gap model, so its regime constants can be zero purely because
-    the reference steady state is. This fixture is in levels, where the
-    constant is what actually drives the piecewise solve.
-    """
-    model = parsed_rbc_so
-    conf = copy.deepcopy(model)
-    c, k, z = conf.variables
-    delta = sp.Symbol("delta")
-
-    conf.equations.constraints = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
-    conf.equations.regimes = {
-        frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
-    }
-    return compile_model(conf)
-
-
-def _rbc_seed(config, compiled):
-    """Newton seed over the compiled layout, generated variables included.
-
-    A lag aux starts where its origin does, so the suffix is stripped before the
-    `<name>_ss` lookup; an unseeded variable starts at zero.
-    """
-    calib = config.calibration.parameters
-    seeds = []
-    for name in compiled.var_names:
-        origin = re.sub(r"_lag\d+$", "", name)
-        sym = sp.Symbol(f"{origin}_ss")
-        seeds.append(float(calib[sym]) if sym in calib else 0.0)
-    return np.array(seeds)
-
-
-def _rbc_steady_state(config, compiled):
-    ss, _ = steady_state_newton(
-        compiled.construct_objective_cfunc().address,
-        _rbc_seed(config, compiled),
-        _params(config, compiled),
-        compiled.n_exog,
-    )
-    return ss
-
-
 def test_symbolic_pencil_matches_the_reference_sweep_in_levels(
-    parsed_rbc_so, compiled_rbc_obc
+    parsed_rbc_obc, compiled_rbc_obc, ss_rbc_obc
 ):
     # POST82 sits at ss = 0, where a pencil can read as right for the wrong
     # reason. Here the expansion point is nonzero and the equations are
     # genuinely nonlinear, so the derivatives carry state.
-    ss = _rbc_steady_state(parsed_rbc_so, compiled_rbc_obc)
-    assert np.abs(ss).max() > 1.0
-    _assert_pencil_parity(parsed_rbc_so, compiled_rbc_obc, ss, 0.05)
+    _assert_pencil_parity(parsed_rbc_obc, compiled_rbc_obc, ss_rbc_obc, 0.05)
 
 
 def test_levels_regime_constant_is_the_steady_state_residual(
-    parsed_rbc_so, compiled_rbc_obc
+    parsed_rbc_obc, compiled_rbc_obc, par_rbc_obc, ss_rbc_obc
 ):
-    par = _params(parsed_rbc_so, compiled_rbc_obc)
     n_eq = len(compiled_rbc_obc.var_names)
-
     ref_cfunc = compiled_rbc_obc.construct_objective_cfunc()
     n_exog = compiled_rbc_obc.n_exog
-    ss_ref, _ = steady_state_newton(
-        ref_cfunc.address, _rbc_seed(parsed_rbc_so, compiled_rbc_obc), par, n_exog
-    )
 
-    # The whole point of a levels fixture: the expansion point is not the origin.
-    assert np.abs(ss_ref).max() > 1.0
     c_ref = residual_eval(
-        ref_cfunc.address, ss_ref, ss_ref, ss_ref, np.zeros(n_exog), par, n_eq
+        ref_cfunc.address,
+        ss_rbc_obc,
+        ss_rbc_obc,
+        ss_rbc_obc,
+        np.zeros(n_exog),
+        par_rbc_obc,
+        n_eq,
     ).real
     np.testing.assert_allclose(c_ref, 0.0, atol=1e-10)
 
     # `euler` is row 0; the replacement k(t+1) = (1 - delta) k(t) leaves a
     # residual of delta * k_ss at the reference steady state.
     k_idx = compiled_rbc_obc.var_names.index("k")
-    delta = parsed_rbc_so.calibration.parameters[sp.Symbol("delta")]
-    expected = float(delta) * ss_ref[k_idx]
+    delta = parsed_rbc_obc.calibration.parameters[sp.Symbol("delta")]
+    expected = float(delta) * ss_rbc_obc[k_idx]
     assert expected > 0.5
 
     cfunc = _regime_cfuncs(compiled_rbc_obc)[1]
     c_r = residual_eval(
-        cfunc.address, ss_ref, ss_ref, ss_ref, np.zeros(n_exog), par, n_eq
+        cfunc.address,
+        ss_rbc_obc,
+        ss_rbc_obc,
+        ss_rbc_obc,
+        np.zeros(n_exog),
+        par_rbc_obc,
+        n_eq,
     ).real
 
     want = np.zeros(n_eq)

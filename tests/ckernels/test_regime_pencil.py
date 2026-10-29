@@ -10,24 +10,12 @@ behind, which is what the piecewise solve actually consumes.
 
 from __future__ import annotations
 
-import copy
-import re
-
 import numpy as np
 import pytest
-import sympy as sp
 
-from SymbolicDSGE._ckernels.core import (
-    klein_preprocess,
-    residual_eval,
-    steady_state_newton,
-)
+from SymbolicDSGE._ckernels.core import klein_preprocess, residual_eval
 from SymbolicDSGE._ckernels.occbin import regime_pencil
-from SymbolicDSGE.core import compile_model
-from SymbolicDSGE.core.config import Constraint
 from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
-
-t = sp.Symbol("t", integer=True)
 
 LOW = 0b1
 
@@ -47,87 +35,41 @@ def _regime_cfuncs(compiled):
 
 
 @pytest.fixture(scope="module")
-def mod_rbc_so(parsed_rbc_so):
-    """Levels RBC where a bad-TFP regime shuts investment off."""
-    conf = copy.deepcopy(parsed_rbc_so)
-    _, k, z = conf.variables
-    delta = sp.Symbol("delta")
-
-    conf.equations.constraints = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
-    conf.equations.regimes = {
-        frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
-    }
-    return conf
-
-
-@pytest.fixture(scope="module")
-def compiled(mod_rbc_so):
-    return compile_model(mod_rbc_so)
-
-
-@pytest.fixture(scope="module")
-def par(mod_rbc_so, compiled):
-    calib = mod_rbc_so.calibration.parameters
-    return np.array([float(calib[p]) for p in compiled.calib_params])
-
-
-@pytest.fixture(scope="module")
-def ss_ref(mod_rbc_so, compiled, par):
-    """Reference steady state, which every regime linearizes around.
-
-    A lag aux starts where its origin does, so the suffix is stripped before the
-    `<name>_ss` lookup; an unseeded variable starts at zero.
-    """
-    calib = mod_rbc_so.calibration.parameters
-    seed = []
-    for name in compiled.var_names:
-        origin = re.sub(r"_lag\d+$", "", name)
-        sym = sp.Symbol(f"{origin}_ss")
-        seed.append(float(calib[sym]) if sym in calib else 0.0)
-
-    ss, _ = steady_state_newton(
-        compiled.construct_objective_cfunc().address,
-        np.array(seed),
-        par,
-        compiled.n_exog,
-    )
-    # The whole point of a levels fixture: the expansion point is not the origin.
-    assert np.abs(ss).max() > 1.0
-    return ss
-
-
-@pytest.fixture(scope="module")
-def reference(compiled, par, ss_ref):
-    n_var = len(compiled.var_names)
+def reference(compiled_rbc_obc, par_rbc_obc, ss_rbc_obc):
+    n_var = len(compiled_rbc_obc.var_names)
     return klein_preprocess(
-        compiled.construct_objective_cfunc().address,
-        ss_ref,
-        par,
+        compiled_rbc_obc.construct_objective_cfunc().address,
+        ss_rbc_obc,
+        par_rbc_obc,
         n_var,
-        compiled.n_exog,
+        compiled_rbc_obc.n_exog,
     )
 
 
 @pytest.fixture(scope="module")
-def patched(compiled, par, ss_ref, reference):
-    func = compiled.construct_regime_pencil_func()
-    return regime_pencil(func.address(LOW), func.rows[LOW], ss_ref, par, *reference)
+def patched(compiled_rbc_obc, par_rbc_obc, ss_rbc_obc, reference):
+    func = compiled_rbc_obc.construct_regime_pencil_func()
+    return regime_pencil(
+        func.address(LOW), func.rows[LOW], ss_rbc_obc, par_rbc_obc, *reference
+    )
 
 
 def _rows(compiled):
     return compiled.construct_regime_pencil_func().rows[LOW]
 
 
-def test_patched_rows_match_a_full_sweep_of_the_regime(compiled, par, ss_ref, patched):
+def test_patched_rows_match_a_full_sweep_of_the_regime(
+    compiled_rbc_obc, par_rbc_obc, ss_rbc_obc, patched
+):
     # The patch is only worth doing if it lands where sweeping the whole regime
     # residual would have.
-    n_var = len(compiled.var_names)
-    rows = _rows(compiled)
+    n_var = len(compiled_rbc_obc.var_names)
+    rows = _rows(compiled_rbc_obc)
     a, b, c, d, _ = patched
 
-    regime_cfunc = _regime_cfuncs(compiled)[LOW]
+    regime_cfunc = _regime_cfuncs(compiled_rbc_obc)[LOW]
     a_r, b_r, c_r, d_r = klein_preprocess(
-        regime_cfunc.address, ss_ref, par, n_var, compiled.n_exog
+        regime_cfunc.address, ss_rbc_obc, par_rbc_obc, n_var, compiled_rbc_obc.n_exog
     )
 
     np.testing.assert_allclose(a[rows], a_r[rows])
@@ -136,10 +78,10 @@ def test_patched_rows_match_a_full_sweep_of_the_regime(compiled, par, ss_ref, pa
     np.testing.assert_allclose(d[rows], d_r[rows])
 
 
-def test_unreplaced_rows_are_copied_verbatim(compiled, reference, patched):
+def test_unreplaced_rows_are_copied_verbatim(compiled_rbc_obc, reference, patched):
     # memcpy, not arithmetic: anything but bit equality means a row moved.
-    n_var = len(compiled.var_names)
-    other = np.setdiff1d(np.arange(n_var), _rows(compiled))
+    n_var = len(compiled_rbc_obc.var_names)
+    other = np.setdiff1d(np.arange(n_var), _rows(compiled_rbc_obc))
     a_ref, b_ref, c_ref, d_ref = reference
     a, b, c, d, _ = patched
 
@@ -151,20 +93,20 @@ def test_unreplaced_rows_are_copied_verbatim(compiled, reference, patched):
 
 
 def test_constants_are_the_regime_residual_at_the_reference(
-    compiled, par, ss_ref, patched
+    compiled_rbc_obc, par_rbc_obc, ss_rbc_obc, patched
 ):
-    n_var = len(compiled.var_names)
-    rows = _rows(compiled)
+    n_var = len(compiled_rbc_obc.var_names)
+    rows = _rows(compiled_rbc_obc)
     *_, cst = patched
 
-    regime_cfunc = _regime_cfuncs(compiled)[LOW]
+    regime_cfunc = _regime_cfuncs(compiled_rbc_obc)[LOW]
     c_r = residual_eval(
         regime_cfunc.address,
-        ss_ref,
-        ss_ref,
-        ss_ref,
-        np.zeros(compiled.n_exog),
-        par,
+        ss_rbc_obc,
+        ss_rbc_obc,
+        ss_rbc_obc,
+        np.zeros(compiled_rbc_obc.n_exog),
+        par_rbc_obc,
         n_var,
     ).real
 
@@ -178,13 +120,15 @@ def test_constants_are_the_regime_residual_at_the_reference(
     assert np.count_nonzero(cst) == rows.size
 
 
-def test_reference_regime_is_a_verbatim_copy(compiled, par, ss_ref, reference):
+def test_reference_regime_is_a_verbatim_copy(
+    compiled_rbc_obc, par_rbc_obc, ss_rbc_obc, reference
+):
     # A null pencil is how the mask-0 slot of the table gets filled, so the
     # backward recursion can index it without a branch.
-    n_var = len(compiled.var_names)
+    n_var = len(compiled_rbc_obc.var_names)
     a_ref, b_ref, c_ref, d_ref = reference
     a, b, c, d, cst = regime_pencil(
-        0, np.empty(0, dtype=np.int64), ss_ref, par, *reference
+        0, np.empty(0, dtype=np.int64), ss_rbc_obc, par_rbc_obc, *reference
     )
 
     np.testing.assert_array_equal(a, a_ref)
@@ -195,32 +139,34 @@ def test_reference_regime_is_a_verbatim_copy(compiled, par, ss_ref, reference):
 
 
 def test_the_lag_block_carries_no_control_columns(
-    compiled, par, ss_ref, reference, patched
+    compiled_rbc_obc, par_rbc_obc, ss_rbc_obc, reference, patched
 ):
     # The backward recursion reads only the state columns of `c`, on the
     # grounds that a control does not occur at t-1. Both slots, since a patched
     # row is written by the regime sweep rather than copied.
-    n_var = len(compiled.var_names)
-    empty = np.zeros((n_var, compiled.n_ctrl))
+    n_var = len(compiled_rbc_obc.var_names)
+    empty = np.zeros((n_var, compiled_rbc_obc.n_ctrl))
     reference_slot = regime_pencil(
-        0, np.empty(0, dtype=np.int64), ss_ref, par, *reference
+        0, np.empty(0, dtype=np.int64), ss_rbc_obc, par_rbc_obc, *reference
     )
 
     for _, _, c, _, _ in (reference_slot, patched):
-        np.testing.assert_array_equal(c[:, compiled.n_state :], empty)
+        np.testing.assert_array_equal(c[:, compiled_rbc_obc.n_state :], empty)
 
 
-def test_rows_outside_the_pencil_are_rejected(compiled, par, ss_ref, reference):
+def test_rows_outside_the_pencil_are_rejected(
+    compiled_rbc_obc, par_rbc_obc, ss_rbc_obc, reference
+):
     # The kernel scatters straight into a[row]; an unchecked index writes past
     # the output instead of raising.
-    n_var = len(compiled.var_names)
-    func = compiled.construct_regime_pencil_func()
+    n_var = len(compiled_rbc_obc.var_names)
+    func = compiled_rbc_obc.construct_regime_pencil_func()
 
     with pytest.raises(ValueError, match=rf"outside 0\.\.{n_var - 1}"):
         regime_pencil(
             func.address(LOW),
             np.array([n_var], dtype=np.int64),
-            ss_ref,
-            par,
+            ss_rbc_obc,
+            par_rbc_obc,
             *reference,
         )
