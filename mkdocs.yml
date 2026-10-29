@@ -182,7 +182,7 @@ nav:
       - Bundle Loading Guide: guides/bundle_loading_guide.md
   - Documentation:
       - ModelConfig: documentation/ModelConfig.md
-      - DSGESolver: documentation/DSGESolver.md
+      - Model Solution and Compilation: documentation/solution_and_compilation.md
       - Linearization: documentation/Linearization.md
       - Estimator: documentation/Estimator.md
       - CompiledModel: documentation/CompiledModel.md
