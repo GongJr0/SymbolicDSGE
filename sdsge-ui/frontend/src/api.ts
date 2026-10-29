@@ -80,13 +80,10 @@ export function loadYamlContent(
   });
 }
 
-export function solveModel(
-  model_name: string,
-  compileKwargs: Record<string, unknown> = {},
-): Promise<ModelSummary> {
+export function solveModel(model_name: string): Promise<ModelSummary> {
   return requestJson<ModelSummary>("/api/model/solve", {
     method: "POST",
-    body: JSON.stringify({ model_name, compile_kwargs: compileKwargs }),
+    body: JSON.stringify({ model_name }),
   });
 }
 
