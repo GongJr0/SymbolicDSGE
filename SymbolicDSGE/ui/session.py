@@ -20,7 +20,8 @@ except Exception:
 import numpy as np
 from numpy.typing import NDArray
 
-from ..core import DSGESolver
+from ..core import compile_model, solve_model
+from ..core.solver import estimate, estimate_and_solve
 from ..core.compiled_model import CompiledModel
 from ..core.config import ModelConfig
 from ..core.model_parser import ModelParser
@@ -61,7 +62,6 @@ class ModelSlot:
     source: str | None = None
     raw_yaml: str | None = None
     model_config: ModelConfig | None = None
-    solver: DSGESolver | None = None
     compiled: CompiledModel | None = None
     solved: SolvedModel | None = None
 
@@ -194,7 +194,6 @@ class UISession:
         slot.source = source
         slot.raw_yaml = emit_config_yaml(model.config)
         slot.model_config = model.config
-        slot.solver = DSGESolver(model.config)
         slot.compiled = model.compiled
         slot.solved = model
         return self.model_summary(name)
@@ -227,7 +226,6 @@ class UISession:
         slot.source = source
         slot.raw_yaml = raw_yaml
         slot.model_config = model
-        slot.solver = DSGESolver(model)
         slot.compiled = None
         slot.solved = None
         return self.model_summary(model_name)
@@ -236,16 +234,15 @@ class UISession:
         self,
         *,
         model_name: str,
-        compile_kwargs: Mapping[str, Any] | None = None,
         solve_kwargs: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         slot = self._slot(model_name)
-        if slot.solver is None:
+        config = slot.model_config
+        if config is None:
             raise ValueError(f"No model is loaded for '{model_name}'.")
-        compiled = slot.solver.compile(**dict(compile_kwargs or {}))
-        solved = slot.solver.solve(compiled, **dict(solve_kwargs or {}))
+        compiled = compile_model(config)
+        slot.solved = solve_model(config, compiled=compiled, **dict(solve_kwargs or {}))
         slot.compiled = compiled
-        slot.solved = solved
         return self.model_summary(model_name)
 
     def model_summary(self, name: str) -> dict[str, Any]:
@@ -348,10 +345,10 @@ class UISession:
 
     def run_estimation(self, request: EstimationRunRequest) -> dict[str, Any]:
         slot = self._slot(request["model_name"])
-        if slot.solver is None:
-            raise ValueError(f"No model is loaded for '{request['model_name']}'.")
         if slot.compiled is None:
-            slot.compiled = slot.solver.compile(**dict(request["compile_kwargs"]))
+            if slot.model_config is None:
+                raise ValueError(f"No model is loaded for '{request['model_name']}'.")
+            slot.compiled = compile_model(slot.model_config)
 
         y = np.asarray(request["y"], dtype=np.float64)
         if y.ndim != 2:
@@ -436,14 +433,14 @@ class UISession:
         }
         solved = False
         if request["estimate_and_solve"]:
-            result, model = slot.solver.estimate_and_solve(
+            result, model = estimate_and_solve(
                 posterior_point=request["posterior_point"],
                 **common,
             )
             slot.solved = model
             solved = True
         else:
-            result = slot.solver.estimate(**common)
+            result = estimate(**common)
 
         result_wire = serialize_estimation_result(result)
         payload: dict[str, Any] = {

@@ -26,7 +26,7 @@ from SymbolicDSGE._ckernels.occbin._occbin import (
     occbin_recursion,
     occbin_recursion_arena_size,
 )
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import compile_model, solve_model
 from SymbolicDSGE.core.config import Constraint
 
 t = sp.Symbol("t", integer=True)
@@ -38,7 +38,7 @@ MIXED = np.array([0, 1, 1, 1, 0, 1, 1, 0, 0, 0], dtype=np.int8)
 
 
 @pytest.fixture(scope="module")
-def solver(parsed_rbc_so):
+def mod_rbc_so(parsed_rbc_so):
     """Levels RBC where a bad-TFP regime shuts investment off."""
     model = parsed_rbc_so
     conf = copy.deepcopy(model)
@@ -49,23 +49,23 @@ def solver(parsed_rbc_so):
     conf.equations.regimes = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
-    return DSGESolver(conf)
+    return conf
 
 
 @pytest.fixture(scope="module")
-def compiled(solver):
-    return solver.compile()
+def compiled(mod_rbc_so):
+    return compile_model(mod_rbc_so)
 
 
 @pytest.fixture(scope="module")
-def policy(solver, compiled):
+def policy(mod_rbc_so, compiled):
     """The piecewise solve at the calibration.
 
     A constrained model solves to a ``PiecewiseSolution``, which is where the
     regime pencils and the reference rule come from: the kernel under test
     consumes exactly what the production path hands it.
     """
-    pol = solver.solve(compiled).policy
+    pol = solve_model(mod_rbc_so, compiled=compiled).policy
     # The whole point of a levels fixture: the expansion point is not the origin.
     assert np.abs(pol.steady_state).max() > 1.0
     return pol

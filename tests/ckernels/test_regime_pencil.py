@@ -23,7 +23,7 @@ from SymbolicDSGE._ckernels.core import (
     steady_state_newton,
 )
 from SymbolicDSGE._ckernels.occbin import regime_pencil
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import compile_model
 from SymbolicDSGE.core.config import Constraint
 from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
 
@@ -47,7 +47,7 @@ def _regime_cfuncs(compiled):
 
 
 @pytest.fixture(scope="module")
-def solver(parsed_rbc_so):
+def mod_rbc_so(parsed_rbc_so):
     """Levels RBC where a bad-TFP regime shuts investment off."""
     conf = copy.deepcopy(parsed_rbc_so)
     _, k, z = conf.variables
@@ -57,28 +57,28 @@ def solver(parsed_rbc_so):
     conf.equations.regimes = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
-    return DSGESolver(conf)
+    return conf
 
 
 @pytest.fixture(scope="module")
-def compiled(solver):
-    return solver.compile()
+def compiled(mod_rbc_so):
+    return compile_model(mod_rbc_so)
 
 
 @pytest.fixture(scope="module")
-def par(solver, compiled):
-    calib = solver.config.calibration.parameters
+def par(mod_rbc_so, compiled):
+    calib = mod_rbc_so.calibration.parameters
     return np.array([float(calib[p]) for p in compiled.calib_params])
 
 
 @pytest.fixture(scope="module")
-def ss_ref(solver, compiled, par):
+def ss_ref(mod_rbc_so, compiled, par):
     """Reference steady state, which every regime linearizes around.
 
     A lag aux starts where its origin does, so the suffix is stripped before the
     `<name>_ss` lookup; an unseeded variable starts at zero.
     """
-    calib = solver.config.calibration.parameters
+    calib = mod_rbc_so.calibration.parameters
     seed = []
     for name in compiled.var_names:
         origin = re.sub(r"_lag\d+$", "", name)

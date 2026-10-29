@@ -15,8 +15,7 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE._ckernels.core import klein_solve1
-from SymbolicDSGE.core import DSGESolver
-from SymbolicDSGE.core import parse_config
+from SymbolicDSGE.core import parse_config, compile_model
 from SymbolicDSGE.core.solver_backend import klein_solve
 from SymbolicDSGE.core.resolvers import resolve_ss_seed
 
@@ -27,7 +26,7 @@ MODELS = ["rbc_second_order", "test", "post82"]
 
 def _model(path):
     model = parse_config(path)
-    compiled = DSGESolver(model).compile()
+    compiled = compile_model(model)
     calib = model.calibration.parameters
     par = np.array([float(calib[p]) for p in compiled.calib_params], dtype=np.float64)
     seed = resolve_ss_seed(model, compiled.layout)

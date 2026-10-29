@@ -28,7 +28,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import solve_model
 from SymbolicDSGE.core import parse_config
 from _oracles import dynare_rbc_occbin as golden
 
@@ -49,8 +49,7 @@ _T0 = _CHECK_AHEAD + 1
 def solved(rbc_occbin_test_model_path):
     """The model a user gets from ``solve``: constraints make it piecewise."""
     model = parse_config(rbc_occbin_test_model_path)
-    solver = DSGESolver(model)
-    return solver.solve(solver.compile())
+    return solve_model(model)
 
 
 @pytest.fixture(scope="module")

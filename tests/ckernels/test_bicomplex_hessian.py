@@ -13,8 +13,7 @@ import pytest
 import sympy as sp
 
 from SymbolicDSGE._ckernels.core._core import bicomplex_hessian
-from SymbolicDSGE.core import DSGESolver
-from SymbolicDSGE.core import parse_config
+from SymbolicDSGE.core import parse_config, compile_model
 from SymbolicDSGE._symbolic_printers import (
     BicomplexOps,
     ResidualLayout,
@@ -59,7 +58,7 @@ def test_bicomplex_hessian_transcendental():
 def test_bicomplex_hessian_linear_model_is_zero(model_path):
     # A log linear model has an identically zero residual Hessian.
     model = parse_config(model_path)
-    compiled = DSGESolver(model).compile()
+    compiled = compile_model(model)
     layout = ResidualLayout.from_compiled(compiled)
     cf = compiled.construct_objective_cfunc_bicomplex()
 

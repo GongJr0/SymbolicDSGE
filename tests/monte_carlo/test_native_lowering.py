@@ -4,7 +4,7 @@ from typing import cast
 
 import numpy as np
 
-from SymbolicDSGE import DSGESolver, parse_config
+from SymbolicDSGE import parse_config, solve_model
 from SymbolicDSGE._ckernels.monte_carlo._runner import run as run_native
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE.core.solved_model import SolvedModel
@@ -377,8 +377,7 @@ def test_native_lowering_runs_first_order_simulation_with_observables(
     # returning deviations and solved.sim returning levels agree by accident,
     # and the whole assertion goes blind to the steady state.
     model = parse_config(rbc_second_order_test_model_path)
-    solver = DSGESolver(model)
-    solved = solver.solve(solver.compile(), order=1)
+    solved = solve_model(model, order=1)
     assert np.any(solved.policy.steady_state != 0.0)
     T = 7
     shocks = {name: np.linspace(0.01, 0.03, T) for name in solved.compiled.shock_names}

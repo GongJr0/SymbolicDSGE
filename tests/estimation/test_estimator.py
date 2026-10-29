@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from numpy import float64
 
-from SymbolicDSGE import DSGESolver, parse_config
+from SymbolicDSGE import parse_config, compile_model
 from SymbolicDSGE.core.model_parser import ModelParser
 from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
 from SymbolicDSGE.estimation import Estimator, make_prior
@@ -69,7 +69,7 @@ def compiled_variant():
         model = ModelParser.from_string(
             yaml.safe_dump(data, sort_keys=False), "<variant>"
         ).get()
-        return model, DSGESolver(model).compile()
+        return model, compile_model(model)
 
     return build
 
@@ -725,7 +725,7 @@ def test_sparse_q_block_for_lkj_prior_raises_descriptive_error(
     # Three shocks, none of whose correlations the config names: the pairs fall
     # back to zero, which is fine until a block prior needs a name per pair.
     model = parse_config(gali_2015_test_model_path)
-    compiled = DSGESolver(model).compile()
+    compiled = compile_model(model)
     with pytest.raises(ValueError, match="dense correlation block") as excinfo:
         Estimator(
             config=model,
@@ -925,7 +925,7 @@ def test_reserved_block_key_rejects_a_one_dimensional_matrix(nk_zlb_test_model_p
     # One observable means a named R std and no pair to correlate, so naming the
     # reserved key asks for a block the matrix has no room for.
     model = parse_config(nk_zlb_test_model_path)
-    compiled = DSGESolver(model).compile()
+    compiled = compile_model(model)
     with pytest.raises(ValueError, match="dimension at least 2"):
         Estimator(
             config=model,

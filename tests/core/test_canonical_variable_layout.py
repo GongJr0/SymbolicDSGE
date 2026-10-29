@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import yaml
 
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import compile_model
 from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.resolvers import shock_covariance
 from SymbolicDSGE._ckernels.core import jacobian_eval, measurement_eval
@@ -32,8 +32,7 @@ def _write_misordered_test_model(tmp_path, test_model_path):
 def _compile_misordered_test_model(tmp_path, test_model_path):
     path = _write_misordered_test_model(tmp_path, test_model_path)
     model = parse_config(path)
-    solver = DSGESolver(model)
-    return model, solver.compile()
+    return model, compile_model(model)
 
 
 def test_compile_default_layout_canonicalizes_misordered_yaml_variables(
@@ -111,63 +110,3 @@ def test_kalman_order_sensitive_matrices_use_canonical_compiled_layout(
         shock_covariance(config),
         np.diag([0.50**2, 0.25**2]).astype(np.float64),
     )
-
-
-def test_explicit_order_permutes_within_each_block(tmp_path, test_model_path):
-    path = _write_misordered_test_model(tmp_path, test_model_path)
-    model = parse_config(path)
-    compiled = DSGESolver(model).compile(
-        variable_order=["r", "v", "u", "r_star", "x", "Pi"],
-    )
-
-    assert compiled.layout.state_names == ("r", "v", "u")
-    assert compiled.layout.control_names == ("r_star", "x", "Pi")
-    assert compiled.var_names == ["r", "v", "u", "r_star", "x", "Pi"]
-
-
-def test_explicit_order_places_a_minted_lag_after_the_named_states(
-    tmp_path, test_model_path
-):
-    # u(t-2) mints u_lag1, which is a state the model never declared. The order
-    # names what the model declares, and the minted lag closes the state block.
-    with open(test_model_path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    data["equations"]["model"]["u_process"] = "u(t) = rho_u*u(t-2) + e_u"
-    path = tmp_path / "deep_test.yaml"
-    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-
-    model = parse_config(path)
-    compiled = DSGESolver(model).compile(
-        variable_order=["r", "v", "u", "r_star", "x", "Pi"],
-    )
-
-    assert compiled.layout.state_names == ("r", "v", "u", "u_lag1")
-    assert compiled.layout.control_names == ("r_star", "x", "Pi")
-    assert compiled.layout.generated_names == ("u_lag1",)
-    assert compiled.idx["u_lag1"] == 3
-
-    # declared_names is the user's own list and nothing else. A dense x0 reaches
-    # the aux too, so it spans the concatenation, minted last.
-    layout = compiled.layout
-    assert set(layout.declared_names) == {"Pi", "x", "r_star", "u", "v", "r"}
-    assert {*layout.declared_names, *layout.generated_names} == set(compiled.var_names)
-
-
-def test_explicit_order_rejects_a_control_in_the_state_block(tmp_path, test_model_path):
-    path = _write_misordered_test_model(tmp_path, test_model_path)
-    model = parse_config(path)
-    solver = DSGESolver(model)
-
-    with pytest.raises(ValueError, match="must lead with the model's states"):
-        solver.compile(variable_order=["u", "v", "Pi", "r", "x", "r_star"])
-
-
-def test_compile_rejects_an_order_naming_a_generated_state(tmp_path, test_model_path):
-    path = _write_misordered_test_model(tmp_path, test_model_path)
-    model = parse_config(path)
-    solver = DSGESolver(model)
-
-    with pytest.raises(ValueError, match="must not appear"):
-        solver.compile(
-            variable_order=["Pi", "x", "r_star", "u", "v", "r", "u_lag1"],
-        )

@@ -23,7 +23,7 @@ from SymbolicDSGE.core.shock.spec import deserialize_shocks
 
 from ..core.model_parser import ModelParser
 from ..core.solved_model import SolvedModel
-from ..core.solver import DSGESolver
+from ..core.solver import solve_model
 from ..core.shock import Shock, ShockPath
 from ..estimation.estimator import Estimator
 from ..estimation.results import MCMCResult, MLEResult, MAPResult
@@ -172,11 +172,8 @@ def _load_models(
             )
         parser = ModelParser.from_string(archive.read_text(member.path), member.path)
         model = parser.get()
-        solver = DSGESolver(model)
-        compile_kwargs = dict(member.options.get("compile_kwargs", {}))
         solve_kwargs = dict(member.options.get("solve_kwargs", {}))
-        compiled = solver.compile(**compile_kwargs)
-        out[member.model_name] = solver.solve(compiled, **solve_kwargs)
+        out[member.model_name] = solve_model(model, **solve_kwargs)
     return out
 
 

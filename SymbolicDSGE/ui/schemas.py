@@ -38,7 +38,6 @@ class LoadYamlRequest(TypedDict):
 
 class SolveModelRequest(TypedDict):
     model_name: str
-    compile_kwargs: dict[str, Any]
     solve_kwargs: dict[str, Any]
 
 

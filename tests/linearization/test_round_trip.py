@@ -21,7 +21,7 @@ import numpy as np
 import pytest
 import sympy as sp
 
-from SymbolicDSGE import DSGESolver, parse_config
+from SymbolicDSGE import parse_config, compile_model, solve_model
 from SymbolicDSGE.core.config import ModelConfig
 from SymbolicDSGE.core.model_parser import ModelParser
 from SymbolicDSGE.linearization import Linearizer
@@ -71,15 +71,13 @@ class _RoundTrip(NamedTuple):
 def _round_trip(
     model: ModelConfig, methods: Mapping[str, str] | None = None
 ) -> _RoundTrip:
-    solver = DSGESolver(model)
-    compiled = solver.compile()
 
+    compiled = compile_model(model)
     view = Linearizer(model, compiled, methods).at()
-    linear_solver = DSGESolver(view.to_config())
 
     return _RoundTrip(
-        direct=solver.solve(compiled),
-        linear=linear_solver.solve(linear_solver.compile()),
+        direct=solve_model(model, compiled=compiled),
+        linear=solve_model(view.to_config()),
         point={str(name): float(value) for name, value in view.steady_state.items()},
     )
 
@@ -242,7 +240,7 @@ def test_a_constrained_model_refuses_to_become_a_config(rbc_occbin_test_model_pa
     # thresholds. The view itself is a sound diagnostic, which is why the guard
     # sits on the conversion rather than on at().
     model = parse_config(rbc_occbin_test_model_path)
-    compiled = DSGESolver(model).compile()
+    compiled = compile_model(model)
 
     view = Linearizer(model, compiled).at()
     assert view.model

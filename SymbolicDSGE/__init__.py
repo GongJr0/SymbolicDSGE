@@ -10,12 +10,14 @@ without writing any code (beyond the YAML model specification).
 """
 
 from .core import (
-    DSGESolver,
     ModelConfig,
     Shock,
     ShockPath,
     SolvedModel,
+    CompiledModel,
     parse_config,
+    compile_model,
+    solve_model,
 )
 from .kalman import KalmanFilter
 from .estimation import Estimator
@@ -23,16 +25,23 @@ from .bundle import BundleBuilder, load_bundle
 from . import utils
 
 __all__ = [
+    # Containers
     "ModelConfig",
-    "parse_config",
-    "DSGESolver",
+    "CompiledModel",
     "SolvedModel",
-    "KalmanFilter",
-    "Estimator",
+    # Core parse/solve API
+    "parse_config",
+    "compile_model",
+    "solve_model",
+    # Shock API,
     "Shock",
     "ShockPath",
-    "utils",
+    # Filtering and estimation API
+    "KalmanFilter",
+    "Estimator",
     # .sdsge bundle API
     "BundleBuilder",
     "load_bundle",
+    # Math utils/FRED data
+    "utils",
 ]

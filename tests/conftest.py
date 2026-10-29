@@ -119,23 +119,16 @@ def model_path(request) -> Path:
 
 @pytest.fixture(scope="session")
 def post82_bundle(post82_test_model_path):
-    from SymbolicDSGE import DSGESolver, parse_config
+    from SymbolicDSGE import parse_config, compile_model, solve_model
 
     parsed = parse_config(post82_test_model_path)
-    solver = DSGESolver(parsed)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled)
+    compiled = compile_model(parsed)
+    solved = solve_model(parsed, compiled=compiled)
     return {
-        "solver": solver,
         "parsed": parsed,
         "compiled": compiled,
         "solved": solved,
     }
-
-
-@pytest.fixture(scope="session")
-def solver_post82(post82_bundle):
-    return post82_bundle["solver"]
 
 
 @pytest.fixture(scope="session")
@@ -155,23 +148,16 @@ def solved_post82(post82_bundle):
 
 @pytest.fixture(scope="session")
 def test_bundle(test_model_path):
-    from SymbolicDSGE import DSGESolver, parse_config
+    from SymbolicDSGE import parse_config, compile_model, solve_model
 
     parsed = parse_config(test_model_path)
-    solver = DSGESolver(parsed)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled)
+    compiled = compile_model(parsed)
+    solved = solve_model(parsed, compiled=compiled)
     return {
-        "solver": solver,
         "parsed": parsed,
         "compiled": compiled,
         "solved": solved,
     }
-
-
-@pytest.fixture(scope="session")
-def solver_test(test_bundle):
-    return test_bundle["solver"]
 
 
 @pytest.fixture(scope="session")
@@ -192,23 +178,16 @@ def solved_test(test_bundle):
 
 @pytest.fixture(scope="session")
 def rbc_so_bundle(rbc_second_order_test_model_path):
-    from SymbolicDSGE import DSGESolver, parse_config
+    from SymbolicDSGE import parse_config, compile_model, solve_model
 
     parsed = parse_config(rbc_second_order_test_model_path)
-    solver = DSGESolver(parsed)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled, order=2)
+    compiled = compile_model(parsed)
+    solved = solve_model(parsed, compiled=compiled, order=2)
     return {
-        "solver": solver,
         "parsed": parsed,
         "compiled": compiled,
         "solved": solved,
     }
-
-
-@pytest.fixture(scope="session")
-def solver_rbc_so(rbc_so_bundle):
-    return rbc_so_bundle["solver"]
 
 
 @pytest.fixture(scope="session")
@@ -233,11 +212,10 @@ def solved_multishock(rbc_multishock_test_model_path):
     Read-only: consumers take its policy and its calibration as they are, so
     the whole suite shares one solve. ``compiled`` comes off it.
     """
-    from SymbolicDSGE import DSGESolver, parse_config
+    from SymbolicDSGE import parse_config, solve_model
 
     model = parse_config(rbc_multishock_test_model_path)
-    solver = DSGESolver(model)
-    return solver.solve(solver.compile(), order=2)
+    return solve_model(model, order=2)
 
 
 @pytest.fixture(scope="session")
