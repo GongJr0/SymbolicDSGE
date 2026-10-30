@@ -8,7 +8,7 @@ import sys
 from itertools import combinations
 from pathlib import Path
 from types import FrameType
-from typing import Any, Callable, TypeAlias, Sequence
+from typing import Any, Callable, Mapping, TypeAlias, Sequence
 import warnings
 
 from sympy.core.basic import Basic
@@ -352,7 +352,7 @@ class ModelParser:
         if not conf.equations.constraints:
             return
 
-        constraints: dict[str, Constraint] = conf.equations.constraints
+        constraints: Mapping[str, Constraint] = conf.equations.constraints
 
         if len(constraints) > 2:
             raise NotImplementedError(
@@ -429,7 +429,7 @@ class ModelParser:
         conf: ModelConfig,
         key: frozenset[str],
         regime: Regime,
-        constraints: dict[str, Constraint],
+        constraints: Mapping[str, Constraint],
     ) -> None:
         label = ", ".join(sorted(key))
 

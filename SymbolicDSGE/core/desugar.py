@@ -20,7 +20,7 @@ the controls.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator, Mapping
 
 import sympy as sp
 from sympy import Eq, Expr, Function, Symbol
@@ -158,7 +158,7 @@ def _scan_offset_depths(
 
 
 def _offset_expressions(
-    model: dict[str, Eq],
+    model: Mapping[str, Eq],
     regimes: RegimeGetterDict | None,
     observables: SymbolGetterDict[Expr],
 ) -> Iterator[Expr]:

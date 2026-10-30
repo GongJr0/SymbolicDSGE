@@ -7,9 +7,9 @@ from typing import (
     Mapping,
     TypeAlias,
     TypeVar,
-    Dict,
     Sequence,
 )
+from types import MappingProxyType
 from collections import UserDict
 from sympy import Symbol, Function, Eq, Expr, And, Or, Not
 from sympy.core.relational import Relational
@@ -22,10 +22,38 @@ from .config_emitter import write_config_yaml
 KT = TypeVar("KT")
 V = TypeVar("V")
 
-Regime: TypeAlias = Dict[str, Eq]  # {model_equation_name: replacement}
+Regime: TypeAlias = Mapping[str, Eq]  # {model_equation_name: replacement}
+
+_IMMUTABILITY_MSG = (
+    "This object is currently immutable. "
+    "If you tried to mutate the config a SolvedModel holds, "
+    "it is recommended to re-solve the model on the new config. "
+    "If you know the edit you're going to make will not change the "
+    "functional form or compiled structure of the model, call `.unlock()` "
+    "on the config before mutating it."
+)
 
 
-class _NormalizedKeyDict(UserDict[KT, V]):
+class _Lockable:
+    _locked: bool = False
+
+    @property
+    def is_locked(self) -> bool:
+        return self._locked
+
+    def lock(self) -> None:
+        object.__setattr__(self, "_locked", True)
+
+    def unlock(self) -> None:
+        object.__setattr__(self, "_locked", False)
+
+    def __setattr__(self, name: str, val: Any) -> None:
+        if self.is_locked:
+            raise AttributeError(_IMMUTABILITY_MSG)
+        object.__setattr__(self, name, val)
+
+
+class _NormalizedKeyDict(UserDict[KT, V], _Lockable):
     """A mapping whose key accepts more than one spelling.
 
     A subclass supplies ``_key``, resolving any accepted spelling to the one the
@@ -47,9 +75,14 @@ class _NormalizedKeyDict(UserDict[KT, V]):
         return self.data[self._key(key)]
 
     def __setitem__(self, key: Any, value: V) -> None:
+        if self.is_locked:
+            raise AttributeError(_IMMUTABILITY_MSG)
         self.data[self._key(key)] = value
 
     def __delitem__(self, key: Any) -> None:
+        if self.is_locked:
+            raise AttributeError(_IMMUTABILITY_MSG)
+
         del self.data[self._key(key)]
 
     def __contains__(self, key: Any) -> bool:
@@ -89,7 +122,7 @@ class RegimeGetterDict(_NormalizedKeyDict[frozenset[str], Regime]):
 
 
 @dataclass
-class CovarianceSpec:
+class CovarianceSpec(_Lockable):
     """Specification of a covariance matrix in terms of standard deviations and correlations."""
 
     std: SymbolGetterDict[str]
@@ -102,9 +135,19 @@ class CovarianceSpec:
         corr_params = [v for v in self.corr.values() if v is not None]
         return set(std_params + corr_params)
 
+    def lock(self) -> None:
+        self.std.lock()
+        self.corr.lock()
+        super().lock()
+
+    def unlock(self) -> None:
+        super().unlock()
+        self.std.unlock()
+        self.corr.unlock()
+
 
 @dataclass
-class Constraint:
+class Constraint(_Lockable):
     """Constrants that can bind and relax on separate conditions, allowing for regime switching in the model.
 
     Attributes
@@ -117,12 +160,13 @@ class Constraint:
         satisfied.
     """
 
+    # SymPy expressions are unmutable, super's lock/unlock is enough
     bind: Relational | And | Or | Not
     relax: Relational | And | Or | Not
 
 
 @dataclass
-class Equations:
+class Equations(_Lockable):
     """Equations defining the transitions, policy, and observables of the model.
 
     Attributes
@@ -147,15 +191,45 @@ class Equations:
         observables.
     """
 
-    model: Dict[str, Eq]
-    constraints: Dict[str, Constraint] | None  # {constraint_name: Constraint}
+    model: Mapping[str, Eq]
+    constraints: Mapping[str, Constraint] | None  # {constraint_name: Constraint}
     regimes: RegimeGetterDict | None  # {binding_set: Regime}
     observables: SymbolGetterDict[Expr]
     obs_is_affine: SymbolGetterDict[bool]
 
+    def lock(self) -> None:
+        self.model = MappingProxyType(self.model)
+        if self.constraints is not None:
+            for constraint in self.constraints.values():
+                constraint.lock()
+            self.constraints = MappingProxyType(self.constraints)
+        if self.regimes is not None:
+            for k, v in self.regimes.items():
+                self.regimes[k] = MappingProxyType(v)
+            self.regimes.lock()
+        self.observables.lock()
+        self.obs_is_affine.lock()
+
+        super().lock()
+
+    def unlock(self) -> None:
+        super().unlock()
+
+        self.model = dict(self.model)
+        if self.constraints is not None:
+            for constraint in self.constraints.values():
+                constraint.unlock()
+            self.constraints = dict(self.constraints)
+        if self.regimes is not None:
+            for k, v in self.regimes.items():
+                self.regimes[k] = dict(v)
+            self.regimes.unlock()
+        self.observables.unlock()
+        self.obs_is_affine.unlock()
+
 
 @dataclass
-class Calib:
+class Calib(_Lockable):
     """Calibration of the model configuration, including parameter values, shock standard deviations, and shock correlations.
 
     Attributes
@@ -181,6 +255,21 @@ class Calib:
                 tuple(float(v) for v in self.parameters.values()),
             )
         )
+
+    def lock(self) -> None:
+        self.parameters.lock()
+        self.shocks.lock()
+        if self.measurement_noise is not None:
+            self.measurement_noise.lock()
+        super().lock()
+
+    def unlock(self) -> None:
+        super().unlock()
+
+        self.parameters.unlock()
+        self.shocks.unlock()
+        if self.measurement_noise is not None:
+            self.measurement_noise.unlock()
 
 
 def cov_from_spec(
@@ -241,7 +330,7 @@ def cov_from_spec(
 
 
 @dataclass(repr=False)
-class ModelConfig:
+class ModelConfig(_Lockable):
     """A model configuration parsed into symbolic representations of its variables, parameters, shocks, observables, and equations.
 
     Attributes
@@ -265,12 +354,38 @@ class ModelConfig:
     """
 
     name: str
-    variables: list[Function]
+    variables: Sequence[Function]
     ss_seed: FunctionGetterDict[Expr | None]
-    shocks: list[Symbol]
-    observables: list[Symbol]
+    shocks: Sequence[Symbol]
+    observables: Sequence[Symbol]
     equations: Equations
     calibration: Calib
+
+    def lock(self) -> None:
+        # lockables
+        self.ss_seed.lock()
+        self.equations.lock()
+        self.calibration.lock()
+
+        # list->tuple
+        self.variables = tuple(self.variables)
+        self.shocks = tuple(self.shocks)
+        self.observables = tuple(self.observables)
+
+        super().lock()
+
+    def unlock(self) -> None:
+        super().unlock()
+
+        # unlockables
+        self.ss_seed.unlock()
+        self.equations.unlock()
+        self.calibration.unlock()
+
+        # tuple->list
+        self.variables = list(self.variables)
+        self.shocks = list(self.shocks)
+        self.observables = list(self.observables)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.name})"
@@ -295,7 +410,11 @@ class ModelConfig:
                 f"The following keys are missing from the model's calibration parameters: {missing_keys}"
             )
 
+        was_locked = self.is_locked
+        self.unlock()
         self.calibration.parameters.update(new_params)
+        if was_locked:
+            self.lock()
 
     def to_yaml(self, path: str | Path, *, digits: int | None = None) -> None:
         """Write the model configuration to a YAML file.

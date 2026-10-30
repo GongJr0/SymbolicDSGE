@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, Mapping, TypedDict, TypeVar
 
 import yaml
 from pathlib import Path
@@ -104,7 +104,7 @@ class _ConfigSchema(TypedDict):
 
 
 def _emit_constraints(
-    constraints: dict[str, Constraint] | None,
+    constraints: Mapping[str, Constraint] | None,
 ) -> dict[str, dict[str, str]]:
     """Emit constraints as a dictionary of strings."""
     if constraints is None:
