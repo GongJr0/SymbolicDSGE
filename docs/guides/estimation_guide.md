@@ -9,14 +9,14 @@ tags:
     Refer to [this](../assets/param_estimation.ipynb) notebook for an example parameter estimation workflow.
 
 ???+ warning "Read the Quickstart Guide"
-    This guide only handles the estimation process and is written assuming the reader has some familiarity with the core DSGE API (i.e. `DSGESolver`, `SolvedModel` etc.). It is strongly recommended to at least have read the [Quickstart Guide](./quickstart.md) before working with parameter estimation.
+    This guide only handles the estimation process and is written assuming the reader has some familiarity with the core DSGE API (i.e. `parse_config`, `solve_model`, `SolvedModel` etc.). It is strongly recommended to at least have read the [Quickstart Guide](./quickstart.md) before working with parameter estimation.
 
 This guide walks through the parameter estimation workflow of `SymbolicDSGE` using an example setup and an MCMC sampling based Bayesian Estimation setup.
 
 We will cover:
 
 - How priors are built (and why transforms matter)
-- How to run MCMC through `DSGESolver.estimate_and_solve(...)`
+- How to run MCMC through `estimate_and_solve(...)`
 - What outputs to expect from the process
 
 ## Parse Configs and Compile
@@ -110,7 +110,7 @@ estimated = {
 
 ## Running the Estimation
 
-The estimation process is carried out by `DSGESolver.estimate()` and `DSGESolver.estimate_and_solve`. The former returns the estimation results, but does not provide a `SolvedModel` using said estimation output. Conversely, the latter provides both the results, and an immediately usable `SolvedModel` object derived from the results.
+The estimation process is carried out by `estimate()` and `estimate_and_solve()`. The former returns the estimation results, but does not provide a `SolvedModel` using said estimation output. Conversely, the latter provides both the results, and an immediately usable `SolvedModel` object derived from the results.
 
 ```python
 res, sol = estimate_and_solve(
@@ -299,6 +299,5 @@ More detailed information regarding estimation can be found via the references. 
 
     - [`Estimator`](../documentation/Estimator.md)
     - [`Prior`](../documentation/prior_spec/Prior.md)
-    - [`DSGESolver`](../documentation/DSGESolver.md)
 
 [Download Guide Notebook](../assets/param_estimation.ipynb){ .md-button download="" }

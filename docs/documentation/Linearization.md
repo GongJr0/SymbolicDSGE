@@ -134,7 +134,7 @@ Parameters stay symbolic in the emitted equations.
 PointLinearView.to_config() -> ModelConfig
 ```
 
-The linearized model as a `ModelConfig`, which `DSGESolver` accepts like any other.
+The linearized model as a `ModelConfig`, which `solve_model` and `compile_model` accepts like any other.
 
 __Returns:__
 
@@ -155,7 +155,7 @@ __Overrides:__
 Everything else is carried from the source config unchanged.
 
 ???+ warning "Estimating a point-linear config"
-    `DSGESolver` refuses a `PointLinearView`, and `to_config()` is the explicit way past that.
+    `solve_model` and `compile_model` refuses a `PointLinearView`, and `to_config()` is the explicit way past that.
     Freezing the expansion at a steady state introduces a restriction original config does not have.
     Consequently, a pre-linearized levels model is accurate only at the specific parameterization producing the resolved steady state.
     Proceed with caution if any workflow mutating the parameterization is intended.

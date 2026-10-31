@@ -87,12 +87,10 @@ sdsge-ui
 # Option 2: Serve the GUI with a pre-loaded SolvedModel object
 
 # Read a config and solve the model as usual
-from SymbolicDSGE import DSGESolver, parse_config
+from SymbolicDSGE import parse_config, solve_model
 
 model = parse_config(...)
-solver = DSGESolver(model)
-compiled = solver.compile(...)
-sol = solver.solve(compiled, ...)
+sol = solve_model(model)
 
 # Serve the GUI with the solved model pre-loaded in the reference slot
 sol.serve(open_browser=True)

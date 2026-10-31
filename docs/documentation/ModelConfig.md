@@ -27,6 +27,24 @@ __Fields:__
 __Methods:__
 
 ```python
+ModelConfig.update_parameters(
+    new_params: Mapping[str, float] | Mapping[sympy.Symbol, float],
+) -> None
+```
+
+Update the clibration parameters of a `ModelConfig` regardless of the lock state of the config.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| new_params | `{name: value}` mapping to override parameter entries. |
+
+
+&nbsp;
+
+
+```python
 @staticmethod
 ModelConfig.parse_yaml(
     path: str | Path,
@@ -82,6 +100,45 @@ __Returns:__
     `to_yaml` produces the exact representation of the config in memory.
     Edits made to a config after parsing (e.g. parameter estimation) will be reflected in the written file.
 
+&nbsp;
+
+```python
+ModelConfig.lock() -> Self
+```
+Unlock the config and all of its children to make it mutable.
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `Self` (`ModelConfig`) | The config object this method was called on. |
+
+???+ info "Locked types"
+    Every object in the config except `list` instances lock in place with their own `lock` method during this call.
+    `list`s are converted to `tuple`s and are immutable since the contents of all `list` members are SymPy objects, which are immutable themselves.
+
+???+ info "Locking at solve"
+    `ModelConfig` remains mutable as a standalone object when parsed.
+    Solving a config procudes a locked copy in `SolvedModel.config` to ensure
+    a confg and it's solution cannot drift apart.
+
+&nbsp;
+
+```python
+ModelConfig.unlock() -> Self
+```
+Lock the config and all of its children to ensure immutability.
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `Self` (`ModelConfig`) | The config object this method was called on. |
+
+???+ info "Type conversions"
+    Unlocking converts the `tuple`s in a locked config back to `list`s for mutability.
+    All remaining objects use their own `unlock` method and their types stay intact.
+
 # Equations
 
 ```python
@@ -95,8 +152,8 @@ __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| model | `dict[str, sympy.Eq]` | Model equations keyed by equation name. |
-| constraints | `dict[str, Constraint | None]` | `bind`/`relax` pairs as `Constraint` objects. Keyed by the constraint name.|
+| model | `LockableDict[str, sympy.Eq]` | Model equations keyed by equation name. |
+| constraints | `LockableDict[str, Constraint | None]` | `bind`/`relax` pairs as `Constraint` objects. Keyed by the constraint name.|
 | regimes | `RegimeGetterDict[Regime]` | Regime equations keyed by the constraint names that define the regime. Each `Regime` is a mapping of model equation name and the expression that replaces it when the regime binds. |
 | observables | `SymbolGetterDict[sympy.Expr]` | Observable equations. |
 | obs_is_affine | `SymbolGetterDict[bool]` | Whether each observable equation is affine in current state variables. |
