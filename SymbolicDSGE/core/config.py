@@ -1,16 +1,7 @@
 """Symbolic representation of a parsed DSGE model configuration."""
 
 from dataclasses import dataclass
-from typing import (
-    AbstractSet,
-    Any,
-    Mapping,
-    TypeAlias,
-    TypeVar,
-    Sequence,
-)
-from types import MappingProxyType
-from collections import UserDict
+from typing import Mapping, Sequence
 from sympy import Symbol, Function, Eq, Expr, And, Or, Not
 from sympy.core.relational import Relational
 from numpy import array, eye, float64, ix_, outer
@@ -18,107 +9,14 @@ from numpy.typing import NDArray
 
 from pathlib import Path
 from .config_emitter import write_config_yaml
-
-KT = TypeVar("KT")
-V = TypeVar("V")
-
-Regime: TypeAlias = Mapping[str, Eq]  # {model_equation_name: replacement}
-
-_IMMUTABILITY_MSG = (
-    "This object is currently immutable. "
-    "If you tried to mutate the config a SolvedModel holds, "
-    "it is recommended to re-solve the model on the new config. "
-    "If you know the edit you're going to make will not change the "
-    "functional form or compiled structure of the model, call `.unlock()` "
-    "on the config before mutating it."
+from .types import (
+    _Lockable,
+    LockableDict,
+    SymbolGetterDict,
+    PairGetterDict,
+    FunctionGetterDict,
+    RegimeGetterDict,
 )
-
-
-class _Lockable:
-    _locked: bool = False
-
-    @property
-    def is_locked(self) -> bool:
-        return self._locked
-
-    def lock(self) -> None:
-        object.__setattr__(self, "_locked", True)
-
-    def unlock(self) -> None:
-        object.__setattr__(self, "_locked", False)
-
-    def __setattr__(self, name: str, val: Any) -> None:
-        if self.is_locked:
-            raise AttributeError(_IMMUTABILITY_MSG)
-        object.__setattr__(self, name, val)
-
-
-class _NormalizedKeyDict(UserDict[KT, V], _Lockable):
-    """A mapping whose key accepts more than one spelling.
-
-    A subclass supplies ``_key``, resolving any accepted spelling to the one the
-    underlying dict is keyed by. The three primitives below route through it and
-    ``UserDict`` builds ``get``, ``pop``, ``setdefault``, ``update`` and the rest
-    on top of them, so the coercion reaches the whole mapping API. Subclassing
-    ``dict`` instead would leave every method not overridden by hand reading the
-    hash table directly, which is silently wrong rather than loud.
-    """
-
-    def __init__(self, inp: Any) -> None:
-        super().__init__(inp)
-
-    @staticmethod
-    def _key(key: Any) -> Any:
-        raise NotImplementedError
-
-    def __getitem__(self, key: Any) -> V:
-        return self.data[self._key(key)]
-
-    def __setitem__(self, key: Any, value: V) -> None:
-        if self.is_locked:
-            raise AttributeError(_IMMUTABILITY_MSG)
-        self.data[self._key(key)] = value
-
-    def __delitem__(self, key: Any) -> None:
-        if self.is_locked:
-            raise AttributeError(_IMMUTABILITY_MSG)
-
-        del self.data[self._key(key)]
-
-    def __contains__(self, key: Any) -> bool:
-        return self._key(key) in self.data
-
-
-class SymbolGetterDict(_NormalizedKeyDict[Symbol, V]):
-    @staticmethod
-    def _key(key: Any) -> Any:
-        return Symbol(key) if isinstance(key, str) else key
-
-
-class PairGetterDict(_NormalizedKeyDict[frozenset[Symbol], V]):
-    @staticmethod
-    def _key(key: Any) -> Any:
-        if isinstance(key, (Sequence, AbstractSet)) and not isinstance(key, str):
-            return frozenset(Symbol(k) if isinstance(k, str) else k for k in key)
-        return key
-
-
-class FunctionGetterDict(_NormalizedKeyDict[Function, V]):
-    @staticmethod
-    def _key(key: Any) -> Any:
-        return Function(key) if isinstance(key, str) else key
-
-
-class RegimeGetterDict(_NormalizedKeyDict[frozenset[str], Regime]):
-    """Key normalizing dictionary for regimes. Accessors accept a single regime name or a set of names, and normalize to the frozenset of names the underlying dict is keyed by."""
-
-    @staticmethod
-    def _key(key: Any) -> Any:
-        if isinstance(key, str):
-            return frozenset(s.strip() for s in key.split(","))
-        if isinstance(key, (Sequence, AbstractSet)):
-            return frozenset(str(k) for k in key)
-        return key
 
 
 @dataclass
@@ -135,13 +33,11 @@ class CovarianceSpec(_Lockable):
         corr_params = [v for v in self.corr.values() if v is not None]
         return set(std_params + corr_params)
 
-    def lock(self) -> None:
+    def _freeze(self) -> None:
         self.std.lock()
         self.corr.lock()
-        super().lock()
 
-    def unlock(self) -> None:
-        super().unlock()
+    def _thaw(self) -> None:
         self.std.unlock()
         self.corr.unlock()
 
@@ -191,41 +87,43 @@ class Equations(_Lockable):
         observables.
     """
 
-    model: Mapping[str, Eq]
-    constraints: Mapping[str, Constraint] | None  # {constraint_name: Constraint}
+    model: LockableDict[str, Eq]
+    constraints: LockableDict[str, Constraint] | None  # {constraint_name: Constraint}
     regimes: RegimeGetterDict | None  # {binding_set: Regime}
     observables: SymbolGetterDict[Expr]
     obs_is_affine: SymbolGetterDict[bool]
 
-    def lock(self) -> None:
-        self.model = MappingProxyType(self.model)
+    def _freeze(self) -> None:
+        self.model = LockableDict(self.model)
+        self.model.lock()
+
         if self.constraints is not None:
-            for constraint in self.constraints.values():
-                constraint.lock()
-            self.constraints = MappingProxyType(self.constraints)
+            self.constraints = LockableDict(
+                {n: c.lock() for n, c in self.constraints.items()}
+            ).lock()
+
         if self.regimes is not None:
-            for k, v in self.regimes.items():
-                self.regimes[k] = MappingProxyType(v)
-            self.regimes.lock()
+            self.regimes = RegimeGetterDict(
+                {k: LockableDict(r).lock() for k, r in self.regimes.items()}
+            ).lock()
+
         self.observables.lock()
         self.obs_is_affine.lock()
 
-        super().lock()
+    def _thaw(self) -> None:
 
-    def unlock(self) -> None:
-        super().unlock()
-
-        self.model = dict(self.model)
-        if self.constraints is not None:
-            for constraint in self.constraints.values():
-                constraint.unlock()
-            self.constraints = dict(self.constraints)
-        if self.regimes is not None:
-            for k, v in self.regimes.items():
-                self.regimes[k] = dict(v)
-            self.regimes.unlock()
+        self.model.unlock()
         self.observables.unlock()
         self.obs_is_affine.unlock()
+
+        if self.constraints is not None:
+            for c in self.constraints.values():
+                c.unlock()
+            self.constraints.unlock()
+        if self.regimes is not None:
+            for r in self.regimes.values():
+                r.unlock()
+            self.regimes.unlock()
 
 
 @dataclass
@@ -256,16 +154,13 @@ class Calib(_Lockable):
             )
         )
 
-    def lock(self) -> None:
+    def _freeze(self) -> None:
         self.parameters.lock()
         self.shocks.lock()
         if self.measurement_noise is not None:
             self.measurement_noise.lock()
-        super().lock()
 
-    def unlock(self) -> None:
-        super().unlock()
-
+    def _thaw(self) -> None:
         self.parameters.unlock()
         self.shocks.unlock()
         if self.measurement_noise is not None:
@@ -316,6 +211,7 @@ def cov_from_spec(
     for pair, param_name in spec.corr.items():
         if param_name is None:
             continue
+
         i, j = (pos[str(member)] for member in pair)
         rho_ij = _param(param_name)
         rho[i, j] = rho_ij
@@ -361,7 +257,7 @@ class ModelConfig(_Lockable):
     equations: Equations
     calibration: Calib
 
-    def lock(self) -> None:
+    def _freeze(self) -> None:
         # lockables
         self.ss_seed.lock()
         self.equations.lock()
@@ -372,11 +268,7 @@ class ModelConfig(_Lockable):
         self.shocks = tuple(self.shocks)
         self.observables = tuple(self.observables)
 
-        super().lock()
-
-    def unlock(self) -> None:
-        super().unlock()
-
+    def _thaw(self) -> None:
         # unlockables
         self.ss_seed.unlock()
         self.equations.unlock()

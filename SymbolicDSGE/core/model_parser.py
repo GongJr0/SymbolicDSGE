@@ -25,18 +25,20 @@ from sympy.parsing.sympy_parser import (
     factorial_notation,
 )
 from numpy import float64
-
+from .types import (
+    LockableDict,
+    SymbolGetterDict,
+    FunctionGetterDict,
+    PairGetterDict,
+    RegimeGetterDict,
+    Regime,
+)
 from .config import (
     CovarianceSpec,
     ModelConfig,
     Constraint,
-    Regime,
     Equations,
     Calib,
-    RegimeGetterDict,
-    SymbolGetterDict,
-    PairGetterDict,
-    FunctionGetterDict,
 )
 
 
@@ -807,18 +809,21 @@ def _parse_equations(
 
     regimes_raw = eq_data.get("regimes", {}) or {}
 
-    regimes = RegimeGetterDict({})
-
+    regimes: dict[str, Regime] = {}
     for raw_key, v in regimes_raw.items():
         if raw_key in regimes:
             raise ValueError(
                 f"Duplicate regime key '{raw_key}' encountered "
                 "in equations.regimes. Each regime key must be unique."
             )
-        regimes[raw_key] = {
-            name: _get_eq(eq)
-            for name, eq in _require_mapping(v, f"equations.regimes.{raw_key}").items()
-        }
+        regimes[raw_key] = LockableDict(
+            {
+                name: _get_eq(eq)
+                for name, eq in _require_mapping(
+                    v, f"equations.regimes.{raw_key}"
+                ).items()
+            }
+        )
 
     observables_raw = eq_data.get("observables", {}) or {}
     observables_eq: dict[Symbol, Expr] = {
@@ -832,9 +837,9 @@ def _parse_equations(
     )
 
     return Equations(
-        model=model,
-        constraints=constraints if constraints else None,
-        regimes=regimes if regimes else None,
+        model=LockableDict(model),
+        constraints=LockableDict(constraints) if constraints else None,
+        regimes=RegimeGetterDict(regimes) if regimes else None,
         observables=SymbolGetterDict(observables_eq),
         obs_is_affine=SymbolGetterDict(is_affine),
     )

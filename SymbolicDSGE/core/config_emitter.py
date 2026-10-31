@@ -25,14 +25,8 @@ def _sstr(expr: Basic) -> str:
 
 
 if TYPE_CHECKING:
-    from .config import (
-        ModelConfig,
-        Equations,
-        Calib,
-        Constraint,
-        RegimeGetterDict,
-        CovarianceSpec,
-    )
+    from .config import ModelConfig, Equations, Calib, Constraint, CovarianceSpec
+    from .types import RegimeGetterDict
 
 # --- YAML Representation Spec ---
 

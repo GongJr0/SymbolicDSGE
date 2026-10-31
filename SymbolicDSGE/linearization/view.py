@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from copy import deepcopy
 from sympy import Eq, Expr
 
-from ..core.config import ModelConfig, SymbolGetterDict, FunctionGetterDict
+from ..core.config import ModelConfig
+from ..core.types import LockableDict, SymbolGetterDict, FunctionGetterDict
 
 
 @dataclass(frozen=True)
@@ -25,9 +26,9 @@ class PointLinearView:
                 "original specification."
             )
 
-        new = deepcopy(self._config)
-        new.equations.model = dict(self.model)
+        new = deepcopy(self._config).unlock()
 
+        new.equations.model = LockableDict(self.model)
         new.equations.observables = SymbolGetterDict(self.observables)
         new.equations.obs_is_affine = SymbolGetterDict(
             {var: True for var in self.observables}

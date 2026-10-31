@@ -235,6 +235,7 @@ def solve_model(
         raise ValueError(f"order must be 1 or 2, got {order}.")
 
     conf = deepcopy(config)
+    conf.lock()
     compiled = compile_model(conf) if compiled is None else compiled
 
     piecewise = bool(compiled.constraint_names)

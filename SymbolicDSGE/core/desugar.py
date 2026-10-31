@@ -20,16 +20,14 @@ the controls.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Iterator, Mapping
+from typing import Any, Iterator, Mapping
 
 import sympy as sp
 from sympy import Eq, Expr, Function, Symbol
 from sympy.core.function import AppliedUndef
 
-from SymbolicDSGE.core.config import SymbolGetterDict, RegimeGetterDict
-
-if TYPE_CHECKING:
-    from .config import ModelConfig
+from .types import SymbolGetterDict, RegimeGetterDict
+from .config import ModelConfig
 
 #: ``v(t-n)`` lifts to ``f"{v}{LAG_SUFFIX}{n-1}"``, ``v(t+n)`` to
 #: ``f"{v}{LEAD_SUFFIX}{n-1}"``.

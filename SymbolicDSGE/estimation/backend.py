@@ -27,7 +27,8 @@ from .prior_program import (
 )
 from . import resolvers as r
 from ..core.compiled_model import CompiledModel
-from ..core.config import ModelConfig, SymbolGetterDict
+from ..core.config import ModelConfig
+from ..core.types import SymbolGetterDict
 from ..core.resolvers import (
     VariableLayout,
     resolve_ss_seed,
