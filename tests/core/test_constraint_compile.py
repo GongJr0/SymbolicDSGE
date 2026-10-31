@@ -271,7 +271,7 @@ def _evaluate(compiled, exprs, n_row, n_col, point, par):
 def _symbolic_pencil(compiled, residuals):
     """(a, b, c, d) by the diff-then-fold the regime blocks are emitted with.
 
-    Mirrors ``DSGESolver._compile_regimes``: differentiate at each date before
+    Mirrors ``_compile_regimes``: differentiate at each date before
     collapsing them, and carry klein_preproc's sign on every sweep but the fwd
     one, so the row reads ``a y' = b y + c y_prev + d eps``.
     """
