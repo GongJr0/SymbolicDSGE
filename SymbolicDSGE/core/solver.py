@@ -160,6 +160,7 @@ def compile_model(config: ModelConfig) -> CompiledModel:
         constraint_names=constraint_names,
         constraint_exprs=constraint_exprs,
         regimes=regimes,
+        config_token=config.token,
     )
 
 
@@ -210,8 +211,9 @@ def solve_model(
     Raises
     ------
     ValueError
-        ``order`` is neither 1 nor 2, or ``ss_seed`` is the wrong length or
-        names a variable the model does not have.
+        - ``order`` is neither 1 nor 2.
+        - ``ss_seed`` is the wrong length or names a variable the model does not have.
+        - ``compiled`` is passed but is not compatible with ``config``.
     KeyError
         ``parameters`` omits a calibrated parameter.
     NotImplementedError
@@ -228,7 +230,7 @@ def solve_model(
             "interpretation of any likelihood-related operation under varying parameters. "
             "Linearization already occurs numerically in the solver. You do not need to "
             "pre-linearize a specification symbolically. If you intended to use the model "
-            "linearized at one constant point, pass `PointLinearView.to_config(). "
+            "linearized at one constant point, pass `PointLinearView.to_config()."
         )
 
     if order not in (1, 2):
@@ -236,7 +238,16 @@ def solve_model(
 
     conf = deepcopy(config)
     conf.lock()
-    compiled = compile_model(conf) if compiled is None else compiled
+
+    if compiled is not None:
+        if compiled.config_token != conf.token:
+            raise ValueError(
+                "The compiled model and config passed to `solve_model` are not compatible. "
+                "The config could have been mutated in a way that changed the model's structure after the compiled model was created. "
+                "Confirm the arguments are the ones you intended to pass. If they are, recompile the model or pass the config by itself."
+            )
+    else:
+        compiled = compile_model(conf)
 
     piecewise = bool(compiled.constraint_names)
     if piecewise and order == 2:

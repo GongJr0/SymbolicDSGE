@@ -108,7 +108,16 @@ class Estimator:
         R: NDF | None = None,
         P0: NDF | None = None,
     ) -> None:
-        compiled = compiled or compile_model(config)
+        if compiled is not None:
+            if compiled.config_token != config.token:
+                raise ValueError(
+                    "The compiled model and config passed to `Estimator` are not compatible. "
+                    "The config could have been mutated in a way that changed the model's structure after the compiled model was created. "
+                    "Confirm the arguments are the ones you intended to pass. If they are, recompile the model or pass the config by itself."
+                )
+        else:
+            compiled = compile_model(config)
+
         self.estimated_params, self.priors = r.get_names_and_priors(
             estimated_params, compiled
         )

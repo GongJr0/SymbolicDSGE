@@ -340,3 +340,27 @@ class ModelConfig(_Lockable):
         from .model_parser import ModelParser
 
         return ModelParser(path).get()
+
+    @property
+    def token(self) -> int:
+        """Numeric token for comparing compatibility of a config with a compiled model.
+
+        Hash based identifier of the elements that invalidate a compilation when mutated.
+        If a token does not match one recorded on the compiled model, the config and compiled model
+        cannot be used in unison.
+        """
+        eqs = self.equations
+        return hash(
+            (
+                tuple(self.variables),
+                tuple(self.shocks),
+                tuple(self.observables),
+                tuple(eqs.model.items()),
+                tuple(eqs.observables.items()),
+                tuple((k, v.bind, v.relax) for k, v in (eqs.constraints or {}).items()),
+                frozenset(
+                    (k, tuple(r.items())) for k, r in (eqs.regimes or {}).items()
+                ),
+                tuple(self.calibration.parameters.keys()),
+            )
+        )

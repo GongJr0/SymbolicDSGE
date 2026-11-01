@@ -24,6 +24,12 @@ __Fields:__
 | equations | `Equations` | `dataclass` containing model equations, constraints, regimes, observable equations, observable affinity flags. |
 | calibration | `Calib` | `dataclass` of parameter calibrations plus std/corr parameter mappings for shocks and measurement noise. |
 
+__Properties:__
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| is_locked | `bool` | Whether this config and all of its children are locked. |
+| token | `int` | Hash-based token for comparing the structural part of a config with a compiled model or another config. |
+
 __Methods:__
 
 ```python
