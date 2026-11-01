@@ -103,23 +103,6 @@ def compile_model(config: ModelConfig) -> CompiledModel:
         subs_map[f(t + 1)] = fwd  # pyright: ignore
         subs_map[f(t - 1)] = prev  # pyright: ignore
 
-    params_order = [p.name for p in config.calibration.parameters]
-    p_missing = [
-        p.name for p in config.calibration.parameters if p.name not in params_order
-    ]
-    p_unknown = [
-        name
-        for name in params_order
-        if name not in {p.name for p in config.calibration.parameters}
-    ]
-    p_dupe = [name for name in params_order if params_order.count(name) > 1]
-
-    if p_missing or p_unknown or p_dupe:
-        raise ValueError(
-            "params_order contains invalid entries. "
-            f"Missing: {p_missing}, Unknown: {p_unknown}, Duplicated: {p_dupe}."
-        )
-
     # Shocks stay in the residual: they reach the pencil as the innovation block
     compiled_numeric: list[Expr] = [o.xreplace(subs_map) for o in residuals]
 
@@ -145,13 +128,13 @@ def compile_model(config: ModelConfig) -> CompiledModel:
     measurement_jacobian_eqs: list[Expr] = [
         sp.diff(expr, cur_sym) for expr in observable_exprs for cur_sym in cur_syms
     ]
-
+    params_names = [p.name for p in config.calibration.parameters]
     return CompiledModel(
         name=config.name,
         cur_syms=cur_syms,
+        calib_params=params_names,
         layout=layout,
         var_names=var_order,
-        calib_params=params_order,
         idx=idx,
         objective_eqs=compiled_numeric,
         observable_names=[v.name for v in config.observables],
@@ -182,7 +165,7 @@ def solve_model(
         Optional pre-compiled model carrying the residual, the incidence, and the
         calibration the solve reads.
     parameters : dict[str, float] | None
-        Mapping of {name: value} covering every calibrated parameter. If
+        Mapping of {name: value} to update parameters with. If
         None, the model's own calibration is used.
     ss_seed : list[float] | ndarray | dict[str, float] | None
         Initial guess of the steady state Newton solver. List or array in
@@ -215,7 +198,7 @@ def solve_model(
         - ``ss_seed`` is the wrong length or names a variable the model does not have.
         - ``compiled`` is passed but is not compatible with ``config``.
     KeyError
-        ``parameters`` omits a calibrated parameter.
+        Unknown parameter names in ``parameters``.
     NotImplementedError
         ``order=2`` was asked of a model with constraints.
     SolveError
@@ -236,18 +219,18 @@ def solve_model(
     if order not in (1, 2):
         raise ValueError(f"order must be 1 or 2, got {order}.")
 
-    conf = deepcopy(config)
-    conf.lock()
-
     if compiled is not None:
-        if compiled.config_token != conf.token:
+        if compiled.config_token != config.token:
             raise ValueError(
                 "The compiled model and config passed to `solve_model` are not compatible. "
                 "The config could have been mutated in a way that changed the model's structure after the compiled model was created. "
                 "Confirm the arguments are the ones you intended to pass. If they are, recompile the model or pass the config by itself."
             )
     else:
-        compiled = compile_model(conf)
+        compiled = compile_model(config)
+
+    conf = deepcopy(config)
+    conf.lock()
 
     piecewise = bool(compiled.constraint_names)
     if piecewise and order == 2:
@@ -257,12 +240,12 @@ def solve_model(
             "constraints from the model specification."
         )
 
-    point = parameters if parameters is not None else conf.calibration.parameters
-    seed = resolve_ss_seed(conf, compiled.layout, ss_seed=ss_seed, params=point)
-    param_vec = np.array(
-        [point[p] for p in compiled.calib_params],
-        dtype=float64,
-    )
+    if parameters is not None:
+        conf.update_parameters(parameters)
+
+    params = conf.calibration.parameters
+    seed = resolve_ss_seed(conf, compiled.layout, ss_seed=ss_seed, params=params)
+    param_vec = np.fromiter(params.values(), dtype=float64, count=compiled.n_par)
 
     sol: SolvedModel[Any]
 
