@@ -147,7 +147,7 @@ def test_a_variable_at_both_dates_is_counted_in_each_block(
 def test_singular_steady_state_jacobian_reports_no_partition(tmp_path):
     model, compiled = _written(tmp_path, "no_fixed_point", _no_fixed_point_yaml())
     with pytest.raises(SteadyStateError) as exc:
-        solve_model(model, compiled=compiled, parameters=_params(model, order=1))
+        solve_model(model, compiled=compiled, parameters=_params(model))
 
     err = exc.value
     assert err.status is SolveStatus.NEWTON_SINGULAR
