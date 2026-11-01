@@ -34,7 +34,7 @@ from SymbolicDSGE._ckernels.occbin._occbin import (
     occbin_sim,
     occbin_sim_arena_size,
 )
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import compile_model, solve_model
 
 from SymbolicDSGE.core.config import Constraint
 
@@ -60,7 +60,7 @@ MIXED = np.array([0, 1, 1, 1, 0, 1, 1, 0, 0, 0], dtype=np.int8)
 
 
 @pytest.fixture(scope="module")
-def solver(parsed_rbc_so):
+def mod_rbc_so(parsed_rbc_so):
     """Levels RBC where TFP below a threshold shuts investment off."""
     model = parsed_rbc_so
     conf = copy.deepcopy(model)
@@ -73,17 +73,17 @@ def solver(parsed_rbc_so):
     conf.equations.regimes = {
         frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
     }
-    return DSGESolver(conf)
+    return conf
 
 
 @pytest.fixture(scope="module")
-def compiled(solver):
-    return solver.compile()
+def compiled(mod_rbc_so):
+    return compile_model(mod_rbc_so)
 
 
 @pytest.fixture(scope="module")
-def par(solver, compiled):
-    calib = solver.config.calibration.parameters
+def par(mod_rbc_so, compiled):
+    calib = mod_rbc_so.calibration.parameters
     return np.array([float(calib[p]) for p in compiled.calib_params])
 
 
@@ -93,14 +93,14 @@ def cf(compiled):
 
 
 @pytest.fixture(scope="module")
-def policy(solver, compiled):
+def policy(mod_rbc_so, compiled):
     """The piecewise solve at the calibration.
 
     A constrained model solves to a ``PiecewiseSolution``, which is where the
     regime pencils and the reference rule come from: the kernels under test
     consume exactly what the production path hands them.
     """
-    return solver.solve(compiled).policy
+    return solve_model(mod_rbc_so, compiled=compiled).policy
 
 
 @pytest.fixture(scope="module")

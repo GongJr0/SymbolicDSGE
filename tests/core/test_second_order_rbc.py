@@ -14,6 +14,7 @@ from __future__ import annotations
 import numpy as np
 import sympy as sp
 
+from SymbolicDSGE.core.solver import solve_model
 from _oracles import dynare_rbc_second_order as golden
 
 # Dynare's DR order [k', z, c] is our canonical order [k, z, c] row for row: k'
@@ -126,7 +127,7 @@ def test_solve_order2_wiring(rbc_so_bundle):
     the Dynare goldens. order=1 is unchanged (no second-order fields)."""
     solved = rbc_so_bundle["solved"]
     compiled = rbc_so_bundle["compiled"]
-    solver = rbc_so_bundle["solver"]
+    parsed = rbc_so_bundle["parsed"]
 
     pol = solved.policy
     assert pol.order == 2
@@ -148,7 +149,7 @@ def test_solve_order2_wiring(rbc_so_bundle):
 
     # First order path is untouched: no second-order tensors.
     # (levels model -> the expansion point must be supplied; zeros would fail BK.)
-    first = solver.solve(compiled, order=1)
+    first = solve_model(parsed, compiled=compiled, order=1)
     assert first.policy.order == 1
     assert not hasattr(first.policy, "gxx")
 

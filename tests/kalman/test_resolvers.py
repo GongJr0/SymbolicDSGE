@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 import SymbolicDSGE.kalman.resolvers as resolvers
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import solve_model
 from SymbolicDSGE.core.resolvers import shock_covariance
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.kalman.resolvers import (
@@ -39,8 +39,8 @@ R_FULL = np.array(
 @pytest.fixture(scope="module")
 def multishock_order1(solved_multishock) -> SolvedModel:
     """The shared compile solved to first order, for the unscented order gate."""
-    return DSGESolver(solved_multishock.config).solve(
-        compiled=solved_multishock.compiled, order=1
+    return solve_model(
+        solved_multishock.config, compiled=solved_multishock.compiled, order=1
     )
 
 
@@ -339,9 +339,9 @@ def test_resolve_observations_rejects_invalid_inputs(
 
 
 @pytest.fixture(scope="module")
-def solved_rbc_order1(solver_rbc_so, compiled_rbc_so) -> SolvedModel:
+def solved_rbc_order1(parsed_rbc_so, compiled_rbc_so) -> SolvedModel:
     """The RBC at first order. The shared bundle solves it to second."""
-    return solver_rbc_so.solve(compiled=compiled_rbc_so, order=1)
+    return solve_model(parsed_rbc_so, compiled=compiled_rbc_so, order=1)
 
 
 @pytest.fixture(scope="module")

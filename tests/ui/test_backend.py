@@ -57,7 +57,8 @@ def _solved_client(model_path) -> TestClient:
         json={"model_name": "reference", "path": str(model_path)},
     )
     client.post(
-        "/api/model/solve", json={"model_name": "reference", "compile_kwargs": {}}
+        "/api/model/solve",
+        json={"model_name": "reference"},
     )
     return client
 
@@ -167,7 +168,6 @@ def test_ui_backend_loads_solves_and_simulates_model(test_model_path) -> None:
         "/api/model/solve",
         json={
             "model_name": "reference",
-            "compile_kwargs": {},
         },
     )
     assert solved.status_code == 200
@@ -409,13 +409,11 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(
         "/api/model/solve",
         json={
             "model_name": "reference",
-            "compile_kwargs": {},
         },
     )
     assert solved.status_code == 200
 
     slot = app.state.ui_session._slot("reference")
-    assert slot.solver is not None
     assert slot.solved is not None
     solved_model = slot.solved
     result = MLEResult(
@@ -435,7 +433,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(
         captured.update(kwargs)
         return result
 
-    monkeypatch.setattr(slot.solver, "estimate", fake_estimate)
+    monkeypatch.setattr("SymbolicDSGE.ui.session.estimate", fake_estimate)
     request = {
         "model_name": "reference",
         "routine": "mle",
@@ -451,7 +449,6 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(
             }
         ],
         "method_kwargs": {"maxiter": 25, "method": "Nelder-Mead", "cov": True},
-        "compile_kwargs": {},
         "ss_seed": None,
         "posterior_point": "mean",
         "estimate_and_solve": False,
@@ -497,7 +494,9 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(
         captured.update(kwargs)
         return result, solved_model
 
-    monkeypatch.setattr(slot.solver, "estimate_and_solve", fake_estimate_and_solve)
+    monkeypatch.setattr(
+        "SymbolicDSGE.ui.session.estimate_and_solve", fake_estimate_and_solve
+    )
     estimate_and_solve = client.post(
         "/api/run/estimation",
         json={**request, "estimate_and_solve": True},
@@ -518,7 +517,7 @@ def test_ui_backend_validates_and_runs_monte_carlo_pipeline(test_model_path) -> 
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"model_name": role, "compile_kwargs": {}},
+            json={"model_name": role},
         )
         assert solved.status_code == 200
 
@@ -587,7 +586,7 @@ def _solve_reference(client: TestClient, model_path) -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"model_name": role, "compile_kwargs": {}},
+            json={"model_name": role},
         )
         assert solved.status_code == 200
 
@@ -693,7 +692,7 @@ def test_ui_backend_accepts_fanout(test_model_path) -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"model_name": role, "compile_kwargs": {}},
+            json={"model_name": role},
         )
         assert solved.status_code == 200
 
@@ -767,7 +766,7 @@ def test_ui_backend_runs_jarque_bera_monte_carlo_step(test_model_path) -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"model_name": role, "compile_kwargs": {}},
+            json={"model_name": role},
         )
         assert solved.status_code == 200
 
@@ -833,7 +832,7 @@ def test_ui_backend_runs_breusch_pagan_monte_carlo_step(test_model_path) -> None
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"model_name": role, "compile_kwargs": {}},
+            json={"model_name": role},
         )
         assert solved.status_code == 200
 
@@ -907,7 +906,7 @@ def test_ui_backend_runs_breusch_godfrey_monte_carlo_step(test_model_path) -> No
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"model_name": role, "compile_kwargs": {}},
+            json={"model_name": role},
         )
         assert solved.status_code == 200
 
@@ -981,7 +980,7 @@ def test_ui_backend_runs_cusum_monte_carlo_step(test_model_path) -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"model_name": role, "compile_kwargs": {}},
+            json={"model_name": role},
         )
         assert solved.status_code == 200
 
@@ -1053,7 +1052,7 @@ def test_ui_backend_runs_cusumsq_monte_carlo_step(test_model_path) -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"model_name": role, "compile_kwargs": {}},
+            json={"model_name": role},
         )
         assert solved.status_code == 200
 
@@ -1125,7 +1124,7 @@ def test_ui_backend_runs_chow_monte_carlo_step(test_model_path) -> None:
         assert loaded.status_code == 200
         solved = client.post(
             "/api/model/solve",
-            json={"model_name": role, "compile_kwargs": {}},
+            json={"model_name": role},
         )
         assert solved.status_code == 200
 
@@ -1367,7 +1366,7 @@ def test_ui_backend_runs_custom_op_pipeline(test_model_path) -> None:
         )
         client.post(
             "/api/model/solve",
-            json={"model_name": role, "compile_kwargs": {}},
+            json={"model_name": role},
         )
 
     pipeline = {
@@ -1442,7 +1441,7 @@ def test_ui_backend_rejects_invalid_custom_op_on_run(test_model_path) -> None:
         )
         client.post(
             "/api/model/solve",
-            json={"model_name": role, "compile_kwargs": {}},
+            json={"model_name": role},
         )
 
     pipeline = {
@@ -1490,13 +1489,14 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
 ):
     """The kwargs the form posts must bind to the method that receives them.
 
-    ``DSGESolver.estimate`` declares ``**method_kwargs``, so a fake standing in
-    for it accepts anything and a wrong shape reaches no receiver until the run
-    itself raises. The receiver is one level down, and binding against it is
-    what makes a renamed or wrapped parameter fail here.
+    ``estimate`` declares ``**method_kwargs``, so a fake standing in for it
+    accepts anything and a wrong shape reaches no receiver until the run itself
+    raises. The receiver is one level down, and binding against it is what
+    makes a renamed or wrapped parameter fail here.
     """
     import inspect
 
+    from SymbolicDSGE.core.solver import estimate
     from SymbolicDSGE.estimation.estimator import Estimator
 
     app = create_app()
@@ -1511,12 +1511,11 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
     assert (
         client.post(
             "/api/model/solve",
-            json={"model_name": "reference", "compile_kwargs": {}},
+            json={"model_name": "reference"},
         ).status_code
         == 200
     )
 
-    slot = app.state.ui_session._slot("reference")
     captured: dict[str, object] = {}
 
     def fake_estimate(**kwargs):
@@ -1533,7 +1532,7 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
             loglik=np.float64(-1.25),
         )
 
-    monkeypatch.setattr(slot.solver, "estimate", fake_estimate)
+    monkeypatch.setattr("SymbolicDSGE.ui.session.estimate", fake_estimate)
     response = client.post(
         "/api/run/estimation",
         json={
@@ -1558,7 +1557,6 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
             ],
             # The shape EstimationView.tsx posts for mle and map.
             "method_kwargs": {"maxiter": 25},
-            "compile_kwargs": {},
             "ss_seed": None,
             "posterior_point": "mean",
             "estimate_and_solve": False,
@@ -1568,7 +1566,7 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
 
     # Whatever is not one of estimate's own parameters is forwarded verbatim to
     # the optimizer, so that is the set the optimizer has to accept.
-    own = set(inspect.signature(slot.solver.__class__.estimate).parameters)
+    own = set(inspect.signature(estimate).parameters)
     forwarded = {k: v for k, v in captured.items() if k not in own}
     assert forwarded, "nothing was forwarded, so the binding below proves nothing"
 

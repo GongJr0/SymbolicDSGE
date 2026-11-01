@@ -119,23 +119,16 @@ def model_path(request) -> Path:
 
 @pytest.fixture(scope="session")
 def post82_bundle(post82_test_model_path):
-    from SymbolicDSGE import DSGESolver, parse_config
+    from SymbolicDSGE import parse_config, compile_model, solve_model
 
     parsed = parse_config(post82_test_model_path)
-    solver = DSGESolver(parsed)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled)
+    compiled = compile_model(parsed)
+    solved = solve_model(parsed, compiled=compiled)
     return {
-        "solver": solver,
         "parsed": parsed,
         "compiled": compiled,
         "solved": solved,
     }
-
-
-@pytest.fixture(scope="session")
-def solver_post82(post82_bundle):
-    return post82_bundle["solver"]
 
 
 @pytest.fixture(scope="session")
@@ -155,23 +148,16 @@ def solved_post82(post82_bundle):
 
 @pytest.fixture(scope="session")
 def test_bundle(test_model_path):
-    from SymbolicDSGE import DSGESolver, parse_config
+    from SymbolicDSGE import parse_config, compile_model, solve_model
 
     parsed = parse_config(test_model_path)
-    solver = DSGESolver(parsed)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled)
+    compiled = compile_model(parsed)
+    solved = solve_model(parsed, compiled=compiled)
     return {
-        "solver": solver,
         "parsed": parsed,
         "compiled": compiled,
         "solved": solved,
     }
-
-
-@pytest.fixture(scope="session")
-def solver_test(test_bundle):
-    return test_bundle["solver"]
 
 
 @pytest.fixture(scope="session")
@@ -192,23 +178,16 @@ def solved_test(test_bundle):
 
 @pytest.fixture(scope="session")
 def rbc_so_bundle(rbc_second_order_test_model_path):
-    from SymbolicDSGE import DSGESolver, parse_config
+    from SymbolicDSGE import parse_config, compile_model, solve_model
 
     parsed = parse_config(rbc_second_order_test_model_path)
-    solver = DSGESolver(parsed)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled, order=2)
+    compiled = compile_model(parsed)
+    solved = solve_model(parsed, compiled=compiled, order=2)
     return {
-        "solver": solver,
         "parsed": parsed,
         "compiled": compiled,
         "solved": solved,
     }
-
-
-@pytest.fixture(scope="session")
-def solver_rbc_so(rbc_so_bundle):
-    return rbc_so_bundle["solver"]
 
 
 @pytest.fixture(scope="session")
@@ -227,17 +206,90 @@ def solved_rbc_so(rbc_so_bundle):
 
 
 @pytest.fixture(scope="session")
+def parsed_rbc_obc(parsed_rbc_so):
+    """Levels RBC where a bad-TFP regime shuts investment off.
+
+    POST82 is a gap model, so its regime constants can be zero purely because
+    the reference steady state is. This one is in levels, where the constant is
+    the ``delta * k_ss`` the shut-off investment rule leaves behind, which is
+    what the piecewise solve consumes.
+    """
+    import copy
+
+    import sympy as sp
+
+    from SymbolicDSGE.core.config import Constraint
+
+    t = sp.Symbol("t", integer=True)
+    conf = copy.deepcopy(parsed_rbc_so)
+    _, k, z = conf.variables
+    delta = sp.Symbol("delta")
+
+    conf.equations.constraints = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
+    conf.equations.regimes = {
+        frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
+    }
+    return conf
+
+
+@pytest.fixture(scope="session")
+def compiled_rbc_obc(parsed_rbc_obc):
+    from SymbolicDSGE import compile_model
+
+    return compile_model(parsed_rbc_obc)
+
+
+@pytest.fixture(scope="session")
+def par_rbc_obc(parsed_rbc_obc, compiled_rbc_obc):
+    import numpy as np
+
+    calib = parsed_rbc_obc.calibration.parameters
+    return np.array([float(calib[p]) for p in compiled_rbc_obc.calib_params])
+
+
+@pytest.fixture(scope="session")
+def ss_rbc_obc(parsed_rbc_obc, compiled_rbc_obc, par_rbc_obc):
+    """Reference steady state, which every regime linearizes around.
+
+    A lag aux starts where its origin does, so the suffix is stripped before the
+    ``<name>_ss`` seed lookup; an unseeded variable starts at zero.
+    """
+    import re
+
+    import numpy as np
+    import sympy as sp
+
+    from SymbolicDSGE._ckernels.core import steady_state_newton
+
+    calib = parsed_rbc_obc.calibration.parameters
+    seed = []
+    for name in compiled_rbc_obc.var_names:
+        origin = re.sub(r"_lag\d+$", "", name)
+        sym = sp.Symbol(f"{origin}_ss")
+        seed.append(float(calib[sym]) if sym in calib else 0.0)
+
+    ss, _ = steady_state_newton(
+        compiled_rbc_obc.construct_objective_cfunc().address,
+        np.array(seed),
+        par_rbc_obc,
+        compiled_rbc_obc.n_exog,
+    )
+    # The whole point of a levels fixture: the expansion point is not the origin.
+    assert np.abs(ss).max() > 1.0
+    return ss
+
+
+@pytest.fixture(scope="session")
 def solved_multishock(rbc_multishock_test_model_path):
     """The three-shock correlated RBC, solved to second order.
 
     Read-only: consumers take its policy and its calibration as they are, so
     the whole suite shares one solve. ``compiled`` comes off it.
     """
-    from SymbolicDSGE import DSGESolver, parse_config
+    from SymbolicDSGE import parse_config, solve_model
 
     model = parse_config(rbc_multishock_test_model_path)
-    solver = DSGESolver(model)
-    return solver.solve(solver.compile(), order=2)
+    return solve_model(model, order=2)
 
 
 @pytest.fixture(scope="session")

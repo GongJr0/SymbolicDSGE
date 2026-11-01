@@ -18,7 +18,7 @@ from SymbolicDSGE._ckernels.core._core import (
     klein_preprocess,
     second_order,
 )
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import compile_model
 from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.solver_backend import klein_solve
 from SymbolicDSGE.core.resolvers import resolve_ss_seed, shock_covariance
@@ -29,7 +29,7 @@ _BLOCKS = ("gxx", "hxx", "gxu", "hxu", "guu", "huu", "gss", "hss")
 
 def _drive(path):
     model = parse_config(path)
-    compiled = DSGESolver(model).compile()
+    compiled = compile_model(model)
     n_eq = len(compiled.var_names)
     n_state = compiled.n_state
     calib = model.calibration.parameters

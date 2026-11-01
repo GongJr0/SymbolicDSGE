@@ -23,8 +23,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import compile_model
 from SymbolicDSGE.core import parse_config
+from SymbolicDSGE.core.solver import solve_model
 from SymbolicDSGE.core.solver_backend import BKStatus
 
 MODELS = Path(__file__).resolve().parents[1] / "fixtures" / "models"
@@ -36,8 +37,7 @@ RHO_G = 0.8
 @pytest.fixture(scope="module")
 def indeterminate():
     model = parse_config(MODELS / "indeterminate.yaml")
-    solver = DSGESolver(model)
-    return solver, solver.compile()
+    return model, compile_model(model)
 
 
 def _params(config, **overrides) -> dict[str, float]:
@@ -82,8 +82,8 @@ def _msv_loadings(par: dict[str, float]) -> dict[str, float]:
 def test_the_selection_spans_the_state_on_either_side_of_the_taylor_principle(
     indeterminate, psi_pi, stab, n_stable
 ):
-    solver, compiled = indeterminate
-    par = _params(solver.config, psi_pi=psi_pi)
+    model, compiled = indeterminate
+    par = _params(model, psi_pi=psi_pi)
 
     warns = (
         pytest.warns(UserWarning, match="INDETERMINATE")
@@ -91,7 +91,7 @@ def test_the_selection_spans_the_state_on_either_side_of_the_taylor_principle(
         else nullcontext()
     )
     with warns:
-        solved = solver.solve(compiled, parameters=par, order=1)
+        solved = solve_model(model, compiled=compiled, parameters=par, order=1)
 
     assert solved.policy.stab is stab
     assert compiled.n_state == 1
@@ -117,13 +117,15 @@ def test_the_indeterminate_rule_is_the_determinate_one_continued(indeterminate):
     """A passive rule changes which roots are stable, not which equations the
     rule has to satisfy, so the two calibrations differ only through ``psi_pi``.
     """
-    solver, compiled = indeterminate
-    passive = _params(solver.config, psi_pi=0.8)
-    active = _params(solver.config, psi_pi=1.5)
+    model, compiled = indeterminate
+    passive = _params(model, psi_pi=0.8)
+    active = _params(model, psi_pi=1.5)
 
     with pytest.warns(UserWarning, match="INDETERMINATE"):
-        solved_passive = solver.solve(compiled, parameters=passive, order=1)
-    solved_active = solver.solve(compiled, parameters=active, order=1)
+        solved_passive = solve_model(
+            model, compiled=compiled, parameters=passive, order=1
+        )
+    solved_active = solve_model(model, compiled=compiled, parameters=active, order=1)
 
     np.testing.assert_allclose(solved_passive.policy.p, solved_active.policy.p)
     assert not np.allclose(solved_passive.policy.f, solved_active.policy.f)

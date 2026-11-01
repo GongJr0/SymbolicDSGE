@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import solve_model
 from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.solved_model import FirstOrderSolvedModel
 from SymbolicDSGE.estimation import Estimator
@@ -41,8 +41,7 @@ _ESTIMATED = ["RHO"]
 @pytest.fixture(scope="module")
 def solved(nk_zlb_test_model_path):
     model = parse_config(nk_zlb_test_model_path)
-    solver = DSGESolver(model)
-    return solver.solve(solver.compile())
+    return solve_model(model)
 
 
 @pytest.fixture(scope="module")

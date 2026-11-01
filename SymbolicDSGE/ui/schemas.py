@@ -38,7 +38,6 @@ class LoadYamlRequest(TypedDict):
 
 class SolveModelRequest(TypedDict):
     model_name: str
-    compile_kwargs: dict[str, Any]
     solve_kwargs: dict[str, Any]
 
 
@@ -85,7 +84,6 @@ class EstimationRunRequest(TypedDict):
     observables: list[str] | None
     parameters: list[EstimationParameterSpec]
     method_kwargs: dict[str, Any]
-    compile_kwargs: dict[str, Any]
     ss_seed: list[float] | None
     posterior_point: PosteriorPoint
     estimate_and_solve: bool

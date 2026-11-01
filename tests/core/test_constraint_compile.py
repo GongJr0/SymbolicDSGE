@@ -4,13 +4,12 @@ from __future__ import annotations
 import copy
 import ctypes
 import dataclasses
-import re
 
 import numpy as np
 import pytest
 import sympy as sp
 
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import compile_model
 from SymbolicDSGE.core.compiled_model import RegimeBlock
 from SymbolicDSGE.core.config import Constraint
 from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
@@ -57,22 +56,21 @@ def _with_constraints(parsed, constraint, replacements=None):
     conf.equations.regimes = {
         c: replacements.get(c, {target: sp.Eq(var(t), 0)}) for c in combos
     }
-    return DSGESolver(conf)
+    return conf
 
 
 @pytest.fixture(scope="module")
 def compiled_obc(parsed_post82):
-    model = parsed_post82
-    g, z = (v for v in model.variables[:2])
+    g, z = (v for v in parsed_post82.variables[:2])
     beta = sp.Symbol("beta")
-    solver = _with_constraints(
+    model = _with_constraints(
         parsed_post82,
         {
             "lo": Constraint(bind=g(t) < 0, relax=g(t) >= 0),
             "hi": Constraint(bind=sp.And(z(t) > beta, g(t) < 1), relax=z(t) <= beta),
         },
     )
-    return solver.compile()
+    return compile_model(model)
 
 
 def test_conditions_substitute_into_cur_symbols(compiled_obc):
@@ -213,10 +211,12 @@ def test_a_connective_mixing_strict_and_inclusive_is_rejected(parsed_post82):
     model = parsed_post82
     g, z = (v for v in model.variables[:2])
     beta = sp.Symbol("beta")
-    compiled = _with_constraints(
-        parsed_post82,
-        {"lo": Constraint(bind=sp.And(z(t) >= beta, g(t) < 1), relax=g(t) > 1)},
-    ).compile()
+    compiled = compile_model(
+        _with_constraints(
+            parsed_post82,
+            {"lo": Constraint(bind=sp.And(z(t) >= beta, g(t) < 1), relax=g(t) > 1)},
+        )
+    )
 
     with pytest.raises(NotImplementedError, match="mixes strict and inclusive"):
         compiled.construct_constraint_func()
@@ -226,9 +226,11 @@ def test_an_equality_condition_has_no_distance(parsed_post82):
     # A Relational the parser accepts and the distance encoding cannot express.
     model = parsed_post82
     g = model.variables[0]
-    compiled = _with_constraints(
-        parsed_post82, {"lo": Constraint(bind=sp.Eq(g(t), 0), relax=g(t) > 0)}
-    ).compile()
+    compiled = compile_model(
+        _with_constraints(
+            parsed_post82, {"lo": Constraint(bind=sp.Eq(g(t), 0), relax=g(t) > 0)}
+        )
+    )
 
     with pytest.raises(NotImplementedError, match="Equality"):
         compiled.construct_constraint_func()
@@ -269,7 +271,7 @@ def _evaluate(compiled, exprs, n_row, n_col, point, par):
 def _symbolic_pencil(compiled, residuals):
     """(a, b, c, d) by the diff-then-fold the regime blocks are emitted with.
 
-    Mirrors ``DSGESolver._compile_regimes``: differentiate at each date before
+    Mirrors ``_compile_regimes``: differentiate at each date before
     collapsing them, and carry klein_preproc's sign on every sweep but the fwd
     one, so the row reads ``a y' = b y + c y_prev + d eps``.
     """
@@ -335,23 +337,24 @@ def compiled_lead_regime(parsed_post82):
     beta = sp.Symbol("beta")
     shock = next(iter(model.shocks))
     target = list(model.equations.model)[2]
-    solver = _with_constraints(
-        parsed_post82,
-        {"lo": Constraint(bind=r(t) < 0, relax=r(t) >= 0)},
-        {
-            frozenset({"lo"}): {
-                target: sp.Eq(
-                    r(t),
-                    beta * g(t + 1) * z(t + 1)
-                    + sp.exp(g(t + 1))
-                    - r(t) ** 2
-                    + beta * z(t - 1)
-                    + shock,
-                )
-            }
-        },
+    return compile_model(
+        _with_constraints(
+            parsed_post82,
+            {"lo": Constraint(bind=r(t) < 0, relax=r(t) >= 0)},
+            {
+                frozenset({"lo"}): {
+                    target: sp.Eq(
+                        r(t),
+                        beta * g(t + 1) * z(t + 1)
+                        + sp.exp(g(t + 1))
+                        - r(t) ** 2
+                        + beta * z(t - 1)
+                        + shock,
+                    )
+                }
+            },
+        )
     )
-    return solver.compile()
 
 
 def test_regime_pencil_rows_match_the_complex_step_sweep(
@@ -519,19 +522,20 @@ def compiled_regimes(parsed_post82):
     g, _, r = model.variables[:3]
     beta = sp.Symbol("beta")
     target = list(model.equations.model)[2]
-    solver = _with_constraints(
-        parsed_post82,
-        {
-            "lo": Constraint(bind=r(t) < 0, relax=r(t) >= 0),
-            "hi": Constraint(bind=g(t) > beta, relax=g(t) <= beta),
-        },
-        {
-            frozenset({"lo"}): {target: sp.Eq(r(t), 0)},
-            frozenset({"hi"}): {target: sp.Eq(r(t), beta)},
-            frozenset({"lo", "hi"}): {target: sp.Eq(r(t), 2 * beta)},
-        },
+    return compile_model(
+        _with_constraints(
+            parsed_post82,
+            {
+                "lo": Constraint(bind=r(t) < 0, relax=r(t) >= 0),
+                "hi": Constraint(bind=g(t) > beta, relax=g(t) <= beta),
+            },
+            {
+                frozenset({"lo"}): {target: sp.Eq(r(t), 0)},
+                frozenset({"hi"}): {target: sp.Eq(r(t), beta)},
+                frozenset({"lo", "hi"}): {target: sp.Eq(r(t), 2 * beta)},
+            },
+        )
     )
-    return solver.compile()
 
 
 def test_regimes_are_keyed_by_binding_bitmask(compiled_regimes):
@@ -616,13 +620,13 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
     # regime never touched, with no numerical symptom at compile time.
     model = parsed_post82
     r, Pi = model.variables[2], model.variables[4]
-    solver = _with_constraints(
+    conf = _with_constraints(
         parsed_post82,
         {"elb": Constraint(bind=r(t) < 0, relax=r(t) >= 0)},
         {frozenset({"elb"}): {"taylor": sp.Eq(r(t), Pi(t - 2))}},
     )
 
-    compiled = solver.compile()
+    compiled = compile_model(conf)
     names = list(model.equations.model)
 
     assert "Pi_lag1" in compiled.var_names
@@ -654,91 +658,49 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
     assert np.flatnonzero(changed).tolist() == compiled.regimes[1].rows
 
 
-@pytest.fixture(scope="module")
-def compiled_rbc_obc(parsed_rbc_so):
-    """Levels RBC where a bad-TFP regime shuts investment off.
-
-    POST82 is a gap model, so its regime constants can be zero purely because
-    the reference steady state is. This fixture is in levels, where the
-    constant is what actually drives the piecewise solve.
-    """
-    model = parsed_rbc_so
-    conf = copy.deepcopy(model)
-    c, k, z = conf.variables
-    delta = sp.Symbol("delta")
-
-    conf.equations.constraints = {"low": Constraint(bind=z(t) < 0, relax=z(t) >= 0)}
-    conf.equations.regimes = {
-        frozenset({"low"}): {"euler": sp.Eq(k(t + 1), (1 - delta) * k(t))}
-    }
-    return DSGESolver(conf).compile()
-
-
-def _rbc_seed(config, compiled):
-    """Newton seed over the compiled layout, generated variables included.
-
-    A lag aux starts where its origin does, so the suffix is stripped before the
-    `<name>_ss` lookup; an unseeded variable starts at zero.
-    """
-    calib = config.calibration.parameters
-    seeds = []
-    for name in compiled.var_names:
-        origin = re.sub(r"_lag\d+$", "", name)
-        sym = sp.Symbol(f"{origin}_ss")
-        seeds.append(float(calib[sym]) if sym in calib else 0.0)
-    return np.array(seeds)
-
-
-def _rbc_steady_state(config, compiled):
-    ss, _ = steady_state_newton(
-        compiled.construct_objective_cfunc().address,
-        _rbc_seed(config, compiled),
-        _params(config, compiled),
-        compiled.n_exog,
-    )
-    return ss
-
-
 def test_symbolic_pencil_matches_the_reference_sweep_in_levels(
-    parsed_rbc_so, compiled_rbc_obc
+    parsed_rbc_obc, compiled_rbc_obc, ss_rbc_obc
 ):
     # POST82 sits at ss = 0, where a pencil can read as right for the wrong
     # reason. Here the expansion point is nonzero and the equations are
     # genuinely nonlinear, so the derivatives carry state.
-    ss = _rbc_steady_state(parsed_rbc_so, compiled_rbc_obc)
-    assert np.abs(ss).max() > 1.0
-    _assert_pencil_parity(parsed_rbc_so, compiled_rbc_obc, ss, 0.05)
+    _assert_pencil_parity(parsed_rbc_obc, compiled_rbc_obc, ss_rbc_obc, 0.05)
 
 
 def test_levels_regime_constant_is_the_steady_state_residual(
-    parsed_rbc_so, compiled_rbc_obc
+    parsed_rbc_obc, compiled_rbc_obc, par_rbc_obc, ss_rbc_obc
 ):
-    par = _params(parsed_rbc_so, compiled_rbc_obc)
     n_eq = len(compiled_rbc_obc.var_names)
-
     ref_cfunc = compiled_rbc_obc.construct_objective_cfunc()
     n_exog = compiled_rbc_obc.n_exog
-    ss_ref, _ = steady_state_newton(
-        ref_cfunc.address, _rbc_seed(parsed_rbc_so, compiled_rbc_obc), par, n_exog
-    )
 
-    # The whole point of a levels fixture: the expansion point is not the origin.
-    assert np.abs(ss_ref).max() > 1.0
     c_ref = residual_eval(
-        ref_cfunc.address, ss_ref, ss_ref, ss_ref, np.zeros(n_exog), par, n_eq
+        ref_cfunc.address,
+        ss_rbc_obc,
+        ss_rbc_obc,
+        ss_rbc_obc,
+        np.zeros(n_exog),
+        par_rbc_obc,
+        n_eq,
     ).real
     np.testing.assert_allclose(c_ref, 0.0, atol=1e-10)
 
     # `euler` is row 0; the replacement k(t+1) = (1 - delta) k(t) leaves a
     # residual of delta * k_ss at the reference steady state.
     k_idx = compiled_rbc_obc.var_names.index("k")
-    delta = parsed_rbc_so.calibration.parameters[sp.Symbol("delta")]
-    expected = float(delta) * ss_ref[k_idx]
+    delta = parsed_rbc_obc.calibration.parameters[sp.Symbol("delta")]
+    expected = float(delta) * ss_rbc_obc[k_idx]
     assert expected > 0.5
 
     cfunc = _regime_cfuncs(compiled_rbc_obc)[1]
     c_r = residual_eval(
-        cfunc.address, ss_ref, ss_ref, ss_ref, np.zeros(n_exog), par, n_eq
+        cfunc.address,
+        ss_rbc_obc,
+        ss_rbc_obc,
+        ss_rbc_obc,
+        np.zeros(n_exog),
+        par_rbc_obc,
+        n_eq,
     ).real
 
     want = np.zeros(n_eq)
@@ -753,13 +715,13 @@ def test_regime_replacements_carry_shocks_like_the_reference(parsed_post82):
     r = model.variables[2]
     shock = next(iter(model.shocks))
     rho_r = sp.Symbol("rho_r")
-    solver = _with_constraints(
+    conf = _with_constraints(
         parsed_post82,
         {"lo": Constraint(bind=r(t) < 0, relax=r(t) >= 0)},
         {frozenset({"lo"}): {"taylor": sp.Eq(r(t), shock + rho_r * r(t))}},
     )
 
-    compiled = solver.compile()
+    compiled = compile_model(conf)
     block = compiled.regimes[1]
     residual = block.residuals[2]
 
@@ -779,14 +741,14 @@ def test_regime_replacing_an_undeclared_equation_is_rejected(parsed_post82):
     # index off the reference.
     model = parsed_post82
     r = model.variables[2]
-    solver = _with_constraints(
+    conf = _with_constraints(
         parsed_post82,
         {"lo": Constraint(bind=r(t) < 0, relax=r(t) >= 0)},
         {frozenset({"lo"}): {"not_an_equation": sp.Eq(r(t), 0)}},
     )
 
     with pytest.raises(ValueError, match=r"does not declare: \['not_an_equation'\]"):
-        solver.compile()
+        compile_model(conf)
 
 
 def test_model_without_regimes_has_no_regime_blocks(compiled_post82):
@@ -809,10 +771,10 @@ def test_model_without_constraints_cannot_build_a_constraint_func(compiled_post8
 def test_conditions_reject_leads_and_lags(parsed_post82, offset):
     model = parsed_post82
     g = model.variables[0]
-    solver = _with_constraints(
+    conf = _with_constraints(
         parsed_post82,
         {"lo": Constraint(bind=g(t + offset) < 0, relax=g(t) >= 0)},
     )
 
     with pytest.raises(ValueError, match="must be contemporaneous."):
-        solver.compile()
+        compile_model(conf)

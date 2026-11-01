@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 from ..bayesian.priors import Prior
 from ..core.config import ModelConfig
 from ..core.compiled_model import CompiledModel
+from ..core.solver import compile_model
 
 from .._ckernels.estimation import (
     run_estimation,
@@ -44,8 +45,9 @@ class Estimator:
     ----------
     config : ModelConfig
         Model configuration object containing the target model specification.
-    compiled : CompiledModel
-        Compiled model object containing the target model's information.
+    compiled : CompiledModel | None
+        Optional pre-compiled model object containing the target model's information.
+        If None, the model is compiled once at the Estimator's initialization.
     y : NDF | pd.DataFrame
         Observed data for the estimation procedure. Array in declared observable order or a DataFrame with columns matching the observable names.
     observables : Sequence[str] | None
@@ -94,8 +96,8 @@ class Estimator:
         self,
         *,
         config: ModelConfig,
-        compiled: CompiledModel,
         y: NDF | pd.DataFrame,
+        compiled: CompiledModel | None = None,
         observables: Sequence[str] | None = None,
         filter_mode: str = "linear",
         estimated_params: Sequence[str] | Mapping[str, Prior] | None = None,
@@ -106,6 +108,16 @@ class Estimator:
         R: NDF | None = None,
         P0: NDF | None = None,
     ) -> None:
+        if compiled is not None:
+            if compiled.config_token != config.token:
+                raise ValueError(
+                    "The compiled model and config passed to `Estimator` are not compatible. "
+                    "The config could have been mutated in a way that changed the model's structure after the compiled model was created. "
+                    "Confirm the arguments are the ones you intended to pass. If they are, recompile the model or pass the config by itself."
+                )
+        else:
+            compiled = compile_model(config)
+
         self.estimated_params, self.priors = r.get_names_and_priors(
             estimated_params, compiled
         )

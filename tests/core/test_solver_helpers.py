@@ -1,4 +1,4 @@
-"""Branch coverage for DSGESolver static helpers (no model needed)."""
+"""Branch coverage for s static helpers (no model needed)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pytest
 import sympy as sp
 
 from SymbolicDSGE.core import parse_config
-from SymbolicDSGE.core.solver import DSGESolver, _resolve_order
+import SymbolicDSGE.core.solver as s
 from SymbolicDSGE.core.resolvers import resolve_ss_seed
 
 t = sp.Symbol("t")
@@ -17,91 +17,54 @@ a = sp.Symbol("a")
 
 
 def test_coerce_variable_name_branches():
-    assert DSGESolver._coerce_variable_name("x") == "x"
+    assert s._coerce_variable_name("x") == "x"
     # UndefinedFunction class -> __name__ branch
-    assert DSGESolver._coerce_variable_name(c) == "c"
+    assert s._coerce_variable_name(c) == "c"
     # Symbol -> .name branch
-    assert DSGESolver._coerce_variable_name(sp.Symbol("y")) == "y"
+    assert s._coerce_variable_name(sp.Symbol("y")) == "y"
     # applied call c(t) -> .func.__name__ branch
-    assert DSGESolver._coerce_variable_name(c(t)) == "c"
+    assert s._coerce_variable_name(c(t)) == "c"
     # nothing matches -> str() fallback
     obj = SimpleNamespace()
-    assert DSGESolver._coerce_variable_name(obj) == str(obj)
+    assert s._coerce_variable_name(obj) == str(obj)
 
 
 _STATES = ("k", "z")
 _CONTROLS = ("c", "y")
 
 
-def test_resolve_variable_order_permutes_within_each_block():
-    # Membership is the model's, position is the caller's: both blocks come back
-    # in the order they were named.
-    assert DSGESolver._resolve_variable_order(
-        ["z", "k", "y", "c"], _STATES, _CONTROLS
-    ) == (("z", "k"), ("y", "c"))
-
-
-def test_resolve_variable_order_appends_the_minted_lags_to_the_states():
-    assert DSGESolver._resolve_variable_order(
-        ["z", "k", "c", "y"],
-        (*_STATES, "k_lag1"),
-        _CONTROLS,
-        frozenset({"k_lag1"}),
-    ) == (("z", "k", "k_lag1"), ("c", "y"))
-
-
-def test_resolve_variable_order_errors():
-    with pytest.raises(ValueError, match="duplicate"):
-        DSGESolver._resolve_variable_order(["z", "z", "k", "c"], _STATES, _CONTROLS)
-    with pytest.raises(ValueError, match="Unknown: \\['nope'\\]"):
-        DSGESolver._resolve_variable_order(["z", "k", "c", "nope"], _STATES, _CONTROLS)
-    with pytest.raises(ValueError, match="Missing: \\['y'\\]"):
-        DSGESolver._resolve_variable_order(["z", "k", "c"], _STATES, _CONTROLS)
-    # A minted lag is the compiler's to place, so naming one is unknown.
-    with pytest.raises(ValueError, match="must not appear"):
-        DSGESolver._resolve_variable_order(
-            ["z", "k", "c", "y", "k_lag1"],
-            (*_STATES, "k_lag1"),
-            _CONTROLS,
-            frozenset({"k_lag1"}),
-        )
-    # Right names, wrong blocks: a control cannot be written into the state block.
-    with pytest.raises(ValueError, match="must lead with the model's states"):
-        DSGESolver._resolve_variable_order(["z", "c", "k", "y"], _STATES, _CONTROLS)
-
-
 def test_solve_rejects_bad_order():
     with pytest.raises(ValueError, match="order must be 1 or 2"):
-        DSGESolver.solve(SimpleNamespace(), None, order=3)
+        s.solve_model(SimpleNamespace(), order=3)
 
 
 def test_resolve_order_defaults_to_the_filter_minimum():
-    assert _resolve_order(None, "linear") == 1
-    assert _resolve_order(None, "extended") == 1
-    assert _resolve_order(None, "unscented") == 2
+    assert s._resolve_order(None, "linear") == 1
+    assert s._resolve_order(None, "extended") == 1
+    assert s._resolve_order(None, "unscented") == 2
 
 
 def test_resolve_order_keeps_an_explicit_order_at_or_above_the_minimum():
     # A filter reads nothing above the order it needs, so every order from its
     # minimum up produces the same likelihood and the choice is the caller's.
-    assert _resolve_order(1, "linear") == 1
-    assert _resolve_order(2, "linear") == 2
-    assert _resolve_order(2, "unscented") == 2
+    assert s._resolve_order(1, "linear") == 1
+    assert s._resolve_order(2, "linear") == 2
+    assert s._resolve_order(2, "unscented") == 2
 
 
 def test_resolve_order_rejects_first_order_under_the_ukf():
     with pytest.raises(ValueError, match="UKF requires second-order tensors"):
-        _resolve_order(1, "unscented")
+        s._resolve_order(1, "unscented")
 
 
 def test_resolve_order_rejects_an_order_no_solve_produces():
     with pytest.raises(ValueError, match="order must be 1 or 2"):
-        _resolve_order(3, "linear")
+        s._resolve_order(3, "linear")
 
 
 def test_resolve_order_rejects_an_unknown_filter_mode():
     with pytest.raises(ValueError, match="Unrecognized filter_mode"):
-        _resolve_order(None, "kalman")
+        s._resolve_order(None, "kalman")
 
 
 @pytest.fixture
@@ -114,7 +77,7 @@ def deep_pair(tmp_path, test_model_path):
     path = tmp_path / "deep_test.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     model = parse_config(path)
-    return model, DSGESolver(model).compile()
+    return model, s.compile_model(model)
 
 
 def test_ss_seed_is_written_over_the_declared_variables(parsed_rbc_so, compiled_rbc_so):

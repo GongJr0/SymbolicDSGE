@@ -255,6 +255,11 @@ class CompiledModel:
     # printed to a native cfunc on demand (construct_measurement_jacobian_cfunc).
     measurement_jacobian_eqs: list[Expr]
 
+    # Identifier for the config producing this compiled model,
+    # used to validate compatibility of compiled models and configs
+    # passed to methods together.
+    config_token: int
+
     # Regime conditions in declaration order, bind then relax per constraint;
     # printed to a native cfunc on demand (construct_constraint_func).
     constraint_names: tuple[str, ...] = ()

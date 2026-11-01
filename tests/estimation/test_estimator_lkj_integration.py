@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 from sympy import Symbol
 
-from SymbolicDSGE import DSGESolver, parse_config
+from SymbolicDSGE import parse_config, compile_model, solve_model
 from SymbolicDSGE.bayesian import make_prior
 from SymbolicDSGE.bayesian.priors import Prior
 from SymbolicDSGE.bayesian.transforms.cholesky_corr import CholeskyCorrTransform
@@ -19,11 +19,10 @@ from SymbolicDSGE.estimation.prior_program import TransformCode
 @pytest.fixture(scope="module")
 def dense_lkj_bundle(dense_lkj_test_model_path):
     model = parse_config(dense_lkj_test_model_path)
-    solver = DSGESolver(model)
-    compiled = solver.compile()
+    compiled = compile_model(model)
 
     steady = np.zeros((len(compiled.layout.declared_names),), dtype=np.float64)
-    solved = solver.solve(compiled=compiled, ss_seed=steady)
+    solved = solve_model(model, compiled=compiled, ss_seed=steady)
 
     params = model.calibration.parameters
     std_map = model.calibration.shocks.std
@@ -62,7 +61,6 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
         size=T,
     )
     return {
-        "solver": solver,
         "config": model,
         "compiled": compiled,
         "steady": steady,

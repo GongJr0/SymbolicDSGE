@@ -340,7 +340,6 @@ export function EstimationView({
                             // Only MAP takes it; mle has no such parameter.
                             ...(routine === "map" ? { jacobian: knobs.jacobian } : {}),
                         },
-                compile_kwargs: {},
                 ss_seed: null,
                 posterior_point: knobs.posterior_point,
                 estimate_and_solve: estimateAndSolve,

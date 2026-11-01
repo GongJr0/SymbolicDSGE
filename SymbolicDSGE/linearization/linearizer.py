@@ -16,7 +16,7 @@ from .._ckernels.core import steady_state_newton
 from ..core.compiled_model import CompiledModel
 from ..core.config import ModelConfig
 from ..core.resolvers import resolve_ss_seed
-from ..core.config import SymbolGetterDict, FunctionGetterDict
+from ..core.types import SymbolGetterDict, FunctionGetterDict
 from .view import PointLinearView
 
 NDF = NDArray[float64]

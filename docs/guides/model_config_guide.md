@@ -122,7 +122,7 @@ equations:
 
 ???+ info "Timing of Equations"
     The solver adopts the three-date system allowing `{-1, 0, +1}` time indices in the system. However, leads and lags past the three-date system are handled through auxiliary variables. For any configuration where higher-offsets are used, expect the post-config outputs to represent the complete state-space system with auxiliary variables.
-    Variable generation happens at compile-time (See [`DSGESolver.compile`](../documentation/DSGESolver.md)), you can access `CompiledModel.layout.generated_names`, or from a `SolvedModel` object, `SolvedModel.layout.generated_names`. `declared_names` available from the same objects will return the initial variable names, in the order they were declared in the config.
+    Variable generation happens at compile-time (See [`compile_model`](../documentation/solution_and_compilation.md)), you can access `CompiledModel.layout.generated_names`, or from a `SolvedModel` object, `SolvedModel.layout.generated_names`. `declared_names` available from the same objects will return the initial variable names, in the order they were declared in the config.
 
 ### Constraints
 

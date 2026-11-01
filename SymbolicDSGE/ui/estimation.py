@@ -62,7 +62,7 @@ def build_estimation_inputs(
     run takes: the estimated names, their starting values, the built priors
     (MAP/MCMC only, where every selected row must carry one), and the bounds.
     ``bounds`` stays ``None`` unless some row sets one, matching what
-    :meth:`SymbolicDSGE.core.solver.DSGESolver.estimate` expects. The GUI never
+    :meth:`SymbolicDSGE.core.solver.estimate` expects. The GUI never
     offers the reserved matrix keys, so every row here is a scalar parameter.
     """
     active = [parameter for parameter in parameters if parameter["estimate"]]

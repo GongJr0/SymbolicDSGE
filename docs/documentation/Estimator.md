@@ -8,18 +8,12 @@ tags:
 from SymbolicDSGE import Estimator
 ```
 
-`Estimator` exposes `mle`, `map`, and `mcmc` on top of a compiled DSGE model + Kalman likelihood.
-
-???+ note "Recommended Entry"
-    Most users should call [`DSGESolver.estimate`](./DSGESolver.md) or [`DSGESolver.estimate_and_solve`](./DSGESolver.md) instead of constructing `Estimator` directly.
-
-## Constructor
-
 ```python
 Estimator(
     *,
-    compiled: CompiledModel, # (1)!
-    y: np.ndarray | pd.DataFrame, # (2)!
+    config: ModelConfig
+    y: np.ndarray | pd.DataFrame, # (1)!
+    compiled: CompiledModel, # (2)!
     observables: list[str] | None = None,
     filter_mode: str = "linear", # (3)!
     estimated_params: Sequence[str] | Mapping[str, Prior] | None = None, # (4)!
@@ -32,8 +26,8 @@ Estimator(
 )
 ```
 
-1. Compiled model from `DSGESolver.compile(...)`.
-2. Measurement data for Kalman likelihood.
+1. Measurement data for Kalman likelihood.
+2. Compiled model from `compile_model(...)`.
 3. Filter algorithm for the likelihood: `#!python "linear"`, `#!python "extended"` (EKF), or `#!python "unscented"` (UKF). Chosen explicitly, not inferred.
 4. Parameter names to estimate, or a mapping from parameter name to `Prior` object. If `None`, all parameters are estimated with uniform priors. `map()` and `mcmc()` require priors to be specified and `mle()` ignores them.
 5. Optional constant observation-covariance override. If omitted, `R` is built from the calibration's `measurement_noise` block.

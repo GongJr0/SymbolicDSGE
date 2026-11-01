@@ -18,7 +18,7 @@ import pytest
 import sympy as sp
 
 from SymbolicDSGE._ckernels.occbin._occbin import constraint_path
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import compile_model
 from SymbolicDSGE.core.config import Constraint
 
 t = sp.Symbol("t", integer=True)
@@ -31,7 +31,7 @@ OVER_ON, OVER_BOTH, OVER_OFF = -2.0, 0.0, 2.0
 
 
 @pytest.fixture(scope="module")
-def solver(parsed_post82):
+def mod_post82(parsed_post82):
     conf = copy.deepcopy(parsed_post82)
     by_name = {v.__name__: v for v in conf.variables}
     g, z = by_name["g"], by_name["z"]
@@ -49,18 +49,18 @@ def solver(parsed_post82):
             frozenset({"band", "over"}),
         )
     }
-    return DSGESolver(conf)
+    return conf
 
 
 @pytest.fixture(scope="module")
-def compiled(solver):
-    return solver.compile()
+def compiled(mod_post82):
+    return compile_model(mod_post82)
 
 
 @pytest.fixture(scope="module")
-def par(solver, compiled):
+def par(mod_post82, compiled):
     return np.array(
-        [float(solver.config.calibration.parameters[p]) for p in compiled.calib_params],
+        [float(mod_post82.calibration.parameters[p]) for p in compiled.calib_params],
         dtype=np.float64,
     )
 

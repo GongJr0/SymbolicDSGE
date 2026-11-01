@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from SymbolicDSGE.core import DSGESolver, parse_config
+from SymbolicDSGE.core import parse_config, compile_model, solve_model
 from SymbolicDSGE.core.solver_backend import BKStatus
 
 MODELS = Path(__file__).resolve().parents[1] / "fixtures" / "models"
@@ -16,8 +16,7 @@ MODELS = Path(__file__).resolve().parents[1] / "fixtures" / "models"
 
 def _compiled(name: str):
     model = parse_config(MODELS / name)
-    solver = DSGESolver(model)
-    return solver, model, solver.compile()
+    return model, compile_model(model)
 
 
 @pytest.fixture(scope="module")
@@ -35,10 +34,12 @@ def _params(config, **overrides) -> dict[str, float]:
 
 @pytest.mark.parametrize("order", [1, 2])
 def test_determinate_solve_is_silent(gali, order):
-    solver, config, compiled = gali
+    config, compiled = gali
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
-        solved = solver.solve(compiled, parameters=_params(config), order=order)
+        solved = solve_model(
+            config, compiled=compiled, parameters=_params(config), order=order
+        )
     assert solved.policy.stab is BKStatus.DETERMINATE
     assert solved.is_determinate is True
     assert "unique and stable" in solved.policy.stab.message
@@ -48,10 +49,13 @@ def test_determinate_solve_is_silent(gali, order):
 # forward-looking variable unpinned, one violation off one parameter.
 @pytest.mark.parametrize("order", [1, 2])
 def test_indeterminacy_warns_and_returns(gali, order):
-    solver, config, compiled = gali
+    config, compiled = gali
     with pytest.warns(UserWarning, match="INDETERMINATE") as record:
-        solved = solver.solve(
-            compiled, parameters=_params(config, phi_pi=0.5), order=order
+        solved = solve_model(
+            config,
+            compiled=compiled,
+            parameters=_params(config, phi_pi=0.5),
+            order=order,
         )
     assert BKStatus.INDETERMINATE.message in str(record[0].message)
     assert solved.policy.stab is BKStatus.INDETERMINATE

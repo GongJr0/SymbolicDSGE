@@ -14,10 +14,10 @@ We will use a pre-defined config file (accessible in the [repository](https://gi
 
 ## Reading Model Configuration
 
-The configuration files are parsed by the `#!python SymbolicDSGE.parse_config` function.
+The configuration files are parsed by the `SymbolicDSGE.parse_config` function.
 
 ```python
-from SymbolicDSGE import DSGESolver, Shock, parse_config
+from SymbolicDSGE import Shock, parse_config, compile_model, solve_model
 
 from sympy import Matrix
 from warnings import catch_warnings, simplefilter
@@ -36,54 +36,30 @@ with catch_warnings():
 mat
 ```
 
-The notebook opens `POST82.yaml` from `docs/assets`, hence its `../../MODELS` path. From the repository root, use `MODELS/POST82.yaml` instead. The warning filter is only for the `SymPy` matrix display.
-
 This displays the parsed equations as `SymPy` objects. Variables are functions of time, and the configuration retains the equations through the `ModelConfig` interface.
 
 ## Compilation
 
 Compilation converts the symbolic model to a numeric residual callback. It desugars longer leads and lags with auxiliary variables, derives the state and control layout from equation timing, and compiles the residual consumed by the first-order solver.
 
+The regular solve function (see below) executes the compilation step automatically,
+however compilation is by far the most expensive step in the solution process and there's a separate `compile_model(ModelConfig)` function to allow for multiple solves/estimation routines without re-compiling the model.
+
 ```python
-solver = DSGESolver(model)
-compiled = solver.compile(
-    variable_order=None,  # None => as specified in model config
-    params_order=None,  # None => as specified in model config
-)
-
-print("Equations with symbols removed: \n", "\n".join(map(str, compiled.objective_eqs)))
-print("\n")
-print("Equations as passed to the solver: \n", compiled.construct_objective_cfunc())
-```
-
-`variable_order=None` and `params_order=None` use the configuration's declared order as the fallback. The compiler derives the canonical solver layout itself.
-
-At compilation, the equations are transformed as shown in the code output:
-
-```text
-Equations with symbols removed:
- -beta*fwd_Pi + cur_Pi - kappa*(cur_x - cur_z)
--cur_g + cur_x - fwd_x + tau_inv*(cur_r - fwd_Pi)
-cur_r - e_r - prev_r*rho_r + (rho_r - 1)*(cur_Pi*psi_pi + psi_x*(cur_x - cur_z))
-cur_g - e_g - prev_g*rho_g
-cur_z - e_z - prev_z*rho_z
-
-
-Equations as passed to the solver:
-<Numba C callback '_residual_cf'>
+compiled = compile_model(model)
 ```
 
 ???+ note "Variable Layout"
     The residual callback receives numeric forward, current, and previous variable vectors, the current shock vector, and the parameter vector. A variable that occurs at `t-1` is a state, and every other variable is a control. The compiler creates any auxiliary variables needed for longer lags or leads, then places all states before controls.
 
-
 ## Solution
 
-The solution step takes steady-state values and optionally parameter calibrations to provide a `#!python SolvedModel`.
+The solution step takes steady-state values and optionally parameter calibrations to provide a `SolvedModel`.
 
 ```python
-sol = solver.solve(
-    compiled,
+sol = solve_model(
+    model,
+    compiled=compiled,  # Optional
     parameters=None,  # None => use "calibration" from model config
     ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
 )
@@ -100,11 +76,11 @@ Is determinate:  True
 Eigenvalues:  [0.28 +0.j 0.83 +0.j 0.85 +0.j 2.605+0.j 1.185+0.j] (1)
 ```
 </div>
-1. Eigenvalues stay complex because the ordered Schur solve makes the imaginary part meaningful here. The policy matrices are not: `#!python sol.policy.p` and `#!python sol.policy.f` are real, projected once inside the solve.
+1. Eigenvalues stay complex because the ordered Schur solve makes the imaginary part meaningful here. The policy matrices are not: `sol.policy.p` and `sol.policy.f` are real, projected once inside the solve.
 
 ## Inspecting Model Dynamics
 
-While we can check the matrices directly, we can also use the built-in methods `#!python SolvedModel.irf` and `#!python SolvedModel.transition_plot` to display the dynamics.
+While we can check the matrices directly, we can also use the built-in methods `SolvedModel.irf` and `SolvedModel.transition_plot` to display the dynamics.
 
 ```python
 irf_dict = sol.irf(
@@ -135,15 +111,15 @@ array([0.64 , 0.544, 0.462, 0.393, 0.334, 0.284, 0.241, 0.205, 0.174,
 
 ## Simulation
 
-`#!python SolvedModel` also supplies a `#!python .sim()` method for simulations.
+`SolvedModel` also supplies a `.sim()` method for simulations.
 The method simulates `T` periods given an initial state and a shock specification.
 
 Shock specifications can take two forms.
 
-- A `#!python Shock` distribution spec
-- A `#!python ShockPath` containing an array of shocks and the targeted shock symbols.
+- A `Shock` distribution spec
+- A `ShockPath` containing an array of shocks and the targeted shock symbols.
 
-Shocks are specified as a sequence, where `#!python Shock` and `#!python ShockPath` can be mixed.
+Shocks are specified as a sequence, where `Shock` and `ShockPath` can be mixed.
 `Shock` takes a distribution name, a distribution object implementing `ppf(...)`, or a `ppf(...)` function.
 The latter two are produced via `Shock.from_ppf(...)` and they resolve to inverse CDF tables with `n_knots` points, defaulting to 1024.
 `{"norm", "t", "uni", "exp", "gamma", "beta"}` are built in distributions that `dist` can take as a string. `"norm"` and `"t"` support multivariate draws with clear dependence structure while the others (not having a clear and unambiguous multivariate definition) do not resort to copulas or alternative definitions/parameterizations.

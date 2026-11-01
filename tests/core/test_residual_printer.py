@@ -12,8 +12,7 @@ import numpy as np
 import pytest
 import sympy as sp
 
-from SymbolicDSGE.core import DSGESolver
-from SymbolicDSGE.core import parse_config
+from SymbolicDSGE.core import parse_config, compile_model
 from SymbolicDSGE._ckernels.core import klein_preprocess, residual_eval
 from _oracles.core import _approximate_system_numeric
 from SymbolicDSGE._symbolic_printers import ResidualLayout, build_cfunc
@@ -110,7 +109,7 @@ def test_ipow_complex_step_correct_for_negative_base(expr_factory, analytic):
 
 def _compiled(path: Path):
     model = parse_config(path)
-    return model, DSGESolver(model).compile()
+    return model, compile_model(model)
 
 
 def _param_vector(config, compiled, dtype):

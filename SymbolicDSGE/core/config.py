@@ -1,16 +1,7 @@
 """Symbolic representation of a parsed DSGE model configuration."""
 
 from dataclasses import dataclass
-from typing import (
-    AbstractSet,
-    Any,
-    Mapping,
-    TypeAlias,
-    TypeVar,
-    Dict,
-    Sequence,
-)
-from collections import UserDict
+from typing import Mapping, Sequence
 from sympy import Symbol, Function, Eq, Expr, And, Or, Not
 from sympy.core.relational import Relational
 from numpy import array, eye, float64, ix_, outer
@@ -18,78 +9,18 @@ from numpy.typing import NDArray
 
 from pathlib import Path
 from .config_emitter import write_config_yaml
-
-KT = TypeVar("KT")
-V = TypeVar("V")
-
-Regime: TypeAlias = Dict[str, Eq]  # {model_equation_name: replacement}
-
-
-class _NormalizedKeyDict(UserDict[KT, V]):
-    """A mapping whose key accepts more than one spelling.
-
-    A subclass supplies ``_key``, resolving any accepted spelling to the one the
-    underlying dict is keyed by. The three primitives below route through it and
-    ``UserDict`` builds ``get``, ``pop``, ``setdefault``, ``update`` and the rest
-    on top of them, so the coercion reaches the whole mapping API. Subclassing
-    ``dict`` instead would leave every method not overridden by hand reading the
-    hash table directly, which is silently wrong rather than loud.
-    """
-
-    def __init__(self, inp: Any) -> None:
-        super().__init__(inp)
-
-    @staticmethod
-    def _key(key: Any) -> Any:
-        raise NotImplementedError
-
-    def __getitem__(self, key: Any) -> V:
-        return self.data[self._key(key)]
-
-    def __setitem__(self, key: Any, value: V) -> None:
-        self.data[self._key(key)] = value
-
-    def __delitem__(self, key: Any) -> None:
-        del self.data[self._key(key)]
-
-    def __contains__(self, key: Any) -> bool:
-        return self._key(key) in self.data
-
-
-class SymbolGetterDict(_NormalizedKeyDict[Symbol, V]):
-    @staticmethod
-    def _key(key: Any) -> Any:
-        return Symbol(key) if isinstance(key, str) else key
-
-
-class PairGetterDict(_NormalizedKeyDict[frozenset[Symbol], V]):
-    @staticmethod
-    def _key(key: Any) -> Any:
-        if isinstance(key, (Sequence, AbstractSet)) and not isinstance(key, str):
-            return frozenset(Symbol(k) if isinstance(k, str) else k for k in key)
-        return key
-
-
-class FunctionGetterDict(_NormalizedKeyDict[Function, V]):
-    @staticmethod
-    def _key(key: Any) -> Any:
-        return Function(key) if isinstance(key, str) else key
-
-
-class RegimeGetterDict(_NormalizedKeyDict[frozenset[str], Regime]):
-    """Key normalizing dictionary for regimes. Accessors accept a single regime name or a set of names, and normalize to the frozenset of names the underlying dict is keyed by."""
-
-    @staticmethod
-    def _key(key: Any) -> Any:
-        if isinstance(key, str):
-            return frozenset(s.strip() for s in key.split(","))
-        if isinstance(key, (Sequence, AbstractSet)):
-            return frozenset(str(k) for k in key)
-        return key
+from .types import (
+    _Lockable,
+    LockableDict,
+    SymbolGetterDict,
+    PairGetterDict,
+    FunctionGetterDict,
+    RegimeGetterDict,
+)
 
 
 @dataclass
-class CovarianceSpec:
+class CovarianceSpec(_Lockable):
     """Specification of a covariance matrix in terms of standard deviations and correlations."""
 
     std: SymbolGetterDict[str]
@@ -102,9 +33,17 @@ class CovarianceSpec:
         corr_params = [v for v in self.corr.values() if v is not None]
         return set(std_params + corr_params)
 
+    def _freeze(self) -> None:
+        self.std.lock()
+        self.corr.lock()
+
+    def _thaw(self) -> None:
+        self.std.unlock()
+        self.corr.unlock()
+
 
 @dataclass
-class Constraint:
+class Constraint(_Lockable):
     """Constrants that can bind and relax on separate conditions, allowing for regime switching in the model.
 
     Attributes
@@ -117,12 +56,13 @@ class Constraint:
         satisfied.
     """
 
+    # SymPy expressions are unmutable, super's lock/unlock is enough
     bind: Relational | And | Or | Not
     relax: Relational | And | Or | Not
 
 
 @dataclass
-class Equations:
+class Equations(_Lockable):
     """Equations defining the transitions, policy, and observables of the model.
 
     Attributes
@@ -147,15 +87,47 @@ class Equations:
         observables.
     """
 
-    model: Dict[str, Eq]
-    constraints: Dict[str, Constraint] | None  # {constraint_name: Constraint}
+    model: LockableDict[str, Eq]
+    constraints: LockableDict[str, Constraint] | None  # {constraint_name: Constraint}
     regimes: RegimeGetterDict | None  # {binding_set: Regime}
     observables: SymbolGetterDict[Expr]
     obs_is_affine: SymbolGetterDict[bool]
 
+    def _freeze(self) -> None:
+        self.model = LockableDict(self.model)
+        self.model.lock()
+
+        if self.constraints is not None:
+            self.constraints = LockableDict(
+                {n: c.lock() for n, c in self.constraints.items()}
+            ).lock()
+
+        if self.regimes is not None:
+            self.regimes = RegimeGetterDict(
+                {k: LockableDict(r).lock() for k, r in self.regimes.items()}
+            ).lock()
+
+        self.observables.lock()
+        self.obs_is_affine.lock()
+
+    def _thaw(self) -> None:
+
+        self.model.unlock()
+        self.observables.unlock()
+        self.obs_is_affine.unlock()
+
+        if self.constraints is not None:
+            for c in self.constraints.values():
+                c.unlock()
+            self.constraints.unlock()
+        if self.regimes is not None:
+            for r in self.regimes.values():
+                r.unlock()
+            self.regimes.unlock()
+
 
 @dataclass
-class Calib:
+class Calib(_Lockable):
     """Calibration of the model configuration, including parameter values, shock standard deviations, and shock correlations.
 
     Attributes
@@ -181,6 +153,18 @@ class Calib:
                 tuple(float(v) for v in self.parameters.values()),
             )
         )
+
+    def _freeze(self) -> None:
+        self.parameters.lock()
+        self.shocks.lock()
+        if self.measurement_noise is not None:
+            self.measurement_noise.lock()
+
+    def _thaw(self) -> None:
+        self.parameters.unlock()
+        self.shocks.unlock()
+        if self.measurement_noise is not None:
+            self.measurement_noise.unlock()
 
 
 def cov_from_spec(
@@ -227,6 +211,7 @@ def cov_from_spec(
     for pair, param_name in spec.corr.items():
         if param_name is None:
             continue
+
         i, j = (pos[str(member)] for member in pair)
         rho_ij = _param(param_name)
         rho[i, j] = rho_ij
@@ -241,7 +226,7 @@ def cov_from_spec(
 
 
 @dataclass(repr=False)
-class ModelConfig:
+class ModelConfig(_Lockable):
     """A model configuration parsed into symbolic representations of its variables, parameters, shocks, observables, and equations.
 
     Attributes
@@ -265,12 +250,34 @@ class ModelConfig:
     """
 
     name: str
-    variables: list[Function]
+    variables: Sequence[Function]
     ss_seed: FunctionGetterDict[Expr | None]
-    shocks: list[Symbol]
-    observables: list[Symbol]
+    shocks: Sequence[Symbol]
+    observables: Sequence[Symbol]
     equations: Equations
     calibration: Calib
+
+    def _freeze(self) -> None:
+        # lockables
+        self.ss_seed.lock()
+        self.equations.lock()
+        self.calibration.lock()
+
+        # list->tuple
+        self.variables = tuple(self.variables)
+        self.shocks = tuple(self.shocks)
+        self.observables = tuple(self.observables)
+
+    def _thaw(self) -> None:
+        # unlockables
+        self.ss_seed.unlock()
+        self.equations.unlock()
+        self.calibration.unlock()
+
+        # tuple->list
+        self.variables = list(self.variables)
+        self.shocks = list(self.shocks)
+        self.observables = list(self.observables)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.name})"
@@ -295,7 +302,11 @@ class ModelConfig:
                 f"The following keys are missing from the model's calibration parameters: {missing_keys}"
             )
 
+        was_locked = self.is_locked
+        self.unlock()
         self.calibration.parameters.update(new_params)
+        if was_locked:
+            self.lock()
 
     def to_yaml(self, path: str | Path, *, digits: int | None = None) -> None:
         """Write the model configuration to a YAML file.
@@ -329,3 +340,27 @@ class ModelConfig:
         from .model_parser import ModelParser
 
         return ModelParser(path).get()
+
+    @property
+    def token(self) -> int:
+        """Numeric token for comparing compatibility of a config with a compiled model.
+
+        Hash based identifier of the elements that invalidate a compilation when mutated.
+        If a token does not match one recorded on the compiled model, the config and compiled model
+        cannot be used in unison.
+        """
+        eqs = self.equations
+        return hash(
+            (
+                tuple(self.variables),
+                tuple(self.shocks),
+                tuple(self.observables),
+                tuple(eqs.model.items()),
+                tuple(eqs.observables.items()),
+                tuple((k, v.bind, v.relax) for k, v in (eqs.constraints or {}).items()),
+                frozenset(
+                    (k, tuple(r.items())) for k, r in (eqs.regimes or {}).items()
+                ),
+                tuple(self.calibration.parameters.keys()),
+            )
+        )

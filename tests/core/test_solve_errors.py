@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from SymbolicDSGE._ckernels.core._solve_errors import SolveStatus
-from SymbolicDSGE.core import DSGESolver, parse_config
+from SymbolicDSGE.core import parse_config, compile_model, solve_model
 from SymbolicDSGE.core.solver_backend import (
     _FAILURES,
     DecisionRuleError,
@@ -75,8 +75,7 @@ def _overflowing_residual_yaml() -> str:
 
 def _compiled(path: Path):
     model = parse_config(path)
-    solver = DSGESolver(model)
-    return solver, solver.compile()
+    return model, compile_model(model)
 
 
 def _written(tmp_path: Path, name: str, spec: str):
@@ -99,9 +98,11 @@ def gali():
 
 
 def test_no_stable_solution_carries_the_partition_and_the_eigenvalues(gali):
-    solver, compiled = gali
+    model, compiled = gali
     with pytest.raises(DecisionRuleError) as exc:
-        solver.solve(compiled, parameters=_params(solver.config, rho_a=1.8), order=1)
+        solve_model(
+            model, compiled=compiled, parameters=_params(model, rho_a=1.8), order=1
+        )
 
     err = exc.value
     assert err.status is SolveStatus.NO_STABLE_SOLUTION
@@ -122,12 +123,13 @@ def test_no_stable_solution_carries_the_partition_and_the_eigenvalues(gali):
 
 
 def test_a_variable_at_both_dates_is_counted_in_each_block(
-    solver_rbc_so, compiled_rbc_so
+    parsed_rbc_so, compiled_rbc_so
 ):
     with pytest.raises(DecisionRuleError) as exc:
-        solver_rbc_so.solve(
-            compiled_rbc_so,
-            parameters=_params(solver_rbc_so.config, rho=1.8),
+        solve_model(
+            parsed_rbc_so,
+            compiled=compiled_rbc_so,
+            parameters=_params(parsed_rbc_so, rho=1.8),
             order=2,
         )
 
@@ -143,9 +145,9 @@ def test_a_variable_at_both_dates_is_counted_in_each_block(
 
 
 def test_singular_steady_state_jacobian_reports_no_partition(tmp_path):
-    solver, compiled = _written(tmp_path, "no_fixed_point", _no_fixed_point_yaml())
+    model, compiled = _written(tmp_path, "no_fixed_point", _no_fixed_point_yaml())
     with pytest.raises(SteadyStateError) as exc:
-        solver.solve(compiled, parameters=_params(solver.config), order=1)
+        solve_model(model, compiled=compiled, parameters=_params(model, order=1))
 
     err = exc.value
     assert err.status is SolveStatus.NEWTON_SINGULAR
@@ -156,11 +158,11 @@ def test_singular_steady_state_jacobian_reports_no_partition(tmp_path):
 
 
 def test_non_finite_steady_state_residual_does_not_converge(tmp_path):
-    solver, compiled = _written(
+    model, compiled = _written(
         tmp_path, "overflowing_residual", _overflowing_residual_yaml()
     )
     with pytest.raises(SteadyStateError) as exc:
-        solver.solve(compiled, parameters=_params(solver.config), order=1)
+        solve_model(model, compiled=compiled, parameters=_params(model), order=1)
 
     assert exc.value.status is SolveStatus.NEWTON_NO_CONVERGE
     assert "State space:" not in str(exc.value)

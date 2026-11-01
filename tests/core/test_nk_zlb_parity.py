@@ -31,7 +31,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE.core import DSGESolver
+from SymbolicDSGE.core import solve_model
 from SymbolicDSGE.core import parse_config
 from _oracles import dynare_nk_zlb_1_constraint as golden
 
@@ -88,8 +88,7 @@ _TOL = 1e-11
 def solved(nk_zlb_test_model_path):
     """The model a user gets from ``solve``: the constraint makes it piecewise."""
     model = parse_config(nk_zlb_test_model_path)
-    solver = DSGESolver(model)
-    return solver.solve(solver.compile())
+    return solve_model(model)
 
 
 @pytest.fixture(scope="module")

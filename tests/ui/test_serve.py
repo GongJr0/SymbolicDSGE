@@ -54,13 +54,6 @@ def _estimation_spec(y) -> EstimatorSpec:
     )
 
 
-_NEEDS_ESTIMATOR_CONFIG = pytest.mark.xfail(
-    raises=TypeError,
-    strict=True,
-    reason="_estimator builds an Estimator without the config it now requires",
-)
-
-
 def _hydrated_bundle(tmp_path: Path, parsed_test, compiled_test) -> Path:
     """Build a bundle that hits every preload slot (estimation+mc+sim)."""
     rng = np.random.default_rng(0)
@@ -84,7 +77,7 @@ def _hydrated_bundle(tmp_path: Path, parsed_test, compiled_test) -> Path:
     return (
         BundleBuilder(created_by="serve-test")
         .add_model("reference", parsed_test, compile_kwargs={})
-        .add_estimation(_estimator(observed, compiled_test), result=result)
+        .add_estimation(_estimator(observed, compiled_test, parsed_test), result=result)
         .add_mc(pipeline)
         .set_simulation(
             "reference",
@@ -322,7 +315,6 @@ def test_session_summary_drops_unset_workspace_slots() -> None:
 # -- build_workspace from a LoadedBundle -----------------------------------
 
 
-@_NEEDS_ESTIMATOR_CONFIG
 def test_build_workspace_populates_all_slots(
     tmp_path: Path, parsed_test, compiled_test
 ) -> None:
@@ -420,7 +412,6 @@ def test_prefill_restores_the_settings_a_run_was_made_with(parsed_test) -> None:
     assert "factr" not in view and "pgtol" not in view
 
 
-@_NEEDS_ESTIMATOR_CONFIG
 def test_build_workspace_keeps_gui_shape_out_of_the_bundle_slot(
     tmp_path: Path, parsed_test, compiled_test
 ) -> None:
@@ -440,7 +431,6 @@ def test_build_workspace_keeps_gui_shape_out_of_the_bundle_slot(
     assert "parameters" not in ws.estimation["reference"].spec["params"]
 
 
-@_NEEDS_ESTIMATOR_CONFIG
 def test_workspace_spec_slot_goes_straight_into_a_bundle(
     tmp_path: Path, parsed_test, compiled_test
 ) -> None:
@@ -464,6 +454,7 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(
                     y=ws.estimation["reference"].spec["y"],
                     params=ws.estimation["reference"].spec["params"],
                 ),
+                config=parsed_test,
                 compiled=compiled_test,
             )
         )
@@ -479,7 +470,6 @@ def test_workspace_spec_slot_goes_straight_into_a_bundle(
 # -- bundled simulation replay ---------------------------------------------
 
 
-@_NEEDS_ESTIMATOR_CONFIG
 def test_bundled_simulation_replays_into_an_output(
     tmp_path: Path, parsed_test, compiled_test
 ) -> None:
@@ -507,7 +497,6 @@ def test_bundled_simulation_replays_into_an_output(
     assert simulation["result"]["model_name"] == "reference"
 
 
-@_NEEDS_ESTIMATOR_CONFIG
 def test_bundled_simulation_replay_reproduces_rather_than_redraws(
     tmp_path: Path, parsed_test, compiled_test
 ) -> None:
@@ -530,7 +519,6 @@ def test_bundled_simulation_replay_reproduces_rather_than_redraws(
     assert series(first) == series(second)
 
 
-@_NEEDS_ESTIMATOR_CONFIG
 def test_a_simulation_that_cannot_replay_leaves_the_session_usable(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], parsed_test, compiled_test
 ) -> None:
@@ -666,7 +654,6 @@ def test_serve_from_solved_model_preloads_reference(
     assert captured.get("source") is None
 
 
-@_NEEDS_ESTIMATOR_CONFIG
 def test_serve_from_bundle_path_hydrates_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parsed_test, compiled_test
 ) -> None:
@@ -686,7 +673,6 @@ def test_serve_from_bundle_path_hydrates_workspace(
     assert captured["source"] == str(bundle)
 
 
-@_NEEDS_ESTIMATOR_CONFIG
 def test_preloaded_model_reports_its_source_and_yaml(
     tmp_path: Path, parsed_test, compiled_test
 ) -> None:
@@ -730,7 +716,6 @@ def test_serve_from_rejects_missing_bundle(tmp_path: Path) -> None:
 # -- CLI argparse ---------------------------------------------------------
 
 
-@_NEEDS_ESTIMATOR_CONFIG
 def test_cli_main_with_bundle_delegates_to_serve_from(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parsed_test, compiled_test
 ) -> None:
@@ -771,13 +756,14 @@ def test_cli_main_rejects_missing_bundle_path(tmp_path: Path) -> None:
         main([str(tmp_path / "missing.sdsge"), "--no-browser"])
 
 
-def _estimator(y, compiled) -> Estimator:
+def _estimator(y, compiled, config) -> Estimator:
     """A live estimator over the bundled model, in the shape a loader rebuilds.
 
     ``test.yaml`` declares no ``kalman:`` section, so ``R`` is passed
     explicitly; without one the estimator a bundle describes cannot be built.
     """
     return Estimator(
+        config=config,
         compiled=compiled,
         y=np.asarray(y, dtype=np.float64),
         observables=["Infl", "Rate"],

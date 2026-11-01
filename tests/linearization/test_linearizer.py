@@ -12,7 +12,7 @@ import pytest
 import sympy as sp
 from sympy.core.function import AppliedUndef
 
-from SymbolicDSGE import DSGESolver, parse_config
+from SymbolicDSGE import parse_config, compile_model
 from SymbolicDSGE.core.model_parser import ModelParser
 from SymbolicDSGE.core.compiled_model import CompiledModel
 from SymbolicDSGE.core.config import ModelConfig
@@ -62,20 +62,20 @@ T = sp.Symbol("t", integer=True)
 def rbc(rbc_second_order_test_model_path) -> tuple[ModelConfig, CompiledModel]:
     """Levels RBC: c and k have positive steady states, z sits at zero."""
     model = parse_config(rbc_second_order_test_model_path)
-    return model, DSGESolver(model).compile()
+    return model, compile_model(model)
 
 
 @pytest.fixture(scope="module")
 def gap(test_model_path) -> tuple[ModelConfig, CompiledModel]:
     """A model already authored in gaps, so Newton returns the origin."""
     model = parse_config(test_model_path)
-    return model, DSGESolver(model).compile()
+    return model, compile_model(model)
 
 
 @pytest.fixture(scope="module")
 def aux() -> tuple[ModelConfig, CompiledModel]:
     model = ModelParser.from_string(AUX_MODEL).get()
-    return model, DSGESolver(model).compile()
+    return model, compile_model(model)
 
 
 @pytest.fixture(scope="module")
@@ -286,4 +286,4 @@ def test_linearize_model_matches_the_class_at_base_calibration(rbc, rbc_log):
 
 def test_solver_rejects_a_view(gap_linear):
     with pytest.raises(TypeError, match="point-linearized model is not accepted"):
-        DSGESolver(gap_linear)
+        compile_model(gap_linear)

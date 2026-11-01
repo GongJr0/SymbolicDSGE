@@ -36,13 +36,11 @@ BundleBuilder.add_model(
     name: str,
     model: SolvedModel | CompiledModel | ModelConfig,
     *,
-    compile_kwargs: Mapping[str, Any] | None = None, # (1)!
     solve_kwargs: Mapping[str, Any] | None = None,   # (2)!
 ) -> BundleBuilder
 ```
 
-1. Forwarded to `DSGESolver.compile(...)` when the loader rebuilds the `SolvedModel`.
-2. Forwarded to `DSGESolver.solve(...)` at the same step.
+2. Forwarded to `solve_model(...)` at the same step.
 
 Add a model configuration to the bundle.
 
@@ -50,8 +48,7 @@ Add a model configuration to the bundle.
 |:---------------|----------------------------------------------------------------------------------:|
 | name           |              Name of the added model, other members refer to a model by its name. |
 | model          | `ModelConfig` or both model variants that store one. Serialized into YAML format. |
-| compile_kwargs |                          Compile kwargs the loader passes to `DSGESolver.compile`.|
-| solve_kwargs   |                             Solve kwargs the loader passes to `DSGESolver.solve`. |
+| solve_kwargs   |                                  Solve kwargs the loader passes to `solve_model`. |
 
 &nbsp;
 

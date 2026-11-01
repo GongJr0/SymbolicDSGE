@@ -8,7 +8,8 @@ from numpy import float64
 
 from sympy import Symbol, Expr
 
-from .config import FunctionGetterDict, ModelConfig, SymbolGetterDict, cov_from_spec
+from .types import FunctionGetterDict, SymbolGetterDict
+from .config import ModelConfig, cov_from_spec
 
 NDF = NDArray[np.float64]
 

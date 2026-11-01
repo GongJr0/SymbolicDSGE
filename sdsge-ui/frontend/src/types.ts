@@ -268,7 +268,6 @@ export interface EstimationRunRequest {
     observables: string[] | null;
     parameters: EstimationParameterSpec[];
     method_kwargs: Record<string, unknown>;
-    compile_kwargs: Record<string, unknown>;
     ss_seed: number[] | null;
     posterior_point: string;
     estimate_and_solve: boolean;

@@ -17,7 +17,7 @@ from SymbolicDSGE.core.solved_model import (
     FirstOrderSolvedModel,
     SecondOrderSolvedModel,
 )
-from SymbolicDSGE import DSGESolver, parse_config
+from SymbolicDSGE import parse_config, compile_model, solve_model
 from SymbolicDSGE._ckernels.core import (
     affine_observations_into,
     simulate_linear_states_into,
@@ -541,14 +541,13 @@ def test_resolvers_rebuild_symbolic_R_from_current_calibration(
     still report the parsed values here.
     """
     model = parse_config(post82_test_model_path)
-    solver = DSGESolver(model)
-    compiled = solver.compile()
+    compiled = compile_model(model)
 
-    solver.config.calibration.parameters[Symbol("meas_infl")] = 2.0
-    solver.config.calibration.parameters[Symbol("meas_rate")] = 3.0
-    solver.config.calibration.parameters[Symbol("meas_rho_ir")] = 0.1
+    model.calibration.parameters[Symbol("meas_infl")] = 2.0
+    model.calibration.parameters[Symbol("meas_rate")] = 3.0
+    model.calibration.parameters[Symbol("meas_rho_ir")] = 0.1
 
-    solved = solver.solve(compiled)
+    solved = solve_model(model, compiled=compiled)
     y = pd.DataFrame({"Infl": [0.0, 0.0], "Rate": [0.0, 0.0]})
     args = resolve_linear_args(solved, y, ["Infl", "Rate"])
 
@@ -589,9 +588,8 @@ def variant(tmp_path, test_model_path):
         path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
         model = parse_config(path)
-        solver = DSGESolver(model)
-        compiled = solver.compile()
-        return model, compiled, solver.solve(compiled=compiled)
+        compiled = compile_model(model)
+        return model, compiled, solve_model(model, compiled=compiled)
 
     return build
 

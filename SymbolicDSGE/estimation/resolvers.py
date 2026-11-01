@@ -13,7 +13,7 @@ from ..bayesian.distributions.lkj_chol import LKJChol
 from ..bayesian.priors import Prior
 from ..bayesian.support import OutOfSupportError
 from ..bayesian.transforms import CholeskyCorrTransform, Transform
-from ..core.config import PairGetterDict
+from ..core.types import PairGetterDict
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
