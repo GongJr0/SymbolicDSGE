@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 
 from sympy.logic.boolalg import Boolean
 
@@ -32,7 +32,6 @@ from .._ckernels.core import (
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
-ND = NDArray
 
 
 @dataclass(frozen=True)
@@ -491,24 +490,9 @@ class CompiledModel:
         """
         return self._objective_cfunc_bicomplex
 
-    def _coerce_param_vector(self, par: Mapping[Any, Any] | Any) -> ND:
-        # Resolve a name/Symbol-keyed mapping into calib_params order. dtype and
-        # contiguity are the native boundary's job (the Cython shims cast), so this
-        # only produces the ordered numeric vector.
-        if isinstance(par, Mapping):
-            vals = []
-            for p in self.calib_params:
-                if p in par:
-                    vals.append(par[p])
-                else:
-                    raise KeyError(f"Missing parameter '{p}'.")
-            return np.asarray(vals)
-
-        return np.asarray(par)
-
     def build_affine_measurement_matrices(
         self,
-        params: Mapping[Any, Any] | Any,
+        params: NDF,
         observables: Sequence[str],
         ss: NDF,
     ) -> tuple[NDF, NDF]:
@@ -516,8 +500,8 @@ class CompiledModel:
 
         Parameters
         ----------
-        params : Mapping[Any, Any] | Any
-            Model parameters, either as a mapping from parameter names to values or as an ordered vector.
+        params : NDArray[float64]
+            Model parameters as a vector in calibration order.
         observables : Sequence[str]
             Obserbable names to include in the measurement equation, in the order they should appear in the output matrices.
         ss : NDF
@@ -530,18 +514,17 @@ class CompiledModel:
             d : Constant vector for the affine measurement equation.
 
         """
-        param_vec = self._coerce_param_vector(params)
-        if param_vec.shape[0] != self.n_par:
+        if params.shape[0] != self.n_par:
             raise ValueError(
-                f"Parameter vector length {param_vec.shape[0]} != {self.n_par}"
+                f"Parameter vector length {params.shape[0]} != {self.n_par}"
             )
 
         meas_addr = self.construct_measurement_cfunc(observables).address
         jac_addr = self.construct_measurement_jacobian_cfunc(observables).address
         n_obs = len(observables)
 
-        d = measurement_eval(meas_addr, ss, param_vec, n_obs)
-        C = jacobian_eval(jac_addr, ss, param_vec, n_obs, self.n_var)
+        d = measurement_eval(meas_addr, ss, params, n_obs)
+        C = jacobian_eval(jac_addr, ss, params, n_obs, self.n_var)
         return C, d
 
     def _normalize_observables(

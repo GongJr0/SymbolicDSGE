@@ -145,15 +145,6 @@ class Calib(_Lockable):
     shocks: CovarianceSpec
     measurement_noise: CovarianceSpec | None
 
-    def fingerprint(self) -> int:
-        """Hashable snapshot of the parameter values, for keying caches."""
-        return hash(
-            (
-                tuple(self.parameters.keys()),
-                tuple(float(v) for v in self.parameters.values()),
-            )
-        )
-
     def _freeze(self) -> None:
         self.parameters.lock()
         self.shocks.lock()

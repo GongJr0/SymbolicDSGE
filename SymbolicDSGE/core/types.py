@@ -1,7 +1,16 @@
 from __future__ import annotations
 
 from collections import UserDict
-from typing import Any, AbstractSet, Sequence, TypeVar, TypeAlias, Self
+from typing import (
+    Any,
+    AbstractSet,
+    ItemsView,
+    Sequence,
+    TypeVar,
+    TypeAlias,
+    Self,
+    ValuesView,
+)
 from sympy import Eq, Symbol, Function
 
 KT = TypeVar("KT")
@@ -82,6 +91,15 @@ class _NormalizedKeyDict(UserDict[KT, V], _Lockable):
 
     def __contains__(self, key: Any) -> bool:
         return self._key(key) in self.data
+
+    def values(self) -> ValuesView[V]:
+        # Skip normalization: no coercion needs to happen
+        # paying for _key() is pure waste.
+        return self.data.values()
+
+    def items(self) -> ItemsView[KT, V]:
+        # as on values()
+        return self.data.items()
 
 
 class LockableDict(_NormalizedKeyDict[KT, V]):

@@ -6,8 +6,6 @@ so nothing here is specific to how the model was solved.
 
 from __future__ import annotations
 
-from typing import Tuple, Sequence
-
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
@@ -17,17 +15,6 @@ from ..config import ModelConfig
 from ..compiled_model import CompiledModel
 
 NDF = NDArray[float64]
-
-
-def build_C_d_from_obs(
-    config: ModelConfig, compiled: CompiledModel, y_names: Sequence[str], ss: NDF
-) -> Tuple[NDF, NDF]:
-    """``(C, d)`` for the declared observables, linearized at ``ss``."""
-    return compiled.build_affine_measurement_matrices(
-        config.calibration.parameters,
-        y_names,
-        ss,
-    )
 
 
 def non_affine_measurement(

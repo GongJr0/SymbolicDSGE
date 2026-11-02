@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from functools import cached_property
 from typing import (
     Any,
     Tuple,
@@ -494,17 +493,15 @@ class SolvedModel(ABC, Generic[Policy]):
         self,
         y_names: Sequence[str],
     ) -> Tuple[NDF, NDF]:
-        """``(C, d)`` for ``y_names``, memoized against the calibration."""
-        key = (tuple(y_names), self.config.calibration.fingerprint())
-        hit = self._cd_cache.get(key)
-        if hit is not None:
-            return hit
-
-        result = measurement.build_C_d_from_obs(
-            self.config, self.compiled, y_names, self.policy.steady_state
+        """``(C, d)`` for ``y_names``."""
+        par = np.fromiter(
+            self.config.calibration.parameters.values(),
+            dtype=float64,
+            count=self.compiled.n_par,
         )
-        self._cd_cache[key] = result
-        return result
+        return self.compiled.build_affine_measurement_matrices(
+            par, y_names, self.policy.steady_state
+        )
 
     def kalman(
         self,
@@ -610,10 +607,6 @@ class SolvedModel(ABC, Generic[Policy]):
     def is_determinate(self) -> bool:
         """Whether the model's policy solution is determinate (stable and unique)."""
         return self.policy.is_determinate
-
-    @cached_property
-    def _cd_cache(self) -> dict[tuple, Tuple[NDF, NDF]]:
-        return {}
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.config.name})"

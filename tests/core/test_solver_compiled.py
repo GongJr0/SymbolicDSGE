@@ -65,24 +65,6 @@ def test_compile_builds_expected_structures(parsed_test, compiled_test):
     assert set(c.observable_names) == {"Infl", "Rate"}
 
 
-def test_compiled_parameters_accept_dict_and_vector_forms(parsed_test, compiled_test):
-    c = compiled_test
-    ss = np.zeros(len(c.var_names))
-
-    par_dict = {
-        p: float64(parsed_test.calibration.parameters[p]) for p in c.calib_params
-    }
-    par_vec = np.array([par_dict[p] for p in c.calib_params])
-
-    C_dict, d_dict = c.build_affine_measurement_matrices(
-        par_dict, c.observable_names, ss
-    )
-    C_vec, d_vec = c.build_affine_measurement_matrices(par_vec, c.observable_names, ss)
-
-    assert np.array_equal(C_dict, C_vec)
-    assert np.array_equal(d_dict, d_vec)
-
-
 def test_compiled_parameters_reject_bad_vector_length(compiled_test):
     c = compiled_test
     ss = np.zeros(len(c.var_names))
