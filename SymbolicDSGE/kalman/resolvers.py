@@ -233,9 +233,7 @@ def _jitter(jitter: Float64Like | None) -> float:
 
 def _calib_params(model: SolvedModel) -> NDF:
     params = model.config.calibration.parameters
-    return asarray(
-        [params[name] for name in model.compiled.calib_params], dtype=float64
-    )
+    return np.fromiter(params.values(), dtype=float64, count=model.compiled.n_par)
 
 
 def _ukf_array(model: SolvedModel, name: str) -> NDF:

@@ -26,11 +26,7 @@ def non_affine_measurement(
     """Observables evaluated along a path, for a non-affine measurement."""
     # ``state`` is (T, n_var) in cur_syms canonical order (checked at compile).
     params = config.calibration.parameters
-    param_vals = np.array(
-        [float64(params[p]) for p in compiled.calib_params],
-        dtype=float64,
-    )
-
+    param_vals = np.fromiter(params.values(), dtype=float64, count=compiled.n_par)
     # The measurement cfunc emits observables sorted by model index; map its
     # output columns back to the caller's y_names order.
     obs_sorted = compiled._normalize_observables(y_names)

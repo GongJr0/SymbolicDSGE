@@ -113,9 +113,8 @@ def _compiled(path: Path):
 
 
 def _param_vector(config, compiled, dtype):
-    return np.array(
-        [float(config.calibration.parameters[p]) for p in compiled.calib_params],
-        dtype=dtype,
+    return np.fromiter(
+        config.calibration.parameters.values(), dtype=dtype, count=compiled.n_par
     )
 
 
