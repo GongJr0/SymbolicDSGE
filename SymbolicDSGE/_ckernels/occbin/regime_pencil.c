@@ -34,6 +34,10 @@ void sdsge_regime_pencil(regime_ctx *regime, const f64 *SDSGE_RESTRICT ss,
   const i64 n_row = regime->n_row;
 
   // pencil into flat arena [a; b; c; d; cst]
+  memset(arena, 0,
+         (size_t)sdsge_regime_pencil_arena_size(n_var, n_exog, regime->n_row)
+                 .n_float *
+             sizeof(f64));
   regime->pencil(ss, par, arena);
   const f64 *blk_a = arena;
   const f64 *blk_b = blk_a + n_row * n_var;

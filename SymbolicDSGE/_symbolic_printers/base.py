@@ -52,11 +52,6 @@ class ExpressionPrinter(ABC):
 
     @property
     @abstractmethod
-    def allocated_dtype(self) -> str:
-        """NumPy dtype used when an allocating wrapper is emitted."""
-
-    @property
-    @abstractmethod
     def context_name(self) -> str:
         """Short name used in unsupported node errors."""
 
@@ -78,28 +73,31 @@ class ExpressionPrinter(ABC):
                 f"{self.context_name} layout has no slot for: {', '.join(missing)}."
             )
 
-    def emit(
-        self, exprs: Sequence[sp.Expr], layout: Layout, *, allocate: bool
-    ) -> list[str]:
+    def emit(self, exprs: Sequence[sp.Expr], layout: Layout) -> list[str]:
+        """Emit the body writing ``exprs`` into the caller's ``out`` buffer.
+
+        Identically zero expressions are not stored: which slots those are is a
+        property of the expressions, so the caller zeros ``out`` once per buffer
+        rather than once per call. A caller reusing a buffer across differing
+        expression sets must re-zero between them.
+        """
         self.layout = layout
         self.lines = []
         self._tmp = 0
 
         self._check_layout_covers(exprs, layout)
 
-        n_out = self.ops.elems_per_var * layout.n_expr
-        replacements, reduced = sp.cse(exprs, symbols=sp.numbered_symbols("cse_"))
+        keep = [i for i, expr in enumerate(exprs) if expr != 0]
+        replacements, reduced = sp.cse(
+            [exprs[i] for i in keep], symbols=sp.numbered_symbols("cse_")
+        )
         for sym, sub in replacements:
             rendered = self.render(sub)
             self.lines.append(f"    {sym.name} = {rendered}")
 
-        if allocate:
-            self.lines.append(f"    out = np.empty(({n_out},), {self.allocated_dtype})")
-        for i, expr in enumerate(reduced):
+        for i, expr in zip(keep, reduced):
             rendered = self.render(expr)
             self.lines.append("    " + self.ops.store("out", i, rendered))
-        if allocate:
-            self.lines.append("    return out")
         return self.lines
 
     def render(self, expr: Any) -> str:

@@ -302,8 +302,8 @@ cdef void _alloc_fill_kf(sdsge_linear_ctx *c, object kf_dto, object sol_dto,
     c.meas = <meas_fn><void*><size_t>kf_dto.meas_addr
     c.jac = <meas_fn><void*><size_t>kf_dto.jac_addr
 
-    cdef double[:, ::1] C = _held(np.empty((n_obs, n_var), np.float64), hold)
-    cdef double[::1] d = _held(np.empty(n_obs, np.float64), hold)
+    cdef double[:, ::1] C = _held(np.zeros((n_obs, n_var), np.float64), hold)
+    cdef double[::1] d = _held(np.zeros(n_obs, np.float64), hold)
     cdef double[::1] x0 = _held(np.zeros(n_var, np.float64), hold)
 
     c.kf_ctx.n = n_var

@@ -399,6 +399,10 @@ int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
   f64 *temp_km = M + k * m;
   f64 *x_lvl = temp_km + k * m;
 
+  /* H_buf is filled sparsely by the numba cfunc. Structural zeros cannot change
+   * inside the filter so zeroing before the loop guarantees correct output. */
+  memset(H_buf, 0, (size_t)(m * n) * sizeof(f64));
+
   kf_build_bqbt(in->B, in->Q, temp_nk, BQBT, n, k);
 
   const f64 const_term = (f64)m * log(TWO_PI);

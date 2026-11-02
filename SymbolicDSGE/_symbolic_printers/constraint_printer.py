@@ -102,10 +102,6 @@ class ConstraintPrinter(ExpressionPrinter):
         self.cops = ops
 
     @property
-    def allocated_dtype(self) -> str:
-        return "np.float64"
-
-    @property
     def context_name(self) -> str:
         return "constraint"
 
@@ -178,7 +174,7 @@ def build_constraint_cfunc(
     thing their sign cannot: which conditions hold when the distance is zero.
     """
     table: ConstraintOpTable = ConstraintOps() if ops is None else ops
-    body = ConstraintPrinter(table).emit(exprs, layout, allocate=False)
+    body = ConstraintPrinter(table).emit(exprs, layout)
     preamble = [
         f"    cur = carray(cur_ptr, ({layout.n_var},))",
         f"    par = carray(par_ptr, ({layout.n_par},))",

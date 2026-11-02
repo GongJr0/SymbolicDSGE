@@ -141,10 +141,6 @@ class ResidualLayout:
 
 class ResidualPrinter(ExpressionPrinter):
     @property
-    def allocated_dtype(self) -> str:
-        return "np.complex128"
-
-    @property
     def context_name(self) -> str:
         return "residual"
 
@@ -153,7 +149,7 @@ def build_cfunc(
     exprs: Sequence[sp.Expr], layout: ResidualLayout, ops: OpTable | None = None
 ) -> Any:
     table: OpTable = C128Ops() if ops is None else ops
-    body = ResidualPrinter(table).emit(exprs, layout, allocate=False)
+    body = ResidualPrinter(table).emit(exprs, layout)
     w = table.elems_per_var
     preamble = [
         f"    fwd = carray(fwd_ptr, ({w * layout.n_var},))",

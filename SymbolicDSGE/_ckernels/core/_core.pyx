@@ -1064,7 +1064,7 @@ def jacobian_eval(size_t jac_addr, vars, par, int64_t n_obs, int64_t n_var):
     """
     cdef double[::1] vv = np.ascontiguousarray(vars, dtype=np.float64)
     cdef double[::1] pv = np.ascontiguousarray(par, dtype=np.float64)
-    out = np.empty((n_obs, n_var), dtype=np.float64)
+    out = np.zeros((n_obs, n_var), dtype=np.float64)
     cdef double[:, ::1] ov = out
 
     cdef double *vars_ptr = &vv[0] if vv.shape[0] > 0 else NULL

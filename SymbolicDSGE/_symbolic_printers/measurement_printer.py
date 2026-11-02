@@ -115,10 +115,6 @@ class MeasurementLayout:
 
 class MeasurementPrinter(ExpressionPrinter):
     @property
-    def allocated_dtype(self) -> str:
-        return "np.float64"
-
-    @property
     def context_name(self) -> str:
         return "measurement"
 
@@ -129,7 +125,7 @@ def build_measurement_cfunc(
     ops: OpTable | None = None,
 ) -> Any:
     table: OpTable = F64Ops() if ops is None else ops
-    body = MeasurementPrinter(table).emit(exprs, layout, allocate=False)
+    body = MeasurementPrinter(table).emit(exprs, layout)
     preamble = [
         f"    vars = carray(vars_ptr, ({layout.n_var},))",
         f"    par = carray(par_ptr, ({layout.n_par},))",
