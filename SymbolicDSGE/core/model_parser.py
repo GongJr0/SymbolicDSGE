@@ -430,7 +430,7 @@ class ModelParser:
             )
 
         for key, regime in regimes.items():
-            cls._validate_regime(conf, key, regime, constraints)
+            cls._validate_regime(conf, key, regime)
 
     @classmethod
     def _validate_regime(
@@ -438,14 +438,13 @@ class ModelParser:
         conf: ModelConfig,
         key: frozenset[str],
         regime: Regime,
-        constraints: Mapping[str, Constraint],
     ) -> None:
         label = ", ".join(sorted(key))
 
-        if sp.simplify(sp.And(*(constraints[n].bind for n in key))) is sp.false:
-            raise ValueError(
-                f"Regime '{label}' can never bind: its members' conditions are mutually exclusive"
-            )
+        # Removed due to non-exact decisions and disproportionate runtime:
+        # Checking that a regime can never bind. If a deterministic and accurate
+        # check is found, and is faster than the old `simplify(And(binds))`
+        # it can be reinstated.
 
         if not regime:
             raise ValueError(f"Regime '{label}' replaces no model equations")
