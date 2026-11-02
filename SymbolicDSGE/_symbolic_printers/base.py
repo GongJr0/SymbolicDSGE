@@ -74,13 +74,6 @@ class ExpressionPrinter(ABC):
             )
 
     def emit(self, exprs: Sequence[sp.Expr], layout: Layout) -> list[str]:
-        """Emit the body writing ``exprs`` into the caller's ``out`` buffer.
-
-        Identically zero expressions are not stored: which slots those are is a
-        property of the expressions, so the caller zeros ``out`` once per buffer
-        rather than once per call. A caller reusing a buffer across differing
-        expression sets must re-zero between them.
-        """
         self.layout = layout
         self.lines = []
         self._tmp = 0
@@ -94,6 +87,9 @@ class ExpressionPrinter(ABC):
         for sym, sub in replacements:
             rendered = self.render(sub)
             self.lines.append(f"    {sym.name} = {rendered}")
+
+        if len(keep) != len(exprs):
+            self.lines.append("    out[:] = 0.0")
 
         for i, expr in zip(keep, reduced):
             rendered = self.render(expr)
