@@ -50,6 +50,10 @@ def _nonlinear_compile_yaml() -> str:
     )
 
 
+def _cur_syms(compiled):
+    return [sp.Symbol(f"cur_{name}") for name in compiled.var_names]
+
+
 def test_compile_builds_expected_structures(parsed_test, compiled_test):
     c = compiled_test
     n_vars = len(parsed_test.variables)
@@ -59,7 +63,6 @@ def test_compile_builds_expected_structures(parsed_test, compiled_test):
     assert c.n_state == 3
     assert c.n_exog == 2
     assert len(c.var_names) == n_vars
-    assert len(c.cur_syms) == n_vars
     assert len(c.objective_eqs) == len(parsed_test.equations.model)
     assert set(c.idx.keys()) == set(c.var_names)
     assert set(c.observable_names) == {"Infl", "Rate"}
@@ -82,13 +85,13 @@ def test_measurement_array_dispatchers_match_lambdify_reference(
     # sympy.lambdify evaluation of the stored observable exprs (the reference the
     # printer replaced).
     c = compiled_test
-    state = np.linspace(0.05, 0.05 * len(c.cur_syms), len(c.cur_syms), dtype=float64)
+    state = np.linspace(0.05, 0.05 * c.n_var, c.n_var, dtype=float64)
     params = np.array(
         [float64(parsed_test.calibration.parameters[p]) for p in c.calib_params],
         dtype=float64,
     )
-    n_var = len(c.cur_syms)
-    args = [*c.cur_syms, *c.calib_params]
+    n_var = c.n_var
+    args = [*_cur_syms(c), *c.calib_params]
 
     meas_ref = [sp.lambdify(args, e, "numpy") for e in c.observable_eqs]
     scalar_measure = np.asarray([f(*state, *params) for f in meas_ref], dtype=float64)
@@ -111,7 +114,7 @@ def test_measurement_array_dispatchers_match_lambdify_reference(
 def test_measurement_cfunc_matches_array_dispatcher(parsed_test, compiled_test):
     c = compiled_test
     observables = list(reversed(c.observable_names))
-    state = np.linspace(0.05, 0.05 * len(c.cur_syms), len(c.cur_syms), dtype=float64)
+    state = np.linspace(0.05, 0.05 * c.n_var, c.n_var, dtype=float64)
     params = np.array(
         [float64(parsed_test.calibration.parameters[p]) for p in c.calib_params],
         dtype=float64,
@@ -143,7 +146,7 @@ def test_compile_infers_n_state_and_n_exog(parsed_test):
 
     assert compiled.n_state == 3
     assert compiled.n_exog == 2
-    assert compiled.var_names[: compiled.n_state] == ["u", "v", "r"]
+    assert compiled.var_names[: compiled.n_state] == ("u", "v", "r")
 
 
 def test_compile_lifts_a_lead_beyond_the_three_dates(parsed_test):

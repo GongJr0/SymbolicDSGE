@@ -195,8 +195,8 @@ def test_a_minted_lag_is_minted_again_from_the_linear_config(aux):
     # The linear config declares u alone, so the aux cannot be carried across.
     # Both compiles landing on the same layout is what makes the policies
     # comparable at all.
-    assert aux.direct.compiled.var_names == ["u", "u_lag1"]
-    assert aux.linear.compiled.var_names == ["u", "u_lag1"]
+    assert aux.direct.compiled.var_names == ("u", "u_lag1")
+    assert aux.linear.compiled.var_names == ("u", "u_lag1")
     assert aux.linear.compiled.layout.aux_origin == {"u_lag1": "u"}
     assert set(aux.linear.config.ss_seed) == {sp.Function("u")}
 

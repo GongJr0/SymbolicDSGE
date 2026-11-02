@@ -567,33 +567,33 @@ def _compile_regimes(
         # same vector; differentiating before that fold is what keeps a and b
         # distinct. b carries klein_preproc's sign on the cur sweep.
         replaced = [residuals[row] for row in rows]
-        jac_a = [
+        jac_a = tuple(
             sp.diff(resid, sym).subs(at_point)  # pyright: ignore
             for resid in replaced
             for sym in fwd_syms
-        ]
-        jac_b = [
+        )
+        jac_b = tuple(
             (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
             for resid in replaced
             for sym in cur_syms
-        ]
-        jac_c = [
+        )
+        jac_c = tuple(
             (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
             for resid in replaced
             for sym in prev_syms
-        ]
-        jac_d = [
+        )
+        jac_d = tuple(
             (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
             for resid in replaced
             for sym in shock_syms
-        ]
+        )
         # The regime's own residual there, unnegated where b is negated:
         # a E[y+] = b y - c. Zero on unreplaced rows, so only these are kept.
-        constants = [resid.subs(at_point) for resid in replaced]  # pyright: ignore
+        constants = tuple(resid.subs(at_point) for resid in replaced)  # pyright: ignore
 
         compiled[sum(1 << bit[name] for name in key)] = RegimeBlock(
-            residuals=residuals,
-            rows=rows,
+            residuals=tuple(residuals),
+            rows=tuple(rows),
             jac_a=jac_a,
             jac_b=jac_b,
             jac_c=jac_c,
@@ -686,10 +686,10 @@ def _infer_variable_layout(
         canonical_names=canonical_names,
         state_names=state_names,
         control_names=control_names,
-        idx=idx,
-        aux_origin={g.name: g.origin for g in desugared.generated},
+        idx=MappingProxyType(idx),
+        aux_origin=MappingProxyType({g.name: g.origin for g in desugared.generated}),
         shock_names=shock_names,
-        shock_idx={name: i for i, name in enumerate(shock_names)},
+        shock_idx=MappingProxyType({name: i for i, name in enumerate(shock_names)}),
     )
 
 

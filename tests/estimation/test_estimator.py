@@ -137,7 +137,7 @@ def test_to_spec_captures_construction_state(
 
     assert isinstance(spec, EstimatorSpec)
     assert spec.params["estimated_params"] == ["psi_pi"]
-    assert spec.params["observables"] == compiled_post82.observable_names
+    assert spec.params["observables"] == list(compiled_post82.observable_names)
     assert spec.params["filter_mode"] == "linear"
     assert spec.params["priors"] is None
     assert spec.y == y_post82.to_numpy().tolist()

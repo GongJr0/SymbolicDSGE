@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -58,7 +59,7 @@ class VariableLayout:
     n_state: int
     n_ctrl: int
 
-    idx: dict[str, int]
+    idx: MappingProxyType[str, int]
 
     declared_names: tuple[str, ...]
     canonical_names: tuple[str, ...]
@@ -66,9 +67,13 @@ class VariableLayout:
     control_names: tuple[str, ...]
     generated_names: tuple[str, ...] = ()
 
-    aux_origin: dict[str, str] = field(default_factory=dict)
+    aux_origin: MappingProxyType[str, str] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     shock_names: tuple[str, ...] = ()
-    shock_idx: dict[str, int] = field(default_factory=dict)
+    shock_idx: MappingProxyType[str, int] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
 
 def newton_seed(

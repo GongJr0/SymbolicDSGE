@@ -22,6 +22,10 @@ from SymbolicDSGE._ckernels.core import (
 t = sp.Symbol("t", integer=True)
 
 
+def _cur_syms(compiled):
+    return [sp.Symbol(f"cur_{name}") for name in compiled.var_names]
+
+
 def _regime_cfuncs(compiled):
     """One residual @cfunc per regime, sharing the reference layout.
 
@@ -78,12 +82,12 @@ def test_conditions_substitute_into_cur_symbols(compiled_obc):
     cur_g, cur_z = sp.Symbol("cur_g"), sp.Symbol("cur_z")
 
     assert compiled_obc.constraint_names == ("lo", "hi")
-    assert compiled_obc.constraint_exprs == [
+    assert compiled_obc.constraint_exprs == (
         cur_g < 0,
         cur_g >= 0,
         sp.And(cur_z > beta, cur_g < 1),
         cur_z <= beta,
-    ]
+    )
 
 
 def test_constraint_func_layout(compiled_obc):
@@ -161,7 +165,11 @@ def test_flags_match_the_written_conditions(compiled_obc, g, z, beta, expected):
 def test_flags_match_a_lambdify_oracle(compiled_obc):
     cf = compiled_obc.construct_constraint_func()
     oracle = [
-        sp.lambdify((compiled_obc.cur_syms, compiled_obc.calib_params), e, "numpy")
+        sp.lambdify(
+            (_cur_syms(compiled_obc), compiled_obc.calib_params),
+            e,
+            "numpy",
+        )
         for e in compiled_obc.constraint_exprs
     ]
     rng = np.random.default_rng(0)
@@ -249,7 +257,10 @@ def _fold_to_cur(compiled):
     """The expansion point: every date is the same vector, the innovation zero."""
     fold = {}
     for prefix in ("fwd", "prev"):
-        for name, cur in zip(compiled.var_names, compiled.cur_syms):
+        for name, cur in zip(
+            compiled.var_names,
+            _cur_syms(compiled),
+        ):
             fold[sp.Symbol(f"{prefix}_{name}")] = cur
     fold.update({shock: 0.0 for shock in _shock_syms(compiled)})
     return fold
@@ -262,7 +273,7 @@ def _evaluate(compiled, exprs, n_row, n_col, point, par):
     them inside a derivative taken against a variable.
     """
     shocks = _shock_syms(compiled)
-    args = (compiled.cur_syms, shocks, compiled.calib_params)
+    args = (_cur_syms(compiled), shocks, compiled.calib_params)
     zeros = np.zeros(len(shocks))
     vals = [float(sp.lambdify(args, e, "numpy")(point, zeros, par)) for e in exprs]
     return np.array(vals).reshape(n_row, n_col)
@@ -280,7 +291,7 @@ def _symbolic_pencil(compiled, residuals):
     prev = [sp.Symbol(f"prev_{name}") for name in compiled.var_names]
 
     a = [sp.diff(e, s).subs(fold) for e in residuals for s in fwd]
-    b = [(-sp.diff(e, s)).subs(fold) for e in residuals for s in compiled.cur_syms]
+    b = [(-sp.diff(e, s)).subs(fold) for e in residuals for s in _cur_syms(compiled)]
     c = [(-sp.diff(e, s)).subs(fold) for e in residuals for s in prev]
     d = [(-sp.diff(e, s)).subs(fold) for e in residuals for s in _shock_syms(compiled)]
     return a, b, c, d
@@ -474,7 +485,7 @@ def test_regime_pencil_func_carries_every_regime_and_is_cached(compiled_regimes)
     for mask, block in compiled_regimes.regimes.items():
         # The driver reads these as an i64 buffer next to the address.
         assert func.rows[mask].dtype == np.int64
-        assert func.rows[mask].tolist() == block.rows
+        assert tuple(func.rows[mask]) == block.rows
         assert func.n_row(mask) == len(block.rows)
 
     assert compiled_regimes.construct_regime_pencil_func() is func
@@ -484,7 +495,9 @@ def test_regime_pencil_rejects_a_block_that_does_not_match_its_rows(compiled_reg
     # Emission is where both the block and n_var are in scope; a short block
     # would otherwise reshape into a wrong pencil rather than fail.
     broken = dataclasses.replace(
-        compiled_regimes, regimes={1: RegimeBlock(rows=[0], jac_a=[], jac_b=[])}
+        compiled_regimes,
+        regimes={1: RegimeBlock(rows=[0], jac_a=[], jac_b=[])},
+        config_token="miss1",
     )
 
     with pytest.raises(ValueError, match="a/b/c jacobian entries"):
@@ -496,6 +509,7 @@ def test_regime_pencil_rejects_a_block_that_does_not_match_its_rows(compiled_reg
     no_shock = dataclasses.replace(
         compiled_regimes,
         regimes={1: RegimeBlock(rows=[0], jac_a=row, jac_b=row, jac_c=row)},
+        config_token="miss2",
     )
 
     with pytest.raises(ValueError, match="shock jacobian"):
@@ -509,6 +523,7 @@ def test_regime_pencil_rejects_a_block_that_does_not_match_its_rows(compiled_reg
         regimes={
             1: RegimeBlock(rows=[0], jac_a=row, jac_b=row, jac_c=row, jac_d=shock_row)
         },
+        config_token="miss3",
     )
 
     with pytest.raises(ValueError, match="constants"):
@@ -554,12 +569,12 @@ def test_regimes_replace_rows_in_reference_order(compiled_regimes):
 
     for mask, block in compiled_regimes.regimes.items():
         assert len(block.residuals) == len(ref)
-        differing = [
+        differing = tuple(
             i
             for i, (a, b) in enumerate(zip(ref, block.residuals))
             if sp.simplify(a - b) != 0
-        ]
-        assert differing == [2], f"mask {mask} changed rows {differing}"
+        )
+        assert differing == (2,), f"mask {mask} changed rows {differing}"
         assert block.rows == differing
 
 
@@ -630,7 +645,7 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
     names = list(model.equations.model)
 
     assert "Pi_lag1" in compiled.var_names
-    assert compiled.regimes[1].rows == [names.index("taylor")]
+    assert compiled.regimes[1].rows == (names.index("taylor"),)
 
     # The rows the pencil actually moves are the rows we recorded, which is the
     # part an index shift would break.
@@ -655,7 +670,7 @@ def test_regime_rows_survive_an_aux_equation_only_the_regime_needs(parsed_post82
     changed = np.maximum(
         np.abs(a_r - a_ref).max(axis=1), np.abs(b_r - b_ref).max(axis=1)
     )
-    assert np.flatnonzero(changed).tolist() == compiled.regimes[1].rows
+    assert tuple(np.flatnonzero(changed)) == compiled.regimes[1].rows
 
 
 def test_symbolic_pencil_matches_the_reference_sweep_in_levels(
@@ -761,7 +776,7 @@ def test_model_without_constraints_cannot_build_a_constraint_func(compiled_post8
     # The func is the OccBin driver's, so asking an unconstrained model for one
     # is a caller error rather than an empty result.
     assert compiled_post82.constraint_names == ()
-    assert compiled_post82.constraint_exprs == []
+    assert compiled_post82.constraint_exprs == ()
 
     with pytest.raises(ValueError, match="no constraints in compiled model"):
         compiled_post82.construct_constraint_func()
