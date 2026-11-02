@@ -568,22 +568,22 @@ def _compile_regimes(
         # distinct. b carries klein_preproc's sign on the cur sweep.
         replaced = [residuals[row] for row in rows]
         jac_a = tuple(
-            sp.diff(resid, sym).subs(at_point)  # pyright: ignore
+            sp.diff(resid, sym).xreplace(at_point)
             for resid in replaced
             for sym in fwd_syms
         )
         jac_b = tuple(
-            (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
+            (-sp.diff(resid, sym)).xreplace(at_point)
             for resid in replaced
             for sym in cur_syms
         )
         jac_c = tuple(
-            (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
+            (-sp.diff(resid, sym)).xreplace(at_point)
             for resid in replaced
             for sym in prev_syms
         )
         jac_d = tuple(
-            (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
+            (-sp.diff(resid, sym)).xreplace(at_point)
             for resid in replaced
             for sym in shock_syms
         )
@@ -594,10 +594,10 @@ def _compile_regimes(
         compiled[sum(1 << bit[name] for name in key)] = RegimeBlock(
             residuals=tuple(residuals),
             rows=tuple(rows),
-            jac_a=jac_a,
-            jac_b=jac_b,
-            jac_c=jac_c,
-            jac_d=jac_d,
+            jac_a=jac_a,  # pyright: ignore
+            jac_b=jac_b,  # pyright: ignore
+            jac_c=jac_c,  # pyright: ignore
+            jac_d=jac_d,  # pyright: ignore
             constants=constants,
         )
     return compiled
