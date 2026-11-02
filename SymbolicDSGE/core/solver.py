@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from ..estimation.results import MLEResult, MAPResult, MCMCResult
     from ..bayesian.priors import Prior
 
-from .config import ModelConfig
+from .config import ModelConfig, TIME
 from .resolvers import VariableLayout, resolve_ss_seed
 from .compiled_model import (
     CompiledModel,
@@ -76,7 +76,7 @@ def compile_model(config: ModelConfig) -> CompiledModel:
 
     # Convert model to {-1, 0, 1} offsets with auxiliary variables for lags and leads.
     desugared = desugar_model(config)
-    t = Symbol("t", integer=True)
+    t = TIME
     ordered_variables = desugared.variables
 
     # Convert model to minimization problem
@@ -624,14 +624,13 @@ def _lagged_names(desugared: DesugarResult) -> set[str]:
     a Jacobian: a calibration that happened to zero a coefficient would
     otherwise resize the state vector between draws.
     """
-    t = Symbol("t", integer=True)
     declared = {v.__name__ for v in desugared.variables}
     lagged: set[str] = set()
     for expr in _offset_expressions(
         desugared.model, desugared.regimes, desugared.observables
     ):
         for call in expr.atoms(AppliedUndef):
-            info = _call_offset(call, declared, t)
+            info = _call_offset(call, declared, TIME)
             if info is not None and info[1] < 0:
                 lagged.add(info[0])
     return lagged

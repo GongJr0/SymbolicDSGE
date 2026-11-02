@@ -18,6 +18,9 @@ from .types import (
     RegimeGetterDict,
 )
 
+# Shared time symbol across modules, unused in this file.
+TIME = Symbol("t", integer=True)
+
 
 @dataclass
 class CovarianceSpec(_Lockable):

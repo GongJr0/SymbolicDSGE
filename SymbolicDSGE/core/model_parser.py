@@ -8,7 +8,7 @@ import sys
 from itertools import combinations
 from pathlib import Path
 from types import FrameType
-from typing import Any, Callable, Mapping, TypeAlias, Sequence
+from typing import AbstractSet, Any, Callable, Mapping, TypeAlias, Sequence
 import warnings
 
 from sympy.core.basic import Basic
@@ -39,6 +39,7 @@ from .config import (
     Constraint,
     Equations,
     Calib,
+    TIME,
 )
 
 
@@ -273,7 +274,9 @@ class ModelParser:
         return found
 
     @staticmethod
-    def _unknown_atoms(conf: ModelConfig, *exprs: Basic) -> set[Any]:
+    def _unknown_atoms(
+        conf: ModelConfig, *exprs: Basic
+    ) -> tuple[set[Any], set[AppliedUndef]]:
         """Symbols referenced by *exprs* that the model declares nowhere.
 
         Declared means a variable, a parameter, or a shock: regime replacements
@@ -287,15 +290,22 @@ class ModelParser:
         """
         applied: set[Any] = set()
         free: set[Symbol] = set()
+        unk_t: set[AppliedUndef] = set()
         for expr in exprs:
             applied |= expr.atoms(AppliedUndef)
             free |= expr.free_symbols  # pyright: ignore
 
         time_syms = {s for c in applied for a in c.args for s in a.free_symbols}
+        variables = set(conf.variables)
+        for c in applied:
+            if c.func in variables and c.args:
+                if not (c.args[0] - TIME).is_Integer:
+                    unk_t.add(c)
+
         var_funcs = {c.func for c in applied}
 
         declared = set(conf.calibration.parameters) | set(conf.shocks)
-        return (var_funcs - set(conf.variables)) | ((free - time_syms) - declared)
+        return (var_funcs - variables) | ((free - time_syms) - declared), unk_t
 
     @classmethod
     def validate_equations(cls, conf: ModelConfig) -> None:
@@ -307,12 +317,10 @@ class ModelParser:
         variables and model equations.
         """
         for name, eq in conf.equations.model.items():
-            unknown_atoms = cls._unknown_atoms(conf, eq)
-            raise_if_unk("Equation", name, unknown_atoms)
+            raise_if_unk("Equation", name, *cls._unknown_atoms(conf, eq))
 
         for name, eq in conf.equations.observables.items():
-            unknown_atoms = cls._unknown_atoms(conf, eq)
-            raise_if_unk("Observable", name, unknown_atoms)
+            raise_if_unk("Observable", name, *cls._unknown_atoms(conf, eq))
 
             shock_refs = cls._shock_atoms(conf, eq)
             if shock_refs:
@@ -377,8 +385,7 @@ class ModelParser:
                 )
 
             # Check if inequalities refer to uninitialized variables
-            unknown_atoms = cls._unknown_atoms(conf, binds, relaxes)
-            raise_if_unk("Constraint", name, unknown_atoms)
+            raise_if_unk("Constraint", name, *cls._unknown_atoms(conf, binds, relaxes))
 
     @classmethod
     def validate_regimes(cls, conf: ModelConfig) -> None:
@@ -455,12 +462,11 @@ class ModelParser:
                 raise TypeError(
                     f"Replacement for '{target}' in regime '{label}' is not a valid SymPy Eq: {replacement!r}"
                 )
-            unknown_atoms = cls._unknown_atoms(conf, replacement)
-            if unknown_atoms:
-                raise ValueError(
-                    f"Replacement for '{target}' in regime '{label}' "
-                    f"references unknown symbol(s): {set_sort(unknown_atoms)!r}"
-                )
+            raise_if_unk(
+                f"Replacement for {target!r} in regime",
+                label,
+                *cls._unknown_atoms(conf, replacement),
+            )
 
     @classmethod
     def validate_ss_seed(cls, conf: ModelConfig) -> None:
@@ -667,8 +673,6 @@ def _build_namespace(
 ]:
     ordered_var_names = _get_variables(data)
 
-    t = sp.symbols("t", integer=True)
-
     _raise_if_not_unique(ordered_var_names, "variables must be unique.")
     _raise_if_not_unique(data.get("shocks", []), "shocks must be unique.")
 
@@ -689,7 +693,7 @@ def _build_namespace(
     shocks: list[Symbol] = [sp.Symbol(name) for name in data.get("shocks", [])]
 
     _LOCALS: dict[str, Any] = {
-        "t": t,
+        "t": TIME,
         **{var.name: var for var in variables},  # pyright: ignore
         **{param.name: param for param in params},
         **{shock.name: shock for shock in shocks},
@@ -1134,13 +1138,26 @@ def _raise_if_not_unique(values: Sequence[Any], preamble: str) -> None:
             raise ValueError(f"{preamble}" f"\nDuplicate entries: {duplicates}.")
 
 
-def set_sort(s: set[Any]) -> list[Any]:
+def set_sort(s: AbstractSet[Any]) -> list[Any]:
     """Return a sorted list of the set's elements."""
     return sorted(map(str, s))
 
 
-def raise_if_unk(place: str, name: str | Symbol, unk: set[Any]) -> None:
+def raise_if_unk(
+    place: str,
+    name: str | Symbol,
+    unk: set[Any],
+    shifts: AbstractSet[AppliedUndef] = frozenset(),
+) -> None:
+    parts = []
     if unk:
-        raise ValueError(
-            f"{place} {str(name)!r} references unknown symbol(s): {set_sort(unk)}"
-        )
+        parts.append(f"unknown symbol(s): {set_sort(unk)!r}")
+    if shifts:
+        parts.append(f"invalid time shift(s): {set_sort(shifts)!r}")
+    if not parts:
+        return
+
+    msg = f"{place} {str(name)!r} references {' and '.join(parts)}."
+    if shifts:
+        msg += " Write a time shift as 't' plus/minus an integer, as in 't-1'."
+    raise ValueError(msg)
