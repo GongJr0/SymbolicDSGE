@@ -543,16 +543,21 @@ class CompiledModel:
         observables: Sequence[str] | None,
     ) -> tuple[str, ...]:
         if observables is None:
-            return tuple(self.observable_names)
+            return self.observable_names
 
         obs = tuple(observables)
-        if len(set(obs)) != len(obs):
+        if obs == self.observable_names:
+            return self.observable_names
+
+        obsset = set(obs)
+        if len(obsset) != len(obs):
             raise ValueError("Observable list contains duplicates.")
 
         obs_idx = {name: i for i, name in enumerate(self.observable_names)}
-        missing = [name for name in obs if name not in obs_idx]
-        if missing:
-            raise KeyError(f"Unknown observables not in compiled model: {missing}")
+        if missing := obsset - obs_idx.keys():
+            raise KeyError(
+                f"Unknown observables not in compiled model: {sorted(missing)!r}"
+            )
 
         return tuple(sorted(obs, key=lambda name: obs_idx[name]))
 
