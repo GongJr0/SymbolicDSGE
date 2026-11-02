@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Protocol
+from typing import Any, Protocol, Sequence
 
 import sympy as sp
 
@@ -60,7 +60,7 @@ class ExpressionPrinter(ABC):
     def context_name(self) -> str:
         """Short name used in unsupported node errors."""
 
-    def _check_layout_covers(self, exprs: list[sp.Expr], layout: Layout) -> None:
+    def _check_layout_covers(self, exprs: Sequence[sp.Expr], layout: Layout) -> None:
         """Every free symbol of ``exprs`` must name a slot.
 
         Runs before common subexpression elimination, whose temporaries are
@@ -71,7 +71,7 @@ class ExpressionPrinter(ABC):
         """
         free: set[sp.Symbol] = set()
         for expr in exprs:
-            free |= expr.free_symbols
+            free |= expr.free_symbols  # pyright: ignore
         missing = sorted(str(sym) for sym in free if str(sym) not in layout.slot)
         if missing:
             raise KeyError(
@@ -79,7 +79,7 @@ class ExpressionPrinter(ABC):
             )
 
     def emit(
-        self, exprs: list[sp.Expr], layout: Layout, *, allocate: bool
+        self, exprs: Sequence[sp.Expr], layout: Layout, *, allocate: bool
     ) -> list[str]:
         self.layout = layout
         self.lines = []

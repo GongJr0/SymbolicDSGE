@@ -9,6 +9,7 @@ import sympy as sp
 from sympy import Symbol, Expr
 from sympy.logic.boolalg import Boolean
 from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
+from types import MappingProxyType
 
 import numpy as np
 from numpy import float64, asarray, ndarray
@@ -84,7 +85,7 @@ def compile_model(config: ModelConfig) -> CompiledModel:
     name_to_func = {v.__name__: v for v in ordered_variables}
 
     layout = _infer_variable_layout(desugared, config.shocks)
-    var_order = list(layout.canonical_names)
+    var_order = layout.canonical_names
 
     var_funcs = [name_to_func[name] for name in var_order]
     idx = layout.idx
@@ -104,7 +105,7 @@ def compile_model(config: ModelConfig) -> CompiledModel:
         subs_map[f(t - 1)] = prev  # pyright: ignore
 
     # Shocks stay in the residual: they reach the pencil as the innovation block
-    compiled_numeric: list[Expr] = [o.xreplace(subs_map) for o in residuals]
+    compiled_numeric: tuple[Expr, ...] = tuple(o.xreplace(subs_map) for o in residuals)
 
     constraint_names, constraint_exprs = _compile_constraints(
         config, subs_map, set(idx.keys()), t
@@ -120,29 +121,28 @@ def compile_model(config: ModelConfig) -> CompiledModel:
         t,
     )
 
-    observable_exprs = [
+    observable_exprs = tuple(
         expr.xreplace(subs_map) for expr in desugared.observables.values()
-    ]
+    )
     # Flat row-major (n_obs, n_var) jacobian; printed to a native cfunc on
     # demand via CompiledModel.construct_measurement_jacobian_cfunc.
-    measurement_jacobian_eqs: list[Expr] = [
+    measurement_jacobian_eqs: tuple[Expr, ...] = tuple(
         sp.diff(expr, cur_sym) for expr in observable_exprs for cur_sym in cur_syms
-    ]
-    params_names = [p.name for p in config.calibration.parameters]
+    )
+    params_names = tuple(p.name for p in config.calibration.parameters)
     return CompiledModel(
         name=config.name,
-        cur_syms=cur_syms,
         calib_params=params_names,
         layout=layout,
         var_names=var_order,
-        idx=idx,
+        idx=MappingProxyType(idx),
         objective_eqs=compiled_numeric,
-        observable_names=[v.name for v in config.observables],
+        observable_names=tuple(v.name for v in config.observables),
         observable_eqs=observable_exprs,  # pyright: ignore
         measurement_jacobian_eqs=measurement_jacobian_eqs,
         constraint_names=constraint_names,
         constraint_exprs=constraint_exprs,
-        regimes=regimes,
+        regimes=MappingProxyType(regimes),
         config_token=config.token,
     )
 
@@ -478,7 +478,7 @@ def _compile_constraints(
     subs_map: dict[Any, Symbol],
     declared: set[str],
     t: Symbol,
-) -> tuple[tuple[str, ...], list[Boolean]]:
+) -> tuple[tuple[str, ...], tuple[Boolean, ...]]:
     """Regime conditions in declaration order, bind then relax per constraint.
 
     Declaration order is the regime bit order; the ``frozenset`` regime keys
@@ -487,7 +487,7 @@ def _compile_constraints(
     """
     constraints = conf.equations.constraints
     if not constraints:
-        return (), []
+        return (), ()
 
     names = tuple(constraints)
     exprs: list[Boolean] = []
@@ -502,7 +502,7 @@ def _compile_constraints(
                         f"t{info[1]:+d}. Regime conditions must be contemporaneous."
                     )
             exprs.append(cond.subs(subs_map))
-    return names, exprs
+    return names, tuple(exprs)
 
 
 def _compile_regimes(

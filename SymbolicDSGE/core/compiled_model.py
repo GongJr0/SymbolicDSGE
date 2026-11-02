@@ -1,6 +1,6 @@
 """Compiled, numericly-evaluable representation of a DSGE model."""
 
-from sympy import Symbol, Expr
+from sympy import Expr
 
 import numpy as np
 from numpy import complex128, float64, int64
@@ -9,8 +9,10 @@ from numpy.typing import NDArray
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any, Sequence
+from types import MappingProxyType
 
 from sympy.logic.boolalg import Boolean
+
 
 from .resolvers import VariableLayout
 from SymbolicDSGE._symbolic_printers import (
@@ -186,32 +188,29 @@ class CompiledModel:
     ----------
     name : str
         Name of the model specification that produced this compiled model.
-    cur_syms : list[Symbol]
-        Post-compile generated time-t model variables, in canonical order, as sympy
-        symbols.
     layout : VariableLayout
         :class:`VariableLayout` object describing the model's variable structure and
         indexing.
-    var_names : list[str]
+    var_names : tuple[str, ...]
         Names of all compiled variables, in canonical order.
-    idx : dict[str, int]
+    idx : MappingProxyType[str, int]
         Index mapping variable names to their canonical positions.
-    objective_eqs : list[Expr]
+    objective_eqs : tuple[Expr, ...]
         Expressions of the model's residual equations, in canonical order.
-    calib_params : list[str]
+    calib_params : tuple[str, ...]
         Calibration parameter names, in canonical order.
-    observable_names : list[str]
+    observable_names : tuple[str, ...]
         Names of the model's observables, in canonical order.
-    observable_eqs : list[Expr]
+    observable_eqs : tuple[Expr, ...]
         Observable equations, in canonical order.
-    measurement_jacobian_eqs : list[Expr]
+    measurement_jacobian_eqs : tuple[Expr, ...]
         Jacobian expressions of the observables with respect to the model's
         variables, in row-major order.
     constraint_names : tuple[str, ...]
         Constraint names, in declaration order, for regime conditions.
-    constraint_exprs : list[Boolean]
+    constraint_exprs : tuple[Boolean, ...]
         Expressions of the regime constraints, in declaration order.
-    regimes : dict[int, RegimeBlock]
+    regimes : MappingProxyType[int, RegimeBlock]
         Regime blocks, keyed by the bitmask of their binding constraints, containing
         replaced rows and their Jacobians.
     n_var : int
@@ -238,21 +237,19 @@ class CompiledModel:
 
     name: str
 
-    cur_syms: list[Symbol]
-
     layout: VariableLayout
-    var_names: list[str]
-    idx: dict[str, int]
+    var_names: tuple[str, ...]
+    idx: MappingProxyType[str, int]
 
-    objective_eqs: list[Expr]
+    objective_eqs: tuple[Expr, ...]
 
-    calib_params: list[str]
+    calib_params: tuple[str, ...]
 
-    observable_names: list[str]
-    observable_eqs: list[Expr]
+    observable_names: tuple[str, ...]
+    observable_eqs: tuple[Expr, ...]
     # Flat row-major (n_obs, n_var) symbolic jacobian d(observable)/d(cur_var);
     # printed to a native cfunc on demand (construct_measurement_jacobian_cfunc).
-    measurement_jacobian_eqs: list[Expr]
+    measurement_jacobian_eqs: tuple[Expr, ...]
 
     # Identifier for the config producing this compiled model,
     # used to validate compatibility of compiled models and configs
@@ -262,11 +259,13 @@ class CompiledModel:
     # Regime conditions in declaration order, bind then relax per constraint;
     # printed to a native cfunc on demand (construct_constraint_func).
     constraint_names: tuple[str, ...] = ()
-    constraint_exprs: list[Boolean] = field(default_factory=list)
+    constraint_exprs: tuple[Boolean, ...] = ()
 
     # One block per regime, keyed by the bitmask of its binding constraints over
     # constraint_names. Residuals stay in reference equation order.
-    regimes: dict[int, RegimeBlock] = field(default_factory=dict)
+    regimes: MappingProxyType[int, RegimeBlock] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
     @property
     def n_var(self) -> int:

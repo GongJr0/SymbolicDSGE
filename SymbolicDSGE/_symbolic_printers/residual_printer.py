@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, Sequence, TYPE_CHECKING
 
 import sympy as sp
 from numba import cfunc, types
@@ -150,7 +150,7 @@ class ResidualPrinter(ExpressionPrinter):
 
 
 def build_cfunc(
-    exprs: list[sp.Expr], layout: ResidualLayout, ops: OpTable | None = None
+    exprs: Sequence[sp.Expr], layout: ResidualLayout, ops: OpTable | None = None
 ) -> Any:
     table: OpTable = C128Ops() if ops is None else ops
     body = ResidualPrinter(table).emit(exprs, layout, allocate=False)

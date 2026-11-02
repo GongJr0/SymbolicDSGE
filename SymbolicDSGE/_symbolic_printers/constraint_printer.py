@@ -136,7 +136,7 @@ class ConstraintPrinter(ExpressionPrinter):
         return result
 
 
-def constraint_inclusive(exprs: list[Any]) -> int:
+def constraint_inclusive(exprs: Sequence[Any]) -> int:
     """Bitmask of the conditions that hold at a distance of exactly zero.
 
     Bit ``k`` is slot ``k`` of the distance buffer. A connective's branches must
@@ -168,7 +168,9 @@ def _inclusive(expr: Any) -> bool:
 
 
 def build_constraint_cfunc(
-    exprs: list[Any], layout: ConstraintLayout, ops: ConstraintOpTable | None = None
+    exprs: Sequence[Any],
+    layout: ConstraintLayout,
+    ops: ConstraintOpTable | None = None,
 ) -> tuple[Any, int]:
     """``(cfunc, inclusive)`` for the conditions, in bind/relax slot order.
 

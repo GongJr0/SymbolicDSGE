@@ -20,7 +20,7 @@ NDF = NDArray[float64]
 def non_affine_measurement(
     config: ModelConfig,
     compiled: CompiledModel,
-    y_names: list[str],
+    y_names: tuple[str, ...],
     state: NDF,
 ) -> NDF:
     """Observables evaluated along a path, for a non-affine measurement."""
