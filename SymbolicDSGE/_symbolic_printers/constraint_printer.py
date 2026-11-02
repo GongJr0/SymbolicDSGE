@@ -102,10 +102,6 @@ class ConstraintPrinter(ExpressionPrinter):
         self.cops = ops
 
     @property
-    def allocated_dtype(self) -> str:
-        return "np.float64"
-
-    @property
     def context_name(self) -> str:
         return "constraint"
 
@@ -136,7 +132,7 @@ class ConstraintPrinter(ExpressionPrinter):
         return result
 
 
-def constraint_inclusive(exprs: list[Any]) -> int:
+def constraint_inclusive(exprs: Sequence[Any]) -> int:
     """Bitmask of the conditions that hold at a distance of exactly zero.
 
     Bit ``k`` is slot ``k`` of the distance buffer. A connective's branches must
@@ -168,7 +164,9 @@ def _inclusive(expr: Any) -> bool:
 
 
 def build_constraint_cfunc(
-    exprs: list[Any], layout: ConstraintLayout, ops: ConstraintOpTable | None = None
+    exprs: Sequence[Any],
+    layout: ConstraintLayout,
+    ops: ConstraintOpTable | None = None,
 ) -> tuple[Any, int]:
     """``(cfunc, inclusive)`` for the conditions, in bind/relax slot order.
 
@@ -176,7 +174,7 @@ def build_constraint_cfunc(
     thing their sign cannot: which conditions hold when the distance is zero.
     """
     table: ConstraintOpTable = ConstraintOps() if ops is None else ops
-    body = ConstraintPrinter(table).emit(exprs, layout, allocate=False)
+    body = ConstraintPrinter(table).emit(exprs, layout)
     preamble = [
         f"    cur = carray(cur_ptr, ({layout.n_var},))",
         f"    par = carray(par_ptr, ({layout.n_par},))",

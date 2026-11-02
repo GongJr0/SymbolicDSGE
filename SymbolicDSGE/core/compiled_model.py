@@ -1,6 +1,6 @@
 """Compiled, numericly-evaluable representation of a DSGE model."""
 
-from sympy import Symbol, Expr
+from sympy import Expr
 
 import numpy as np
 from numpy import complex128, float64, int64
@@ -8,12 +8,16 @@ from numpy.typing import NDArray
 
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence, cast
+from types import MappingProxyType
 
 from sympy.logic.boolalg import Boolean
 
+
 from .resolvers import VariableLayout
 from SymbolicDSGE._symbolic_printers import (
+    OpTable,
+    C128Ops,
     BicomplexOps,
     ConstraintLayout,
     MeasurementLayout,
@@ -32,7 +36,18 @@ from .._ckernels.core import (
 
 NDF = NDArray[float64]
 NDC = NDArray[complex128]
-ND = NDArray
+
+# Global cfunc cache for all emitters.
+# Keys on (int(config_token), str(<emitter>), Optional[object(<selector>)])
+# A hit on config token indicates two equal models, module level
+# Caching can intentionally match on different compilation instances
+# sharing the config token.
+#
+# --- Lifetimes ---
+# The cache is global and nothing is evicted.
+# Functions stay alive in the cache for the duration of the process.
+# As a result, their `.address` is constant and valid at all times.
+_CFUNC_CACHE: dict[tuple, Any] = {}
 
 
 @dataclass(frozen=True)
@@ -127,13 +142,13 @@ class RegimeBlock:
     row reads ``a y' = b y + c y_prev + d eps - const``.
     """
 
-    rows: list[int]
-    residuals: list[Expr] = field(default_factory=list)
-    jac_a: list[Expr] = field(default_factory=list)
-    jac_b: list[Expr] = field(default_factory=list)
-    jac_c: list[Expr] = field(default_factory=list)
-    jac_d: list[Expr] = field(default_factory=list)
-    constants: list[Expr] = field(default_factory=list)
+    rows: tuple[int, ...]
+    residuals: tuple[Expr, ...] = ()
+    jac_a: tuple[Expr, ...] = ()
+    jac_b: tuple[Expr, ...] = ()
+    jac_c: tuple[Expr, ...] = ()
+    jac_d: tuple[Expr, ...] = ()
+    constants: tuple[Expr, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -150,8 +165,8 @@ class RegimePencilFunc:
     is unnegated, so all of them drop into a reference pencil copy as they are.
     """
 
-    cfuncs: dict[int, Any]
-    rows: dict[int, NDArray[int64]]
+    cfuncs: MappingProxyType[int, Any]
+    rows: MappingProxyType[int, NDArray[int64]]
     n_var: int
     n_exog: int
     n_par: int
@@ -187,32 +202,29 @@ class CompiledModel:
     ----------
     name : str
         Name of the model specification that produced this compiled model.
-    cur_syms : list[Symbol]
-        Post-compile generated time-t model variables, in canonical order, as sympy
-        symbols.
     layout : VariableLayout
         :class:`VariableLayout` object describing the model's variable structure and
         indexing.
-    var_names : list[str]
+    var_names : tuple[str, ...]
         Names of all compiled variables, in canonical order.
-    idx : dict[str, int]
+    idx : MappingProxyType[str, int]
         Index mapping variable names to their canonical positions.
-    objective_eqs : list[Expr]
+    objective_eqs : tuple[Expr, ...]
         Expressions of the model's residual equations, in canonical order.
-    calib_params : list[str]
+    calib_params : tuple[str, ...]
         Calibration parameter names, in canonical order.
-    observable_names : list[str]
+    observable_names : tuple[str, ...]
         Names of the model's observables, in canonical order.
-    observable_eqs : list[Expr]
+    observable_eqs : tuple[Expr, ...]
         Observable equations, in canonical order.
-    measurement_jacobian_eqs : list[Expr]
+    measurement_jacobian_eqs : tuple[Expr, ...]
         Jacobian expressions of the observables with respect to the model's
         variables, in row-major order.
     constraint_names : tuple[str, ...]
         Constraint names, in declaration order, for regime conditions.
-    constraint_exprs : list[Boolean]
+    constraint_exprs : tuple[Boolean, ...]
         Expressions of the regime constraints, in declaration order.
-    regimes : dict[int, RegimeBlock]
+    regimes : MappingProxyType[int, RegimeBlock]
         Regime blocks, keyed by the bitmask of their binding constraints, containing
         replaced rows and their Jacobians.
     n_var : int
@@ -239,21 +251,19 @@ class CompiledModel:
 
     name: str
 
-    cur_syms: list[Symbol]
-
     layout: VariableLayout
-    var_names: list[str]
-    idx: dict[str, int]
+    var_names: tuple[str, ...]
+    idx: MappingProxyType[str, int]
 
-    objective_eqs: list[Expr]
+    objective_eqs: tuple[Expr, ...]
 
-    calib_params: list[str]
+    calib_params: tuple[str, ...]
 
-    observable_names: list[str]
-    observable_eqs: list[Expr]
+    observable_names: tuple[str, ...]
+    observable_eqs: tuple[Expr, ...]
     # Flat row-major (n_obs, n_var) symbolic jacobian d(observable)/d(cur_var);
     # printed to a native cfunc on demand (construct_measurement_jacobian_cfunc).
-    measurement_jacobian_eqs: list[Expr]
+    measurement_jacobian_eqs: tuple[Expr, ...]
 
     # Identifier for the config producing this compiled model,
     # used to validate compatibility of compiled models and configs
@@ -263,11 +273,13 @@ class CompiledModel:
     # Regime conditions in declaration order, bind then relax per constraint;
     # printed to a native cfunc on demand (construct_constraint_func).
     constraint_names: tuple[str, ...] = ()
-    constraint_exprs: list[Boolean] = field(default_factory=list)
+    constraint_exprs: tuple[Boolean, ...] = ()
 
     # One block per regime, keyed by the bitmask of its binding constraints over
     # constraint_names. Residuals stay in reference equation order.
-    regimes: dict[int, RegimeBlock] = field(default_factory=dict)
+    regimes: MappingProxyType[int, RegimeBlock] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
     @property
     def n_var(self) -> int:
@@ -315,7 +327,7 @@ class CompiledModel:
         return self.layout.shock_names
 
     @property
-    def shock_idx(self) -> dict[str, int]:
+    def shock_idx(self) -> MappingProxyType[str, int]:
         """``{shock name: column}`` into the ``(T, n_exog)`` shock matrix."""
         return self.layout.shock_idx
 
@@ -356,8 +368,15 @@ class CompiledModel:
             out[i] = bits
         return out
 
-    @cached_property
-    def _regime_pencil_func(self) -> RegimePencilFunc | None:
+    def construct_regime_pencil_func(self) -> RegimePencilFunc | None:
+        """Build the native (C callable) functions that evaluate the model's regime pencil rows at a given state and parameter vector.
+
+        Returns
+        -------
+        RegimePencilFunc | None
+            :class:`RegimePencilFunc` containing the regime pencil functions, or ``None`` if the model has no regimes.
+
+        """
         # Replaced rows of each regime pencil as one cfunc per regime, so the
         # assembly patches a reference pencil copy instead of sweeping the whole
         # regime. Both blocks share a cfunc: after the fwd fold they are
@@ -365,6 +384,10 @@ class CompiledModel:
         # so the addresses and the row buffers stay valid for the driver.
         if not self.regimes:
             return None
+
+        key = (self.config_token, "regime", None)
+        if hit := _CFUNC_CACHE.get(key):
+            return cast(RegimePencilFunc, hit)
 
         base = MeasurementLayout.from_compiled(self)
         cfuncs: dict[int, Any] = {}
@@ -407,42 +430,15 @@ class CompiledModel:
             cfuncs[mask] = build_measurement_cfunc(exprs, layout)
             rows[mask] = np.asarray(block.rows, dtype=np.int64)
 
-        return RegimePencilFunc(
-            cfuncs=cfuncs,
-            rows=rows,
+        reg = RegimePencilFunc(
+            cfuncs=MappingProxyType(cfuncs),
+            rows=MappingProxyType(rows),
             n_var=base.n_var,
             n_exog=self.n_exog,
             n_par=base.n_par,
         )
-
-    def construct_regime_pencil_func(self) -> RegimePencilFunc | None:
-        """Build the native (C callable) functions that evaluate the model's regime pencil rows at a given state and parameter vector.
-
-        Returns
-        -------
-        RegimePencilFunc | None
-            :class:`RegimePencilFunc` containing the regime pencil functions, or ``None`` if the model has no regimes.
-
-        """
-        return self._regime_pencil_func
-
-    @cached_property
-    def _constraint_func(self) -> ConstraintFunc:
-        # Conditions as one numba @cfunc (C ABI) for the native OccBin driver.
-        # Held here so its .address stays valid for the driver.
-        if not self.constraint_names:
-            raise ValueError(
-                "Constraint function cannot be built: no constraints in compiled model."
-            )
-        layout = ConstraintLayout.from_compiled(self, self.constraint_names)
-        cfunc, inclusive = build_constraint_cfunc(self.constraint_exprs, layout)
-        return ConstraintFunc(
-            cfunc=cfunc,
-            names=self.constraint_names,
-            n_var=layout.n_var,
-            n_par=layout.n_par,
-            inclusive=inclusive,
-        )
+        _CFUNC_CACHE[key] = reg
+        return reg
 
     def construct_constraint_func(self) -> ConstraintFunc:
         """Build the native (C callable) function that evaluates the model's regime conditions at a given state and parameter vector.
@@ -453,13 +449,33 @@ class CompiledModel:
             :class:`ConstraintFunc` containing the regime condition function.
 
         """
-        return self._constraint_func
+        # Conditions as one numba @cfunc (C ABI) for the native OccBin driver.
+        # Held here so its .address stays valid for the driver.
+        if not self.constraint_names:
+            raise ValueError(
+                "Constraint function cannot be built: no constraints in compiled model."
+            )
+        key = (self.config_token, "constraint", None)
+        if hit := _CFUNC_CACHE.get(key):
+            return cast(ConstraintFunc, hit)
+        layout = ConstraintLayout.from_compiled(self, self.constraint_names)
+        cfunc, inclusive = build_constraint_cfunc(self.constraint_exprs, layout)
+        constr = ConstraintFunc(
+            cfunc=cfunc,
+            names=self.constraint_names,
+            n_var=layout.n_var,
+            n_par=layout.n_par,
+            inclusive=inclusive,
+        )
+        _CFUNC_CACHE[key] = constr
+        return constr
 
-    @cached_property
-    def _objective_cfunc(self) -> Any:
-        # Residual as a numba @cfunc (C ABI) for the native complex-step preproc
-        # (klein_preprocess). Held here so its .address stays valid for the driver.
-        return build_cfunc(self.objective_eqs, ResidualLayout.from_compiled(self))
+    def __cached_residual_cf(self, opset: OpTable, key: tuple) -> Any:
+        if hit := _CFUNC_CACHE.get(key):
+            return hit
+        cf = build_cfunc(self.objective_eqs, ResidualLayout.from_compiled(self), opset)
+        _CFUNC_CACHE[key] = cf
+        return cf
 
     def construct_objective_cfunc(self) -> Any:
         """Built a native (C callable) function that evaluates the model's residuals at a given state and parameter vector.
@@ -470,15 +486,8 @@ class CompiledModel:
             Function as a ``numba`` ``@cfunc`` (C ABI); used by native kernels to evaluate the model's residuals.
 
         """
-        return self._objective_cfunc
-
-    @cached_property
-    def _objective_cfunc_bicomplex(self) -> Any:
-        # Residual as a bicomplex @cfunc for the second-order Hessian sweep
-        # (bicomplex_hessian). Held here so its .address stays valid.
-        return build_cfunc(
-            self.objective_eqs, ResidualLayout.from_compiled(self), BicomplexOps()
-        )
+        key = (self.config_token, "residual_c128", None)
+        return self.__cached_residual_cf(C128Ops(), key)
 
     def construct_objective_cfunc_bicomplex(self) -> Any:
         """Build a native (C callable) function that evaluates the model's residuals using bicomplex numbers for second-order Hessian computation.
@@ -489,26 +498,12 @@ class CompiledModel:
             ``numba`` ``@cfunc`` (C ABI) that evaluates the model's residuals using bicomplex numbers, used for second-order Hessian computation.
 
         """
-        return self._objective_cfunc_bicomplex
-
-    def _coerce_param_vector(self, par: Mapping[Any, Any] | Any) -> ND:
-        # Resolve a name/Symbol-keyed mapping into calib_params order. dtype and
-        # contiguity are the native boundary's job (the Cython shims cast), so this
-        # only produces the ordered numeric vector.
-        if isinstance(par, Mapping):
-            vals = []
-            for p in self.calib_params:
-                if p in par:
-                    vals.append(par[p])
-                else:
-                    raise KeyError(f"Missing parameter '{p}'.")
-            return np.asarray(vals)
-
-        return np.asarray(par)
+        key = (self.config_token, "residual_bicomplex", None)
+        return self.__cached_residual_cf(BicomplexOps(), key)
 
     def build_affine_measurement_matrices(
         self,
-        params: Mapping[Any, Any] | Any,
+        params: NDF,
         observables: Sequence[str],
         ss: NDF,
     ) -> tuple[NDF, NDF]:
@@ -516,8 +511,8 @@ class CompiledModel:
 
         Parameters
         ----------
-        params : Mapping[Any, Any] | Any
-            Model parameters, either as a mapping from parameter names to values or as an ordered vector.
+        params : NDArray[float64]
+            Model parameters as a vector in calibration order.
         observables : Sequence[str]
             Obserbable names to include in the measurement equation, in the order they should appear in the output matrices.
         ss : NDF
@@ -530,18 +525,17 @@ class CompiledModel:
             d : Constant vector for the affine measurement equation.
 
         """
-        param_vec = self._coerce_param_vector(params)
-        if param_vec.shape[0] != self.n_par:
+        if params.shape[0] != self.n_par:
             raise ValueError(
-                f"Parameter vector length {param_vec.shape[0]} != {self.n_par}"
+                f"Parameter vector length {params.shape[0]} != {self.n_par}"
             )
 
         meas_addr = self.construct_measurement_cfunc(observables).address
         jac_addr = self.construct_measurement_jacobian_cfunc(observables).address
         n_obs = len(observables)
 
-        d = measurement_eval(meas_addr, ss, param_vec, n_obs)
-        C = jacobian_eval(jac_addr, ss, param_vec, n_obs, self.n_var)
+        d = measurement_eval(meas_addr, ss, params, n_obs)
+        C = jacobian_eval(jac_addr, ss, params, n_obs, self.n_var)
         return C, d
 
     def _normalize_observables(
@@ -549,22 +543,23 @@ class CompiledModel:
         observables: Sequence[str] | None,
     ) -> tuple[str, ...]:
         if observables is None:
-            return tuple(self.observable_names)
+            return self.observable_names
 
         obs = tuple(observables)
-        if len(set(obs)) != len(obs):
+        if obs == self.observable_names:
+            return self.observable_names
+
+        obsset = set(obs)
+        if len(obsset) != len(obs):
             raise ValueError("Observable list contains duplicates.")
 
         obs_idx = {name: i for i, name in enumerate(self.observable_names)}
-        missing = [name for name in obs if name not in obs_idx]
-        if missing:
-            raise KeyError(f"Unknown observables not in compiled model: {missing}")
+        if missing := obsset - obs_idx.keys():
+            raise KeyError(
+                f"Unknown observables not in compiled model: {sorted(missing)!r}"
+            )
 
         return tuple(sorted(obs, key=lambda name: obs_idx[name]))
-
-    @cached_property
-    def _measurement_cfunc_cache(self) -> dict[tuple[str, ...], Any]:
-        return {}
 
     def construct_measurement_cfunc(
         self,
@@ -584,18 +579,15 @@ class CompiledModel:
 
         """
         obs = self._normalize_observables(observables)
-        cache = self._measurement_cfunc_cache
-        if obs in cache:
-            return cache[obs]
+        key = (self.config_token, "measurement", obs)
+        if hit := _CFUNC_CACHE.get(key):
+            return hit  # Any (CFunc)
 
         layout = MeasurementLayout.from_compiled(self, obs)
         exprs = [self.observable_eqs[i] for i in layout.observable_indices]
-        cache[obs] = build_measurement_cfunc(exprs, layout)
-        return cache[obs]
-
-    @cached_property
-    def _measurement_jacobian_cfunc_cache(self) -> dict[tuple[str, ...], Any]:
-        return {}
+        cf = build_measurement_cfunc(exprs, layout)
+        _CFUNC_CACHE[key] = cf
+        return cf
 
     def construct_measurement_jacobian_cfunc(
         self,
@@ -615,9 +607,9 @@ class CompiledModel:
 
         """
         obs = self._normalize_observables(observables)
-        cache = self._measurement_jacobian_cfunc_cache
-        if obs in cache:
-            return cache[obs]
+        key = (self.config_token, "measurement_jac", obs)
+        if hit := _CFUNC_CACHE.get(key):
+            return hit  # Any (CFunc)
 
         base = MeasurementLayout.from_compiled(self, obs)
         n_var = base.n_var
@@ -634,8 +626,9 @@ class CompiledModel:
             n_par=base.n_par,
             n_obs=len(exprs),
         )
-        cache[obs] = build_measurement_cfunc(exprs, layout)
-        return cache[obs]
+        cf = build_measurement_cfunc(exprs, layout)
+        _CFUNC_CACHE[key] = cf
+        return cf
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.name})"

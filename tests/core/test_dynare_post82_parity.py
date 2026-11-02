@@ -92,8 +92,9 @@ def _shocks(block: np.ndarray) -> dict[str, np.ndarray]:
 
 def _measurement(config, compiled):
     params = config.calibration.parameters
+    par = np.fromiter(params.values(), dtype=np.float64, count=compiled.n_par)
     C, d = compiled.build_affine_measurement_matrices(
-        params,
+        par,
         list(compiled.observable_names),
         np.zeros(len(compiled.var_names)),
     )

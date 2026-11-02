@@ -9,6 +9,7 @@ import sympy as sp
 from sympy import Symbol, Expr
 from sympy.logic.boolalg import Boolean
 from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
+from types import MappingProxyType
 
 import numpy as np
 from numpy import float64, asarray, ndarray
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
     from ..estimation.results import MLEResult, MAPResult, MCMCResult
     from ..bayesian.priors import Prior
 
-from .config import ModelConfig
+from .config import ModelConfig, TIME
 from .resolvers import VariableLayout, resolve_ss_seed
 from .compiled_model import (
     CompiledModel,
@@ -75,7 +76,7 @@ def compile_model(config: ModelConfig) -> CompiledModel:
 
     # Convert model to {-1, 0, 1} offsets with auxiliary variables for lags and leads.
     desugared = desugar_model(config)
-    t = Symbol("t", integer=True)
+    t = TIME
     ordered_variables = desugared.variables
 
     # Convert model to minimization problem
@@ -84,7 +85,7 @@ def compile_model(config: ModelConfig) -> CompiledModel:
     name_to_func = {v.__name__: v for v in ordered_variables}
 
     layout = _infer_variable_layout(desugared, config.shocks)
-    var_order = list(layout.canonical_names)
+    var_order = layout.canonical_names
 
     var_funcs = [name_to_func[name] for name in var_order]
     idx = layout.idx
@@ -104,7 +105,7 @@ def compile_model(config: ModelConfig) -> CompiledModel:
         subs_map[f(t - 1)] = prev  # pyright: ignore
 
     # Shocks stay in the residual: they reach the pencil as the innovation block
-    compiled_numeric: list[Expr] = [o.xreplace(subs_map) for o in residuals]
+    compiled_numeric: tuple[Expr, ...] = tuple(o.xreplace(subs_map) for o in residuals)
 
     constraint_names, constraint_exprs = _compile_constraints(
         config, subs_map, set(idx.keys()), t
@@ -120,29 +121,28 @@ def compile_model(config: ModelConfig) -> CompiledModel:
         t,
     )
 
-    observable_exprs = [
+    observable_exprs = tuple(
         expr.xreplace(subs_map) for expr in desugared.observables.values()
-    ]
+    )
     # Flat row-major (n_obs, n_var) jacobian; printed to a native cfunc on
     # demand via CompiledModel.construct_measurement_jacobian_cfunc.
-    measurement_jacobian_eqs: list[Expr] = [
+    measurement_jacobian_eqs: tuple[Expr, ...] = tuple(
         sp.diff(expr, cur_sym) for expr in observable_exprs for cur_sym in cur_syms
-    ]
-    params_names = [p.name for p in config.calibration.parameters]
+    )
+    params_names = tuple(p.name for p in config.calibration.parameters)
     return CompiledModel(
         name=config.name,
-        cur_syms=cur_syms,
         calib_params=params_names,
         layout=layout,
         var_names=var_order,
-        idx=idx,
+        idx=MappingProxyType(idx),
         objective_eqs=compiled_numeric,
-        observable_names=[v.name for v in config.observables],
+        observable_names=tuple(v.name for v in config.observables),
         observable_eqs=observable_exprs,  # pyright: ignore
         measurement_jacobian_eqs=measurement_jacobian_eqs,
         constraint_names=constraint_names,
         constraint_exprs=constraint_exprs,
-        regimes=regimes,
+        regimes=MappingProxyType(regimes),
         config_token=config.token,
     )
 
@@ -478,7 +478,7 @@ def _compile_constraints(
     subs_map: dict[Any, Symbol],
     declared: set[str],
     t: Symbol,
-) -> tuple[tuple[str, ...], list[Boolean]]:
+) -> tuple[tuple[str, ...], tuple[Boolean, ...]]:
     """Regime conditions in declaration order, bind then relax per constraint.
 
     Declaration order is the regime bit order; the ``frozenset`` regime keys
@@ -487,7 +487,7 @@ def _compile_constraints(
     """
     constraints = conf.equations.constraints
     if not constraints:
-        return (), []
+        return (), ()
 
     names = tuple(constraints)
     exprs: list[Boolean] = []
@@ -502,7 +502,7 @@ def _compile_constraints(
                         f"t{info[1]:+d}. Regime conditions must be contemporaneous."
                     )
             exprs.append(cond.subs(subs_map))
-    return names, exprs
+    return names, tuple(exprs)
 
 
 def _compile_regimes(
@@ -567,37 +567,37 @@ def _compile_regimes(
         # same vector; differentiating before that fold is what keeps a and b
         # distinct. b carries klein_preproc's sign on the cur sweep.
         replaced = [residuals[row] for row in rows]
-        jac_a = [
-            sp.diff(resid, sym).subs(at_point)  # pyright: ignore
+        jac_a = tuple(
+            sp.diff(resid, sym).xreplace(at_point)
             for resid in replaced
             for sym in fwd_syms
-        ]
-        jac_b = [
-            (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
+        )
+        jac_b = tuple(
+            (-sp.diff(resid, sym)).xreplace(at_point)
             for resid in replaced
             for sym in cur_syms
-        ]
-        jac_c = [
-            (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
+        )
+        jac_c = tuple(
+            (-sp.diff(resid, sym)).xreplace(at_point)
             for resid in replaced
             for sym in prev_syms
-        ]
-        jac_d = [
-            (-sp.diff(resid, sym)).subs(at_point)  # pyright: ignore
+        )
+        jac_d = tuple(
+            (-sp.diff(resid, sym)).xreplace(at_point)
             for resid in replaced
             for sym in shock_syms
-        ]
+        )
         # The regime's own residual there, unnegated where b is negated:
         # a E[y+] = b y - c. Zero on unreplaced rows, so only these are kept.
-        constants = [resid.subs(at_point) for resid in replaced]  # pyright: ignore
+        constants = tuple(resid.subs(at_point) for resid in replaced)  # pyright: ignore
 
         compiled[sum(1 << bit[name] for name in key)] = RegimeBlock(
-            residuals=residuals,
-            rows=rows,
-            jac_a=jac_a,
-            jac_b=jac_b,
-            jac_c=jac_c,
-            jac_d=jac_d,
+            residuals=tuple(residuals),
+            rows=tuple(rows),
+            jac_a=jac_a,  # pyright: ignore
+            jac_b=jac_b,  # pyright: ignore
+            jac_c=jac_c,  # pyright: ignore
+            jac_d=jac_d,  # pyright: ignore
             constants=constants,
         )
     return compiled
@@ -624,14 +624,13 @@ def _lagged_names(desugared: DesugarResult) -> set[str]:
     a Jacobian: a calibration that happened to zero a coefficient would
     otherwise resize the state vector between draws.
     """
-    t = Symbol("t", integer=True)
     declared = {v.__name__ for v in desugared.variables}
     lagged: set[str] = set()
     for expr in _offset_expressions(
         desugared.model, desugared.regimes, desugared.observables
     ):
         for call in expr.atoms(AppliedUndef):
-            info = _call_offset(call, declared, t)
+            info = _call_offset(call, declared, TIME)
             if info is not None and info[1] < 0:
                 lagged.add(info[0])
     return lagged
@@ -686,10 +685,10 @@ def _infer_variable_layout(
         canonical_names=canonical_names,
         state_names=state_names,
         control_names=control_names,
-        idx=idx,
-        aux_origin={g.name: g.origin for g in desugared.generated},
+        idx=MappingProxyType(idx),
+        aux_origin=MappingProxyType({g.name: g.origin for g in desugared.generated}),
         shock_names=shock_names,
-        shock_idx={name: i for i, name in enumerate(shock_names)},
+        shock_idx=MappingProxyType({name: i for i, name in enumerate(shock_names)}),
     )
 
 

@@ -71,7 +71,7 @@ def _supplied(kwargs: Mapping[str, Any], *names: str) -> dict[str, Any]:
 def _model_params(model: SolvedModel) -> NDF:
     parameters = model.config.calibration.parameters
     return _flat_f64(
-        np.asarray([parameters[param] for param in model.compiled.calib_params])
+        np.fromiter(parameters.values(), dtype=np.float64, count=model.compiled.n_par)
     )
 
 

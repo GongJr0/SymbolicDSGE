@@ -12,7 +12,7 @@ from SymbolicDSGE._ckernels.core import jacobian_eval, measurement_eval
 
 # States then controls, each in declaration order. test.yaml lags u, v and r,
 # so those are the states; its two shocks are innovations, not variables.
-EXPECTED_CANONICAL_ORDER = ["u", "v", "r", "Pi", "x", "r_star"]
+EXPECTED_CANONICAL_ORDER = ("u", "v", "r", "Pi", "x", "r_star")
 EXPECTED_IDX = {name: i for i, name in enumerate(EXPECTED_CANONICAL_ORDER)}
 N_VAR = len(EXPECTED_CANONICAL_ORDER)
 
@@ -43,7 +43,7 @@ def test_compile_default_layout_canonicalizes_misordered_yaml_variables(
     assert compiled.var_names == EXPECTED_CANONICAL_ORDER
     assert compiled.idx == EXPECTED_IDX
     assert compiled.layout.declared_names == ("Pi", "x", "r_star", "u", "v", "r")
-    assert compiled.layout.canonical_names == tuple(EXPECTED_CANONICAL_ORDER)
+    assert compiled.layout.canonical_names == EXPECTED_CANONICAL_ORDER
     assert compiled.layout.state_names == ("u", "v", "r")
     assert compiled.layout.control_names == ("Pi", "x", "r_star")
     assert compiled.n_exog == 2

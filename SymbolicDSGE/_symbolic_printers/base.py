@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Protocol
+from typing import Any, Protocol, Sequence
 
 import sympy as sp
 
@@ -52,15 +52,10 @@ class ExpressionPrinter(ABC):
 
     @property
     @abstractmethod
-    def allocated_dtype(self) -> str:
-        """NumPy dtype used when an allocating wrapper is emitted."""
-
-    @property
-    @abstractmethod
     def context_name(self) -> str:
         """Short name used in unsupported node errors."""
 
-    def _check_layout_covers(self, exprs: list[sp.Expr], layout: Layout) -> None:
+    def _check_layout_covers(self, exprs: Sequence[sp.Expr], layout: Layout) -> None:
         """Every free symbol of ``exprs`` must name a slot.
 
         Runs before common subexpression elimination, whose temporaries are
@@ -71,35 +66,34 @@ class ExpressionPrinter(ABC):
         """
         free: set[sp.Symbol] = set()
         for expr in exprs:
-            free |= expr.free_symbols
+            free |= expr.free_symbols  # pyright: ignore
         missing = sorted(str(sym) for sym in free if str(sym) not in layout.slot)
         if missing:
             raise KeyError(
                 f"{self.context_name} layout has no slot for: {', '.join(missing)}."
             )
 
-    def emit(
-        self, exprs: list[sp.Expr], layout: Layout, *, allocate: bool
-    ) -> list[str]:
+    def emit(self, exprs: Sequence[sp.Expr], layout: Layout) -> list[str]:
         self.layout = layout
         self.lines = []
         self._tmp = 0
 
         self._check_layout_covers(exprs, layout)
 
-        n_out = self.ops.elems_per_var * layout.n_expr
-        replacements, reduced = sp.cse(exprs, symbols=sp.numbered_symbols("cse_"))
+        keep = [i for i, expr in enumerate(exprs) if expr != 0]
+        replacements, reduced = sp.cse(
+            [exprs[i] for i in keep], symbols=sp.numbered_symbols("cse_")
+        )
         for sym, sub in replacements:
             rendered = self.render(sub)
             self.lines.append(f"    {sym.name} = {rendered}")
 
-        if allocate:
-            self.lines.append(f"    out = np.empty(({n_out},), {self.allocated_dtype})")
-        for i, expr in enumerate(reduced):
+        if len(keep) != len(exprs):
+            self.lines.append("    out[:] = 0.0")
+
+        for i, expr in zip(keep, reduced):
             rendered = self.render(expr)
             self.lines.append("    " + self.ops.store("out", i, rendered))
-        if allocate:
-            self.lines.append("    return out")
         return self.lines
 
     def render(self, expr: Any) -> str:

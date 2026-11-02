@@ -6,8 +6,6 @@ so nothing here is specific to how the model was solved.
 
 from __future__ import annotations
 
-from typing import Tuple, Sequence
-
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
@@ -19,31 +17,16 @@ from ..compiled_model import CompiledModel
 NDF = NDArray[float64]
 
 
-def build_C_d_from_obs(
-    config: ModelConfig, compiled: CompiledModel, y_names: Sequence[str], ss: NDF
-) -> Tuple[NDF, NDF]:
-    """``(C, d)`` for the declared observables, linearized at ``ss``."""
-    return compiled.build_affine_measurement_matrices(
-        config.calibration.parameters,
-        y_names,
-        ss,
-    )
-
-
 def non_affine_measurement(
     config: ModelConfig,
     compiled: CompiledModel,
-    y_names: list[str],
+    y_names: tuple[str, ...],
     state: NDF,
 ) -> NDF:
     """Observables evaluated along a path, for a non-affine measurement."""
     # ``state`` is (T, n_var) in cur_syms canonical order (checked at compile).
     params = config.calibration.parameters
-    param_vals = np.array(
-        [float64(params[p]) for p in compiled.calib_params],
-        dtype=float64,
-    )
-
+    param_vals = np.fromiter(params.values(), dtype=float64, count=compiled.n_par)
     # The measurement cfunc emits observables sorted by model index; map its
     # output columns back to the caller's y_names order.
     obs_sorted = compiled._normalize_observables(y_names)

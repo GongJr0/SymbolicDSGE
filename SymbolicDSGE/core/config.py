@@ -18,6 +18,9 @@ from .types import (
     RegimeGetterDict,
 )
 
+# Shared time symbol across modules, unused in this file.
+TIME = Symbol("t", integer=True)
+
 
 @dataclass
 class CovarianceSpec(_Lockable):
@@ -144,15 +147,6 @@ class Calib(_Lockable):
     parameters: SymbolGetterDict[float]
     shocks: CovarianceSpec
     measurement_noise: CovarianceSpec | None
-
-    def fingerprint(self) -> int:
-        """Hashable snapshot of the parameter values, for keying caches."""
-        return hash(
-            (
-                tuple(self.parameters.keys()),
-                tuple(float(v) for v in self.parameters.values()),
-            )
-        )
 
     def _freeze(self) -> None:
         self.parameters.lock()

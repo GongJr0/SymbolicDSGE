@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from typing import Mapping, Sequence
-from numpy import float64, int64, ndarray
+from numpy import float64, int64, ndarray, fromiter
 from numpy.typing import NDArray
 
 from .base import SolvedModel, NDF
@@ -55,8 +55,10 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
         x0_arr = self._initial_state(x0)[: comp.n_state]
 
         shock_mat = simulation_shock_matrix(conf, comp, T, shocks, shock_scale)
-
         constraint = comp.construct_constraint_func()
+        par = fromiter(
+            conf.calibration.parameters.values(), dtype=float64, count=comp.n_par
+        )
 
         X, regimes, diag = occbin_sim(
             a=pol.a,
@@ -66,7 +68,7 @@ class PiecewiseSolvedModel(SolvedModel[PiecewiseSolution]):
             cst=pol.cst,
             ghx_ref=pol.ghx_ref,
             ss=pol.steady_state,
-            par=comp._coerce_param_vector(self.config.calibration.parameters),
+            par=par,
             cond_addr=constraint.address,
             inclusive=constraint.inclusive,
             n_constraint=constraint.n_constraint,

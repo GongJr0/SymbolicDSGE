@@ -27,7 +27,7 @@ from sympy import Eq, Expr, Function, Symbol
 from sympy.core.function import AppliedUndef
 
 from .types import SymbolGetterDict, RegimeGetterDict
-from .config import ModelConfig
+from .config import ModelConfig, TIME
 
 #: ``v(t-n)`` lifts to ``f"{v}{LAG_SUFFIX}{n-1}"``, ``v(t+n)`` to
 #: ``f"{v}{LEAD_SUFFIX}{n-1}"``.
@@ -96,7 +96,7 @@ def desugar_model(conf: ModelConfig) -> DesugarResult:
     observables together, so a regime that displaces something the reference
     does not still finds its aux column in the reference pencil.
     """
-    t = Symbol("t", integer=True)
+    t = TIME
     declared_funcs = list(conf.variables)
     declared_names = [f.__name__ for f in declared_funcs]
     declared = set(declared_names)
@@ -179,11 +179,12 @@ def _call_offset(
     arg0 = call.args[0]
     if t not in getattr(arg0, "free_symbols", set()):
         return None
-    offset = sp.simplify(arg0 - t)
-    if offset.is_Integer or offset.is_integer is True:
+    offset = arg0 - t
+    if offset.is_Integer:
         return name, int(offset)
     raise ValueError(
-        f"Equation {call} displaces {name} by a non-integer offset {offset}."
+        f"Invalid time shift encountered: {call}. Write a time shift as 't' "
+        "plus/minus an integer, as in 't-1'."
     )
 
 
@@ -260,7 +261,7 @@ def _rewrite(
 
 
 def _rewrite_eq(eq: Eq, rewrite: Any) -> Eq:
-    return sp.Eq(rewrite(eq.lhs), rewrite(eq.rhs))  # pyright: ignore
+    return sp.Eq(rewrite(eq.lhs), rewrite(eq.rhs), evaluate=False)  # pyright: ignore
 
 
 def _register(

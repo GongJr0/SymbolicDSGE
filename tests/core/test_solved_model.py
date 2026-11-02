@@ -34,6 +34,10 @@ from SymbolicDSGE.core.solved_model.measurement import (
 from SymbolicDSGE.core.shock.spec import simulation_shock_matrix
 
 
+def _cur_syms(compiled):
+    return [sp.Symbol(f"cur_{name}") for name in compiled.var_names]
+
+
 def _filter_result(T: int = 3, n: int = 1, m: int = 2) -> FilterResult:
     x = np.zeros((T, n), dtype=np.float64)
     y = np.zeros((T, m), dtype=np.float64)
@@ -429,14 +433,14 @@ def test_solved_model_non_affine_measurement_matches_reference(solved_test):
     # of the observable exprs, with output columns remapped to y_names order.
     solved = solved_test
     compiled = solved.compiled
-    n_var = len(compiled.cur_syms)
+    n_var = compiled.n_var
     rng = np.random.default_rng(0)
     state = rng.normal(size=(4, n_var)).astype(np.float64)
 
     # Reversed so the sorted-cfunc columns must be remapped back to y_names order.
     y_names = list(reversed(compiled.observable_names))
 
-    args = [*compiled.cur_syms, *compiled.calib_params]
+    args = [*_cur_syms(compiled), *compiled.calib_params]
     par = np.array(
         [
             np.float64(solved.config.calibration.parameters[p])

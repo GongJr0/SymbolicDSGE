@@ -283,7 +283,9 @@ def test_a_non_integer_offset_is_rejected(tmp_path):
     data = copy.deepcopy(NATURAL_TIME_MODEL)
     data["equations"]["model"]["u_process"] = "u(t) = rho_u*u(t-rho_v) + e_u"
 
-    with pytest.raises(ValueError, match="non-integer offset"):
+    with pytest.raises(
+        ValueError, match=r"Equation 'u_process' references invalid time shift\(s\)"
+    ):
         desugar_model(_parse(tmp_path, data))
 
 
