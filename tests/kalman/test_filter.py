@@ -5,12 +5,11 @@ import numpy as np
 import pytest
 from numba import cfunc, types
 from numpy import float64
-from sympy import Symbol
 
-from SymbolicDSGE.core.config import cov_from_spec
 from SymbolicDSGE.kalman.errors import (
     ErrorCode,
-    MatrixConditionError,
+    HyperparameterError,
+    MatrixFactorizationError,
     ShapeMismatchError,
     get_error_constructor,
 )
@@ -94,9 +93,10 @@ def _ukf_system_1d():
 
 
 def test_error_code_dispatch_maps_known_errors_and_rejects_unknown():
-    assert get_error_constructor(ErrorCode.SHAPE_MISMATCH) is ShapeMismatchError
-    assert get_error_constructor(ErrorCode.MATRIX_CONDITION) is MatrixConditionError
-    assert get_error_constructor(ErrorCode.LINALG_ERROR) is np.linalg.LinAlgError
+    assert get_error_constructor(ErrorCode.P_FACTORIZATION) is MatrixFactorizationError
+    assert get_error_constructor(ErrorCode.Q_FACTORIZATION) is MatrixFactorizationError
+    assert get_error_constructor(ErrorCode.S_FACTORIZATION) is MatrixFactorizationError
+    assert get_error_constructor(ErrorCode.BAD_HYPERPARAMS) is HyperparameterError
 
     with pytest.raises(ValueError, match="Unknown error code"):
         get_error_constructor(ErrorCode.SUCCESS)
@@ -196,7 +196,7 @@ def test_run_linear_raises_on_singular_innovation_covariance():
     ss = np.zeros(1, dtype=float64)
     y = np.zeros((2, 1), dtype=float64)
 
-    with pytest.raises(MatrixConditionError):
+    with pytest.raises(MatrixFactorizationError):
         KalmanFilter.run(A, B, C, d, Q, R, ss, y, P0=np.zeros((1, 1), dtype=float64))
 
 
@@ -278,7 +278,7 @@ def test_run_unscented_rejects_degenerate_inputs():
             **(kwargs | {"hxx": np.zeros((1, 1), dtype=float64)})
         )
 
-    with pytest.raises(MatrixConditionError):
+    with pytest.raises(MatrixFactorizationError):
         KalmanFilter.run_unscented(
             **(
                 kwargs

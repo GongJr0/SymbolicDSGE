@@ -295,7 +295,7 @@ int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
       sdsge_sym_inplace(S_buf, m);
 
     if (sdsge_chol(S_buf, in->jitter, L, m) != SDSGE_OK) {
-      status = KF_ERR_MATRIX_CONDITION;
+      status = KF_ERR_S_FACTORIZATION;
       break;
     }
 
@@ -430,7 +430,7 @@ int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
       sdsge_sym_inplace(S_buf, m);
 
     if (sdsge_chol(S_buf, in->jitter, L, m) != SDSGE_OK) {
-      status = KF_ERR_MATRIX_CONDITION;
+      status = KF_ERR_S_FACTORIZATION;
       break;
     }
 
@@ -693,7 +693,7 @@ i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
   const f64 lambda = in->alpha * in->alpha * ((f64)na + in->kappa) - (f64)na;
   const f64 scale = (f64)na + lambda;
   if (!(scale > 0.0) || !isfinite(scale))
-    return KF_ERR_MATRIX_CONDITION;
+    return KF_ERR_BAD_HYPERPARAMS;
   const f64 gamma = sqrt(scale);
   const f64 w0_m = lambda / scale;
   const f64 w0_c = w0_m + (1.0 - in->alpha * in->alpha + in->beta);
@@ -736,7 +736,7 @@ i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
    * is block diagonal and only its state block moves, so the innovation block
    * is written here and never again. */
   if (ne > 0 && ukf_chol_auto(in->Q, in->jitter, Q_chol, ne) != SDSGE_OK)
-    return KF_ERR_MATRIX_CONDITION;
+    return KF_ERR_Q_FACTORIZATION;
   sdsge_zero_mat(A_chol, na, na);
   for (i64 i = 0; i < ne; ++i)
     for (i64 j = 0; j < ne; ++j)
@@ -748,7 +748,7 @@ i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
 
   for (i64 t = 0; t < T; ++t) {
     if (ukf_chol_auto(P_prev, in->jitter, P_chol, nz) != SDSGE_OK) {
-      status = KF_ERR_MATRIX_CONDITION;
+      status = KF_ERR_P_FACTORIZATION;
       break;
     }
     for (i64 i = 0; i < nz; ++i)
@@ -789,7 +789,7 @@ i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
 
     kf_row_minus_vec(in->obs, t, y_pred, innov, no);
     if (ukf_chol_auto(S, in->jitter, L, no) != SDSGE_OK) {
-      status = KF_ERR_MATRIX_CONDITION;
+      status = KF_ERR_S_FACTORIZATION;
       break;
     }
     sdsge_forward_subst(L, innov, std_innov, no);

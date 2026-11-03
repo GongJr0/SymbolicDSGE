@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from numba import cfunc, njit, types
+from numba import cfunc, types
 from numpy import float64
 
 import SymbolicDSGE.kalman.filter as filter_module
 from SymbolicDSGE.kalman.errors import (
     ErrorCode,
-    MatrixConditionError,
+    MatrixFactorizationError,
     ShapeMismatchError,
 )
 from SymbolicDSGE.kalman.filter import KalmanFilter
@@ -157,10 +157,10 @@ def test_run_converts_error_code_to_matrix_condition(monkeypatch):
     # The native hot loop returns (err, out); a nonzero status is mapped to the
     # matching in-house exception in one place. No numpy exception leaks out.
     def error_hot_loop(*args, **kwargs):
-        return ErrorCode.MATRIX_CONDITION, ()
+        return ErrorCode.S_FACTORIZATION, ()
 
     monkeypatch.setattr(filter_module, "kalman_hot_loop", error_hot_loop)
-    with pytest.raises(MatrixConditionError):
+    with pytest.raises(MatrixFactorizationError):
         KalmanFilter.run(A, B, C, d, Q, R, ss, y)
 
 
@@ -172,10 +172,10 @@ def test_run_extended_converts_error_code_to_matrix_condition(monkeypatch):
     # in-house exception via the ErrorCode registry (mirrors the linear path).
     # meas/jac addresses are unused because the hot loop is monkeypatched.
     def error_ekf(*args, **kwargs):
-        return ErrorCode.MATRIX_CONDITION, ()
+        return ErrorCode.S_FACTORIZATION, ()
 
     monkeypatch.setattr(filter_module, "ekf_hot_loop", error_ekf)
-    with pytest.raises(MatrixConditionError):
+    with pytest.raises(MatrixFactorizationError):
         KalmanFilter.run_extended(
             1,
             1,
@@ -216,17 +216,17 @@ def test_run_status_carries_error_code(monkeypatch):
     assert KalmanFilter.run(A, B, C, d, Q, R, ss, y).status == 0
 
     def error_hot_loop(*args, **kwargs):
-        return ErrorCode.MATRIX_CONDITION, _placeholder_out_11()
+        return ErrorCode.S_FACTORIZATION, _placeholder_out_11()
 
     monkeypatch.setattr(filter_module, "kalman_hot_loop", error_hot_loop)
 
     # Default: a nonzero status raises the mapped exception.
-    with pytest.raises(MatrixConditionError):
+    with pytest.raises(MatrixFactorizationError):
         KalmanFilter.run(A, B, C, d, Q, R, ss, y)
 
     # _raise_on_error=False: the code is carried on ``status`` instead of raising.
     res = KalmanFilter.run(A, B, C, d, Q, R, ss, y, _raise_on_error=False)
-    assert res.status == int(ErrorCode.MATRIX_CONDITION)
+    assert res.status == int(ErrorCode.S_FACTORIZATION)
 
 
 def test_run_extended_status_carries_error_code(monkeypatch):
@@ -235,16 +235,16 @@ def test_run_extended_status_carries_error_code(monkeypatch):
     calib = np.array([0.0], dtype=float64)
 
     def error_ekf(*args, **kwargs):
-        return ErrorCode.MATRIX_CONDITION, _placeholder_out_11()
+        return ErrorCode.S_FACTORIZATION, _placeholder_out_11()
 
     monkeypatch.setattr(filter_module, "ekf_hot_loop", error_ekf)
 
     # Default raises; _raise_on_error=False carries the code on ``status``. The
     # meas/jac addresses are unused because the hot loop is monkeypatched.
-    with pytest.raises(MatrixConditionError):
+    with pytest.raises(MatrixFactorizationError):
         KalmanFilter.run_extended(1, 1, A, B, calib, Q, R, ss, y)
 
     res = KalmanFilter.run_extended(
         1, 1, A, B, calib, Q, R, ss, y, _raise_on_error=False
     )
-    assert res.status == int(ErrorCode.MATRIX_CONDITION)
+    assert res.status == int(ErrorCode.S_FACTORIZATION)

@@ -304,7 +304,7 @@ class KalmanFilter:
         )
         if err != 0 and _raise_on_error:
             ErrorConstructor = get_error_constructor(ErrorCode(err))
-            raise ErrorConstructor()
+            raise ErrorConstructor(err)
         (
             x_pred,
             x_filt,
@@ -542,7 +542,7 @@ class KalmanFilter:
         )
         if err != 0 and _raise_on_error:
             ErrorConstructor = get_error_constructor(ErrorCode(err))
-            raise ErrorConstructor()
+            raise ErrorConstructor(err)
 
         (
             x1_pred,
@@ -704,7 +704,7 @@ class KalmanFilter:
 
         if err != 0 and _raise_on_error:
             ErrorConstructor = get_error_constructor(ErrorCode(err))
-            raise ErrorConstructor()
+            raise ErrorConstructor(err)
         (
             x_pred,
             x_filt,
