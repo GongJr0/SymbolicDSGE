@@ -6,14 +6,14 @@
 
 /* ERROR CODES */
 
-/* -1 is unassigned: it was a complex-matrix rejection no kernel ever
- * returned.*/
 #define KF_OK 0
 #define KF_ERR_SHAPE_MISMATCH -1101
-#define KF_ERR_MATRIX_CONDITION -1102
-#define KF_ERR_SINGULAR_MATRIX -1103
 #define KF_ERR_ALLOC -1104
 #define KF_ERR_LYAPUNOV_CONVERGENCE -1105
+#define KF_ERR_P_FACTORIZATION -1106
+#define KF_ERR_Q_FACTORIZATION -1107
+#define KF_ERR_S_FACTORIZATION -1108
+#define KF_ERR_BAD_HYPERPARAMS -1109
 
 /* Kalman hot-loop helpers. Parity oracle: the numba `*_into` kernels in
  * SymbolicDSGE/kalman/filter.py. All matrices are C-contiguous, row-major, f64.

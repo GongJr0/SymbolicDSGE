@@ -151,7 +151,7 @@ def test_kalman_non_pd_returns_error_code() -> None:
         True,
     )
     status, _ = kf.kalman_hot_loop(*args)
-    assert status == ErrorCode.MATRIX_CONDITION
+    assert status == ErrorCode.S_FACTORIZATION
 
 
 def test_ukf_returns_model_variable_history() -> None:

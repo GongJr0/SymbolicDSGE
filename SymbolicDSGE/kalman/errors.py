@@ -1,8 +1,32 @@
 """Error types raised by the Kalman filter implementation."""
 
-from enum import IntEnum
-import numpy as np
+from enum import IntEnum, unique
 from typing import Any
+
+from .._ckernels.kalman._kalman import (
+    KF_OK,
+    KF_ERR_SHAPE_MISMATCH,
+    KF_ERR_ALLOC,
+    KF_ERR_LYAPUNOV_CONVERGENCE,
+    KF_ERR_P_FACTORIZATION,
+    KF_ERR_Q_FACTORIZATION,
+    KF_ERR_S_FACTORIZATION,
+    KF_ERR_BAD_HYPERPARAMS,
+)
+
+
+@unique
+class ErrorCode(IntEnum):
+    """Mirrors the KF_* codes in _ckernels/kalman/kalman.h."""
+
+    SUCCESS = KF_OK
+    SHAPE_MISMATCH = KF_ERR_SHAPE_MISMATCH
+    ALLOC_ERROR = KF_ERR_ALLOC
+    LYAPUNOV_CONVERGENCE = KF_ERR_LYAPUNOV_CONVERGENCE
+    P_FACTORIZATION = KF_ERR_P_FACTORIZATION
+    Q_FACTORIZATION = KF_ERR_Q_FACTORIZATION
+    S_FACTORIZATION = KF_ERR_S_FACTORIZATION
+    BAD_HYPERPARAMS = KF_ERR_BAD_HYPERPARAMS
 
 
 class ShapeMismatchError(Exception):
@@ -13,30 +37,36 @@ class ShapeMismatchError(Exception):
         super().__init__(message)
 
 
-class MatrixConditionError(Exception):
+class MatrixFactorizationError(Exception):
     """Raised when a matrix is ill-conditioned in the Kalman filter implementation."""
 
-    def __init__(self) -> None:
-        message = "Matrix(s) is ill-conditioned."
-        super().__init__(message)
+    def __init__(self, code: ErrorCode) -> None:
+        default_msg = (
+            "{name!r}Matrix factorization failed. The matrix may be ill-conditioned, "
+            "singular, or not positive definite."
+        )
+        match code:
+            case ErrorCode.P_FACTORIZATION:
+                msg = (
+                    default_msg.format(name="P ")
+                    + " Models without shocks can lead to "
+                    "this error on the default P0 handling."
+                )
+            case ErrorCode.Q_FACTORIZATION:
+                msg = default_msg.format(name="Q ")
+            case ErrorCode.S_FACTORIZATION:
+                msg = default_msg.format(name="S ")
+            case _:
+                msg = default_msg.format(name="")
+        super().__init__(msg)
 
 
 class MemoryAllocationError(Exception):
     """Raised when a native memory allocation fails."""
 
-    def __init__(self) -> None:
+    def __init__(self, *args: Any) -> None:
         message = "Memory allocation failed. (Possibly due to insufficient memory.)"
         super().__init__(message)
-
-
-class ErrorCode(IntEnum):
-    """Mirrors the KF_* codes in _ckernels/kalman/kalman.h."""
-
-    SUCCESS = 0
-    SHAPE_MISMATCH = -1101
-    MATRIX_CONDITION = -1102
-    LINALG_ERROR = -1103
-    ALLOC_ERROR = -1104
 
 
 def get_error_constructor(code: ErrorCode) -> type[Exception]:
@@ -55,10 +85,12 @@ def get_error_constructor(code: ErrorCode) -> type[Exception]:
     """
     if code == ErrorCode.SHAPE_MISMATCH:
         return ShapeMismatchError
-    elif code == ErrorCode.MATRIX_CONDITION:
-        return MatrixConditionError
-    elif code == ErrorCode.LINALG_ERROR:
-        return np.linalg.LinAlgError
+    elif (
+        code == ErrorCode.P_FACTORIZATION
+        or code == ErrorCode.Q_FACTORIZATION
+        or code == ErrorCode.S_FACTORIZATION
+    ):
+        return MatrixFactorizationError
     elif code == ErrorCode.ALLOC_ERROR:
         return MemoryAllocationError
     else:

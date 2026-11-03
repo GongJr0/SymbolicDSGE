@@ -23,8 +23,10 @@ cdef extern from "../diag/diag.h":
 
 cdef extern from "../kalman/kalman.h":
     int c_KF_ERR_SHAPE_MISMATCH "KF_ERR_SHAPE_MISMATCH"
-    int c_KF_ERR_MATRIX_CONDITION "KF_ERR_MATRIX_CONDITION"
-
+    int c_KF_ERR_P_FACTORIZATION "KF_ERR_P_FACTORIZATION"
+    int c_KF_ERR_Q_FACTORIZATION "KF_ERR_Q_FACTORIZATION"
+    int c_KF_ERR_S_FACTORIZATION "KF_ERR_S_FACTORIZATION"
+    int c_KF_ERR_BAD_HYPERPARAMS "KF_ERR_BAD_HYPERPARAMS"
 cdef extern from "runner.h":
     int c_SDSGE_MC_RUN_BAD_ARG "SDSGE_MC_RUN_BAD_ARG"
     int c_SDSGE_MC_NOT_RUN "SDSGE_MC_NOT_RUN"
@@ -55,7 +57,10 @@ class MCStatus(IntEnum):
     DIAG_FALLBACK = c_DIAG_FALLBACK
 
     FILTER_SHAPE_MISMATCH = c_KF_ERR_SHAPE_MISMATCH
-    FILTER_MATRIX_CONDITION = c_KF_ERR_MATRIX_CONDITION
+    FILTER_P_FACTORIZATION = c_KF_ERR_P_FACTORIZATION
+    FILTER_Q_FACTORIZATION = c_KF_ERR_Q_FACTORIZATION
+    FILTER_S_FACTORIZATION = c_KF_ERR_S_FACTORIZATION
+    FILTER_BAD_HYPERPARAMS = c_KF_ERR_BAD_HYPERPARAMS
 
     BAD_ARG = c_SDSGE_MC_RUN_BAD_ARG
     NOT_RUN = c_SDSGE_MC_NOT_RUN
@@ -93,9 +98,12 @@ _MESSAGES = {
         "The diagnostic design is rank-deficient and requires a fallback solver."
     ),
     MCStatus.FILTER_SHAPE_MISMATCH: "The filter inputs have incompatible dimensions.",
-    MCStatus.FILTER_MATRIX_CONDITION: (
-        "A filter matrix could not be factorized with the required conditioning."
+    MCStatus.FILTER_P_FACTORIZATION: (
+        "Cholesky factorization of the P matrix failed. "
+        "This may be due to a bad P0 initialization or a model without shocks in UKF."
     ),
+    MCStatus.FILTER_Q_FACTORIZATION: "Cholesky factorization of the Q matrix failed.",
+    MCStatus.FILTER_S_FACTORIZATION: "Cholesky factorization of the S matrix failed.",
     MCStatus.BAD_ARG: "The runner received an invalid argument or input binding.",
     MCStatus.NOT_RUN: "The step was skipped due to its source step(s) failing.",
     MCStatus.TRANSFORM_BAD_ARG: "A transform argument or input dimension is invalid.",
