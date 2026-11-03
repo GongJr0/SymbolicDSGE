@@ -104,6 +104,10 @@ _MESSAGES = {
     ),
     MCStatus.FILTER_Q_FACTORIZATION: "Cholesky factorization of the Q matrix failed.",
     MCStatus.FILTER_S_FACTORIZATION: "Cholesky factorization of the S matrix failed.",
+    MCStatus.FILTER_BAD_HYPERPARAMS: (
+        "The alpha and kappa combination does not produce positive weights. "
+        "Please check the hyperparameter values."
+    ),
     MCStatus.BAD_ARG: "The runner received an invalid argument or input binding.",
     MCStatus.NOT_RUN: "The step was skipped due to its source step(s) failing.",
     MCStatus.TRANSFORM_BAD_ARG: "A transform argument or input dimension is invalid.",

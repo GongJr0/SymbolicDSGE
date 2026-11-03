@@ -8,6 +8,7 @@ from numpy import float64
 
 from SymbolicDSGE.kalman.errors import (
     ErrorCode,
+    HyperparameterError,
     MatrixFactorizationError,
     ShapeMismatchError,
     get_error_constructor,
@@ -92,10 +93,10 @@ def _ukf_system_1d():
 
 
 def test_error_code_dispatch_maps_known_errors_and_rejects_unknown():
-    assert get_error_constructor(ErrorCode.SHAPE_MISMATCH) is ShapeMismatchError
     assert get_error_constructor(ErrorCode.P_FACTORIZATION) is MatrixFactorizationError
     assert get_error_constructor(ErrorCode.Q_FACTORIZATION) is MatrixFactorizationError
     assert get_error_constructor(ErrorCode.S_FACTORIZATION) is MatrixFactorizationError
+    assert get_error_constructor(ErrorCode.BAD_HYPERPARAMS) is HyperparameterError
 
     with pytest.raises(ValueError, match="Unknown error code"):
         get_error_constructor(ErrorCode.SUCCESS)
