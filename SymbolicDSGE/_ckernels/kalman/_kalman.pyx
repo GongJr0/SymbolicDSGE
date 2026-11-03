@@ -337,8 +337,8 @@ def stationary_covariance(
     cdef int64_t n = Av.shape[0]
     cdef int64_t k = Bv.shape[1]
 
-    if n <= 0 or k <= 0:
-        raise ValueError("A and B must have positive state and shock dimensions.")
+    if n <= 0:
+        raise ValueError("A must have positive state dimensions.")
     if Av.shape[1] != n:
         raise ValueError("A must be square.")
     if Bv.shape[0] != n:
