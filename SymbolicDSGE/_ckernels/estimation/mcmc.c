@@ -13,6 +13,7 @@
 #include "../rng/rng.h" /* sdsge_rng_standard_{normal,uniform}_fill */
 #include "estimation.h" /* sdsge_run_estimation, sdsge_objective_fn */
 #include "prior_program.h"
+#include "sdsge_time.h" /* sdsge_monotime_sec */
 
 /* Native adaptive random-walk Metropolis mainloop (issue #331).
  *
@@ -246,8 +247,24 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
 
   i64 accepted = 0;
   i64 keep_i = 0;
+  i64 next_keep = opt->burn_in; /* init with post-burn-in */
+
+  i64 placeholder_burnin_accepted = 0; /* missing struct field */
+
+  /* clock stores */
+  const f64 base_t = sdsge_monotime_sec();
+  f64 init_t = base_t; /* == base_t if burn_in == 0, else set at first
+                          post-burn-in draw */
+  f64 halt_t;
 
   for (i64 t = 0; t < total_steps; ++t) {
+    /* Timing and acceptance accounting: start the clock at first post-burn-in
+     * draw and record the current accepted count for warmup diagnostics. */
+    if (t == opt->burn_in) {
+      init_t = sdsge_monotime_sec();
+      placeholder_burnin_accepted = accepted;
+    }
+
     /* Propose: prop = current + L @ z,  z ~ N(0, I). */
     sdsge_rng_standard_normal_fill(bg, d, z);
     sdsge_matvec(L, z, prop, d, d);
@@ -283,15 +300,16 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     }
 
     /* Keep post-burn-in draws at the thinning cadence. */
-    if (t >= opt->burn_in && (t - opt->burn_in) % opt->thin == 0) {
+    if (t == next_keep) {
       f64 lj = sdsge_unconstrained_to_params(cb, current, Ltmp,
                                              &buf->kept[keep_i * d]);
       buf->kept_lp[keep_i] = cur_lp - lj;
       buf->kept_lj[keep_i] = lj;
       ++keep_i;
+      next_keep += opt->thin;
     }
   }
-
+  halt_t = sdsge_monotime_sec();
   out->n_accepted = accepted;
   free(work);
   return SDSGE_MCMC_OK;
