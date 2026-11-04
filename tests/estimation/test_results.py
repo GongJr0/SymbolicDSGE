@@ -3,7 +3,16 @@ import numpy as np
 import pytest
 from numpy import float64
 
-from SymbolicDSGE.estimation.results import MCMCResult, MLEResult, MAPResult
+from SymbolicDSGE.estimation.results import (
+    MCMCResult,
+    MLEResult,
+    MAPResult,
+    _hpd_window_size,
+    _validate_hpd_alpha,
+    _validate_samples,
+)
+
+from tests._result_helpers import make_mcmc_result
 
 
 def _result(
@@ -12,13 +21,10 @@ def _result(
     logpost: np.ndarray,
     logjac: np.ndarray,
 ) -> MCMCResult:
-    return MCMCResult(
-        param_names=["a", "b"],
-        samples=np.asarray(samples, dtype=np.float64),
-        logpost_trace=np.asarray(logpost, dtype=np.float64),
-        logjac_trace=np.asarray(logjac, dtype=np.float64),
-        accept_rate=np.float64(0.25),
-        n_draws=int(samples.shape[0]),
+    return make_mcmc_result(
+        samples=samples,
+        logpost_trace=logpost,
+        logjac_trace=logjac,
         burn_in=10,
         thin=2,
     )
@@ -124,8 +130,8 @@ def test_hpd_validation_and_window_full_draws_branches():
         logjac=np.zeros((2,), dtype=np.float64),
     )
 
-    assert MCMCResult._validate_hpd_alpha(0.5) == pytest.approx(0.5)
-    assert MCMCResult._hpd_window_size(5, np.float64(0.0)) == 5
+    assert _validate_hpd_alpha(0.5) == pytest.approx(0.5)
+    assert _hpd_window_size(5, np.float64(0.0)) == 5
     assert res.hpd_intervals(alpha=0.0) == {
         "a": pytest.approx((0.0, 2.0)),
         "b": pytest.approx((1.0, 3.0)),
@@ -141,30 +147,15 @@ def test_hpd_validation_and_window_full_draws_branches():
     ],
 )
 def test_validate_samples_error_branches(samples, param_names, match):
-    res = MCMCResult(
-        param_names=param_names,
-        samples=samples,
-        logpost_trace=np.array([0.0, 1.0], dtype=np.float64),
-        logjac_trace=np.array([0.0, 1.0], dtype=np.float64),
-        accept_rate=np.float64(0.5),
-        n_draws=2,
-        burn_in=0,
-        thin=1,
-    )
     with pytest.raises(ValueError, match=match):
-        res._validate_samples()
+        _validate_samples(samples, tuple(param_names))
 
 
 def test_joint_hpd_set_validates_logpost_trace_shape():
-    res = MCMCResult(
-        param_names=["a", "b"],
+    res = make_mcmc_result(
         samples=np.ones((2, 2), dtype=np.float64),
         logpost_trace=np.ones((2, 1), dtype=np.float64),
         logjac_trace=np.ones((2, 1), dtype=np.float64),
-        accept_rate=np.float64(0.5),
-        n_draws=2,
-        burn_in=0,
-        thin=1,
     )
     with pytest.raises(ValueError, match="1D array"):
         res.joint_hpd_set()
@@ -186,7 +177,7 @@ def test_result_plot_methods_execute_without_gui(monkeypatch):
     monkeypatch.setattr(plt, "show", lambda: calls.append("show"))
     monkeypatch.setattr(scipy.stats, "gaussian_kde", lambda col: _FakeKDE())
 
-    res = MCMCResult(
+    res = make_mcmc_result(
         param_names=["a", "b", "c"],
         samples=np.array(
             [
@@ -198,10 +189,6 @@ def test_result_plot_methods_execute_without_gui(monkeypatch):
         ),
         logpost_trace=np.array([0.0, 1.0, 2.0], dtype=np.float64),
         logjac_trace=np.array([0.0, 1.0, 2.0], dtype=np.float64),
-        accept_rate=np.float64(0.5),
-        n_draws=3,
-        burn_in=0,
-        thin=1,
     )
 
     res.posterior_kde_plot()
@@ -256,7 +243,7 @@ def test_mle_result_spec_roundtrips():
     assert MLEResult.from_spec(d).to_spec() == d
 
 
-def test_mcmc_result_to_spec_and_posterior_arrays():
+def test_mcmc_result_to_spec():
     samples = np.array([[0.0, 1.0], [2.0, 3.0]], dtype=np.float64)
     logpost = np.array([-1.0, -2.0], dtype=np.float64)
     logjac = np.array([0.0, 0.0], dtype=np.float64)
@@ -265,17 +252,20 @@ def test_mcmc_result_to_spec_and_posterior_arrays():
     spec = res.to_spec()
     meta = spec.meta
     assert meta["param_names"] == ["a", "b"]
-    assert meta["accept_rate"] == 0.25
     assert (meta["n_draws"], meta["burn_in"], meta["thin"]) == (2, 10, 2)
     # the bulk columns ride the container, not the meta
     np.testing.assert_array_equal(np.asarray(spec.samples), samples)
     # and the container round-trips back to a live result
     rebuilt = MCMCResult.from_spec(spec)
     np.testing.assert_array_equal(rebuilt.samples, samples)
-    assert rebuilt.param_names == ["a", "b"]
-
-    arrays = res.posterior_arrays()
-    assert set(arrays) == {"samples", "logpost", "logjac"}
-    np.testing.assert_array_equal(arrays["samples"], samples)
-    np.testing.assert_array_equal(arrays["logpost"], logpost)
-    np.testing.assert_array_equal(arrays["logjac"], logjac)
+    assert rebuilt.param_names == ("a", "b")
+    # the sampler's own bookkeeping survives the projection field by field, which
+    # the distinct defaults are what make visible
+    assert (rebuilt.accepted_burn_in, rebuilt.accepted_in_sample) == (
+        res.accepted_burn_in,
+        res.accepted_in_sample,
+    )
+    assert (rebuilt.burn_in_seconds, rebuilt.in_sample_seconds) == (
+        res.burn_in_seconds,
+        res.in_sample_seconds,
+    )

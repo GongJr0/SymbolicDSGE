@@ -19,7 +19,7 @@ from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.bundle.loader import load_bundle
 from SymbolicDSGE.core.shock.generators import Shock
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.estimation.results import MCMCResult, MLEResult, MAPResult
+from SymbolicDSGE.estimation.results import MLEResult, MAPResult
 from SymbolicDSGE.estimation.spec import (
     EstimatorParams,
     EstimatorSpec,
@@ -31,6 +31,8 @@ from SymbolicDSGE.ui.estimation import (
     serialize_estimation_result,
 )
 from SymbolicDSGE.ui.session import TabState, Workspace
+
+from tests._result_helpers import make_mcmc_result
 
 # -- helpers ----------------------------------------------------------------
 
@@ -63,15 +65,12 @@ def _hydrated_bundle(tmp_path: Path, parsed_test, compiled_test) -> Path:
         "logpost": rng.standard_normal(20),
         "logjac": rng.standard_normal(20),
     }
-    result = MCMCResult(
-        param_names=["beta", "sigma"],
+    result = make_mcmc_result(
+        param_names=("beta", "sigma"),
         samples=posterior["samples"],
         logpost_trace=posterior["logpost"],
         logjac_trace=posterior["logjac"],
-        accept_rate=np.float64(0.33),
-        n_draws=20,
         burn_in=5,
-        thin=1,
     )
     pipeline = MCPipeline([simulation_step("sim", target="reference", T=20)])
     return (
@@ -209,15 +208,12 @@ def test_emit_wire_mcmc_meta_plus_traces_matches_live_result() -> None:
     samples = rng.standard_normal((30, 2))
     logpost = (rng.standard_normal(30),)
     logjac = rng.standard_normal(30)
-    live = MCMCResult(
+    live = make_mcmc_result(
         param_names=["beta", "sigma"],
         samples=samples,
         logpost_trace=logpost,
         logjac_trace=logjac,
-        accept_rate=np.float64(0.31),
-        n_draws=30,
         burn_in=5,
-        thin=1,
     )
     # a result rebuilt from a bundle carries its own bulk columns, so the wire is
     # identical whether the traces are supplied separately or read off the result
@@ -228,15 +224,10 @@ def test_emit_wire_mcmc_meta_plus_traces_matches_live_result() -> None:
 def test_emit_wire_mcmc_carries_sampler_config() -> None:
     """The sampler's call arguments, as optimizer_config is for a point run."""
     config = {"adapt": True, "adapt_start": 100, "random_state": 7}
-    live = MCMCResult(
+    live = make_mcmc_result(
         param_names=["beta"],
         samples=np.zeros((3, 1)),
-        logpost_trace=np.zeros(3),
-        logjac_trace=np.zeros(3),
-        accept_rate=np.float64(0.4),
-        n_draws=3,
         burn_in=1,
-        thin=1,
         sampler_config=config,
     )
 

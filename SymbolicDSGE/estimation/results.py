@@ -1,5 +1,7 @@
 """Optimization and MCMC result containers for DSGE model estimation."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -114,7 +116,7 @@ class MLEResult(OptimizationResult):
         return MLEResultSpec(**self.common_spec(), loglik=float(self.loglik))
 
     @classmethod
-    def from_spec(cls, data: MLEResultSpec) -> "MLEResult":
+    def from_spec(cls, data: MLEResultSpec) -> MLEResult:
         """Construct a MLEResult from a JSON-serializable dict representation."""
         se = data.get("se") or {}
         return cls(
@@ -153,7 +155,7 @@ class MAPResult(OptimizationResult):
         )
 
     @classmethod
-    def from_spec(cls, data: MAPResultSpec) -> "MAPResult":
+    def from_spec(cls, data: MAPResultSpec) -> MAPResult:
         """Construct a MAPResult from a JSON-serializable dict representation."""
         se = data.get("se") or {}
         return cls(
@@ -210,11 +212,14 @@ class MCMCResult:
         run was seeded.
     """
 
-    param_names: list[str]
+    param_names: tuple[str, ...]
     samples: NDF
     logpost_trace: NDF
     logjac_trace: NDF
-    accept_rate: float64
+    accepted_burn_in: int
+    accepted_in_sample: int
+    burn_in_seconds: float
+    in_sample_seconds: float
     n_draws: int
     burn_in: int
     thin: int
@@ -222,17 +227,14 @@ class MCMCResult:
     #: beyond ``n_draws``/``burn_in``/``thin`` — recorded for reconstruction.
     sampler_config: dict[str, Any] = field(default_factory=dict)
 
-    def to_spec(self) -> "MCMCResultSpec":
-        """Project to the scalar text metadata carried in a ``.sdsge`` bundle.
-
-        Bulk ``samples`` / ``logpost_trace`` / ``logjac_trace`` are not
-        included. Pair this with :meth:`posterior_arrays` when bundling so they
-        ride a sibling member.
-        The ``sampler_config`` is preserved.
-        """
+    def to_spec(self) -> MCMCResultSpec:
+        """Project to the scalar text metadata carried in a ``.sdsge`` bundle."""
         meta = MCMCResultMeta(
             param_names=list(self.param_names),
-            accept_rate=float(self.accept_rate),
+            accepted_burn_in=int(self.accepted_burn_in),
+            accepted_in_sample=int(self.accepted_in_sample),
+            burn_in_seconds=float(self.burn_in_seconds),
+            in_sample_seconds=float(self.in_sample_seconds),
             n_draws=int(self.n_draws),
             burn_in=int(self.burn_in),
             thin=int(self.thin),
@@ -247,7 +249,7 @@ class MCMCResult:
         )
 
     @classmethod
-    def from_spec(cls, data: MCMCResultSpec) -> "MCMCResult":
+    def from_spec(cls, data: MCMCResultSpec) -> MCMCResult:
         """Produce a :class:`MCMCResult` from the bundle-format MCMC result spec.
 
         Parameters
@@ -263,53 +265,34 @@ class MCMCResult:
         """
         meta = data.meta
         return cls(
-            param_names=list(meta["param_names"]),
+            param_names=tuple(meta["param_names"]),
             samples=np.asarray(data.samples, dtype=float64),
             logpost_trace=np.asarray(data.logpost_trace, dtype=float64),
             logjac_trace=np.asarray(data.logjac_trace, dtype=float64),
-            accept_rate=float64(meta["accept_rate"]),
+            accepted_burn_in=int(meta["accepted_burn_in"]),
+            accepted_in_sample=int(meta["accepted_in_sample"]),
+            burn_in_seconds=float(meta["burn_in_seconds"]),
+            in_sample_seconds=float(meta["in_sample_seconds"]),
             n_draws=int(meta["n_draws"]),
             burn_in=int(meta["burn_in"]),
             thin=int(meta["thin"]),
             sampler_config=dict(meta["sampler_config"]),
         )
 
-    def posterior_arrays(self) -> dict[str, NDF]:
-        """Bulk posterior columns keyed for :func:`SymbolicDSGE.bundle.columns_to_parquet`.
+    @property
+    def accept_rate(self) -> float:
+        # `n_draws` counts retained draws; the proposals behind them are
+        # `n_draws * thin`, which is what the kernel's step total is built from.
+        total_steps = self.burn_in + self.n_draws * self.thin
+        return (self.accepted_burn_in + self.accepted_in_sample) / total_steps
 
-        ``{"samples": (n_draws, n_params), "logpost": (n_draws,), "logjac":
-        (n_draws,)}``, the shape :class:`BundleBuilder` expects as ``posterior``
-        and the loader returns in ``LoadedEstimation.posterior``.
-        """
-        return {
-            "samples": self.samples,
-            "logpost": self.logpost_trace,
-            "logjac": self.logjac_trace,
-        }
+    @property
+    def accept_rate_burn_in(self) -> float:
+        return self.accepted_burn_in / self.burn_in if self.burn_in > 0 else np.nan
 
-    @staticmethod
-    def _validate_hpd_alpha(alpha: float) -> float64:
-        alpha64 = float64(alpha)
-        if not (0.0 <= alpha64 < 1.0):
-            raise ValueError("alpha must satisfy 0 <= alpha < 1.")
-        return alpha64
-
-    def _validate_samples(self) -> tuple[int, int]:
-        if self.samples.ndim != 2:
-            raise ValueError("samples must be a 2D array of shape (n_draws, n_params).")
-        n_draws, n_params = self.samples.shape
-        if n_draws == 0:
-            raise ValueError("samples is empty.")
-        if len(self.param_names) != n_params:
-            raise ValueError(
-                "param_names length does not match the number of sample columns."
-            )
-        return n_draws, n_params
-
-    @staticmethod
-    def _hpd_window_size(n_draws: int, alpha: float64) -> int:
-        mass = float64(1.0 - alpha)
-        return max(1, min(n_draws, int(np.ceil(float(n_draws) * float(mass)))))
+    @property
+    def accept_rate_in_sample(self) -> float:
+        return self.accepted_in_sample / (self.n_draws * self.thin)
 
     def hpd_intervals(
         self, alpha: float = 0.05, n_digits: int = 3
@@ -320,9 +303,9 @@ class MCMCResult:
         The returned interval for each parameter is the shortest empirical interval
         containing approximately ``1 - alpha`` of the retained posterior draws.
         """
-        alpha64 = self._validate_hpd_alpha(alpha)
-        n_draws, _ = self._validate_samples()
-        window = self._hpd_window_size(n_draws, alpha64)
+        alpha64 = _validate_hpd_alpha(alpha)
+        n_draws, _ = _validate_samples(self.samples, self.param_names)
+        window = _hpd_window_size(n_draws, alpha64)
 
         out: dict[str, tuple[float64, float64]] = {}
         for i, name in enumerate(self.param_names):
@@ -350,14 +333,14 @@ class MCMCResult:
         ``threshold`` is the log-posterior cutoff and ``indices`` are positions in
         the original retained chain.
         """
-        alpha64 = self._validate_hpd_alpha(alpha)
-        n_draws, _ = self._validate_samples()
+        alpha64 = _validate_hpd_alpha(alpha)
+        n_draws, _ = _validate_samples(self.samples, self.param_names)
         if self.logpost_trace.ndim != 1 or self.logpost_trace.shape[0] != n_draws:
             raise ValueError(
                 "logpost_trace must be a 1D array with one entry per retained draw."
             )
 
-        window = self._hpd_window_size(n_draws, alpha64)
+        window = _hpd_window_size(n_draws, alpha64)
         order = np.argsort(self.logpost_trace)[::-1]
         threshold = float64(self.logpost_trace[order[window - 1]])
         mask = np.asarray(self.logpost_trace >= threshold, dtype=bool)
@@ -431,3 +414,28 @@ class MCMCResult:
         plt.ylabel("Log-Posterior")
         plt.tight_layout()
         plt.show()
+
+
+def _validate_hpd_alpha(alpha: float) -> float64:
+    alpha64 = float64(alpha)
+    if not (0.0 <= alpha64 < 1.0):
+        raise ValueError("alpha must satisfy 0 <= alpha < 1.")
+    return alpha64
+
+
+def _hpd_window_size(n_draws: int, alpha: float64) -> int:
+    mass = float64(1.0 - alpha)
+    return max(1, min(n_draws, int(np.ceil(float(n_draws) * float(mass)))))
+
+
+def _validate_samples(samples: NDF, param_names: tuple[str, ...]) -> tuple[int, int]:
+    if samples.ndim != 2:
+        raise ValueError("samples must be a 2D array of shape (n_draws, n_params).")
+    n_draws, n_params = samples.shape
+    if n_draws == 0:
+        raise ValueError("samples is empty.")
+    if len(param_names) != n_params:
+        raise ValueError(
+            "param_names length does not match the number of sample columns."
+        )
+    return n_draws, n_params

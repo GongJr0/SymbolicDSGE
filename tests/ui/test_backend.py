@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from SymbolicDSGE.estimation.results import MCMCResult, MLEResult
+from SymbolicDSGE.estimation.results import MLEResult
 from SymbolicDSGE.ui.app import create_app
 from SymbolicDSGE.ui.estimation import (
     build_estimation_inputs,
@@ -27,6 +27,7 @@ from SymbolicDSGE.monte_carlo.mc_constructs import (
 )
 from SymbolicDSGE.regression.ols import ols
 from SymbolicDSGE.regression.result import MCRegressionResult
+from tests._result_helpers import make_mcmc_result
 from tests._spec_helpers import as_posted
 
 
@@ -367,15 +368,12 @@ def test_ui_estimation_inputs_build_scalar_priors_and_validate_selection() -> No
 
 
 def test_ui_estimation_serializes_mcmc_traces_for_charts() -> None:
-    result = MCMCResult(
+    result = make_mcmc_result(
         param_names=["beta", "sigma"],
         samples=np.array([[0.98, 1.1], [0.99, 1.0]], dtype=np.float64),
         logpost_trace=np.array([-3.0, -2.5], dtype=np.float64),
         logjac_trace=np.array([-0.1, -0.2], dtype=np.float64),
-        accept_rate=np.float64(0.5),
-        n_draws=2,
         burn_in=1,
-        thin=1,
     )
 
     payload = serialize_estimation_result(result)

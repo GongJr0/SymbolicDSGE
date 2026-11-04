@@ -210,7 +210,10 @@ class MCMCResultMeta(TypedDict):
     """
 
     param_names: Sequence[str]
-    accept_rate: float
+    accepted_burn_in: int
+    accepted_in_sample: int
+    burn_in_seconds: float
+    in_sample_seconds: float
     n_draws: int
     burn_in: int
     thin: int
