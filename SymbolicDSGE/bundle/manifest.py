@@ -19,26 +19,23 @@ from numpy import ndarray
 from ..core.shock.generators import ShockParameters, ShockPathParameters
 
 # --- LAST BREAK ---
-# V14: Breakage from folding kalman configs into model config objects (#579).
-# R maps were the only remaining kalman config members and they got folded into
-# calibration.measurement_noise with breaking changes to schema and parser.
-#
-# The change breaks forward and backward compatibility.
-# V14 readers theoretically read a V13 bundle, emit a
-# deprecation warning, and ignore the `kalman` member.
-# That leads to inconsistent measurement noise specifications
-# between the author's V13 library and the reader's V14 handling code.
+# V15: Breakage from changes to MCMC result metadata.
+# MCMC results hold more granular acceptance counts and timing data
+# to allow diagnostic computations. That makes any V14 and below bundle
+# with an MCMC result in it unreadable by V15 readers. Similarly, a V15
+# bundle carries attrs that are unknown to the older version and the break
+# goes both ways.
 # ------
 
 #: Bundle format version. Bump on every manifest or member change.
-SDSGE_FORMAT_VERSION = 14
+SDSGE_FORMAT_VERSION = 15
 
 #: Oldest bundle format this reader can reconstruct.
-SDSGE_MIN_READABLE_VERSION = 14
+SDSGE_MIN_READABLE_VERSION = 15
 
 #: Most recent format change requiring a newer reader. Written into the
 #: manifest so older readers reject bundles they cannot interpret.
-SDSGE_LAST_BREAKING_VERSION = 14
+SDSGE_LAST_BREAKING_VERSION = 15
 
 MemberKind = Literal[
     "model_config",
