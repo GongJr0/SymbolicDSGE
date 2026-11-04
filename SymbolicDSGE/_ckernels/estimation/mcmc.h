@@ -37,11 +37,18 @@ typedef struct {
 /* MCMC OUTPUTS */
 
 typedef struct {
-  i64 n_accepted;
+  // Acceptance
+  i64 accepted_burn_in;
+  i64 accepted_in_sample;
+  // Step count
   i64 total_steps;
+  // Errors
   i64 bk_violations;
   i64 status; /* ERROR CODE */
   const char *message;
+  // Timing
+  f64 burn_in_t;
+  f64 in_sample_t;
 } sdsge_mcmc_result;
 
 /* status codes for sdsge_mcmc_result.status */

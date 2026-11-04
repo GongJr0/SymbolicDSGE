@@ -139,7 +139,10 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
                    sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out) {
   const i64 total_steps = opt->burn_in + opt->n_draws * opt->thin;
   out->total_steps = total_steps;
-  out->n_accepted = 0;
+  out->accepted_burn_in = 0;   /* filled at first post-burn-in draw */
+  out->accepted_in_sample = 0; /* filled at last draw */
+  out->burn_in_t = 0.0;
+  out->sample_entry_t = 0.0;
   out->bk_violations = 0; /* filled by the caller off the objective ctx */
   out->status = SDSGE_MCMC_OK;
   out->message = "ok";
@@ -249,8 +252,6 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   i64 keep_i = 0;
   i64 next_keep = opt->burn_in; /* init with post-burn-in */
 
-  i64 placeholder_burnin_accepted = 0; /* missing struct field */
-
   /* clock stores */
   const f64 base_t = sdsge_monotime_sec();
   f64 init_t = base_t; /* == base_t if burn_in == 0, else set at first
@@ -262,7 +263,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
      * draw and record the current accepted count for warmup diagnostics. */
     if (t == opt->burn_in) {
       init_t = sdsge_monotime_sec();
-      placeholder_burnin_accepted = accepted;
+      out->accepted_burn_in = accepted;
     }
 
     /* Propose: prop = current + L @ z,  z ~ N(0, I). */
@@ -310,7 +311,9 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     }
   }
   halt_t = sdsge_monotime_sec();
-  out->n_accepted = accepted;
+  out->accepted_in_sample = accepted - out->accepted_burn_in;
+  out->burn_in_t = init_t - base_t;
+  out->in_sample_t = halt_t - init_t;
   free(work);
   return SDSGE_MCMC_OK;
 }
