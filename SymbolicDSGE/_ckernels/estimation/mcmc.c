@@ -142,7 +142,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   out->accepted_burn_in = 0;   /* filled at first post-burn-in draw */
   out->accepted_in_sample = 0; /* filled at last draw */
   out->burn_in_t = 0.0;
-  out->sample_entry_t = 0.0;
+  out->in_sample_t = 0.0;
   out->bk_violations = 0; /* filled by the caller off the objective ctx */
   out->status = SDSGE_MCMC_OK;
   out->message = "ok";

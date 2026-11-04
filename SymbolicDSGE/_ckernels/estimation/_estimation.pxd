@@ -340,11 +340,14 @@ cdef extern from "mcmc.h":
         double *kept_lj
 
     ctypedef struct sdsge_mcmc_result:
-        int64_t n_accepted
+        int64_t accepted_burn_in
+        int64_t accepted_in_sample
         int64_t total_steps
         int64_t bk_violations
         int64_t status
         const char *message
+        double burn_in_t
+        double in_sample_t
 
     int64_t sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
                            bitgen_t *bg, const double *theta0,
