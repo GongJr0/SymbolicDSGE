@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE._ckernels.estimation import (
+from SymbolicDSGE._ckernels.estimation._prior_program import (
     cov_from_unconstrained as native_cov_from_unconstrained,
     dist_logpdf as native_dist_logpdf,
     lkj_chol_logjac as native_lkj_logjac,
