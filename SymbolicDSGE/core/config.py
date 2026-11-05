@@ -322,7 +322,7 @@ class ModelConfig(_Lockable):
             New ModelConfig instance with the specified overrides applied.
 
         """
-        conf = deepcopy(self)
+        conf = deepcopy(self).unlock()
         conf.update_parameters(params)
         return conf
 
