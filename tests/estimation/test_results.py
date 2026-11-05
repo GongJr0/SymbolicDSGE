@@ -269,3 +269,103 @@ def test_mcmc_result_to_spec():
         res.burn_in_seconds,
         res.in_sample_seconds,
     )
+
+
+def test_ess_is_clipped_to_the_draw_count():
+    # tau near 0.46 at any length, so the raw ESS is about 2.2x the draws.
+    anticorrelated = np.tile([-1.0, -1.0, 1.0, -1.0, 0.0, -1.0, 0.0], 512)
+    res = make_mcmc_result(param_names=["a"], samples=anticorrelated.reshape(-1, 1))
+
+    assert res.ess["a"] == float(res.n_draws)
+
+
+def test_ess_is_cached_and_stays_out_of_the_spec():
+    res = make_mcmc_result(
+        param_names=["a"],
+        samples=np.random.default_rng(0).standard_normal((4000, 1)),
+    )
+
+    assert res.ess is res.ess
+    assert "ess" in res.__dict__
+    assert "ess" not in res.to_spec().meta
+
+
+def test_ess_per_second_divides_by_the_in_sample_clock():
+    res = make_mcmc_result(
+        param_names=["a", "b"],
+        samples=np.random.default_rng(1).standard_normal((4000, 2)),
+        in_sample_seconds=2.5,
+    )
+
+    assert res.ess_per_second == {name: value / 2.5 for name, value in res.ess.items()}
+
+
+def test_ess_and_mcse_are_nan_for_a_parameter_that_never_moved():
+    res = make_mcmc_result(
+        param_names=["moving", "stuck"],
+        samples=np.column_stack(
+            [np.random.default_rng(2).standard_normal(4000), np.ones(4000)]
+        ),
+    )
+
+    assert np.isfinite(res.ess["moving"])
+    assert np.isfinite(res.mcse["moving"])
+    assert np.isnan(res.ess["stuck"])
+    assert np.isnan(res.mcse["stuck"])
+    assert np.isnan(res.mcse_quantile(0.5)["stuck"])
+
+
+def test_mcse_of_the_mean_tracks_the_standard_error():
+    n = 20000
+    res = make_mcmc_result(
+        param_names=["a"],
+        samples=np.random.default_rng(7).standard_normal((n, 1)),
+    )
+
+    assert res.mcse["a"] == pytest.approx(1.0 / np.sqrt(n), rel=0.1)
+
+
+def test_mcse_scales_with_the_parameter_it_belongs_to():
+    """Proportional columns share an ESS, so their MCSEs differ only by scale."""
+    chain = np.random.default_rng(3).standard_normal(6000)
+    res = make_mcmc_result(
+        param_names=["unit", "ten", "hundred"],
+        samples=np.column_stack([chain, 10.0 * chain, 100.0 * chain]),
+    )
+
+    out = res.mcse
+    assert out["ten"] == pytest.approx(10.0 * out["unit"], rel=1e-12)
+    assert out["hundred"] == pytest.approx(100.0 * out["unit"], rel=1e-12)
+
+
+@pytest.mark.parametrize("q", [0.05, 0.5, 0.95])
+def test_mcse_quantile_is_scale_equivariant(q):
+    chain = np.random.default_rng(4).standard_normal(8000)
+    plain = make_mcmc_result(param_names=["a"], samples=chain.reshape(-1, 1))
+    scaled = make_mcmc_result(param_names=["a"], samples=(4.0 * chain).reshape(-1, 1))
+
+    assert scaled.mcse_quantile(q)["a"] == pytest.approx(
+        4.0 * plain.mcse_quantile(q)["a"], rel=1e-12
+    )
+
+
+def test_mcse_quantile_is_larger_in_the_tails_than_at_the_median():
+    res = make_mcmc_result(
+        param_names=["a"],
+        samples=np.random.default_rng(5).standard_normal((8000, 1)),
+    )
+
+    centre = res.mcse_quantile(0.5)["a"]
+    assert res.mcse_quantile(0.05)["a"] > centre
+    assert res.mcse_quantile(0.95)["a"] > centre
+
+
+@pytest.mark.parametrize("q", [0.0, 1.0, -0.1, 1.5])
+def test_mcse_quantile_requires_an_interior_quantile(q):
+    res = make_mcmc_result(
+        param_names=["a"],
+        samples=np.random.default_rng(6).standard_normal((2000, 1)),
+    )
+
+    with pytest.raises(ValueError, match="0 < q < 1"):
+        res.mcse_quantile(q)

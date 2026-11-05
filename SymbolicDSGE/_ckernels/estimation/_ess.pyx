@@ -8,9 +8,22 @@ cdef extern from "sdsge_common.h":
         int64_t n_int
 
 cdef extern from "ess.h":
+    int c_SDSGE_ESS_OK "SDSGE_ESS_OK"
+    int c_SDSGE_ESS_EBADSHAPE "SDSGE_ESS_EBADSHAPE"
+    int c_SDSGE_ESS_EUDEFVARIANCE "SDSGE_ESS_EUDEFVARIANCE"
+    int c_SDSGE_ESS_ENODECAY "SDSGE_ESS_ENODECAY"
+    int c_SDSGE_ESS_ENONPOSTAU "SDSGE_ESS_ENONPOSTAU"
+
     arena_size sdsge_ess_1d_arena_size(int64_t n) nogil
     int sdsge_ess_1d(const double *x, int64_t n,
                      double *arena, double *out) nogil
+
+
+SDSGE_ESS_OK = c_SDSGE_ESS_OK
+SDSGE_ESS_EBADSHAPE = c_SDSGE_ESS_EBADSHAPE
+SDSGE_ESS_EUDEFVARIANCE = c_SDSGE_ESS_EUDEFVARIANCE
+SDSGE_ESS_ENODECAY = c_SDSGE_ESS_ENODECAY
+SDSGE_ESS_ENONPOSTAU = c_SDSGE_ESS_ENONPOSTAU
 
 
 def ess1d(x):
