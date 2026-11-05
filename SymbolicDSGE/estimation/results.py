@@ -364,7 +364,7 @@ class MCMCResult:
             for i, name in enumerate(self.param_names)
         }
 
-    def mcse_quantile(self, q: float) -> dict[str, float]:
+    def mcse_quantile(self, q: float, digits: int | None = None) -> dict[str, float]:
         """Compute the MCSE of the specified quantile for each parameter.
 
         The error is taken on the probability scale from the effective sample size
@@ -377,6 +377,8 @@ class MCMCResult:
         ----------
         q : float
             Quantile to compute the MCSE for, strictly between 0 and 1.
+        digits: int | None
+            Number of decimals for rounding, `None` does not apply rounding.
 
         Returns
         -------
@@ -413,8 +415,8 @@ class MCMCResult:
         return out
 
     def hpd_intervals(
-        self, alpha: float = 0.05, n_digits: int = 3
-    ) -> dict[str, tuple[float64, float64]]:
+        self, alpha: float = 0.05, digits: int | None = None
+    ) -> dict[str, tuple[float, float]]:
         """
         Compute marginal highest-posterior-density intervals for each parameter.
 
@@ -425,23 +427,23 @@ class MCMCResult:
         n_draws = self.samples.shape[0]
         window = _hpd_window_size(n_draws, alpha64)
 
-        out: dict[str, tuple[float64, float64]] = {}
+        out: dict[str, tuple[float, float]] = {}
         for i, name in enumerate(self.param_names):
             col = np.sort(np.asarray(self.samples[:, i], dtype=float64))
             if window == n_draws:
-                low = float64(col[0])
-                high = float64(col[-1])
+                low = float(col[0])
+                high = float(col[-1])
             else:
                 widths = col[window - 1 :] - col[: n_draws - window + 1]
                 start = int(np.argmin(widths))
-                low = float64(col[start])
-                high = float64(col[start + window - 1])
-            out[name] = (low.round(n_digits), high.round(n_digits))
+                low = float(col[start])
+                high = float(col[start + window - 1])
+            out[name] = (_nanrnd(low, digits), _nanrnd(high, digits))
         return out
 
     def joint_hpd_set(
-        self, alpha: float = 0.05, n_digits: int = 3
-    ) -> tuple[NDF, NDF, float64, NDI]:
+        self, alpha: float = 0.05, digits: int | None = None
+    ) -> tuple[NDF, NDF, float, NDI]:
         """
         Compute an empirical joint HPD set for the full parameter vector.
 
@@ -456,12 +458,12 @@ class MCMCResult:
 
         window = _hpd_window_size(n_draws, alpha64)
         order = np.argsort(self.logpost_trace)[::-1]
-        threshold = float64(self.logpost_trace[order[window - 1]])
+        threshold = float(self.logpost_trace[order[window - 1]])
         mask = np.asarray(self.logpost_trace >= threshold, dtype=bool)
         idx = np.flatnonzero(mask).astype(np.int64, copy=False)
         return (
-            np.asarray(self.samples[idx, :], dtype=float64).round(n_digits),
-            np.asarray(self.logpost_trace[idx], dtype=float64).round(n_digits),
+            _nanrndarr(np.asarray(self.samples[idx, :], dtype=float64), digits),
+            _nanrndarr(np.asarray(self.logpost_trace[idx], dtype=float64), digits),
             threshold,
             idx,
         )
@@ -530,7 +532,10 @@ class MCMCResult:
         plt.show()
 
     def posterior_point(
-        self, point: Literal["mean", "map", "last"] = "mean"
+        self,
+        point: Literal["mean", "map", "last"] = "mean",
+        *,
+        digits: int | None = None,
     ) -> dict[str, float]:
         """Select a point estimate from the posterior samples.
 
@@ -541,6 +546,8 @@ class MCMCResult:
                 - "mean": Return the mean of the posterior samples.
                 - "map": Return the sample maximizing the log-posterior (MAP)
                 - "last": Return the last sample in the posterior chain.
+        digits : int | None
+            Number of decimals for rounding, `None` does not apply rounding.
 
         Returns
         -------
@@ -560,7 +567,9 @@ class MCMCResult:
                     "`posterior_point` must be one of {'mean', 'map', 'last'}, got "
                     f"{point!r}."
                 )
-        return dict(zip(self.param_names, (float(v) for v in theta_star)))
+        return dict(
+            zip(self.param_names, (_nanrnd(float(v), digits) for v in theta_star))
+        )
 
     def apply_to(
         self, config: ModelConfig, point: Literal["mean", "map", "last"] = "mean"
@@ -597,3 +606,16 @@ def _validate_hpd_alpha(alpha: float) -> float64:
 def _hpd_window_size(n_draws: int, alpha: float64) -> int:
     mass = float64(1.0 - alpha)
     return max(1, min(n_draws, int(np.ceil(float(n_draws) * float(mass)))))
+
+
+def _nanrnd(val: float, digits: int | None) -> float:
+    if digits is None:
+        return val
+    return round(val, digits)
+
+
+def _nanrndarr(arr: NDF, digits: int | None) -> NDF:
+    if digits is None:
+        return arr
+    else:
+        return arr.round(digits)
