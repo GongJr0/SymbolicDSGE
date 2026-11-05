@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
+from functools import cached_property
 
 from .spec import (
     OptimizationResultSpec,
@@ -16,6 +17,8 @@ from .spec import (
     MCMCResultMeta,
     MCMCResultSpec,
 )
+
+from .._ckernels.estimation import ess, ess1d
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
@@ -185,7 +188,7 @@ class MCMCResult:
 
     Attributes
     ----------
-    param_names : list[str]
+    param_names : tuple[str]
         Names of the parameters in the order they appear in the samples array.
     samples : NDF
         Posterior samples (in parameter space) drawn from the MCMC run, typically
@@ -210,6 +213,12 @@ class MCMCResult:
         settings used during the run. This is recorded for reproducibility and
         unpacking it into :meth:`Estimator.mcmc` reproduces the run; provided the
         run was seeded.
+    accept_rate
+    accept_rate_burn_in
+    accept_rate_in_sample
+    ess
+    ess_per_second
+    mcse
     """
 
     param_names: tuple[str, ...]
@@ -293,6 +302,92 @@ class MCMCResult:
     @property
     def accept_rate_in_sample(self) -> float:
         return self.accepted_in_sample / (self.n_draws * self.thin)
+
+    @cached_property
+    def ess(self) -> dict[str, float]:
+        """Compute the effective sample size (ESS) for each parameter.
+
+        Returns
+        -------
+        dict[str, float]
+            Effective sample size for each parameter, keyed by parameter name.
+        """
+        ess_vals = ess(self.samples)
+        return dict(
+            zip(self.param_names, np.clip(ess_vals, 0.0, self.n_draws).tolist())
+        )
+
+    @property
+    def ess_per_second(self) -> dict[str, float]:
+        """Compute the effective sample size (ESS) per second for each parameter.
+
+        The returned values are retained ess per post-burn-in seconds of the MCMC run,
+        i.e. ``ess / in_sample_seconds``.
+
+        Returns
+        -------
+        dict[str, float]
+            Effective sample size per second for each parameter, keyed by parameter name.
+        """
+        return {name: v / self.in_sample_seconds for name, v in self.ess.items()}
+
+    @property
+    def mcse(self) -> dict[str, float]:
+        """Compute the Monte Carlo Standard Error (MCSE) of the mean for each parameter."""
+        ess = self.ess
+        sd = np.std(self.samples, axis=0, ddof=1)
+        return {
+            name: float(sd[i] / np.sqrt(ess[name]))
+            for i, name in enumerate(self.param_names)
+        }
+
+    def mcse_quantile(self, q: float) -> dict[str, float]:
+        """Compute the MCSE of the specified quantile for each parameter.
+
+        The error is taken on the probability scale from the effective sample size
+        of the indicator chain ``1{x <= x_q}``, then carried back to the parameter
+        scale through the empirical quantile function, which needs no density
+        estimate at ``x_q``. NaN for a parameter whose indicator chain has no
+        usable ESS.
+
+        Parameters
+        ----------
+        q : float
+            Quantile to compute the MCSE for, strictly between 0 and 1.
+
+        Returns
+        -------
+        dict[str, float]
+            MCSE of the specified quantile for each parameter keyed by name.
+
+        """
+        from scipy.stats import beta
+
+        # norm.cdf(-1) and norm.cdf(1)
+        SIGMA_MASS = (0.15865525393145707, 0.8413447460685429)
+
+        if not (0.0 < q < 1.0):
+            raise ValueError("q must satisfy 0 < q < 1.")
+        n_draws, _ = _validate_samples(self.samples, self.param_names)
+
+        out: dict[str, float] = {}
+        for i, name in enumerate(self.param_names):
+            chain = np.asarray(self.samples[:, i], dtype=float64)
+            order = np.sort(chain)
+            x_q = np.quantile(order, q, method="linear")
+            # ``chain`` rather than ``order``: the indicator's ESS measures
+            # autocorrelation, which only exists in draw order.
+            ess_q = min(ess1d((chain <= x_q).astype(float64)), float(n_draws))
+            if not np.isfinite(ess_q):
+                out[name] = float(np.nan)
+                continue
+            lo, hi = np.asarray(
+                beta.ppf(SIGMA_MASS, ess_q * q + 1.0, ess_q * (1.0 - q) + 1.0)
+            )
+            i_lo = int(np.clip(np.floor(lo * n_draws - 1.0), 0, n_draws - 1))
+            i_hi = int(np.clip(np.ceil(hi * n_draws - 1.0), 0, n_draws - 1))
+            out[name] = float((order[i_hi] - order[i_lo]) / 2.0)
+        return out
 
     def hpd_intervals(
         self, alpha: float = 0.05, n_digits: int = 3
