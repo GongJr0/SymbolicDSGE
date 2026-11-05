@@ -653,9 +653,12 @@ cdef dict _do_mcmc(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
         "samples": kept,
         "logpost_trace": kept_lp,
         "logjac_trace": kept_lj,
-        "n_accepted": int(res.n_accepted),
+        "accepted_burn_in": int(res.accepted_burn_in),
+        "accepted_in_sample": int(res.accepted_in_sample),
         "total_steps": int(res.total_steps),
         "bk_violations": int(b.bk_violations),
+        "burn_in_t": float(res.burn_in_t),
+        "in_sample_t": float(res.in_sample_t),
     }
 
 

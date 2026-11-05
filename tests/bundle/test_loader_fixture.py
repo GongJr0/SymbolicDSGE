@@ -77,7 +77,10 @@ _OPT_META = {
 
 _MCMC_META = {
     "param_names": ["a"],
-    "accept_rate": 0.4,
+    "accepted_burn_in": 1,
+    "accepted_in_sample": 3,
+    "burn_in_seconds": 0.25,
+    "in_sample_seconds": 1.5,
     "n_draws": 3,
     "burn_in": 1,
     "thin": 1,

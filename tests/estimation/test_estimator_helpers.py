@@ -9,6 +9,8 @@ from numpy import float64
 from SymbolicDSGE.ui.estimation import _method_from_result
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult
 
+from tests._result_helpers import make_mcmc_result
+
 
 def _opt_result(**cfg) -> MLEResult:
     return MLEResult(
@@ -25,15 +27,9 @@ def _opt_result(**cfg) -> MLEResult:
 
 
 def _mcmc_result() -> MCMCResult:
-    return MCMCResult(
+    return make_mcmc_result(
         param_names=["a"],
         samples=np.zeros((2, 1), dtype=float64),
-        logpost_trace=np.zeros(2, dtype=float64),
-        logjac_trace=np.zeros(2, dtype=float64),
-        accept_rate=float64(0.5),
-        n_draws=2,
-        burn_in=1,
-        thin=1,
         sampler_config={"adapt": True},
     )
 

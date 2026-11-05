@@ -203,15 +203,32 @@ The proposal covariance will use the MAP point to compute the Hessian if `comput
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| param_names | `#!python list[str]` | Parameter order for samples |
+| param_names | `#!python tuple[str, ...]` | Parameter order for samples |
 | samples | `#!python np.ndarray` | Retained posterior samples |
 | logpost_trace | `#!python np.ndarray` | Posterior trace for retained samples, as a density over the parameters |
 | logjac_trace | `#!python np.ndarray` | Log-jacobian of the prior transforms at each retained draw; add it to `logpost_trace` for the unconstrained density the sampler walked |
-| accept_rate | `#!python float` | Acceptance ratio |
+| accepted_burn_in | `#!python int` | Proposals accepted during burn-in |
+| accepted_in_sample | `#!python int` | Proposals accepted after burn-in |
+| burn_in_seconds | `#!python float` | Seconds spent on burn-in |
+| in_sample_seconds | `#!python float` | Seconds spent on the retained phase |
 | n_draws | `#!python int` | Retained draw count |
 | burn_in | `#!python int` | Burn-in iterations |
 | thin | `#!python int` | Thinning interval |
 | sampler_config | `#!python dict[str, Any]` | The sampler configuration used to produce the result |
+
+__Properties:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| accept_rate | `#!python float` | Accepted proposals over every step the sampler took, burn-in included |
+| accept_rate_burn_in | `#!python float` | Acceptance rate over burn-in alone, or NaN when `burn_in` is `#!python 0` |
+| accept_rate_in_sample | `#!python float` | Acceptance rate over the retained phase alone |
+| ess | `#!python dict[str, float]` | Effective sample size of each parameter's posterior mean, keyed by parameter name |
+| ess_per_second | `#!python dict[str, float]` | `ess` divided by `in_sample_seconds` |
+| mcse | `#!python dict[str, float]` | Monte Carlo standard error of each parameter's posterior mean, $\mathrm{sd}/\sqrt{\mathrm{ESS}}$ |
+
+???+ note "Effective Sample Size"
+    ESS is computed with the integrated autocorrelation time under Geyer's initial monotone sequence. Reported values are capped at `n_draws`. A parameter whose chain never moved, or whose autocorrelation has not decayed within the retained draws, reports NaN rather than raising, and that NaN carries through `ess_per_second`, `mcse`, and `mcse_quantile`.
 
 __Methods:__
 
@@ -263,6 +280,33 @@ __Returns:__
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `#!python tuple[np.ndarray, np.ndarray, float, np.ndarray]` | Tuple `#!python (samples, logpost, threshold, indices)` where `samples` are the retained parameter vectors in the joint HPD set, `logpost` are their posterior values, `threshold` is the cutoff log-posterior, and `indices` are positions of the retained draws in the original stored chain. |
+
+&nbsp;
+
+```python
+MCMCResult.mcse_quantile(
+    q: float, # (1)!
+) -> dict[str, float]
+```
+
+1. Quantile whose error is reported. Must satisfy `#!python 0 < q < 1`.
+
+Compute the Monte Carlo standard error of the `q` quantile for each parameter column.
+
+???+ note "Indicator-Chain Estimator"
+    The error is taken on the probability scale from the effective sample size of the indicator chain $\mathbf{1}\{x_t \le \hat{x}_q\}$, then carried back to the parameter scale through the empirical quantile function, which needs no density estimate at $\hat{x}_q$. Reading discrete order statistics leaves the result mildly conservative.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| q | Quantile whose Monte Carlo standard error is reported. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python dict[str, float]` | Mapping from parameter name to the Monte Carlo standard error of that parameter's `q` quantile, or NaN where the indicator chain has no usable effective sample size. |
 
 &nbsp;
 

@@ -10,7 +10,9 @@ from SymbolicDSGE.bayesian.priors import make_prior
 from SymbolicDSGE.bundle.builder import BundleBuilder
 from SymbolicDSGE.bundle.parquet import collapse_columns, from_parquet_columns
 from SymbolicDSGE.estimation import Estimator
-from SymbolicDSGE.estimation.results import MCMCResult, MAPResult
+from SymbolicDSGE.estimation.results import MAPResult
+
+from tests._result_helpers import make_mcmc_result
 
 #: The one estimated parameter, and the observables of the reference model.
 PARAM = "rho_u"
@@ -91,15 +93,11 @@ def test_facade_flattens_optimization_run(estimator, parsed_test) -> None:
 
 def test_facade_flattens_mcmc_run_with_posterior(estimator, parsed_test) -> None:
     rng = np.random.default_rng(0)
-    mcmc = MCMCResult(
+    mcmc = make_mcmc_result(
         param_names=[PARAM],
         samples=rng.standard_normal((10, 1)),
         logpost_trace=rng.standard_normal(10),
         logjac_trace=rng.standard_normal(10),
-        accept_rate=float64(0.4),
-        n_draws=10,
-        burn_in=2,
-        thin=1,
         sampler_config={"adapt": True, "proposal_scale": 0.2, "random_state": 7},
     )
 

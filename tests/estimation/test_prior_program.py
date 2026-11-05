@@ -13,7 +13,7 @@ from SymbolicDSGE.estimation.prior_program import (
     _pack_transform,
     build_prior_tables,
 )
-from SymbolicDSGE._ckernels.estimation import (
+from SymbolicDSGE._ckernels.estimation._prior_program import (
     dist_logpdf,
     logprior_program,
 )

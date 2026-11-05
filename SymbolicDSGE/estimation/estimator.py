@@ -751,11 +751,14 @@ class Estimator:
             usr_opts["bounds"] = r.serialize_bounds(usr_opts["bounds"])
 
         result = MCMCResult(
-            param_names=list(self.param_names),
+            param_names=tuple(self.param_names),
             samples=kept,
             logpost_trace=out["logpost_trace"],
             logjac_trace=out["logjac_trace"],
-            accept_rate=float64(out["n_accepted"] / total_steps),
+            accepted_burn_in=out["accepted_burn_in"],
+            accepted_in_sample=out["accepted_in_sample"],
+            burn_in_seconds=out["burn_in_t"],
+            in_sample_seconds=out["in_sample_t"],
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,

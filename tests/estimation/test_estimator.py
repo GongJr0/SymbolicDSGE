@@ -543,7 +543,7 @@ def test_mcmc_returns_expected_shapes_and_stats(mcmc_estimator):
         random_state=123,
         adapt=True,
     )
-    assert out.param_names == ["psi_pi", "rho_r"]
+    assert out.param_names == ("psi_pi", "rho_r")
     assert out.samples.shape == (40, 2)
     assert out.logpost_trace.shape == (40,)
     assert 0.0 <= out.accept_rate <= 1.0

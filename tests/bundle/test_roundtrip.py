@@ -18,6 +18,8 @@ from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation.results import MCMCResult
 from SymbolicDSGE.estimation.spec import EstimatorParams, EstimatorSpec
 
+from tests._result_helpers import make_mcmc_result
+
 
 def _estimation_spec(y, *, names=("beta", "sigma")) -> EstimatorSpec:
     return EstimatorSpec(
@@ -46,15 +48,12 @@ def test_full_bundle_round_trip(tmp_path: Path, parsed_test, compiled_test) -> N
         "logpost": rng.standard_normal(50),
         "logjac": rng.standard_normal(50),
     }
-    result = MCMCResult(
+    result = make_mcmc_result(
         param_names=["beta", "sigma"],
         samples=posterior["samples"],
         logpost_trace=posterior["logpost"],
         logjac_trace=posterior["logjac"],
-        accept_rate=np.float64(0.31),
-        n_draws=50,
         burn_in=10,
-        thin=1,
     )
     pipeline = MCPipeline([simulation_step("sim", target="reference", T=50)])
 
@@ -89,7 +88,11 @@ def test_full_bundle_round_trip(tmp_path: Path, parsed_test, compiled_test) -> N
     assert loaded.estimation.estimator.estimated_params == ["beta", "sigma"]
     assert loaded.estimation.estimator.observables == ["Infl", "Rate"]
     assert isinstance(loaded.estimation.result, MCMCResult)
-    assert loaded.estimation.result.accept_rate == 0.31
+    assert (
+        loaded.estimation.result.accepted_burn_in,
+        loaded.estimation.result.accepted_in_sample,
+    ) == (result.accepted_burn_in, result.accepted_in_sample)
+    assert loaded.estimation.result.accept_rate == result.accept_rate
     np.testing.assert_allclose(np.asarray(loaded.estimation.estimator.y), observed)
     np.testing.assert_allclose(loaded.estimation.result.samples, posterior["samples"])
     np.testing.assert_allclose(
@@ -121,18 +124,13 @@ def test_full_bundle_round_trip(tmp_path: Path, parsed_test, compiled_test) -> N
 def test_add_estimation_accepts_live_mcmc_result(parsed_test) -> None:
     import json
 
-    from SymbolicDSGE.estimation.results import MCMCResult
-
     rng = np.random.default_rng(1)
-    mcmc = MCMCResult(
+    mcmc = make_mcmc_result(
         param_names=["a", "b"],
         samples=rng.standard_normal((5, 2)),
         logpost_trace=rng.standard_normal(5),
         logjac_trace=rng.standard_normal(5),
-        accept_rate=np.float64(0.4),
-        n_draws=5,
         burn_in=0,
-        thin=1,
     )
     spec = _estimation_spec(rng.standard_normal((4, 2)), names=("a", "b"))
 
@@ -146,7 +144,7 @@ def test_add_estimation_accepts_live_mcmc_result(parsed_test) -> None:
     # live result projected to meta, tagged mcmc
     payload = json.loads(files["estimation/result.json"])
     assert payload["type"] == "mcmc"
-    assert payload["data"]["accept_rate"] == 0.4
+    assert payload["data"]["accepted_in_sample"] == mcmc.accepted_in_sample
     # posterior auto-extracted from the live result (not passed explicitly)
     assert "estimation/posterior.parquet" in files
     posterior = collapse_columns(
