@@ -280,6 +280,18 @@ def test_a_parameter_write_keeps_the_pair_valid(parsed_test, compiled_test):
     assert conf.token == compiled_test.config_token
 
 
+def test_a_parameter_copy_keeps_the_pair_valid(parsed_test, compiled_test):
+    """``with_parameters`` is how ``solve_model`` reaches the config it solves,
+    so a copy that lost the token would reject every compiled model passed with
+    it."""
+    name = next(iter(parsed_test.calibration.parameters))
+
+    conf = parsed_test.with_parameters({str(name): 0.123})
+
+    assert conf.token == compiled_test.config_token
+    assert solve_model(conf, compiled=compiled_test).compiled is compiled_test
+
+
 def test_solving_rejects_a_compiled_model_from_another_config(
     parsed_post82, compiled_test
 ):

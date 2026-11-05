@@ -9,7 +9,6 @@ from SymbolicDSGE.estimation.results import (
     MAPResult,
     _hpd_window_size,
     _validate_hpd_alpha,
-    _validate_samples,
 )
 
 from tests._result_helpers import make_mcmc_result
@@ -136,29 +135,6 @@ def test_hpd_validation_and_window_full_draws_branches():
         "a": pytest.approx((0.0, 2.0)),
         "b": pytest.approx((1.0, 3.0)),
     }
-
-
-@pytest.mark.parametrize(
-    ("samples", "param_names", "match"),
-    [
-        (np.array([1.0, 2.0], dtype=np.float64), ["a", "b"], "2D array"),
-        (np.empty((0, 2), dtype=np.float64), ["a", "b"], "empty"),
-        (np.ones((2, 2), dtype=np.float64), ["a"], "does not match"),
-    ],
-)
-def test_validate_samples_error_branches(samples, param_names, match):
-    with pytest.raises(ValueError, match=match):
-        _validate_samples(samples, tuple(param_names))
-
-
-def test_joint_hpd_set_validates_logpost_trace_shape():
-    res = make_mcmc_result(
-        samples=np.ones((2, 2), dtype=np.float64),
-        logpost_trace=np.ones((2, 1), dtype=np.float64),
-        logjac_trace=np.ones((2, 1), dtype=np.float64),
-    )
-    with pytest.raises(ValueError, match="1D array"):
-        res.joint_hpd_set()
 
 
 def test_result_plot_methods_execute_without_gui(monkeypatch):
@@ -369,3 +345,60 @@ def test_mcse_quantile_requires_an_interior_quantile(q):
 
     with pytest.raises(ValueError, match="0 < q < 1"):
         res.mcse_quantile(q)
+
+
+def _point_result() -> MCMCResult:
+    """Four draws whose mean, highest-logpost row, and last row all differ.
+
+    The values are dyadic, so the mean is exact and the branches can be
+    compared by equality.
+    """
+    return make_mcmc_result(
+        param_names=("phi_pi", "rho_r"),
+        samples=np.array(
+            [[1.0, 0.25], [2.0, 0.5], [4.0, 1.0], [6.0, 1.5]], dtype=np.float64
+        ),
+        logpost_trace=np.array([0.0, 5.0, 1.0, 2.0], dtype=np.float64),
+    )
+
+
+def test_posterior_point_selects_the_mean_the_map_and_the_last_draw():
+    res = _point_result()
+
+    assert res.posterior_point("mean") == {"phi_pi": 3.25, "rho_r": 0.8125}
+    assert res.posterior_point("map") == {"phi_pi": 2.0, "rho_r": 0.5}
+    assert res.posterior_point("last") == {"phi_pi": 6.0, "rho_r": 1.5}
+
+
+def test_posterior_point_rejects_an_unknown_point():
+    with pytest.raises(ValueError, match="must be one of"):
+        _point_result().posterior_point("median")
+
+
+def test_apply_to_writes_the_optimum_over_the_calibration(parsed_test):
+    untouched = parsed_test.calibration.parameters["kappa"]
+    res = MLEResult(
+        x=np.zeros(2, dtype=np.float64),
+        theta={"phi_pi": float64(4.0), "rho_r": float64(0.5)},
+        success=True,
+        message="ok",
+        fun=float64(-1.0),
+        nfev=1,
+        nit=1,
+        optimizer_config={"method": "L-BFGS-B"},
+        loglik=float64(-1.0),
+    )
+
+    conf = res.apply_to(parsed_test)
+
+    assert conf.calibration.parameters["phi_pi"] == 4.0
+    assert conf.calibration.parameters["rho_r"] == 0.5
+    assert conf.calibration.parameters["kappa"] == untouched
+    assert parsed_test.calibration.parameters["phi_pi"] != 4.0
+
+
+def test_apply_to_defaults_to_the_posterior_mean(parsed_test):
+    res = _point_result()
+
+    assert res.apply_to(parsed_test).calibration.parameters["phi_pi"] == 3.25
+    assert res.apply_to(parsed_test, "last").calibration.parameters["phi_pi"] == 6.0

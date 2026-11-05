@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import warnings
 
 import sympy as sp
@@ -229,10 +228,6 @@ def solve_model(
     else:
         compiled = compile_model(config)
 
-    # New config + lock
-    conf = config.with_parameters(parameters or {})
-    conf.lock()
-
     piecewise = bool(compiled.constraint_names)
     if piecewise and order == 2:
         raise NotImplementedError(
@@ -240,6 +235,10 @@ def solve_model(
             "order=2 is not supported in such a case. Use order=1 or remove the "
             "constraints from the model specification."
         )
+
+    # New config + lock
+    conf = config.with_parameters(parameters or {})
+    conf.lock()
 
     params = conf.calibration.parameters
     seed = resolve_ss_seed(conf, compiled.layout, ss_seed=ss_seed, params=params)

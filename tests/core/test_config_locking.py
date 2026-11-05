@@ -177,3 +177,27 @@ def test_an_unlocked_config_is_editable_again_after_a_round_trip(config):
     config.variables.append(sp.Function("extra"))
 
     assert config.calibration.parameters[beta] == 0.5
+
+
+def test_with_parameters_hands_back_an_unlocked_copy(config):
+    config.lock()
+    name = next(iter(config.calibration.parameters))
+
+    copy = config.with_parameters({str(name): 0.123})
+
+    assert not _still_locked(copy)
+    assert [type(getattr(copy, n)) for n in ("variables", "shocks", "observables")] == [
+        list
+    ] * 3
+    assert not _unlocked(config)
+
+
+def test_with_parameters_leaves_the_source_values_in_place(config):
+    name = next(iter(config.calibration.parameters))
+    before = config.calibration.parameters[name]
+
+    copy = config.with_parameters({str(name): before + 1.0})
+
+    assert copy.calibration.parameters[name] == before + 1.0
+    assert config.calibration.parameters[name] == before
+    assert copy.calibration.parameters is not config.calibration.parameters

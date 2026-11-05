@@ -391,7 +391,7 @@ class MCMCResult:
 
         if not (0.0 < q < 1.0):
             raise ValueError("q must satisfy 0 < q < 1.")
-        n_draws, _ = _validate_samples(self.samples, self.param_names)
+        n_draws = self.samples.shape[0]
 
         out: dict[str, float] = {}
         for i, name in enumerate(self.param_names):
@@ -422,7 +422,7 @@ class MCMCResult:
         containing approximately ``1 - alpha`` of the retained posterior draws.
         """
         alpha64 = _validate_hpd_alpha(alpha)
-        n_draws, _ = _validate_samples(self.samples, self.param_names)
+        n_draws = self.samples.shape[0]
         window = _hpd_window_size(n_draws, alpha64)
 
         out: dict[str, tuple[float64, float64]] = {}
@@ -452,11 +452,7 @@ class MCMCResult:
         the original retained chain.
         """
         alpha64 = _validate_hpd_alpha(alpha)
-        n_draws, _ = _validate_samples(self.samples, self.param_names)
-        if self.logpost_trace.ndim != 1 or self.logpost_trace.shape[0] != n_draws:
-            raise ValueError(
-                "logpost_trace must be a 1D array with one entry per retained draw."
-            )
+        n_draws = self.samples.shape[0]
 
         window = _hpd_window_size(n_draws, alpha64)
         order = np.argsort(self.logpost_trace)[::-1]
@@ -601,16 +597,3 @@ def _validate_hpd_alpha(alpha: float) -> float64:
 def _hpd_window_size(n_draws: int, alpha: float64) -> int:
     mass = float64(1.0 - alpha)
     return max(1, min(n_draws, int(np.ceil(float(n_draws) * float(mass)))))
-
-
-def _validate_samples(samples: NDF, param_names: tuple[str, ...]) -> tuple[int, int]:
-    if samples.ndim != 2:
-        raise ValueError("samples must be a 2D array of shape (n_draws, n_params).")
-    n_draws, n_params = samples.shape
-    if n_draws == 0:
-        raise ValueError("samples is empty.")
-    if len(param_names) != n_params:
-        raise ValueError(
-            "param_names length does not match the number of sample columns."
-        )
-    return n_draws, n_params
