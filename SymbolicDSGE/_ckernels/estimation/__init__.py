@@ -23,6 +23,8 @@ from ._estimation import (
     logpost,
 )
 
+from ._ess import ess, ess1d
+
 __all__ = [
     "run_mcmc",
     "run_estimation",
@@ -36,4 +38,6 @@ __all__ = [
     "logprior_program",
     "transform_inverse_and_logjac",
     "unconstrained_from_corr_chol",
+    "ess",
+    "ess1d",
 ]
