@@ -18,7 +18,6 @@ __Fields:__
 | name | `str` | Model name. |
 | variables | `list[sympy.Function]` | Parsed variables (as functions of time). |
 | ss_seed | `FunctionGetterDict[Expr | None]` | Newton seed for the steady-state solve, per variable. `None` seeds at zero. |
-| parameters | `list[sympy.Symbol]` | Model parameters as symbols. |
 | shocks | `list[sympy.Symbol]` | Innovation symbols, in declaration order, which is the shock column order. |
 | observables | `list[sympy.Symbol]` | Observable variables as symbols. |
 | equations | `Equations` | `dataclass` containing model equations, constraints, regimes, observable equations, observable affinity flags. |
@@ -38,7 +37,7 @@ ModelConfig.update_parameters(
 ) -> None
 ```
 
-Update the clibration parameters of a `ModelConfig` regardless of the lock state of the config.
+Update the calibration parameters of a `ModelConfig` regardless of the lock state of the config.
 
 __Inputs:__
 
@@ -46,6 +45,38 @@ __Inputs:__
 |:---------|----------------:|
 | new_params | `{name: value}` mapping to override parameter entries. |
 
+__Returns:__
+
+| __Type__ |             __Description__            |
+|:---------|---------------------------------------:|
+| `None`   | Writes the overrides into this config. |
+
+&nbsp;
+
+
+```python
+ModelConfig.with_parameters(
+    params: Mapping[str, float] | Mapping[sympy.Symbol, float],
+) -> ModelConfig
+```
+
+Copy this config and apply the parameter overrides to the copy.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| params | `{name: value}` mapping to override parameter entries. |
+
+__Returns:__
+
+| __Type__      |          __Description__           |
+|:--------------|-----------------------------------:|
+| `ModelConfig` | New config carrying the overrides. |
+
+???+ info "The copy is unlocked"
+    The returned config is always unlocked.
+    Any entry point requiring a locked config will execute the lock before use.
 
 &nbsp;
 
@@ -95,9 +126,9 @@ __Inputs:__
 
 __Returns:__
 
-| __Type__ | __Description__ |
-|:---------|----------------:|
-| `None` | Writes to `path`. |
+| __Type__ |  __Description__  |
+|:---------|------------------:|
+| `None`   | Writes to `path`. |
 
 ???+ info "What `digits` reaches"
     Calibration parameter values and numeric `ss_seed` entries. A symbolic `ss_seed` expression is printed as it stands.
@@ -111,7 +142,7 @@ __Returns:__
 ```python
 ModelConfig.lock() -> Self
 ```
-Unlock the config and all of its children to make it mutable.
+Lock the config and all of its children to ensure immutability.
 
 __Returns:__
 
@@ -125,15 +156,15 @@ __Returns:__
 
 ???+ info "Locking at solve"
     `ModelConfig` remains mutable as a standalone object when parsed.
-    Solving a config procudes a locked copy in `SolvedModel.config` to ensure
-    a confg and it's solution cannot drift apart.
+    Solving a config produces a locked copy in `SolvedModel.config` to ensure
+    a config and its solution cannot drift apart.
 
 &nbsp;
 
 ```python
 ModelConfig.unlock() -> Self
 ```
-Lock the config and all of its children to ensure immutability.
+Unlock the config and all of its children to make it mutable.
 
 __Returns:__
 

@@ -534,7 +534,7 @@ class MCMCResult:
         plt.show()
 
     def posterior_point(
-        self, point: Literal["mean", "map", "last"]
+        self, point: Literal["mean", "map", "last"] = "mean"
     ) -> dict[str, float]:
         """Select a point estimate from the posterior samples.
 
