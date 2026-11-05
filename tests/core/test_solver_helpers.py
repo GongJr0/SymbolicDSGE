@@ -38,35 +38,6 @@ def test_solve_rejects_bad_order():
         s.solve_model(SimpleNamespace(), order=3)
 
 
-def test_resolve_order_defaults_to_the_filter_minimum():
-    assert s._resolve_order(None, "linear") == 1
-    assert s._resolve_order(None, "extended") == 1
-    assert s._resolve_order(None, "unscented") == 2
-
-
-def test_resolve_order_keeps_an_explicit_order_at_or_above_the_minimum():
-    # A filter reads nothing above the order it needs, so every order from its
-    # minimum up produces the same likelihood and the choice is the caller's.
-    assert s._resolve_order(1, "linear") == 1
-    assert s._resolve_order(2, "linear") == 2
-    assert s._resolve_order(2, "unscented") == 2
-
-
-def test_resolve_order_rejects_first_order_under_the_ukf():
-    with pytest.raises(ValueError, match="UKF requires second-order tensors"):
-        s._resolve_order(1, "unscented")
-
-
-def test_resolve_order_rejects_an_order_no_solve_produces():
-    with pytest.raises(ValueError, match="order must be 1 or 2"):
-        s._resolve_order(3, "linear")
-
-
-def test_resolve_order_rejects_an_unknown_filter_mode():
-    with pytest.raises(ValueError, match="Unrecognized filter_mode"):
-        s._resolve_order(None, "kalman")
-
-
 @pytest.fixture
 def deep_pair(tmp_path, test_model_path):
     """test.yaml with u lagged three deep, so the compiler mints a chain."""

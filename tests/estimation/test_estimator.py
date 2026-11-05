@@ -9,7 +9,6 @@ import pytest
 from numpy import float64
 
 from SymbolicDSGE import parse_config, compile_model
-from SymbolicDSGE.core.solver import estimate_and_solve
 from SymbolicDSGE.core.model_parser import ModelParser
 from SymbolicDSGE.bayesian.distributions.lkj_chol import LKJChol
 from SymbolicDSGE.estimation import Estimator, make_prior
@@ -30,6 +29,7 @@ from SymbolicDSGE.estimation.resolvers import (
     resolve_bounds,
     theta_from_params,
 )
+from SymbolicDSGE.ui.estimation import estimate_and_solve
 
 #: Bounds for ``post82_estimator``'s default ("psi_pi", "rho_r") pair. Bounds
 #: are keyed by name, so a positional pair no longer says which parameter it
