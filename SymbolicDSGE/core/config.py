@@ -1,5 +1,8 @@
 """Symbolic representation of a parsed DSGE model configuration."""
 
+from __future__ import annotations
+
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 from sympy import Symbol, Function, Eq, Expr, And, Or, Not
@@ -301,6 +304,27 @@ class ModelConfig(_Lockable):
         self.calibration.parameters.update(new_params)
         if was_locked:
             self.lock()
+
+    def with_parameters(
+        self, params: Mapping[str, float] | Mapping[Symbol, float]
+    ) -> ModelConfig:
+        """Return a new model configuration with the given parameter overrides applied.
+
+        Parameters
+        ----------
+        params : Mapping[str, float] | Mapping[Symbol, float]
+            Parameters to override in the new model configuration.
+            All parameters must already exist in the model's calibration.
+
+        Returns
+        -------
+        ModelConfig
+            New ModelConfig instance with the specified overrides applied.
+
+        """
+        conf = deepcopy(self)
+        conf.update_parameters(params)
+        return conf
 
     def to_yaml(self, path: str | Path, *, digits: int | None = None) -> None:
         """Write the model configuration to a YAML file.

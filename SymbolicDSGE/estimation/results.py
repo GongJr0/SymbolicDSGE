@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 from functools import cached_property
 
+from ..core.config import ModelConfig
 from .spec import (
     OptimizationResultSpec,
     MLEResultSpec,
@@ -106,6 +107,23 @@ class OptimizationResult:
                 else None
             ),
         )
+
+    def apply_to(self, config: ModelConfig) -> ModelConfig:
+        """Return a new config with the parameter values set to the point estimate.
+
+        Parameters
+        ----------
+        config : ModelConfig
+            Config to take as a base.
+            Must contain all parameter names in the result's ``theta``.
+
+        Returns
+        -------
+        ModelConfig
+            New config object with updated parameters.
+
+        """
+        return config.with_parameters(self.theta)
 
 
 @dataclass(frozen=True)
@@ -514,6 +532,63 @@ class MCMCResult:
         plt.ylabel("Log-Posterior")
         plt.tight_layout()
         plt.show()
+
+    def posterior_point(
+        self, point: Literal["mean", "map", "last"]
+    ) -> dict[str, float]:
+        """Select a point estimate from the posterior samples.
+
+        Parameters
+        ----------
+        point : Literal["mean", "map", "last"]
+            Point estimate to return:
+                - "mean": Return the mean of the posterior samples.
+                - "map": Return the sample maximizing the log-posterior (MAP)
+                - "last": Return the last sample in the posterior chain.
+
+        Returns
+        -------
+        dict[str, float]
+            Parameter values at the point, keyed by name.
+        """
+        match point:
+            case "mean":
+                theta_star = self.samples.mean(axis=0)
+            case "map":
+                idx = int(np.argmax(self.logpost_trace))
+                theta_star = self.samples[idx]
+            case "last":
+                theta_star = self.samples[-1]
+            case _:
+                raise ValueError(
+                    "`posterior_point` must be one of {'mean', 'map', 'last'}, got "
+                    f"{point!r}."
+                )
+        return dict(zip(self.param_names, (float(v) for v in theta_star)))
+
+    def apply_to(
+        self, config: ModelConfig, point: Literal["mean", "map", "last"] = "mean"
+    ) -> ModelConfig:
+        """Return a new config with the parameter values set to the point estimate.
+
+        Parameters
+        ----------
+        config : ModelConfig
+            Config to take as a base.
+            Must contain all parameter names in the result's ``param_names``.
+        point : Literal["mean", "map", "last"]
+            Point estimate to return:
+                - "mean": Return the mean of the posterior samples.
+                - "map": Return the sample maximizing the log-posterior (MAP)
+                - "last": Return the last sample in the posterior chain.
+
+        Returns
+        -------
+        ModelConfig
+            New config object with updated parameters.
+
+        """
+        return config.with_parameters(self.posterior_point(point))
 
 
 def _validate_hpd_alpha(alpha: float) -> float64:

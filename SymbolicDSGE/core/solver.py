@@ -229,7 +229,8 @@ def solve_model(
     else:
         compiled = compile_model(config)
 
-    conf = deepcopy(config)
+    # New config + lock
+    conf = config.with_parameters(parameters or {})
     conf.lock()
 
     piecewise = bool(compiled.constraint_names)
@@ -239,9 +240,6 @@ def solve_model(
             "order=2 is not supported in such a case. Use order=1 or remove the "
             "constraints from the model specification."
         )
-
-    if parameters is not None:
-        conf.update_parameters(parameters)
 
     params = conf.calibration.parameters
     seed = resolve_ss_seed(conf, compiled.layout, ss_seed=ss_seed, params=params)
@@ -371,7 +369,7 @@ def estimate_and_solve(
     order: int | None = None,
     routine: Literal["mle", "map", "mcmc"] = "mle",
     theta0: Mapping[str, float] | None = None,
-    posterior_point: Literal["mean", "mode", "map", "last"] = "mean",
+    posterior_point: Literal["mean", "map", "last"] = "mean",
     observables: list[str] | None = None,
     filter_mode: Literal["linear", "extended", "unscented"] = "linear",
     estimated_params: list[str] | Mapping[str, Prior] | None = None,
@@ -402,9 +400,8 @@ def estimate_and_solve(
     theta0 : NDArray | Mapping[str, float] | None
         Initial guess for estimatied parameters. Mapping of {name: guess} or array in order of appearance in calibration.
         If None, the calibration values are used as initial guess.
-    posterior_point : Literal["mean", "mode", "map", "last"]
-        Point estimates to use when sampling a posterior distribution with MCMC {"mean", "mode", "map", "last"}.
-        "mode" and "map" are equivalent aliases.
+    posterior_point : Literal["mean", "map", "last"]
+        Point estimates to use when sampling a posterior distribution with MCMC {"mean", "map", "last"}.
     observables : list[str] | None
         Names of model observables to use in the estimation. If None, all observables are used.
     filter_mode : Literal["linear", "extended", "unscented"]
@@ -446,7 +443,7 @@ def estimate_and_solve(
     )
 
     result: MLEResult | MAPResult | MCMCResult
-
+    solve_params: Mapping[str, float]
     match routine.lower():
         case "mle":
             result = est.mle(theta0=theta0, **method_kwargs)
@@ -456,16 +453,14 @@ def estimate_and_solve(
             solve_params = result.theta
         case "mcmc":
             result = est.mcmc(theta0=theta0, **method_kwargs)
-            solve_params = _mcmc_posterior_point(result, posterior_point)
+            solve_params = result.posterior_point(posterior_point)
         case _:
             raise ValueError("`routine` must be one of {'mle', 'map', 'mcmc'}.")
 
-    # Sync writes the estimated values into the calibration, which is where
-    # `solve` reads its full parameter vector from; passing them again would
-    # only re-supply what was just installed.
-    config.update_parameters(solve_params)
+    # New config
+    conf = config.with_parameters(solve_params)
     solved = solve_model(
-        config=config,
+        config=conf,
         compiled=compiled,
         order=order,
         ss_seed=ss_seed,
@@ -742,19 +737,3 @@ def _resolve_order(order: int | None, filter_mode: str) -> int:
     raise ValueError(
         f"Unrecognized filter_mode {filter_mode!r}, must be one of {{'linear', 'extended', 'unscented'}}."
     )
-
-
-def _mcmc_posterior_point(result: MCMCResult, point: str) -> dict[str, float64]:
-    if point == "mean":
-        theta_star = asarray(result.samples.mean(axis=0), dtype=float64)
-    elif point == "last":
-        theta_star = asarray(result.samples[-1], dtype=float64)
-    elif point in ("map", "mode"):
-        idx = int(np.argmax(result.logpost_trace))
-        theta_star = asarray(result.samples[idx], dtype=float64)
-    else:
-        raise ValueError(
-            "`posterior_point` must be one of {'mean', 'last', 'map', 'mode'}, got "
-            f"{point!r}."
-        )
-    return dict(zip(result.param_names, (float64(v) for v in theta_star)))
