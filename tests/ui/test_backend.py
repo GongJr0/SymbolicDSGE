@@ -13,6 +13,7 @@ from SymbolicDSGE.ui.estimation import (
     serialize_estimation_result,
 )
 from SymbolicDSGE.ui.mc import build_pipeline, serialize_pipeline_result
+from SymbolicDSGE.ui.estimation import _resolve_order
 from SymbolicDSGE.estimation.spec import PriorSpec
 from SymbolicDSGE.ui.schemas import EstimationParameterSpec
 from SymbolicDSGE.ui.serializers import decode_array, encode_array
@@ -1494,7 +1495,7 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
     """
     import inspect
 
-    from SymbolicDSGE.core.solver import estimate
+    from SymbolicDSGE.ui.estimation import estimate
     from SymbolicDSGE.estimation.estimator import Estimator
 
     app = create_app()
@@ -1570,3 +1571,32 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
 
     target = Estimator.mle if routine == "mle" else Estimator.map
     inspect.signature(target).bind_partial(Estimator, **forwarded)
+
+
+def test_resolve_order_defaults_to_the_filter_minimum():
+    assert _resolve_order(None, "linear") == 1
+    assert _resolve_order(None, "extended") == 1
+    assert _resolve_order(None, "unscented") == 2
+
+
+def test_resolve_order_keeps_an_explicit_order_at_or_above_the_minimum():
+    # A filter reads nothing above the order it needs, so every order from its
+    # minimum up produces the same likelihood and the choice is the caller's.
+    assert _resolve_order(1, "linear") == 1
+    assert _resolve_order(2, "linear") == 2
+    assert _resolve_order(2, "unscented") == 2
+
+
+def test_resolve_order_rejects_first_order_under_the_ukf():
+    with pytest.raises(ValueError, match="UKF requires second-order tensors"):
+        _resolve_order(1, "unscented")
+
+
+def test_resolve_order_rejects_an_order_no_solve_produces():
+    with pytest.raises(ValueError, match="order must be 1 or 2"):
+        _resolve_order(3, "linear")
+
+
+def test_resolve_order_rejects_an_unknown_filter_mode():
+    with pytest.raises(ValueError, match="Unrecognized filter_mode"):
+        _resolve_order(None, "kalman")

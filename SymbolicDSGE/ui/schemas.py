@@ -7,7 +7,7 @@ from .shock import InlineShockEntry
 
 FunctionKind = Literal["array", "figure"]
 EstimationMethod = Literal["mle", "map", "mcmc"]
-PosteriorPoint = Literal["mean", "map", "mode", "last"]
+PosteriorPoint = Literal["mean", "map", "last"]
 WorkspaceTab = Literal["estimation", "mc"]
 
 

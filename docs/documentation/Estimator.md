@@ -170,7 +170,6 @@ The proposal covariance will use the MAP point to compute the Hessian if `comput
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| kind | `#!python str` | `"mle"` or `"map"` |
 | x | `#!python np.ndarray` | Optimized unconstrained vector |
 | theta | `#!python dict[str, float]` | The estimated parameters at the optimum, in constrained space, keyed by `estimated_params`. Parameters that were not estimated are not included: they stay at the model's calibration. |
 | success | `#!python bool` | Optimizer convergence flag |
@@ -181,12 +180,35 @@ The proposal covariance will use the MAP point to compute the Hessian if `comput
 | se | `#!python dict[str, float] | None` | Standard errors of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
 | nfev | `#!python int` | Objective evaluations |
 | nit | `#!python int | None` | Iterations |
+| optimizer_config | `#!python dict[str, Any]` | Optimizer method, bounds, and options the run was called with |
+| cov_status | `#!python int` | `#!python 0` when the covariance was produced, otherwise why it was not |
+
+__Methods:__
+
+```python
+MLEResult.apply_to(
+    config: ModelConfig,
+) -> ModelConfig
+```
+
+Copy of `config` with the estimated parameters written in at their optimum values.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| config | Config to copy. Must declare every name in `theta`. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python ModelConfig` | Copy of `config` carrying `theta`. Parameters that were not estimated keep their calibration values. |
 
 ### MAPResult
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| kind | `#!python str` | `"mle"` or `"map"` |
 | x | `#!python np.ndarray` | Optimized unconstrained vector |
 | theta | `#!python dict[str, float]` | The estimated parameters at the optimum, in constrained space, keyed by `estimated_params`. Parameters that were not estimated are not included: they stay at the model's calibration. |
 | success | `#!python bool` | Optimizer convergence flag |
@@ -198,6 +220,18 @@ The proposal covariance will use the MAP point to compute the Hessian if `comput
 | se | `#!python dict[str, float] | None` | Standard errors of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
 | nfev | `#!python int` | Objective evaluations |
 | nit | `#!python int | None` | Iterations |
+| optimizer_config | `#!python dict[str, Any]` | Optimizer method, bounds, and options the run was called with |
+| cov_status | `#!python int` | `#!python 0` when the covariance was produced, otherwise why it was not |
+
+__Methods:__
+
+```python
+MAPResult.apply_to(
+    config: ModelConfig,
+) -> ModelConfig
+```
+
+Identical to [`MLEResult.apply_to`](#mleresult).
 
 ### MCMCResult
 
@@ -233,8 +267,33 @@ __Properties:__
 __Methods:__
 
 ```python
+MCMCResult.summary(
+    alpha: float = 0.05, # (1)!
+    digits: int | None = 3,
+) -> pd.DataFrame
+```
+
+1. Significance level for the highest-posterior-density (HPD) intervals.
+
+Return a summary table reporting posterior means, standard deviations, ESS, ESS/s, MCSE for the mean, and HPD intervals for each parameter.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| alpha | Significance level used to determine the empirical HPD coverage. |
+| digits | Number of decimal places to round the summary table to. `None` does not apply rounding. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `pd.DataFrame` | Summary table with one row per parameter and columns for posterior mean, standard deviation, ESS, ESS/s, MCSE for the mean, and HPD intervals. |
+
+```python
 MCMCResult.hpd_intervals(
     alpha: float = 0.05, # (1)!
+    digits: int | None = 3,
 ) -> dict[str, tuple[float, float]]
 ```
 
@@ -247,6 +306,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | alpha | Significance level used to determine the empirical HPD coverage. |
+| digits | Number of decimal places to round the HPD intervals to. `None` does not apply rounding. |
 
 __Returns:__
 
@@ -259,6 +319,7 @@ __Returns:__
 ```python
 MCMCResult.joint_hpd_set(
     alpha: float = 0.05, # (1)!
+    digits: int | None = 3,
 ) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]
 ```
 
@@ -274,7 +335,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | alpha | Significance level used to determine the empirical HPD coverage. |
-
+| digits | Number of decimal places to round the retained draws to. `None` does not apply rounding. |
 __Returns:__
 
 | __Type__ | __Description__ |
@@ -286,6 +347,7 @@ __Returns:__
 ```python
 MCMCResult.mcse_quantile(
     q: float, # (1)!
+    digits: int | None = 3,
 ) -> dict[str, float]
 ```
 
@@ -301,12 +363,63 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | q | Quantile whose Monte Carlo standard error is reported. |
+| digits | Number of decimal places to round the MCSE to. `None` does not apply rounding. |
 
 __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `#!python dict[str, float]` | Mapping from parameter name to the Monte Carlo standard error of that parameter's `q` quantile, or NaN where the indicator chain has no usable effective sample size. |
+
+&nbsp;
+
+```python
+MCMCResult.posterior_point(
+    point: Literal["mean", "map", "last"] = "mean", # (1)!
+    digits: int | None = 3,
+) -> dict[str, float]
+```
+
+1. `#!python "mean"` averages the retained draws, `#!python "map"` takes the draw maximizing `logpost_trace`, and `#!python "last"` takes the final retained draw.
+
+Reduce the retained posterior draws to a single parameter vector.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| point | Which summary of the retained draws to return. |
+| digits | Number of decimal places to round the returned parameter vector to. `None` does not apply rounding. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python dict[str, float]` | Parameter values at the selected point, keyed by parameter name. |
+
+&nbsp;
+
+```python
+MCMCResult.apply_to(
+    config: ModelConfig,
+    point: Literal["mean", "map", "last"] = "mean",
+) -> ModelConfig
+```
+
+Copy of `config` with a posterior point estimate written in.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| config | Config to copy. Must declare every name in `param_names`. |
+| point | Which posterior summary to write in, as taken by `posterior_point`. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `#!python ModelConfig` | Copy of `config` carrying the selected point. Parameters that were not estimated keep their calibration values. |
 
 &nbsp;
 

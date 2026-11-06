@@ -16,18 +16,16 @@ This guide walks through the parameter estimation workflow of `SymbolicDSGE` usi
 We will cover:
 
 - How priors are built (and why transforms matter)
-- How to run MCMC through `estimate_and_solve(...)`
+- How to run MCMC through `Estimator`
 - What outputs to expect from the process
 
 ## Parse Configs and Compile
 
 ```python
-from SymbolicDSGE import parse_config
-from SymbolicDSGE.core.solver import estimate_and_solve
+from SymbolicDSGE import parse_config, solve_model, Estimator
 from SymbolicDSGE.utils import FRED
 from SymbolicDSGE.utils.math_utils import HP_two_sided, annualized_log_percent
 from SymbolicDSGE.bayesian import make_prior
-from SymbolicDSGE.estimation import MCMCResult
 
 from typing import cast
 
@@ -60,17 +58,6 @@ beta_prior = make_prior(
 The prior specification defines `Distribution`s such that the optimizer can interact with the distribution object on the unconstrained space.
 For example, in order to optimize in an unbounded search space $\R = (-\infty, \infty)$ we can use any distribution of our choosing regardless of the bounds,
 as long as we specify a `Transform` that maps the distribution support $(a, b) \mapsto \R$. We then rely on the `Transform` objects to apply a "Change of Variables" to produce the unbounded search input. The `Transform` will also be responsible for inverting the optimizer output into the parameter space ($\R \mapsto (a,b)$) we wish to search over. To give a concrete example, a logit transform for example would map $(0,1) \mapsto\R$ in the forward direction. In this scenario the inverse logit would precisely do the opposite $ inv(Z) \to X, \, X \in (0,1) $.
-
-??? info "Change of Variables Details"
-    All transformations except `Identity` (which returns the input itself as output) are examples of the procedure defined in calculus as [Change of Variables](https://en.wikipedia.org/wiki/Change_of_variables). We deal with a specific [subset](https://en.wikipedia.org/wiki/Probability_density_function#Function_of_random_variables_and_change_of_variables_in_the_probability_density_function) of this procedure relating to probability density functions (PDFs). Below we will show how applying/inverting a transform function blindly results in inaccurate conversions and try to outline an intuition for the process. We will try to make it as easy to reason about as possible and some details can get skipped.
-
-    A random variable $Z \in\R$ can follow any distribution $f_z(Z)\in\R$. However after applying any transformation $Z \to X$ such that $Z \neq X$; we can intuitively (and mathematically) agree that the distribution $f_z(X)$ no longer accurately describes the density of the transformed variable $X$.
-
-    Fortunately, there's a deterministic and generally applicable correction we can use to ensure $f_z(Z)$ can be accurately represented in terms of $X$. Denoting the transformation $g_z(Z) \to X$, we can adjust for the mismatch in densities using the derivative (or Jacobian) $\frac{d}{dZ}g_z(Z)$. Skipping the theory, the important bit of knowledge is that $f_z(X)$ is off from the accurate description of $X$'s probability distribution by a factor of this derivative. Therefore, in the scalar case we can denote:
-
-    $$
-    f_z(Z) = f_z(X) \times \left|\frac{d}{dx}g_z\left(X\right)\right| \Longleftrightarrow \ln\left(f_z\left(Z\right)\right) = \ln\left(f_z\left(X\right)\right) + \ln\Biggl(\left|\frac{d}{dX}g_z(X)\right|\Biggl)
-    $$
 
 Using `make_prior` we can define individual priors for each parameter we wish to estimate:
 
@@ -108,38 +95,44 @@ estimated = {
 2. `log` maps real numbers to positive reals without requiring parameters.
 3. `Q_corr` and `R_corr` are block estimations requiring the complete correlation matrix to be parameterized in the config. The `lkj_chol` distribution and `cholesky_corr` are necessary to produce a valid correlation block and are enforced.
 
-## Running the Estimation
+## Estimator Setup
 
-The estimation process is carried out by `estimate()` and `estimate_and_solve()`. The former returns the estimation results, but does not provide a `SolvedModel` using said estimation output. Conversely, the latter provides both the results, and an immediately usable `SolvedModel` object derived from the results.
+The `Estimator` object allows acces to `mle`, `map`, and `mcmc` estimation routines after being initialized with routine-invariant information.
 
 ```python
-res, sol = estimate_and_solve(
+est = Estimator(
     config=model,
-    filter_mode="linear", # (1)!
-    y=observed.loc[observed.index >= "1984-01-01", :], # (2)!
-    observables=["Infl", "Rate"], # (3)!
-    routine="mcmc", # (4)!
-    estimated_params=estimated,
-    ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0],
-    posterior_point="mean", # (5)!
-    n_draws=100_000, # (6)!
-    burn_in=10_000, # (7)!
-    thin=1, # (8)!
-    random_state=0, # (9)!
+    y=observed.loc[observed.index >= "1984-01-01", :], # (1)!
+    observables=["Infl", "Rate"], # (2)!
+    filter_mode="linear", # (3)!
+    estimated_params=estimated,  # (4)!
+    ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0]
 )
-
-res = cast(MCMCResult, res)
 ```
 
-1. Mode of the Kalman Filter used to compute the likelihood. Chosen from `{'linear', 'extended', 'unscented'}`.
-2. Observed data we want to calibrate against
-3. Which observables to use from the model specification. If not specified, all observables will be used. Number of columns in `y` must match the number of observables in the model specification.
-4. Chosen from `{'mle', 'map', 'mcmc'}`.
-5. Which point from the posterior distribution to use as parameters. Chosen from `{'mean', 'mode' == 'map', 'last'}`.
-6. Effective sample size (retained draws).
-7. Burn-in iterations.
-8. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
-9. Seed the draws for reproducibility. If `None`, the draws are not seeded.
+1. Observed data we want to calibrate against
+2. Which observables to use from the model specification. If not specified, all observables will be used. Number of columns in `y` must match the number of observables.
+3. Mode of the Kalman Filter used to compute the likelihood. Chosen from
+`{'linear', 'extended', 'unscented'}`.
+4. Dictionary of `{name: Prior}` or a list of names for the unpriored case.
+
+## Running the Estimation
+
+After instantiating the `Estimator` any of the three estimation routines can be run, each with their own parameterization.
+
+```python
+res = est.mcmc(
+    n_draws=100_000,  # (1)!
+    burn_in=10_000,  # (2)!
+    thin=1,  # (3)!
+    random_state=0,  # (4)!
+)
+```
+
+1. Number of retained draws.
+2. Burn-in iterations.
+3. Keeps every `thin`-th draw. Specifying a `thin` > 1 discards some samples and is commonly used to prevent autocorrelation.
+4. Seed the draws for reproducibility. If `None`, the draws are not seeded.
 
 ```text
 MCMC sampling concluded in 5.92 seconds with 18573.03 iterations per second.
@@ -155,103 +148,54 @@ MCMC sampling concluded in 5.92 seconds with 18573.03 iterations per second.
 
 ## Inspecting the Results
 
-The estimation will return a `MCMCResult` or `OptimizationResult` depending on the specified `method`. Alongside other metadata, these objects report:
+The estimation will return a `MCMCResult`, `MLERestult`, or `MAPResult` depending on the specified method. Alongside other metadata, these objects report:
 
 - Order of parameters in the sample array(s)
 - Each sample drawn (if multiple are drawn)
 - Log posterior of each retained sample
 
-The result objects are a raw outlook into the estimator internals during the method run. Information regarding the parameters selected can be derived from a result object; or the `SolvedModel` objects can be directly inspected via `SolvedModel.config.calibration.parameters`.
-
-Below is a snippet creating a "summary" report given a result object:
+The `MCMCResult` case will be expanded here, but you can refer to the [`Estimator`](../documentation/Estimator.md) reference page to find out exactly what is available in each result type.
 
 ```python
-param_names = res.param_names
-best_idx = np.argmax(res.logpost_trace)
+point = res.posterior_point("mean", digits=3)  # (1)!
+ess = res.ess  # (2)!
+ess_ps = res.ess_per_second  # (3)!
+mcse = res.mcse  # (4)!
+hpd = res.hpd_intervals(alpha=0.05, digits=3)  # (5)!
 
-post_mean = np.mean(res.samples, axis=0)
-loglik = np.mean(res.logpost_trace)
-accept_rate = res.accept_rate
-n_draws = res.n_draws
-burn_in = res.burn_in
-thin = res.thin
-
-param_to_val = dict(zip(param_names, post_mean))
-
-pd.Series(
-    {
-        **param_to_val,  # (1)!
-        "loglik": loglik,
-        "accept_rate": accept_rate,  # (2)!
-        "n_draws": n_draws,
-        "burn_in": burn_in,
-        "thin": thin,
-    }
-).round(3)
+# Summary containing above statistics
+print(res.summary(alpha=0.05, digits=3))
 ```
 
-1. We used `posterior_point='mean'`, therefore we're computing the mean of all sample draws to accurately recreate the parameters being used inside the model.
-2. Acceptance rate is specific to MCMC and is a percent measure of how many samples were "acceptable" within the specified priors and bounds; and of course, model stability constraints. (An unsolvable model is automatically disqualified)
+1. `posterior_point` reduces the posterior distribution to a single point estimate.
+`mean` is the posterior mean and the default. `map` is the empirical MAP estimate (the log-posterior maximizing point in the sample), and `last` is the last sample drawn.
+2. `ess` is the Effective Sample Size (ESS), it is a autocorrelation based measure of how many draws in a sample provided unique information. The figures are calculated for retained draws.
+3. `ess_per_second` is the `ess` divided by the post-warmup runtime of the MCMC kernel. It measures the efficiency of the sampler, tweaking the sampler's hyperparameters to optimize for `ess` or `ess_per_second` is generally advisable.
+4. `mcse` is the Monte Carlo Standard Error (MCSE), it is the monte carlo equivalent of the standard errors and defines the uncertainty around the mean of the posterior distribution. Alternatively `mcse_quantile(q)` is a MCSE approximation for the unceertaintyaround the `q`-th empirical quantile of the posterior distribution.
+5. Highest Posterior Density (HPD) intervals are similar to confidence intervals, but calculate the region of highest density in the posterior distribution. For example, the 95% HPD interval (`alpha=0.05`) is the smallest interval containing 95% of the posterior mass.
 
 ```text
-beta                0.970
-rho_r               0.821
-rho_g               0.879
-rho_z               0.857
-psi_pi              3.128
-psi_x               0.335
-kappa               0.476
-tau_inv             1.158
-rho_gz              0.095
-rho_gr             -0.089
-rho_zr              0.093
-meas_rho_ir        -0.124
-sig_r               0.093
-sig_g               0.201
-sig_z               0.647
-meas_infl           1.194
-meas_rate           0.045
-loglik           -228.579
-accept_rate         0.164
-n_draws        100000.000
-burn_in         10000.000
-thin                1.000
-dtype: float64
+              mean    std       ess  ess_per_second   mcse     hpd (α=0.05)
+beta         0.970  0.012  1080.967         207.665  0.000   (0.946, 0.991)
+rho_r        0.821  0.024   609.137         117.021  0.001   (0.775, 0.867)
+rho_g        0.879  0.022   773.308         148.560  0.001    (0.837, 0.92)
+rho_z        0.857  0.027   849.221         163.144  0.001   (0.801, 0.903)
+psi_pi       3.128  0.514   748.122         143.722  0.019    (2.14, 4.165)
+psi_x        0.335  0.107  1129.949         217.075  0.003   (0.147, 0.549)
+kappa        0.476  0.091   962.902         184.983  0.003     (0.31, 0.66)
+tau_inv      1.158  0.373   611.165         117.411  0.015   (0.497, 1.915)
+rho_gz       0.095  0.433   851.219         163.528  0.015  (-0.694, 0.871)
+rho_gr      -0.089  0.351   787.493         151.285  0.013  (-0.751, 0.558)
+rho_zr       0.093  0.390  1232.472         236.771  0.011  (-0.636, 0.815)
+meas_rho_ir -0.124  0.429  1155.338         221.952  0.013  (-0.886, 0.672)
+sig_r        0.093  0.037   420.354          80.754  0.002   (0.025, 0.164)
+sig_g        0.201  0.067   540.395         103.815  0.003   (0.071, 0.335)
+sig_z        0.647  0.102   927.601         178.202  0.003   (0.461, 0.856)
+meas_infl    1.194  0.205   171.195          32.888  0.016   (0.716, 1.529)
+meas_rate    0.045  0.033  1324.665         254.482  0.001     (0.0, 0.106)
 ```
 
-## Fit Diagnostics (MCMC)
-
-MCMC sampling produces distributions instead of point estimates. Therefore, indications of estimation quality are visible not only through the specific point estimate (and the likelihood of that point), but also through the behavior of the sampled distribution. `MCMCResult` provides a few methods to visualize some of the common points of inspection when deciding whether the estimation was sufficiently well-behaved.
-
-### Highest Posterior Density (HPD) Intervals
-
-HPD intervals are akin to regular confidence intervals, but are computed from the posterior distribution. The HPD interval is the smallest interval in a trace containing the specified probability mass. Computing the bounds of the HPD interval tells us where the mass is concentrated; multimodal distributions for example can present themselves as a wide HPD interval due to multiple high-mass regions. The HPD interval can be computed using the `MCMCResult.hpd_intervals` method:
-
-```python
-res.hpd_intervals(alpha=0.05, n_digits=3) # (1)!
-```
-
-1. `alpha` is the probability mass outside the interval. For example, `alpha=0.05` means we want to compute the 95% HPD interval. `n_digits` is the number of digits to round the output to.
-
-```text
-{'beta': (np.float64(0.946), np.float64(0.991)),
- 'rho_r': (np.float64(0.775), np.float64(0.867)),
- 'rho_g': (np.float64(0.837), np.float64(0.92)),
- 'rho_z': (np.float64(0.801), np.float64(0.903)),
- 'psi_pi': (np.float64(2.14), np.float64(4.165)),
- 'psi_x': (np.float64(0.147), np.float64(0.549)),
- 'kappa': (np.float64(0.31), np.float64(0.66)),
- 'tau_inv': (np.float64(0.497), np.float64(1.915)),
- 'rho_gz': (np.float64(-0.694), np.float64(0.871)),
- 'rho_gr': (np.float64(-0.751), np.float64(0.558)),
- 'rho_zr': (np.float64(-0.636), np.float64(0.815)),
- 'meas_rho_ir': (np.float64(-0.886), np.float64(0.672)),
- 'sig_r': (np.float64(0.025), np.float64(0.164)),
- 'sig_g': (np.float64(0.071), np.float64(0.335)),
- 'sig_z': (np.float64(0.461), np.float64(0.856)),
- 'meas_infl': (np.float64(0.716), np.float64(1.529)),
- 'meas_rate': (np.float64(0.0), np.float64(0.106))}
-```
+## Other Fit Diagnostics (MCMC)
 
 ### Posterior Density Estimation
 
@@ -276,6 +220,17 @@ res.logpost_trace_plot() # (1)!
 1. The method produces a plot from the `MCMCResult.logpost_trace` array with no parameters required.
 
 ![Log-Posterior Trace Plot](../img/lp_trace.png "Log-Posterior Trace Plot")
+
+## Using the Estimated Parameters
+
+All result classes provide a `apply_to(config)`  method that returns a new `ModelConfig` with the estimated parameters applied. For MCMC, we additionally need to specify the point estimate we want to use.
+
+```python
+estimated = res.apply_to(model, point="mean")  # (1)!
+sol = solve_model(estimated, order=1)
+```
+
+1. `mean` is the default point estimate, but `map` and `last` are also available as in `posterior_point`.
 
 ## Practical Notes
 

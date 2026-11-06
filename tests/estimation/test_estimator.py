@@ -29,6 +29,7 @@ from SymbolicDSGE.estimation.resolvers import (
     resolve_bounds,
     theta_from_params,
 )
+from SymbolicDSGE.ui.estimation import estimate_and_solve
 
 #: Bounds for ``post82_estimator``'s default ("psi_pi", "rho_r") pair. Bounds
 #: are keyed by name, so a positional pair no longer says which parameter it
@@ -1138,3 +1139,32 @@ def test_mcmc_adaptation_runs_for_scalar_and_vector(post82_estimator, estimated)
         adapt_start=0,
     )
     assert out.samples.shape == (10, len(estimated))
+
+
+def test_estimate_and_solve_leaves_the_given_config_alone(solved_post82, y_post82):
+    """The estimates reach the solve through a copy, not through the caller's
+    config."""
+    config = solved_post82.config
+
+    def calibration():
+        return {str(k): float(v) for k, v in config.calibration.parameters.items()}
+
+    before = calibration()
+
+    result, solved = estimate_and_solve(
+        config=config,
+        compiled=solved_post82.compiled,
+        y=y_post82,
+        observables=solved_post82.compiled.observable_names,
+        estimated_params=["psi_pi", "rho_r"],
+        ss_seed=solved_post82.policy.steady_state,
+        theta0=_POST82_START,
+        bounds=_POST82_BOUNDS,
+        maxiter=10,
+    )
+
+    assert calibration() == before
+    assert solved.config is not config
+    for name, value in result.theta.items():
+        assert solved.config.calibration.parameters[name] == value
+        assert before[name] != value

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import warnings
 
 import sympy as sp
@@ -229,9 +228,6 @@ def solve_model(
     else:
         compiled = compile_model(config)
 
-    conf = deepcopy(config)
-    conf.lock()
-
     piecewise = bool(compiled.constraint_names)
     if piecewise and order == 2:
         raise NotImplementedError(
@@ -240,8 +236,9 @@ def solve_model(
             "constraints from the model specification."
         )
 
-    if parameters is not None:
-        conf.update_parameters(parameters)
+    # New config + lock
+    conf = config.with_parameters(parameters or {})
+    conf.lock()
 
     params = conf.calibration.parameters
     seed = resolve_ss_seed(conf, compiled.layout, ss_seed=ss_seed, params=params)
@@ -276,201 +273,6 @@ def solve_model(
             stacklevel=2,
         )
     return sol
-
-
-def estimate(
-    *,
-    config: ModelConfig,
-    y: NDArray | pd.DataFrame,
-    compiled: CompiledModel | None = None,
-    routine: Literal["mle", "map", "mcmc"] = "mle",
-    theta0: Mapping[str, float] | None = None,
-    observables: list[str] | None = None,
-    filter_mode: Literal["linear", "extended", "unscented"] = "linear",
-    estimated_params: list[str] | Mapping[str, Prior] | None = None,
-    ss_seed: list[float] | NDArray | dict[str, float] | None = None,
-    P0: NDArray | None = None,
-    jitter: float | None = None,
-    symmetrize: bool = True,
-    R: NDArray | None = None,
-    **method_kwargs: Any,
-) -> MLEResult | MAPResult | MCMCResult:
-    """Estimate a model specification without producing a solved model object.
-
-    Parameters
-    ----------
-    config : ModelConfig
-        Model specification to estimate.
-    y : NDArray | pd.DataFrame
-        Observed data, Array in observable order or ``DataFrame`` with columns named for the observables.
-    compiled : CompiledModel | None
-        Optional pre-compiled model carrying the residual, incidence, ect.
-        If None, the model is compiled from the config once at construction of the Estimator.
-    routine : Literal["mle", "map", "mcmc"]
-        "mle" (Maximum Likelihood Estimation), "map" (Maximum A Posteriori), or "mcmc" (Markov Chain Monte Carlo).
-        "map" and "mcmc" require `estimated_params` to be in the `{name: Prior}` mapping form.
-    theta0 : NDArray | Mapping[str, float] | None
-        Initial guess for estimatied parameters. Mapping of {name: guess} or array in order of appearance in calibration.
-    observables : list[str] | None
-        Names of model observables to use in the estimation. If None, all observables are used.
-    filter_mode : Literal["linear", "extended", "unscented"]
-        Kalman filter routine to use. "linear" (linear Gaussian), "extended" (linear Gaussian with nonlinear measurements), "unscented" (pruned unscented)
-    estimated_params : list[str] | Mapping[str, Prior] | None
-        Names of estimated parameters, or mapping with priors to use in MAP or MCMC. `None` estimates all parameters and uses no priors.
-    ss_seed : list[float] | NDArray | dict[str, float] | None
-        Initial guess of the steady state Newton solver. List or array in declaration order or
-        mapping of {name: guess} for the model's declared variables.
-    P0 : NDArray | None
-        Initial state covariance matrix for the Kalman filter. If None, the stationary state covariance is used.
-    jitter : float | None
-        Jitter to add in the Kalman kernels when a cholesky decomposition fails. If None, no jitter is added.
-    symmetrize : bool
-        Whether to symmetrize the covariance matrices in the Kalman filter.
-    R : NDArray | None
-        Measurement noise covariance matrix for the Kalman filter. If None, the `calibration.measurement_noise`
-        is used. If both are omitted, the call will raise.
-
-    Returns
-    -------
-    MLEResult | MAPResult | MCMCResult
-        Result of the estimation routine.
-
-    """
-    est = _estimator(
-        config=config,
-        y=y,
-        compiled=compiled,
-        observables=observables,
-        filter_mode=filter_mode,
-        estimated_params=estimated_params,
-        ss_seed=(
-            asarray(ss_seed, dtype=float64) if isinstance(ss_seed, list) else ss_seed
-        ),
-        P0=P0,
-        jitter=jitter,
-        symmetrize=symmetrize,
-        R=R,
-    )
-
-    match routine.lower():
-        case "mle":
-            return est.mle(theta0=theta0, **method_kwargs)
-        case "map":
-            return est.map(theta0=theta0, **method_kwargs)
-        case "mcmc":
-            return est.mcmc(theta0=theta0, **method_kwargs)
-        case _:
-            raise ValueError("`routine` must be one of {'mle', 'map', 'mcmc'}.")
-
-
-def estimate_and_solve(
-    *,
-    config: ModelConfig,
-    y: NDArray | pd.DataFrame,
-    compiled: CompiledModel | None = None,
-    order: int | None = None,
-    routine: Literal["mle", "map", "mcmc"] = "mle",
-    theta0: Mapping[str, float] | None = None,
-    posterior_point: Literal["mean", "mode", "map", "last"] = "mean",
-    observables: list[str] | None = None,
-    filter_mode: Literal["linear", "extended", "unscented"] = "linear",
-    estimated_params: list[str] | Mapping[str, Prior] | None = None,
-    ss_seed: list[float] | NDArray | dict[str, float] | None = None,
-    P0: NDArray | None = None,
-    jitter: float | None = None,
-    symmetrize: bool = True,
-    R: NDArray | None = None,
-    **method_kwargs: Any,
-) -> tuple[MLEResult | MAPResult | MCMCResult, SolvedModel]:
-    """Estimate and solve a model specification.
-
-    Parameters
-    ----------
-    config : ModelConfig
-        Model specification to estimate.
-    y : NDArray | pd.DataFrame
-        Observed data, Array in observable order or ``DataFrame`` with columns named for the observables.
-    compiled : CompiledModel | None
-        Optional pre-compiled model carrying the residual, incidence, ect.
-        If None, the model is compiled from the config once at construction of the Estimator.
-    order : int | None
-        Perturbation order for the final solution. `None` uses the lowest order compatible with the
-        selected filter mode: 1 for linear and extended, 2 for unscented.
-    routine : Literal["mle", "map", "mcmc"]
-        "mle" (Maximum Likelihood Estimation), "map" (Maximum A Posteriori), or "mcmc" (Markov Chain Monte Carlo).
-        "map" and "mcmc" require `estimated_params` to be in the `{name: Prior}` mapping form.
-    theta0 : NDArray | Mapping[str, float] | None
-        Initial guess for estimatied parameters. Mapping of {name: guess} or array in order of appearance in calibration.
-        If None, the calibration values are used as initial guess.
-    posterior_point : Literal["mean", "mode", "map", "last"]
-        Point estimates to use when sampling a posterior distribution with MCMC {"mean", "mode", "map", "last"}.
-        "mode" and "map" are equivalent aliases.
-    observables : list[str] | None
-        Names of model observables to use in the estimation. If None, all observables are used.
-    filter_mode : Literal["linear", "extended", "unscented"]
-        Kalman filter routine to use. "linear" (linear Gaussian), "extended" (linear Gaussian with nonlinear measurements), "unscented" (pruned unscented)
-    estimated_params : list[str] | Mapping[str, Prior] | None
-        Names of estimated parameters, or mapping with priors to use in MAP or MCMC. `None` estimates all parameters and uses no priors.
-    ss_seed : list[float] | NDArray | dict[str, float] | None
-        Initial guess of the steady state Newton solver. List or array in declaration order or
-        mapping of {name: guess} for the model's declared variables.
-    P0 : NDArray | None
-        Initial state covariance matrix for the Kalman filter. If None, the stationary state covariance is used.
-    jitter : float | None
-        Jitter to add in the Kalman kernels when a cholesky decomposition fails. If None, no jitter is added.
-    symmetrize : bool
-        Whether to symmetrize the covariance matrices in the Kalman filter.
-    R : NDArray | None
-        Measurement noise covariance matrix for the Kalman filter. If None, the `calibration.measurement_noise`
-        is used. If both are omitted, the call will raise.
-
-    Returns
-    -------
-    tuple[MLEResult | MAPResult | MCMCResult, SolvedModel]
-        Estimation result and solved model produced with the estimated parameters.
-
-    """
-    order = _resolve_order(order, filter_mode)
-    est = _estimator(
-        config=config,
-        y=y,
-        compiled=compiled,
-        observables=observables,
-        filter_mode=filter_mode,
-        estimated_params=estimated_params,
-        ss_seed=ss_seed,
-        P0=P0,
-        jitter=jitter,
-        symmetrize=symmetrize,
-        R=R,
-    )
-
-    result: MLEResult | MAPResult | MCMCResult
-
-    match routine.lower():
-        case "mle":
-            result = est.mle(theta0=theta0, **method_kwargs)
-            solve_params = result.theta
-        case "map":
-            result = est.map(theta0=theta0, **method_kwargs)
-            solve_params = result.theta
-        case "mcmc":
-            result = est.mcmc(theta0=theta0, **method_kwargs)
-            solve_params = _mcmc_posterior_point(result, posterior_point)
-        case _:
-            raise ValueError("`routine` must be one of {'mle', 'map', 'mcmc'}.")
-
-    # Sync writes the estimated values into the calibration, which is where
-    # `solve` reads its full parameter vector from; passing them again would
-    # only re-supply what was just installed.
-    config.update_parameters(solve_params)
-    solved = solve_model(
-        config=config,
-        compiled=compiled,
-        order=order,
-        ss_seed=ss_seed,
-    )
-    return result, solved
 
 
 def _compile_constraints(
@@ -690,71 +492,3 @@ def _infer_variable_layout(
         shock_names=shock_names,
         shock_idx=MappingProxyType({name: i for i, name in enumerate(shock_names)}),
     )
-
-
-def _estimator(
-    *,
-    config: ModelConfig,
-    y: NDArray | pd.DataFrame,
-    compiled: CompiledModel | None = None,
-    observables: list[str] | None = None,
-    filter_mode: str = "linear",
-    estimated_params: list[str] | Mapping[str, Prior] | None = None,
-    ss_seed: list[float] | NDArray | dict[str, float] | None = None,
-    x0: NDArray | None = None,
-    P0: NDArray | None = None,
-    jitter: float | None = None,
-    symmetrize: bool = True,
-    R: NDArray | None = None,
-) -> "Estimator":
-    # Lazy import prevents a solver->estimation->solver import cycle.
-    from ..estimation import Estimator
-
-    return Estimator(
-        config=config,
-        compiled=compiled,
-        y=y,
-        observables=observables,
-        filter_mode=filter_mode,
-        estimated_params=estimated_params,
-        ss_seed=(
-            asarray(ss_seed, dtype=float64) if isinstance(ss_seed, list) else ss_seed
-        ),
-        P0=P0,
-        jitter=jitter,
-        symmetrize=symmetrize,
-        R=R,
-    )
-
-
-def _resolve_order(order: int | None, filter_mode: str) -> int:
-    if order is not None:
-        if order not in (1, 2):
-            raise ValueError(f"order must be 1 or 2, got {order}.")
-        if order == 1 and filter_mode == "unscented":
-            raise ValueError("UKF requires second-order tensors, use `order=2`.")
-        return order
-
-    if filter_mode == "unscented":
-        return 2
-    if filter_mode in ("linear", "extended"):
-        return 1
-    raise ValueError(
-        f"Unrecognized filter_mode {filter_mode!r}, must be one of {{'linear', 'extended', 'unscented'}}."
-    )
-
-
-def _mcmc_posterior_point(result: MCMCResult, point: str) -> dict[str, float64]:
-    if point == "mean":
-        theta_star = asarray(result.samples.mean(axis=0), dtype=float64)
-    elif point == "last":
-        theta_star = asarray(result.samples[-1], dtype=float64)
-    elif point in ("map", "mode"):
-        idx = int(np.argmax(result.logpost_trace))
-        theta_star = asarray(result.samples[idx], dtype=float64)
-    else:
-        raise ValueError(
-            "`posterior_point` must be one of {'mean', 'last', 'map', 'mode'}, got "
-            f"{point!r}."
-        )
-    return dict(zip(result.param_names, (float64(v) for v in theta_star)))

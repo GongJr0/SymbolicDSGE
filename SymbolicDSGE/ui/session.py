@@ -21,7 +21,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..core import compile_model, solve_model
-from ..core.solver import estimate, estimate_and_solve
 from ..core.compiled_model import CompiledModel
 from ..core.config import ModelConfig
 from ..core.model_parser import ModelParser
@@ -39,6 +38,8 @@ from .estimation import (
     build_estimation_inputs,
     estimator_spec_wire,
     serialize_estimation_result,
+    estimate,
+    estimate_and_solve,
 )
 from .simulation import sim_run_kwargs, sim_spec_wire
 from .serializers import (
