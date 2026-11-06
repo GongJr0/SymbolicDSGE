@@ -62,7 +62,7 @@ pip install "SymbolicDSGE[ui]"    # Web based GUI
 
 ### Web-UI
 
-`SymbolicDSGE` ships a `[ui]` dependency with the goal of making DSGE basic experiments accessible to non-programmers.
+`SymbolicDSGE` ships a `[ui]` dependency with the goal of making basic DSGE experiments accessible to non-programmers.
 GUI users can:
 
 - Create a model config
