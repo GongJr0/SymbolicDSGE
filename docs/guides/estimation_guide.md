@@ -163,17 +163,8 @@ ess_ps = res.ess_per_second  # (3)!
 mcse = res.mcse  # (4)!
 hpd = res.hpd_intervals(alpha=0.05, digits=3)  # (5)!
 
-print(
-    pd.DataFrame.from_dict(
-        {
-            "point": point,
-            "ess": ess,
-            "ess_per_s": ess_ps,
-            "mcse": mcse,
-            "hpd (a=0.05)": hpd,
-        }
-    ).round(3)
-)
+# Summary containing above statistics
+print(res.summary(alpha=0.05, digits=3))
 ```
 
 1. `posterior_point` reduces the posterior distribution to a single point estimate.
@@ -184,24 +175,24 @@ print(
 5. Highest Posterior Density (HPD) intervals are similar to confidence intervals, but calculate the region of highest density in the posterior distribution. For example, the 95% HPD interval (`alpha=0.05`) is the smallest interval containing 95% of the posterior mass.
 
 ```text
-             point       ess  ess_per_s   mcse     hpd (a=0.05)
-beta         0.970  1482.569    309.543  0.000    (0.946, 0.99)
-rho_r        0.820   967.958    202.098  0.001   (0.774, 0.866)
-rho_g        0.880   887.094    185.215  0.001    (0.838, 0.92)
-rho_z        0.856  1345.977    281.024  0.001   (0.804, 0.904)
-psi_pi       3.161  1049.739    219.173  0.015   (2.196, 4.135)
-psi_x        0.337  1249.472    260.875  0.003   (0.145, 0.559)
-kappa        0.472  1276.421    266.502  0.003    (0.302, 0.65)
-tau_inv      1.138   931.710    194.530  0.012    (0.493, 1.86)
-rho_gz       0.105  1189.196    248.290  0.012  (-0.657, 0.859)
-rho_gr      -0.104  1137.108    237.415  0.011  (-0.786, 0.563)
-rho_zr       0.098  1388.732    289.951  0.011  (-0.626, 0.827)
-meas_rho_ir -0.145  1208.694    252.361  0.012  (-0.898, 0.667)
-sig_r        0.088   521.195    108.819  0.002   (0.021, 0.159)
-sig_g        0.198   940.984    196.466  0.002   (0.071, 0.317)
-sig_z        0.641  1169.761    244.232  0.003    (0.448, 0.84)
-meas_infl    1.222   406.833     84.942  0.008   (0.847, 1.514)
-meas_rate    0.045  1591.373    332.260  0.001     (0.0, 0.109)
+              mean    std       ess  ess_per_second   mcse     hpd (α=0.05)
+beta         0.970  0.012  1080.967         207.665  0.000   (0.946, 0.991)
+rho_r        0.821  0.024   609.137         117.021  0.001   (0.775, 0.867)
+rho_g        0.879  0.022   773.308         148.560  0.001    (0.837, 0.92)
+rho_z        0.857  0.027   849.221         163.144  0.001   (0.801, 0.903)
+psi_pi       3.128  0.514   748.122         143.722  0.019    (2.14, 4.165)
+psi_x        0.335  0.107  1129.949         217.075  0.003   (0.147, 0.549)
+kappa        0.476  0.091   962.902         184.983  0.003     (0.31, 0.66)
+tau_inv      1.158  0.373   611.165         117.411  0.015   (0.497, 1.915)
+rho_gz       0.095  0.433   851.219         163.528  0.015  (-0.694, 0.871)
+rho_gr      -0.089  0.351   787.493         151.285  0.013  (-0.751, 0.558)
+rho_zr       0.093  0.390  1232.472         236.771  0.011  (-0.636, 0.815)
+meas_rho_ir -0.124  0.429  1155.338         221.952  0.013  (-0.886, 0.672)
+sig_r        0.093  0.037   420.354          80.754  0.002   (0.025, 0.164)
+sig_g        0.201  0.067   540.395         103.815  0.003   (0.071, 0.335)
+sig_z        0.647  0.102   927.601         178.202  0.003   (0.461, 0.856)
+meas_infl    1.194  0.205   171.195          32.888  0.016   (0.716, 1.529)
+meas_rate    0.045  0.033  1324.665         254.482  0.001     (0.0, 0.106)
 ```
 
 ## Other Fit Diagnostics (MCMC)

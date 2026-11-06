@@ -10,6 +10,8 @@ from numpy import float64
 from numpy.typing import NDArray
 from functools import cached_property
 
+import pandas as pd
+
 from ..core.config import ModelConfig
 from .spec import (
     OptimizationResultSpec,
@@ -441,9 +443,7 @@ class MCMCResult:
             out[name] = (_nanrnd(low, digits), _nanrnd(high, digits))
         return out
 
-    def joint_hpd_set(
-        self, alpha: float = 0.05, digits: int | None = None
-    ) -> tuple[NDF, NDF, float, NDI]:
+    def joint_hpd_set(self, alpha: float = 0.05) -> tuple[NDF, NDF, float, NDI]:
         """
         Compute an empirical joint HPD set for the full parameter vector.
 
@@ -462,8 +462,8 @@ class MCMCResult:
         mask = np.asarray(self.logpost_trace >= threshold, dtype=bool)
         idx = np.flatnonzero(mask).astype(np.int64, copy=False)
         return (
-            _nanrndarr(np.asarray(self.samples[idx, :], dtype=float64), digits),
-            _nanrndarr(np.asarray(self.logpost_trace[idx], dtype=float64), digits),
+            np.asarray(self.samples[idx, :], dtype=float64),
+            np.asarray(self.logpost_trace[idx], dtype=float64),
             threshold,
             idx,
         )
@@ -534,7 +534,6 @@ class MCMCResult:
     def posterior_point(
         self,
         point: Literal["mean", "map", "last"] = "mean",
-        *,
         digits: int | None = None,
     ) -> dict[str, float]:
         """Select a point estimate from the posterior samples.
@@ -594,6 +593,39 @@ class MCMCResult:
 
         """
         return config.with_parameters(self.posterior_point(point))
+
+    def summary(self, alpha: float = 0.05, digits: int | None = None) -> pd.DataFrame:
+        """Produce a sumary table of posterior statistics for each parameter.
+
+        Parameters
+        ----------
+        alpha : float
+            Significance level for the highest-posterior-density (HPD) intervals.
+        digits : int | None
+            Number of decimals for rounding, `None` does not apply rounding.
+
+        Returns
+        -------
+        pd.DataFrame
+            Summary table containing mean, standard deviation, ESS, MCSE, and HPD intervals for each parameter.
+        """
+        summary_df = pd.DataFrame(
+            {
+                "mean": self.posterior_point(point="mean"),
+                "std": dict(
+                    zip(self.param_names, np.std(self.samples, axis=0, ddof=1))
+                ),
+                "ess": self.ess,
+                "ess_per_second": self.ess_per_second,
+                "mcse": self.mcse,
+                f"hpd (\u03b1={alpha:.3f})": self.hpd_intervals(
+                    alpha=alpha, digits=digits
+                ),
+            }
+        )
+        if digits is not None:
+            summary_df = summary_df.round(digits)
+        return summary_df
 
 
 def _validate_hpd_alpha(alpha: float) -> float64:

@@ -267,8 +267,33 @@ __Properties:__
 __Methods:__
 
 ```python
+MCMCResult.summary(
+    alpha: float = 0.05, # (1)!
+    digits: int | None = 3,
+) -> pd.DataFrame
+```
+
+1. Significance level for the highest-posterior-density (HPD) intervals.
+
+Return a summary table reporting posterior means, standard deviations, ESS, ESS/s, MCSE for the mean, and HPD intervals for each parameter.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| alpha | Significance level used to determine the empirical HPD coverage. |
+| digits | Number of decimal places to round the summary table to. `None` does not apply rounding. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `pd.DataFrame` | Summary table with one row per parameter and columns for posterior mean, standard deviation, ESS, ESS/s, MCSE for the mean, and HPD intervals. |
+
+```python
 MCMCResult.hpd_intervals(
     alpha: float = 0.05, # (1)!
+    digits: int | None = 3,
 ) -> dict[str, tuple[float, float]]
 ```
 
@@ -281,6 +306,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | alpha | Significance level used to determine the empirical HPD coverage. |
+| digits | Number of decimal places to round the HPD intervals to. `None` does not apply rounding. |
 
 __Returns:__
 
@@ -293,6 +319,7 @@ __Returns:__
 ```python
 MCMCResult.joint_hpd_set(
     alpha: float = 0.05, # (1)!
+    digits: int | None = 3,
 ) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]
 ```
 
@@ -308,7 +335,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | alpha | Significance level used to determine the empirical HPD coverage. |
-
+| digits | Number of decimal places to round the retained draws to. `None` does not apply rounding. |
 __Returns:__
 
 | __Type__ | __Description__ |
@@ -320,6 +347,7 @@ __Returns:__
 ```python
 MCMCResult.mcse_quantile(
     q: float, # (1)!
+    digits: int | None = 3,
 ) -> dict[str, float]
 ```
 
@@ -335,6 +363,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | q | Quantile whose Monte Carlo standard error is reported. |
+| digits | Number of decimal places to round the MCSE to. `None` does not apply rounding. |
 
 __Returns:__
 
@@ -347,6 +376,7 @@ __Returns:__
 ```python
 MCMCResult.posterior_point(
     point: Literal["mean", "map", "last"] = "mean", # (1)!
+    digits: int | None = 3,
 ) -> dict[str, float]
 ```
 
@@ -359,6 +389,7 @@ __Inputs:__
 | __Name__ | __Description__ |
 |:---------|----------------:|
 | point | Which summary of the retained draws to return. |
+| digits | Number of decimal places to round the returned parameter vector to. `None` does not apply rounding. |
 
 __Returns:__
 
