@@ -230,6 +230,17 @@ res.logpost_trace_plot() # (1)!
 
 ![Log-Posterior Trace Plot](../img/lp_trace.png "Log-Posterior Trace Plot")
 
+## Using the Estimated Parameters
+
+All result classes provide a `apply_to(config)`  method that returns a new `ModelConfig` with the estimated parameters applied. For MCMC, we additionally need to specify the point estimate we want to use.
+
+```python
+estimated = res.apply_to(model, point="mean")  # (1)!
+sol = solve_model(estimated, order=1)
+```
+
+1. `mean` is the default point estimate, but `map` and `last` are also available as in `posterior_point`.
+
 ## Practical Notes
 
 ???+ note "When to Use MLE vs MAP vs MCMC"
