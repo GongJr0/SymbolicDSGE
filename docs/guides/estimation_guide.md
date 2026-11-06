@@ -16,7 +16,7 @@ This guide walks through the parameter estimation workflow of `SymbolicDSGE` usi
 We will cover:
 
 - How priors are built (and why transforms matter)
-- How to run MCMC through `estimate_and_solve(...)`
+- How to run MCMC through `Estimator`
 - What outputs to expect from the process
 
 ## Parse Configs and Compile
