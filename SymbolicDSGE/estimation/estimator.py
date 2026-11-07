@@ -5,6 +5,7 @@ from __future__ import annotations
 import warnings
 from time import perf_counter
 from typing import Any, Literal, Mapping, Sequence, cast
+from copy import deepcopy
 
 import numpy as np
 import pandas as pd
@@ -121,7 +122,7 @@ class Estimator:
         self.estimated_params, self.priors = r.get_names_and_priors(
             estimated_params, compiled
         )
-        self.config = config
+        self.config = deepcopy(config)
         self.compiled = compiled
         if config.calibration.measurement_noise is None and R is None:
             raise ValueError(
