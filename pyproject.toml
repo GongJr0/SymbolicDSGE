@@ -74,7 +74,7 @@ dev = [
 
 jupyter = [
     "ipykernel>=7.4.0",
-    "jupyterlab>=4.6.4",
+    "jupyterlab>=4.6.5",
     "jupyter>=1.1.1",
     "jupytext>=1.19.6",
     "jupyterlab-execute-time>=3.3.0",
