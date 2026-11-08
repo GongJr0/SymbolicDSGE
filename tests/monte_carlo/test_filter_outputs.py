@@ -8,14 +8,14 @@ mode-specific presence rules are decided.
 
 from __future__ import annotations
 
-from typing import Literal, cast
-
 import numpy as np
 import pytest
 
 from SymbolicDSGE._ckernels.monte_carlo._arenas import resolve_retention
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
+from SymbolicDSGE.filters.base import Filter
+from SymbolicDSGE.filters.filter import FilterResult, UnscentedFilterResult
+from SymbolicDSGE.filters.gaussian import LinearKalman, ExtendedKalman, UnscentedKalman
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult
 from SymbolicDSGE.monte_carlo.step_factories import (
@@ -32,7 +32,6 @@ N_REP = 4
 PARTIAL_N_REP = 8
 PARTIAL_N_RETAIN = 3
 
-FilterMode = Literal["linear", "extended", "unscented"]
 
 #: Every array field the linear and extended layouts open a buffer for, paired
 #: with the axes each one carries past the replication axis.
@@ -274,20 +273,20 @@ def test_the_unscented_layout_reserves_nothing_for_shocks(
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["linear", "extended"])
+@pytest.mark.parametrize(
+    "filter", [LinearKalman(return_shocks=True), ExtendedKalman(return_shocks=True)]
+)
 def test_each_replication_matches_the_reference_filter_on_its_own_data(
-    solved_post82: SolvedModel, mode: str
+    solved_post82: SolvedModel, filter: Filter
 ) -> None:
     y = _observations(solved_post82)
 
-    filt = _run(solved_post82, y, filter_mode=mode, return_shocks=True).filter_outputs[
-        "filt"
-    ]
+    filt = _run(
+        solved_post82, y, filter_mode=filter.mode.value, return_shocks=True
+    ).filter_outputs["filt"]
 
     for rep in range(N_REP):
-        expected = solved_post82.kalman(
-            y=y[rep], filter_mode=cast(FilterMode, mode), return_shocks=True
-        )
+        expected = filter.filter(solved_post82, y=y[rep])
         for field, _ in _SHARED_FIELDS:
             np.testing.assert_allclose(
                 getattr(filt, field)[rep],
@@ -311,7 +310,7 @@ def test_unscented_replications_match_the_reference_filter(
     filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
 
     for rep in range(N_REP):
-        expected = solved_rbc_so.kalman(y=y[rep], filter_mode="unscented")
+        expected = UnscentedKalman().filter(solved_rbc_so, y=y[rep])
         for field in ("x_pred", "x_filt", "P_pred", "P_filt", *_UNSCENTED_ONLY):
             np.testing.assert_allclose(
                 getattr(filt, field)[rep],
@@ -420,7 +419,7 @@ def test_each_retained_entry_holds_the_replication_it_was_sampled_from(
     for idx, rep in enumerate(retained_reps):
         np.testing.assert_allclose(
             filt.x_filt[idx],
-            solved_post82.kalman(y=y[rep]).x_filt,
+            LinearKalman().filter(solved_post82, y=y[rep]).x_filt,
             rtol=1e-9,
             atol=1e-12,
         )
@@ -536,7 +535,7 @@ def test_filter_reads_observations_from_payload(solved_post82: SolvedModel) -> N
     assert result.datagen_outputs == {}
     actual = result.filter_outputs["filt"]
     for rep in range(2):
-        expected = solved_post82.kalman(y=y[rep], filter_mode="linear")
+        expected = LinearKalman().filter(solved_post82, y=y[rep])
         for field in ("x_pred", "x_filt", "P_pred", "P_filt", "innov", "loglik"):
             np.testing.assert_allclose(
                 getattr(actual, field)[rep],

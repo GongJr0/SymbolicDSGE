@@ -109,7 +109,7 @@ class UnscentedRunArgs(TypedDict):
     jitter: float
 
 
-def resolve_linear_args(
+def _resolve_linear_args(
     model: SolvedModel,
     y: NDF | pd.DataFrame,
     observables: Sequence[str] | None = None,
@@ -144,7 +144,7 @@ def resolve_linear_args(
     )
 
 
-def resolve_extended_args(
+def _resolve_extended_args(
     model: SolvedModel,
     y: NDF | pd.DataFrame,
     observables: Sequence[str] | None = None,
@@ -179,7 +179,7 @@ def resolve_extended_args(
     )
 
 
-def resolve_unscented_args(
+def _resolve_unscented_args(
     model: SolvedModel,
     y: NDF | pd.DataFrame,
     observables: Sequence[str] | None = None,

@@ -53,7 +53,7 @@ import pytest
 from scipy.linalg import solve_discrete_lyapunov
 
 from SymbolicDSGE.core.resolvers import shock_covariance
-from SymbolicDSGE.kalman.filter import KalmanFilter
+from SymbolicDSGE.filters.filter import run_linear
 
 from _oracles import dynare_post82_first_order as dyn
 
@@ -214,7 +214,7 @@ def test_measurement_matrices_match_dynare(parsed_post82, compiled_post82):
 
 def _filter(solution, P0):
     Q, C, d = _measurement(solution.config, solution.compiled)
-    return KalmanFilter.run(
+    return run_linear(
         np.real(solution.policy.A),
         np.real(solution.policy.B),
         C,

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from numba import cfunc, types
 
-from SymbolicDSGE.kalman.errors import ErrorCode
+from SymbolicDSGE.filters.errors import ErrorCode
 from _oracles.kalman import kf_reference
 
 kf = pytest.importorskip("SymbolicDSGE._ckernels.kalman")
