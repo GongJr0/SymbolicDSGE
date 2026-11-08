@@ -274,7 +274,6 @@ nav:
               - Tanh: documentation/prior_spec/transforms/tanh.md
       - Utilities:
           - FRED: documentation/utilities/FRED.md
-          - KalmanFilter: documentation/utilities/KalmanFilter.md
           - math_utils: documentation/utilities/math_utils.md
   - Benchmarks:
       - Linear Kalman Filter: benchmarks/linear_kf.md
