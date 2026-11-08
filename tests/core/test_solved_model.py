@@ -8,7 +8,6 @@ import pandas as pd
 import pytest
 import sympy as sp
 import yaml
-from sympy import Symbol
 from sympy.core.function import AppliedUndef
 
 import SymbolicDSGE.core.solved_model as solved_model_module
