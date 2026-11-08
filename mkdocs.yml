@@ -188,12 +188,17 @@ nav:
       - CompiledModel: documentation/CompiledModel.md
       - SolvedModel: documentation/SolvedModel.md
       - Shock: documentation/Shock.md
-      - FilterResult: documentation/FilterResult.md
       - SimResult: documentation/SimResult.md
       - Model Solutions:
           - FirstOrderSolution: documentation/model_solutions/FirstOrderSolution.md
           - SecondOrderSolution: documentation/model_solutions/SecondOrderSolution.md
           - PiecewiseSolution: documentation/model_solutions/PiecewiseSolution.md
+      - Filters:
+          - Overview: documentation/filters/index.md
+          - LinearKalman: documentation/filters/LinearKalman.md
+          - ExtendedKalman: documentation/filters/ExtendedKalman.md
+          - UnscentedKalman: documentation/filters/UnscentedKalman.md
+          - FilterResult: documentation/filters/FilterResult.md
       - Regression:
           - Overview: documentation/regression/index.md
           - Regression Results: documentation/regression/results.md

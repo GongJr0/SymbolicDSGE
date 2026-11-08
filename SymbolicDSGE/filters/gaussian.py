@@ -34,14 +34,14 @@ class GaussianFilter(Filter[ResultT]):
 @dataclass
 class LinearKalman(GaussianFilter[FilterResult]):
     mode: ClassVar[FilterMode] = FilterMode.LINEAR
-    joseph_cov: bool = True
+    joseph_cov: bool = False
     return_shocks: bool = False
 
     def filter(
         self,
         model: SolvedModel,
         y: NDArray[float64],
-        observables: list[str] | tuple[str] | None = None,
+        observables: list[str] | tuple[str, ...] | None = None,
         R: NDArray[float64] | None = None,
         x0: Mapping[str, float] | None = None,
         P0: NDArray[float64] | None = None,
@@ -56,7 +56,7 @@ class LinearKalman(GaussianFilter[FilterResult]):
             Observed data as an array or DataFrame.
             If an array is provided, the order of `observables` should match the order of the columns.
             If a DataFrame is provided, the columns should name the observables.
-        observables : list[str] | tuple[str] | None
+        observables : list[str] | tuple[str, ...] | None
             Model observables that the data corresponds to.
             If `None`, all observables are used in the order they are defined in the model.
         R : NDArray[float64] | None
@@ -96,14 +96,14 @@ class LinearKalman(GaussianFilter[FilterResult]):
 @dataclass
 class ExtendedKalman(GaussianFilter[FilterResult]):
     mode: ClassVar[FilterMode] = FilterMode.EXTENDED
-    joseph_cov: bool = True
+    joseph_cov: bool = False
     return_shocks: bool = False
 
     def filter(
         self,
         model: SolvedModel,
         y: NDArray[float64],
-        observables: list[str] | tuple[str] | None = None,
+        observables: list[str] | tuple[str, ...] | None = None,
         R: NDArray[float64] | None = None,
         x0: Mapping[str, float] | None = None,
         P0: NDArray[float64] | None = None,
@@ -118,7 +118,7 @@ class ExtendedKalman(GaussianFilter[FilterResult]):
             Observed data as an array or DataFrame.
             If an array is provided, the order of `observables` should match the order of the columns.
             If a DataFrame is provided, the columns should name the observables.
-        observables : list[str] | tuple[str] | None
+        observables : list[str] | tuple[str, ...] | None
             Model observables that the data corresponds to.
             If `None`, all observables are used in the order they are defined in the model.
         R : NDArray[float64] | None
@@ -167,7 +167,7 @@ class UnscentedKalman(GaussianFilter[UnscentedFilterResult]):
         self,
         model: SolvedModel,
         y: NDArray[float64],
-        observables: list[str] | tuple[str] | None = None,
+        observables: list[str] | tuple[str, ...] | None = None,
         R: NDArray[float64] | None = None,
         x0: Mapping[str, float] | None = None,
         P0: NDArray[float64] | None = None,
@@ -182,7 +182,7 @@ class UnscentedKalman(GaussianFilter[UnscentedFilterResult]):
             Observed data as an array or DataFrame.
             If an array is provided, the order of `observables` should match the order of the columns.
             If a DataFrame is provided, the columns should name the observables.
-        observables : list[str] | tuple[str] | None
+        observables : list[str] | tuple[str, ...] | None
             Model observables that the data corresponds to.
             If `None`, all observables are used in the order they are defined in the model.
         R : NDArray[float64] | None

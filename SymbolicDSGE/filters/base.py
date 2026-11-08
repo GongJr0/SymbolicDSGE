@@ -35,7 +35,7 @@ class Filter(ABC, Generic[ResultT]):
         self,
         model: SolvedModel,
         y: NDArray[float64],
-        observables: list[str] | tuple[str] | None = None,
+        observables: list[str] | tuple[str, ...] | None = None,
         R: NDArray[float64] | None = None,
         x0: Mapping[str, float] | None = None,
     ) -> ResultT: ...
