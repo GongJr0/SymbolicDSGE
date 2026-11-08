@@ -28,7 +28,7 @@ class GaussianFilter(Filter[ResultT]):
     """Base class for Gaussian filters."""
 
     jitter: float = 0.0
-    symmetrize: bool = True
+    symmetrize: bool = False
 
 
 @dataclass

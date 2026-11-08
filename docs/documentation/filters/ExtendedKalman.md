@@ -21,7 +21,7 @@ __Fields:__
 | __Name__ | __Type__ | __Default__ | __Description__ |
 |:---------|:--------:|:-----------:|----------------:|
 | jitter | `float` | `0.0` | Amount added to a covariance diagonal when a Cholesky factorization fails. |
-| symmetrize | `bool` | `True` | Symmetrize the covariance matrices via their transposes `0.5 * (M + M.T)`. |
+| symmetrize | `bool` | `False` | Symmetrize the covariance matrices via their transposes `0.5 * (M + M.T)`. |
 | joseph_cov | `bool` | `False` | Use the Joseph form for the covariance update. |
 | return_shocks | `bool` | `False` | Recover the structural shocks implied by the filtered path into `eps_hat`. |
 
