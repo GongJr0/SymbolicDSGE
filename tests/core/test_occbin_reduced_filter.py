@@ -25,6 +25,7 @@ from SymbolicDSGE.core import solve_model
 from SymbolicDSGE.core import parse_config
 from SymbolicDSGE.core.solved_model import FirstOrderSolvedModel
 from SymbolicDSGE.estimation import Estimator
+from SymbolicDSGE.filters.gaussian import LinearKalman, ExtendedKalman, UnscentedKalman
 
 #: The discount-factor shock the parity fixture is built around, at the size
 #: that drives the rate into the bound. Fixed here so the observations every
@@ -59,12 +60,12 @@ def reference(solved):
     return FirstOrderSolvedModel(solved.config, solved.compiled, solved.policy.ref)
 
 
-@pytest.mark.parametrize("filter_mode", ["linear", "extended"])
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
 def test_filtering_a_constrained_model_is_filtering_its_reference_regime(
-    solved, reference, observations, filter_mode
+    solved, reference, observations, filter
 ):
-    ours = solved.kalman(observations, filter_mode=filter_mode)
-    theirs = reference.kalman(observations, filter_mode=filter_mode)
+    ours = filter.filter(solved, y=observations)
+    theirs = filter.filter(reference, y=observations)
 
     assert float(ours.loglik) == float(theirs.loglik)
     np.testing.assert_array_equal(ours.x_filt, theirs.x_filt)
@@ -83,7 +84,7 @@ def test_constraint_binds_on_the_data_being_filtered(solved, observations):
 
 def test_unscented_filtering_is_refused(solved, observations):
     with pytest.raises(ValueError, match="requires a second order solution"):
-        solved.kalman(observations, filter_mode="unscented")
+        UnscentedKalman().filter(solved, y=observations)
 
 
 def test_estimation_likelihood_runs_on_a_constrained_model(
@@ -109,11 +110,6 @@ def test_estimation_likelihood_runs_on_a_constrained_model(
 
     est_loglik = float(est.loglik())
     kf_loglik = float(
-        solved.kalman(
-            observations,
-            filter_mode="linear",
-            symmetrize=True,
-            joseph_cov=False,
-        ).loglik
+        LinearKalman(joseph_cov=False).filter(solved, y=observations).loglik
     )
     assert est_loglik == kf_loglik

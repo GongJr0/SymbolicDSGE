@@ -8,6 +8,7 @@ from SymbolicDSGE import parse_config, solve_model
 from SymbolicDSGE._ckernels.monte_carlo._runner import run as run_native
 from SymbolicDSGE._diag_tests.distributions import PvalMethod, ReferenceDistribution
 from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.filters.gaussian import LinearKalman, ExtendedKalman, UnscentedKalman
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.native_lowering import lower_native_run
 from SymbolicDSGE.monte_carlo.step_factories import (
@@ -466,7 +467,7 @@ def test_native_lowering_runs_linear_and_extended_filters(solved_post82) -> None
         ]
     )
 
-    for mode in ("linear", "extended"):
+    for filter in (LinearKalman(), ExtendedKalman()):
         pipeline = MCPipeline(
             [
                 simulation_step("sim", target="reference", T=T, observables=True),
@@ -475,7 +476,7 @@ def test_native_lowering_runs_linear_and_extended_filters(solved_post82) -> None
                     target="reference",
                     obs_source="sim",
                     obs_field="observables",
-                    filter_mode=mode,
+                    filter_mode=filter.mode.value,
                 ),
             ]
         )
@@ -489,7 +490,7 @@ def test_native_lowering_runs_linear_and_extended_filters(solved_post82) -> None
         )
 
         assert native_result.status == 0
-        expected_filter = solved.kalman(y=expected_y, filter_mode=mode)
+        expected_filter = filter.filter(solved, y=expected_y)
         for field in ("x_pred", "x_filt", "P_pred", "innov", "loglik"):
             layout = lowered.plan["filter"].out_fields[field]
             actual = (
@@ -559,14 +560,13 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides(
     assert native_result.status == 0
     simulated = solved.sim(T, shocks=shocks, observables=True)
     expected_y = np.column_stack([simulated.observables[name] for name in requested])
-    expected_filter = solved.kalman(
+    expected_filter = LinearKalman(return_shocks=True).filter(
+        solved,
         y=expected_y,
-        filter_mode="linear",
         observables=requested,
         x0=x0,
         P0=P0,
         R=R,
-        return_shocks=True,
     )
     for field in ("x_pred", "P_filt", "innov", "eps_hat", "loglik"):
         layout = lowered.plan["filter"].out_fields[field]
@@ -616,7 +616,7 @@ def test_native_lowering_runs_unscented_filter_with_rbc_fixture(
     )
 
     assert native_result.status == 0
-    expected_filter = solved.kalman(y=y, filter_mode="unscented")
+    expected_filter = UnscentedKalman().filter(solved, y=y)
     for field in ("x_pred", "x_filt", "P_pred", "innov", "loglik", "x2_filt"):
         layout = lowered.plan["filter"].out_fields[field]
         actual = (

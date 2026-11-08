@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 from numba import cfunc, types
 from numpy import float64
@@ -19,6 +20,7 @@ from SymbolicDSGE.filters.filter import (
     run_linear,
     run_unscented,
 )
+from SymbolicDSGE.filters.gaussian import ExtendedKalman, LinearKalman
 
 
 def _linear_system_1d():
@@ -321,6 +323,40 @@ def test_run_extended_matches_linear_when_measurement_is_linear():
     assert np.allclose(extended.y_pred, linear.y_pred)
     assert np.allclose(extended.P_filt, linear.P_filt)
     assert np.allclose(extended.loglik, linear.loglik)
+
+
+def test_extended_matches_linear_on_a_levels_model(solved_rbc_so):
+    # The rbc observable is `c_obs: c(t)`, affine in the model variables, so the
+    # extended filter relinearizes onto the same (C, d) the linear filter is
+    # handed and the two must agree period by period. The data is arbitrary:
+    # both filters read the same y, and S never depends on it, so agreement is
+    # required whatever it holds.
+    #
+    # `test_run_extended_matches_linear_when_measurement_is_linear` above makes
+    # the same claim against the kernels directly, where the caller supplies
+    # (A, B, C, d) and no model, so there is no steady state to expand around.
+    # This is the model-level case, and it only bites when that steady state is
+    # away from the origin: the measurement cfunc is a function of levels, so a
+    # filter that evaluates it at deviations drops `h(ss)` from every prediction.
+    compiled = solved_rbc_so.compiled
+    obs = list(compiled.observable_names)
+    ss = np.asarray(solved_rbc_so.policy.steady_state, dtype=np.float64)
+
+    # Guard the premise: at ss == 0 both conventions coincide and the test below
+    # cannot fail for the reason it exists.
+    assert np.max(np.abs(ss)) > 1.0
+
+    rng = np.random.default_rng(0)
+    y = pd.DataFrame(rng.normal(size=(24, len(obs))), columns=obs)
+    R = np.eye(len(obs), dtype=np.float64) * 1e-4
+
+    linear = LinearKalman().filter(solved_rbc_so, y, R=R)
+    extended = ExtendedKalman().filter(solved_rbc_so, y, R=R)
+
+    np.testing.assert_allclose(extended.y_pred, linear.y_pred, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(extended.innov, linear.innov, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(extended.x_filt, linear.x_filt, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(extended.loglik, linear.loglik, rtol=1e-10, atol=1e-12)
 
 
 def test_run_extended_can_skip_history_storage_for_loglik_only_path():

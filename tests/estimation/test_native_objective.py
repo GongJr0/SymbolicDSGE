@@ -3,7 +3,7 @@
 ``NativeLogpost`` marshals a context the same way ``Estimator`` does and calls
 the same C objective the estimation and sampling drivers call, so the linear and
 extended cases pin the whole native path from marshalling through solve, filter
-and loglik against ``SolvedModel.kalman(...).loglik``, the oracle the backend
+and loglik against the matching filter's ``.filter(...).loglik``, the oracle the backend
 tests use. Each estimates one parameter and evaluates at its calibrated value,
 so the resolved parameter vector is the base calibration.
 """
@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from SymbolicDSGE.estimation import Estimator
+from SymbolicDSGE.filters.gaussian import LinearKalman, ExtendedKalman, UnscentedKalman
 
 
 def _native_loglik(
@@ -33,8 +34,8 @@ def _native_loglik(
     return est.loglik()
 
 
-@pytest.mark.parametrize("filter_mode", ["linear", "extended"])
-def test_native_objective_matches_model_kalman(solved_post82, y_post82, filter_mode):
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
+def test_native_objective_matches_model_kalman(solved_post82, y_post82, filter):
     config = solved_post82.config
     compiled = solved_post82.compiled
     obs = ["Infl", "Rate"]
@@ -43,13 +44,11 @@ def test_native_objective_matches_model_kalman(solved_post82, y_post82, filter_m
         compiled=compiled,
         y=y_post82,
         observables=obs,
-        filter_mode=filter_mode,
+        filter_mode=filter.mode.value,
         estimated="psi_pi",
         ss_seed=solved_post82.policy.steady_state,
     )
-    ll_model = solved_post82.kalman(
-        y=y_post82, filter_mode=filter_mode, observables=obs
-    ).loglik
+    ll_model = filter.filter(solved_post82, y=y_post82, observables=obs).loglik
 
     # A Blanchard-Kahn failure returns -inf rather than a wrong number, so a
     # finite value is the observable form of the old bk == 0 assertion.
@@ -88,13 +87,11 @@ def test_native_unscented_objective_matches_model_kalman(solved_rbc_so):
         jitter=jitter,
         symmetrize=symmetrize,
     )
-    ll_model = solved_rbc_so.kalman(
-        y=y,
-        filter_mode="unscented",
-        observables=obs,
-        jitter=jitter,
-        symmetrize=symmetrize,
-    ).loglik
+    ll_model = (
+        UnscentedKalman(jitter=jitter, symmetrize=symmetrize)
+        .filter(solved_rbc_so, y=y, observables=obs)
+        .loglik
+    )
 
     assert np.isfinite(ll)
     np.testing.assert_allclose(ll, float(ll_model), rtol=1e-9, atol=1e-9)

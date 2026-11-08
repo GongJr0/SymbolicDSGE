@@ -13,10 +13,6 @@ from sympy.core.function import AppliedUndef
 
 import SymbolicDSGE.core.solved_model as solved_model_module
 from SymbolicDSGE.core.sim_result import SimResult
-from SymbolicDSGE.core.solved_model import (
-    FirstOrderSolvedModel,
-    SecondOrderSolvedModel,
-)
 from SymbolicDSGE import parse_config, compile_model, solve_model
 from SymbolicDSGE._ckernels.core import (
     affine_observations_into,
@@ -26,8 +22,6 @@ from _oracles.core import (
     _affine_observations_into_numba,
     _simulate_linear_states_into_numba,
 )
-from SymbolicDSGE.filters.filter import FilterResult, UnscentedFilterResult
-from SymbolicDSGE.filters.resolvers import _resolve_linear_args
 from SymbolicDSGE.core.solved_model.measurement import (
     non_affine_measurement,
 )
@@ -36,57 +30,6 @@ from SymbolicDSGE.core.shock.spec import simulation_shock_matrix
 
 def _cur_syms(compiled):
     return [sp.Symbol(f"cur_{name}") for name in compiled.var_names]
-
-
-def _filter_result(T: int = 3, n: int = 1, m: int = 2) -> FilterResult:
-    x = np.zeros((T, n), dtype=np.float64)
-    y = np.zeros((T, m), dtype=np.float64)
-    P = np.zeros((T, n, n), dtype=np.float64)
-    S = np.zeros((T, m, m), dtype=np.float64)
-    return FilterResult(
-        status=0,
-        x_pred=x,
-        x_filt=x,
-        P_pred=P,
-        P_filt=P,
-        y_pred=y,
-        y_filt=y,
-        innov=y,
-        std_innov=y,
-        S=S,
-        eps_hat=None,
-        loglik=np.float64(0.0),
-    )
-
-
-def _unscented_result(
-    T: int = 3,
-    n_state: int = 1,
-    n_var: int = 1,
-) -> UnscentedFilterResult:
-    x = np.zeros((T, n_var), dtype=np.float64)
-    xb = np.zeros((T, n_state), dtype=np.float64)
-    y = np.zeros((T, 2), dtype=np.float64)
-    P = np.zeros((T, 2 * n_state, 2 * n_state), dtype=np.float64)
-    S = np.zeros((T, 2, 2), dtype=np.float64)
-    return UnscentedFilterResult(
-        status=0,
-        x_pred=x,
-        x_filt=x,
-        x1_pred=xb,
-        x2_pred=xb,
-        x1_filt=xb,
-        x2_filt=xb,
-        P_pred=P,
-        P_filt=P,
-        y_pred=y,
-        y_filt=y,
-        innov=y,
-        std_innov=y,
-        S=S,
-        eps_hat=None,
-        loglik=np.float64(0.0),
-    )
 
 
 def _manual_second_order_path(policy, n_state, shock_mat, x0_state) -> np.ndarray:
@@ -386,48 +329,6 @@ def test_solved_model_build_C_d_from_observables(solved_test):
     assert d.shape == (m,)
 
 
-def test_solved_model_kalman_smoke(solved_post82):
-    sim = solved_post82.sim(20, observables=True)
-    y = pd.DataFrame({"Infl": sim.observables["Infl"], "Rate": sim.observables["Rate"]})
-
-    out = solved_post82.kalman(y, observables=["Infl", "Rate"])
-    assert out is not None
-
-
-def test_extended_matches_linear_on_a_levels_model(solved_rbc_so):
-    # The rbc observable is `c_obs: c(t)`, affine in the model variables, so the
-    # extended filter relinearizes onto the same (C, d) the linear filter is
-    # handed and the two must agree period by period. The data is arbitrary:
-    # both filters read the same y, and S never depends on it, so agreement is
-    # required whatever it holds.
-    #
-    # `tests/kalman/test_filter.py` makes the same claim against the filter
-    # classes directly, where the caller supplies (A, B, C, d) and no model, so
-    # there is no steady state to expand around. This is the model-level case,
-    # and it only bites when that steady state is away from the origin: the
-    # measurement cfunc is a function of levels, so a filter that evaluates it
-    # at deviations drops `h(ss)` from every prediction.
-    compiled = solved_rbc_so.compiled
-    obs = list(compiled.observable_names)
-    ss = np.asarray(solved_rbc_so.policy.steady_state, dtype=np.float64)
-
-    # Guard the premise: at ss == 0 both conventions coincide and the test below
-    # cannot fail for the reason it exists.
-    assert np.max(np.abs(ss)) > 1.0
-
-    rng = np.random.default_rng(0)
-    y = pd.DataFrame(rng.normal(size=(24, len(obs))), columns=obs)
-    R = np.eye(len(obs), dtype=np.float64) * 1e-4
-
-    linear = solved_rbc_so.kalman(y, filter_mode="linear", R=R)
-    extended = solved_rbc_so.kalman(y, filter_mode="extended", R=R)
-
-    np.testing.assert_allclose(extended.y_pred, linear.y_pred, rtol=1e-10, atol=1e-12)
-    np.testing.assert_allclose(extended.innov, linear.innov, rtol=1e-10, atol=1e-12)
-    np.testing.assert_allclose(extended.x_filt, linear.x_filt, rtol=1e-10, atol=1e-12)
-    np.testing.assert_allclose(extended.loglik, linear.loglik, rtol=1e-10, atol=1e-12)
-
-
 def test_solved_model_non_affine_measurement_matches_reference(solved_test):
     # Native measurement-path cfunc must match an independent sympy.lambdify eval
     # of the observable exprs, with output columns remapped to y_names order.
@@ -462,103 +363,6 @@ def test_solved_model_non_affine_measurement_matches_reference(solved_test):
             expected[t, j] = f(*state[t], *par)
 
     assert np.allclose(got, expected)
-
-
-@pytest.mark.parametrize(
-    ("model_fixture", "cls", "mode", "resolver", "runner", "result"),
-    [
-        (
-            "solved_test",
-            FirstOrderSolvedModel,
-            "linear",
-            "_resolve_linear_args",
-            "run",
-            _filter_result,
-        ),
-        (
-            "solved_test",
-            FirstOrderSolvedModel,
-            "extended",
-            "_resolve_extended_args",
-            "run_extended",
-            _filter_result,
-        ),
-        (
-            "solved_multishock",
-            SecondOrderSolvedModel,
-            "unscented",
-            "_resolve_unscented_args",
-            "run_unscented",
-            _unscented_result,
-        ),
-    ],
-)
-def test_solved_model_kalman_routes_each_mode_to_its_runner(
-    request, monkeypatch, model_fixture, cls, mode, resolver, runner, result
-):
-    # Each mode pairs one resolver with one runner. The resolvers are covered
-    # against a model in tests/kalman; what matters here is that the pairing
-    # holds and that the resolved set is splatted through unchanged.
-    solved = request.getfixturevalue(model_fixture)
-    assert isinstance(solved, cls)
-
-    resolved = {"sentinel": object()}
-    captured = {}
-
-    monkeypatch.setattr(
-        solved_model_module.base, resolver, lambda *a, **k: dict(resolved)
-    )
-    monkeypatch.setattr(
-        solved_model_module.base.KalmanFilter,
-        runner,
-        staticmethod(
-            lambda **kwargs: (captured.update(kwargs), result())[1],
-        ),
-    )
-
-    out = solved.kalman(
-        y=np.zeros((3, 2), dtype=np.float64),
-        filter_mode=mode,
-        observables=None,
-    )
-
-    np.testing.assert_allclose(out.x_pred, np.zeros((3, 1), dtype=np.float64))
-    assert captured == resolved
-
-
-def test_solved_model_kalman_unscented_rejects_return_shocks(solved_multishock):
-    # Rejected before the resolver runs, so no filter is reached.
-    with pytest.raises(ValueError, match="return_shocks is not supported"):
-        solved_multishock.kalman(
-            y=np.zeros((3, 1), dtype=np.float64),
-            filter_mode="unscented",
-            return_shocks=True,
-        )
-
-
-def test_resolvers_rebuild_symbolic_R_from_current_calibration(
-    post82_test_model_path,
-):
-    """R is read from the calibration at resolve time, not frozen at parse.
-
-    The three parameters move after the compile, so a prebuilt matrix would
-    still report the parsed values here.
-    """
-    model = parse_config(post82_test_model_path)
-    compiled = compile_model(model)
-
-    model.calibration.parameters[Symbol("meas_infl")] = 2.0
-    model.calibration.parameters[Symbol("meas_rate")] = 3.0
-    model.calibration.parameters[Symbol("meas_rho_ir")] = 0.1
-
-    solved = solve_model(model, compiled=compiled)
-    y = pd.DataFrame({"Infl": [0.0, 0.0], "Rate": [0.0, 0.0]})
-    args = _resolve_linear_args(solved, y, ["Infl", "Rate"])
-
-    assert np.allclose(
-        args["R"],
-        np.array([[4.0, 0.6], [0.6, 9.0]], dtype=np.float64),
-    )
 
 
 # --- shock behaviour through the solve --------------------------------------

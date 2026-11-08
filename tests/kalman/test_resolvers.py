@@ -4,9 +4,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from sympy import Symbol
 
+from SymbolicDSGE.filters.gaussian import LinearKalman, UnscentedKalman
 import SymbolicDSGE.filters.resolvers as resolvers
-from SymbolicDSGE.core import solve_model
+from SymbolicDSGE.core import compile_model, parse_config, solve_model
 from SymbolicDSGE.core.resolvers import shock_covariance
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.filters.resolvers import (
@@ -262,6 +264,31 @@ def test_measurement_noise_is_required_only_for_r(solved_test):
     assert args["P0"].shape == (model.compiled.n_var, model.compiled.n_var)
 
 
+def test_resolvers_rebuild_symbolic_R_from_current_calibration(
+    post82_test_model_path,
+):
+    """R is read from the calibration at resolve time, not frozen at parse.
+
+    The three parameters move after the compile, so a prebuilt matrix would
+    still report the parsed values here.
+    """
+    model = parse_config(post82_test_model_path)
+    compiled = compile_model(model)
+
+    model.calibration.parameters[Symbol("meas_infl")] = 2.0
+    model.calibration.parameters[Symbol("meas_rate")] = 3.0
+    model.calibration.parameters[Symbol("meas_rho_ir")] = 0.1
+
+    solved = solve_model(model, compiled=compiled)
+    y = pd.DataFrame({"Infl": [0.0, 0.0], "Rate": [0.0, 0.0]})
+    args = _resolve_linear_args(solved, y, ["Infl", "Rate"])
+
+    assert np.allclose(
+        args["R"],
+        np.array([[4.0, 0.6], [0.6, 9.0]], dtype=np.float64),
+    )
+
+
 def test_resolve_p0_passes_through_for_linear_and_extended():
     # Explicit runtime P0 values pass through linear and extended paths verbatim.
     P0 = np.diag(np.array([2.0, 6.0, 10.0, 14.0, 18.0], dtype=FLOAT))
@@ -372,7 +399,7 @@ def test_solved_model_filter_reports_levels_at_both_orders(
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
 
     solved1, y1 = solved_rbc_order1, levels_rbc_y
-    lin = solved1.kalman(y=y1, filter_mode="linear", observables=["c_obs"])
+    lin = LinearKalman().filter(solved1, y=y1, observables=["c_obs"])
     ss1 = np.asarray(solved1.policy.steady_state, dtype=FLOAT)
 
     assert np.any(ss1 != 0.0)
@@ -382,7 +409,7 @@ def test_solved_model_filter_reports_levels_at_both_orders(
     assert abs(float(np.mean(lin.x_filt[:, c])) - ss1[c]) < 0.5 * abs(ss1[c])
 
     solved2, y2 = solved_rbc_so, levels_rbc_y
-    ukf = solved2.kalman(y=y2, filter_mode="unscented", observables=["c_obs"])
+    ukf = UnscentedKalman().filter(solved2, y=y2, observables=["c_obs"])
 
     ss2 = np.asarray(solved2.policy.steady_state, dtype=FLOAT)
     assert abs(float(np.mean(ukf.x_filt[:, c])) - ss2[c]) < 0.5 * abs(ss2[c])

@@ -34,7 +34,7 @@ class GaussianFilter(Filter[ResultT]):
 @dataclass
 class LinearKalman(GaussianFilter[FilterResult]):
     mode: ClassVar[FilterMode] = FilterMode.LINEAR
-    jospeh_cov: bool = True
+    joseph_cov: bool = True
     return_shocks: bool = False
 
     def filter(
@@ -87,7 +87,7 @@ class LinearKalman(GaussianFilter[FilterResult]):
                 R=R,
                 jitter=self.jitter,
                 symmetrize=self.symmetrize,
-                joseph_cov=self.jospeh_cov,
+                joseph_cov=self.joseph_cov,
                 return_shocks=self.return_shocks,
             )
         )
@@ -96,7 +96,7 @@ class LinearKalman(GaussianFilter[FilterResult]):
 @dataclass
 class ExtendedKalman(GaussianFilter[FilterResult]):
     mode: ClassVar[FilterMode] = FilterMode.EXTENDED
-    jospeh_cov: bool = True
+    joseph_cov: bool = True
     return_shocks: bool = False
 
     def filter(
@@ -149,7 +149,7 @@ class ExtendedKalman(GaussianFilter[FilterResult]):
                 R=R,
                 jitter=self.jitter,
                 symmetrize=self.symmetrize,
-                joseph_cov=self.jospeh_cov,
+                joseph_cov=self.joseph_cov,
                 return_shocks=self.return_shocks,
             )
         )

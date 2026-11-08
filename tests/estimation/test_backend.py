@@ -16,6 +16,7 @@ from SymbolicDSGE.core.config import (
     SymbolGetterDict,
     cov_from_spec,
 )
+from SymbolicDSGE.filters import LinearKalman, ExtendedKalman, UnscentedKalman
 from SymbolicDSGE.estimation import Estimator
 from SymbolicDSGE.estimation import backend
 
@@ -193,21 +194,21 @@ def _post82_estimator(solved, y, **kwargs):
 
 def test_estimator_loglik_linear_matches_model_kalman(solved_post82, y_post82):
     est = _post82_estimator(solved_post82, y_post82, filter_mode="linear")
-    ll_model_lin = solved_post82.kalman(
-        y=y_post82,
-        filter_mode="linear",
-        observables=["Infl", "Rate"],
-    ).loglik
+    ll_model_lin = (
+        LinearKalman()
+        .filter(solved_post82, y_post82, observables=["Infl", "Rate"])
+        .loglik
+    )
     assert np.allclose(float(est.loglik()), ll_model_lin, rtol=1e-10, atol=1e-10)
 
 
 def test_estimator_loglik_extended_matches_model_kalman(solved_post82, y_post82):
     est = _post82_estimator(solved_post82, y_post82, filter_mode="extended")
-    ll_model_ext = solved_post82.kalman(
-        y=y_post82,
-        filter_mode="extended",
-        observables=["Infl", "Rate"],
-    ).loglik
+    ll_model_ext = (
+        ExtendedKalman()
+        .filter(solved_post82, y=y_post82, observables=["Infl", "Rate"])
+        .loglik
+    )
     assert np.allclose(float(est.loglik()), ll_model_ext, rtol=1e-10, atol=1e-10)
 
 
@@ -358,14 +359,7 @@ def test_estimator_loglik_unscented_matches_model_kalman(solved_rbc_so, rbc_ukf_
     )
     ll_est = float(est.loglik())
 
-    ll_ref = float(
-        solved.kalman(
-            y=y,
-            filter_mode="unscented",
-            observables=["c_obs"],
-            symmetrize=True,
-        ).loglik
-    )
+    ll_ref = float(UnscentedKalman().filter(solved, y, observables=["c_obs"]).loglik)
 
     assert np.isfinite(ll_est)
     assert ll_est == pytest.approx(ll_ref, rel=1e-9, abs=1e-9)
