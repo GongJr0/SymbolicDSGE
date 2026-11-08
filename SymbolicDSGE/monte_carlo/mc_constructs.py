@@ -20,7 +20,7 @@ from numpy.typing import NDArray
 from .._ckernels.monte_carlo._status import MCStatus
 
 from ..core.sim_result import SimResult, OccBinDiagnostics
-from ..kalman.filter import FilterResult, UnscentedFilterResult
+from ..filters.filter import FilterResult, UnscentedFilterResult
 from .._diag_tests.result import MCTestResult
 from .._diag_tests.status import TestStatus
 from ..regression.enums import RegressionStatus

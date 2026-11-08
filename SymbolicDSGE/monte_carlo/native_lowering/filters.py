@@ -7,8 +7,7 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
-from SymbolicDSGE.core.solver_backend import SecondOrderSolution
-from SymbolicDSGE.kalman.resolvers import (
+from ...filters.resolvers import (
     _build_R,
     _build_P0,
     _build_unscented_z0,
@@ -21,6 +20,7 @@ from ..._ckernels.monte_carlo._runner import (
     filter_linear_step,
     filter_unscented_step,
 )
+from ...core.solver_backend import SecondOrderSolution
 from ...core.solved_model import SolvedModel
 from ...core.resolvers import shock_covariance
 from ..allocation import BufferPlan, get_target_model

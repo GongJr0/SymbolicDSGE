@@ -6,14 +6,19 @@ import pytest
 from numba import cfunc, types
 from numpy import float64
 
-from SymbolicDSGE.kalman.errors import (
+from SymbolicDSGE.filters.errors import (
     ErrorCode,
     HyperparameterError,
     MatrixFactorizationError,
     ShapeMismatchError,
     get_error_constructor,
 )
-from SymbolicDSGE.kalman.filter import KalmanFilter
+from SymbolicDSGE.filters.filter import (
+    _shape_validate,
+    run_extended,
+    run_linear,
+    run_unscented,
+)
 
 
 def _linear_system_1d():
@@ -111,7 +116,7 @@ def test_shape_validate_raises_on_bad_A_shape():
     d = np.zeros((1,), dtype=float64)
 
     with pytest.raises(ShapeMismatchError):
-        KalmanFilter._shape_validate(A[:1], B, Q, R, C, d, nmk=(2, 1, 1))
+        _shape_validate(A[:1], B, Q, R, C, d, nmk=(2, 1, 1))
 
 
 def test_run_linear_outputs_shapes_and_first_prediction():
@@ -120,7 +125,7 @@ def test_run_linear_outputs_shapes_and_first_prediction():
     x0 = np.array([2.0], dtype=float64)
     P0 = np.array([[1.0]], dtype=float64)
 
-    out = KalmanFilter.run(A, B, C, d, Q, R, ss, y, x0=x0, P0=P0)
+    out = run_linear(A, B, C, d, Q, R, ss, y, x0=x0, P0=P0)
 
     assert out.x_pred.shape == (5, 1)
     assert out.x_filt.shape == (5, 1)
@@ -148,8 +153,8 @@ def test_run_linear_can_skip_history_storage_for_loglik_only_path():
     x0 = np.array([2.0], dtype=float64)
     P0 = np.array([[1.0]], dtype=float64)
 
-    full = KalmanFilter.run(A, B, C, d, Q, R, ss, y, x0=x0, P0=P0)
-    minimal = KalmanFilter.run(
+    full = run_linear(A, B, C, d, Q, R, ss, y, x0=x0, P0=P0)
+    minimal = run_linear(
         A,
         B,
         C,
@@ -180,7 +185,7 @@ def test_run_linear_return_shocks():
     A, B, C, d, Q, R, ss = _linear_system_1d()
     y = np.zeros((4, 1), dtype=float64)
 
-    out = KalmanFilter.run(A, B, C, d, Q, R, ss, y, return_shocks=True)
+    out = run_linear(A, B, C, d, Q, R, ss, y, return_shocks=True)
 
     assert out.eps_hat is not None
     assert out.eps_hat.shape == (4, 1)
@@ -197,14 +202,14 @@ def test_run_linear_raises_on_singular_innovation_covariance():
     y = np.zeros((2, 1), dtype=float64)
 
     with pytest.raises(MatrixFactorizationError):
-        KalmanFilter.run(A, B, C, d, Q, R, ss, y, P0=np.zeros((1, 1), dtype=float64))
+        run_linear(A, B, C, d, Q, R, ss, y, P0=np.zeros((1, 1), dtype=float64))
 
 
 def test_run_unscented_outputs_shapes_and_projected_fields():
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
     kwargs = _ukf_system_1d()
 
-    out = KalmanFilter.run_unscented(**kwargs)
+    out = run_unscented(**kwargs)
 
     T = kwargs["y"].shape[0]
     n_state = kwargs["hx"].shape[0]
@@ -247,8 +252,8 @@ def test_run_unscented_can_skip_history_storage_for_loglik_only_path():
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
     kwargs = _ukf_system_1d()
 
-    full = KalmanFilter.run_unscented(**kwargs)
-    minimal = KalmanFilter.run_unscented(**kwargs, _store_history=False)
+    full = run_unscented(**kwargs)
+    minimal = run_unscented(**kwargs, _store_history=False)
 
     assert np.allclose(minimal.loglik, full.loglik)
     assert minimal.x_pred.shape == (0, 2)
@@ -271,15 +276,13 @@ def test_run_unscented_rejects_degenerate_inputs():
     kwargs = _ukf_system_1d()
 
     with pytest.raises(ValueError, match="meas_addr"):
-        KalmanFilter.run_unscented(**(kwargs | {"meas_addr": 0}))
+        run_unscented(**(kwargs | {"meas_addr": 0}))
 
     with pytest.raises(ShapeMismatchError, match="hxx"):
-        KalmanFilter.run_unscented(
-            **(kwargs | {"hxx": np.zeros((1, 1), dtype=float64)})
-        )
+        run_unscented(**(kwargs | {"hxx": np.zeros((1, 1), dtype=float64)}))
 
     with pytest.raises(MatrixFactorizationError):
-        KalmanFilter.run_unscented(
+        run_unscented(
             **(
                 kwargs
                 | {
@@ -298,8 +301,8 @@ def test_run_extended_matches_linear_when_measurement_is_linear():
     P0 = np.array([[0.7]], dtype=float64)
     calib = np.array([], dtype=float64)
 
-    linear = KalmanFilter.run(A, B, C, d, Q, R, ss, y, x0=x0, P0=P0)
-    extended = KalmanFilter.run_extended(
+    linear = run_linear(A, B, C, d, Q, R, ss, y, x0=x0, P0=P0)
+    extended = run_extended(
         meas_addr=_ekf_lin_meas.address,
         jac_addr=_ekf_lin_jac.address,
         A=A,
@@ -337,8 +340,8 @@ def test_run_extended_can_skip_history_storage_for_loglik_only_path():
         y=y,
         compute_y_filt=False,
     )
-    full = KalmanFilter.run_extended(**kwargs)
-    minimal = KalmanFilter.run_extended(**kwargs, _store_history=False)
+    full = run_extended(**kwargs)
+    minimal = run_extended(**kwargs, _store_history=False)
 
     assert np.allclose(minimal.loglik, full.loglik)
     assert minimal.x_pred.shape == (0, 1)
@@ -357,7 +360,7 @@ def test_run_extended_compute_y_filt_false_and_return_shocks():
     A, B, _, _, Q, R, ss = _linear_system_1d()
     y = np.zeros((4, 1), dtype=float64)
     calib = np.array([], dtype=float64)
-    out_true = KalmanFilter.run_extended(
+    out_true = run_extended(
         meas_addr=_ekf_lin_meas.address,
         jac_addr=_ekf_lin_jac.address,
         A=A,
@@ -371,7 +374,7 @@ def test_run_extended_compute_y_filt_false_and_return_shocks():
         return_shocks=True,
     )
 
-    out = KalmanFilter.run_extended(
+    out = run_extended(
         meas_addr=_ekf_lin_meas.address,
         jac_addr=_ekf_lin_jac.address,
         A=A,
@@ -486,8 +489,8 @@ def test_unscented_reduces_to_the_linear_filter_without_curvature():
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
     unscented, linear, _ = _linear_ukf_pair()
 
-    ukf = KalmanFilter.run_unscented(**unscented)
-    kf = KalmanFilter.run(**linear)
+    ukf = run_unscented(**unscented)
+    kf = run_linear(**linear)
 
     assert ukf.loglik == pytest.approx(kf.loglik, rel=1e-9, abs=1e-9)
     np.testing.assert_allclose(ukf.y_pred, kf.y_pred, rtol=1e-8, atol=1e-9)
@@ -509,7 +512,7 @@ def test_unscented_without_curvature_still_moves_with_the_shock_loading():
     """
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
     unscented, linear, _ = _linear_ukf_pair()
-    base = KalmanFilter.run_unscented(**unscented).loglik
+    base = run_unscented(**unscented).loglik
 
     bumped = np.array([[1.0], [-1.9]], dtype=float64)
     unscented["bu"] = bumped
@@ -519,8 +522,8 @@ def test_unscented_without_curvature_still_moves_with_the_shock_loading():
         linear["A"] @ unscented["P0"] @ linear["A"].T
         + bumped @ unscented["Q"] @ bumped.T
     )
-    moved_ukf = KalmanFilter.run_unscented(**unscented).loglik
-    moved_kf = KalmanFilter.run(**linear).loglik
+    moved_ukf = run_unscented(**unscented).loglik
+    moved_kf = run_linear(**linear).loglik
 
     assert not np.isclose(moved_ukf, base, rtol=1e-6)
     assert moved_ukf == pytest.approx(moved_kf, rel=1e-9, abs=1e-9)

@@ -8,7 +8,6 @@ from typing import (
     Tuple,
     TypeVar,
     Generic,
-    Literal,
     Mapping,
     Sequence,
 )
@@ -18,10 +17,7 @@ import numpy as np
 from numpy import ndarray, float64
 from numpy.typing import NDArray
 
-import pandas as pd
-
 import matplotlib.pyplot as plt
-
 
 from . import export, measurement
 
@@ -29,19 +25,8 @@ from ..shock.generators import Shock, ShockPath
 from ..shock.spec import ShockSpec
 from ..solver_backend import BaseSolution
 from ..sim_result import StatePath, SimResult
-
 from ..compiled_model import CompiledModel
 from ..config import ModelConfig
-from ...kalman.resolvers import (
-    resolve_extended_args,
-    resolve_linear_args,
-    resolve_unscented_args,
-)
-from ...kalman.filter import (
-    KalmanFilter,
-    FilterResult,
-    UnscentedFilterResult,
-)
 
 ND = NDArray
 NDF = NDArray[float64]
@@ -502,106 +487,6 @@ class SolvedModel(ABC, Generic[Policy]):
         return self.compiled.build_affine_measurement_matrices(
             par, y_names, self.policy.steady_state
         )
-
-    def kalman(
-        self,
-        y: NDF | pd.DataFrame,
-        filter_mode: Literal["linear", "extended", "unscented"] = "linear",
-        *,
-        observables: list[str] | None = None,
-        x0: Mapping[str, float] | list[float] | NDF | None = None,
-        jitter: float | None = None,
-        symmetrize: bool = False,
-        joseph_cov: bool = False,
-        return_shocks: bool = False,
-        P0: NDF | None = None,
-        R: NDF | None = None,
-    ) -> FilterResult | UnscentedFilterResult:
-        """Run a Kalman filter against an observable set.
-
-        Parameters
-        ----------
-        y : NDF | pd.DataFrame
-            Observable data as a 2D array in order of declared ``observables`` or a ``DataFrame`` with columns named after the observables.
-        filter_mode : Literal["linear", "extended", "unscented"]
-            Type of the filter to run. "linear" is the standard Kalman filter, "extended" is the allows non-linear measurement equations while the state space is linear. "unscented" is the Unscented Kalman filter which allows for second-order non-linearities in the state space and any parsable non-linear measurement.
-        observables : list[str] | None
-            List of observable variable names to use in the filter. If None, all observables are used.
-        x0 : Mapping[str, float] | list[float] | NDF | None
-            Initial state at ``t - 1``, in levels. ``None`` initiates
-            the simulation at the model's steady state. A sequence covers
-            every compiled variable in declaration order, including
-            generated lags. A mapping sets variables by name, omitted
-            variables start at their steady state.
-        jitter : float | None
-            Amount of jitter to add to a covariance matrix when cholesky decomposition fails. If None, no jitter is added.
-        symmetrize : bool
-            Whether to symmetrize the covariance matrix after each update step. This can help maintain numerical stability.
-        joseph_cov : bool
-            Whether to use the Joseph form of the covariance update. This can help maintain numerical stability.
-        return_shocks : bool
-            Whether to return the estimated shocks along with the filtered states. Unavailable for the unscented filter.
-        P0 : NDF | None
-            Initial state covariance matrix. If None, the default is used.
-        R : NDF | None
-            Measurement noise covariance matrix. If None, the default is used.
-
-        Returns
-        -------
-        FilterResult | UnscentedFilterResult
-            The result of the Kalman filter, containing the filtered states, covariances, and optionally the estimated shocks.
-
-        """
-        if filter_mode == "linear":
-            return KalmanFilter.run(
-                **resolve_linear_args(
-                    self,
-                    y,
-                    observables,
-                    x0=x0,
-                    P0=P0,
-                    R=R,
-                    jitter=jitter,
-                    symmetrize=symmetrize,
-                    return_shocks=return_shocks,
-                    joseph_cov=joseph_cov,
-                )
-            )
-        if filter_mode == "extended":
-            return KalmanFilter.run_extended(
-                **resolve_extended_args(
-                    self,
-                    y,
-                    observables,
-                    x0=x0,
-                    P0=P0,
-                    R=R,
-                    jitter=jitter,
-                    symmetrize=symmetrize,
-                    return_shocks=return_shocks,
-                    joseph_cov=joseph_cov,
-                )
-            )
-        if filter_mode == "unscented":
-            if return_shocks:
-                raise ValueError(
-                    "return_shocks is not supported for unscented filtering."
-                )
-            if joseph_cov:
-                raise ValueError("joseph_cov is not supported for unscented filtering.")
-            return KalmanFilter.run_unscented(
-                **resolve_unscented_args(
-                    self,
-                    y,
-                    observables,
-                    x0=x0,
-                    P0=P0,
-                    R=R,
-                    jitter=jitter,
-                    symmetrize=symmetrize,
-                )
-            )
-        raise ValueError(f"Unrecognized filter mode: {filter_mode!r}")
 
     @property
     def is_determinate(self) -> bool:

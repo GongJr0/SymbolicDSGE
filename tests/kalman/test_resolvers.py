@@ -5,16 +5,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import SymbolicDSGE.kalman.resolvers as resolvers
+import SymbolicDSGE.filters.resolvers as resolvers
 from SymbolicDSGE.core import solve_model
 from SymbolicDSGE.core.resolvers import shock_covariance
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.kalman.resolvers import (
+from SymbolicDSGE.filters.resolvers import (
     FilterMode,
     LinearRunArgs,
-    resolve_extended_args,
-    resolve_linear_args,
-    resolve_unscented_args,
+    _resolve_extended_args,
+    _resolve_linear_args,
+    _resolve_unscented_args,
 )
 
 FLOAT = np.float64
@@ -57,7 +57,7 @@ def y3() -> np.ndarray:
 def test_resolve_linear_args_is_a_complete_run_argument_set(solved_multishock, y3):
     model = solved_multishock
 
-    args = resolve_linear_args(
+    args = _resolve_linear_args(
         model,
         y3,
         # Columns are read in the order the names arrive, then the two are
@@ -98,7 +98,7 @@ def test_default_p0_is_solved_from_the_policy(solved_multishock, y3):
     model = solved_multishock
     n_var = model.compiled.n_var
 
-    P0 = resolve_linear_args(model, y3, list(OBS))["P0"]
+    P0 = _resolve_linear_args(model, y3, list(OBS))["P0"]
 
     assert P0.shape == (n_var, n_var)
     assert np.allclose(P0, P0.T)
@@ -116,7 +116,7 @@ def test_resolve_extended_args_carries_cfunc_addresses_and_skips_c_and_d(
 
     monkeypatch.setattr(model, "_build_C_d_from_obs", bomb)
 
-    args = resolve_extended_args(model, y3, list(OBS))
+    args = _resolve_extended_args(model, y3, list(OBS))
 
     assert "C" not in args
     assert "d" not in args
@@ -143,7 +143,7 @@ def test_resolve_unscented_args_embeds_x0_and_defaults_the_sigma_point_weights(
     idx = model.compiled.idx
     ss = policy.steady_state
 
-    args = resolve_unscented_args(
+    args = _resolve_unscented_args(
         model,
         y3,
         list(OBS),
@@ -182,10 +182,10 @@ def test_resolve_unscented_args_rejects_a_first_order_policy_and_a_bad_x0(
     solved_multishock, multishock_order1, y3
 ):
     with pytest.raises(ValueError, match="requires a second order solution"):
-        resolve_unscented_args(multishock_order1, y3, list(OBS))
+        _resolve_unscented_args(multishock_order1, y3, list(OBS))
 
     with pytest.raises(ValueError, match="must be a complete list/array"):
-        resolve_unscented_args(
+        _resolve_unscented_args(
             solved_multishock, y3, list(OBS), x0=np.array([1.0], dtype=FLOAT)
         )
 
@@ -194,7 +194,7 @@ def test_an_explicit_p0_reaches_the_run_arguments(solved_multishock, y3):
     n_var = solved_multishock.compiled.n_var
     P0 = np.diag(np.arange(2.0, 2.0 + n_var, dtype=FLOAT))
 
-    args = resolve_linear_args(solved_multishock, y3, list(OBS), P0=P0)
+    args = _resolve_linear_args(solved_multishock, y3, list(OBS), P0=P0)
 
     assert np.array_equal(args["P0"], P0)
 
@@ -253,10 +253,10 @@ def test_measurement_noise_is_required_only_for_r(solved_test):
     assert model.config.calibration.measurement_noise is None
 
     with pytest.raises(ValueError, match="R must be provided"):
-        resolve_linear_args(model, y, obs)
+        _resolve_linear_args(model, y, obs)
 
     R = np.diag(np.array([4.0, 9.0], dtype=FLOAT))
-    args = resolve_linear_args(model, y, obs, R=R)
+    args = _resolve_linear_args(model, y, obs, R=R)
 
     assert np.array_equal(args["R"], R)
     assert args["P0"].shape == (model.compiled.n_var, model.compiled.n_var)
@@ -397,7 +397,7 @@ def test_filter_classes_shift_only_the_state_series(solved_rbc_order1, levels_rb
     neither moves with it.
     """
     pytest.importorskip("SymbolicDSGE._ckernels.kalman")
-    from SymbolicDSGE.kalman.filter import KalmanFilter
+    from SymbolicDSGE.filters.filter import run_linear
 
     solved, y = solved_rbc_order1, levels_rbc_y
     pol = solved.policy
@@ -418,8 +418,8 @@ def test_filter_classes_shift_only_the_state_series(solved_rbc_order1, levels_rb
     ss = np.asarray(pol.steady_state, dtype=FLOAT)
     assert np.any(ss != 0.0)
 
-    gaps = KalmanFilter.run(**args, steady_state=np.zeros(n_var, dtype=FLOAT))
-    levels = KalmanFilter.run(**args, steady_state=ss)
+    gaps = run_linear(**args, steady_state=np.zeros(n_var, dtype=FLOAT))
+    levels = run_linear(**args, steady_state=ss)
 
     np.testing.assert_allclose(levels.x_pred, gaps.x_pred + ss, rtol=0, atol=0)
     np.testing.assert_allclose(levels.x_filt, gaps.x_filt + ss, rtol=0, atol=0)

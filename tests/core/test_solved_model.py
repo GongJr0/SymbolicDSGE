@@ -26,8 +26,8 @@ from _oracles.core import (
     _affine_observations_into_numba,
     _simulate_linear_states_into_numba,
 )
-from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
-from SymbolicDSGE.kalman.resolvers import resolve_linear_args
+from SymbolicDSGE.filters.filter import FilterResult, UnscentedFilterResult
+from SymbolicDSGE.filters.resolvers import _resolve_linear_args
 from SymbolicDSGE.core.solved_model.measurement import (
     non_affine_measurement,
 )
@@ -471,7 +471,7 @@ def test_solved_model_non_affine_measurement_matches_reference(solved_test):
             "solved_test",
             FirstOrderSolvedModel,
             "linear",
-            "resolve_linear_args",
+            "_resolve_linear_args",
             "run",
             _filter_result,
         ),
@@ -479,7 +479,7 @@ def test_solved_model_non_affine_measurement_matches_reference(solved_test):
             "solved_test",
             FirstOrderSolvedModel,
             "extended",
-            "resolve_extended_args",
+            "_resolve_extended_args",
             "run_extended",
             _filter_result,
         ),
@@ -487,7 +487,7 @@ def test_solved_model_non_affine_measurement_matches_reference(solved_test):
             "solved_multishock",
             SecondOrderSolvedModel,
             "unscented",
-            "resolve_unscented_args",
+            "_resolve_unscented_args",
             "run_unscented",
             _unscented_result,
         ),
@@ -553,7 +553,7 @@ def test_resolvers_rebuild_symbolic_R_from_current_calibration(
 
     solved = solve_model(model, compiled=compiled)
     y = pd.DataFrame({"Infl": [0.0, 0.0], "Rate": [0.0, 0.0]})
-    args = resolve_linear_args(solved, y, ["Infl", "Rate"])
+    args = _resolve_linear_args(solved, y, ["Infl", "Rate"])
 
     assert np.allclose(
         args["R"],

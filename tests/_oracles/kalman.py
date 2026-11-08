@@ -17,7 +17,7 @@ from numpy.linalg import LinAlgError, cholesky
 from numpy.typing import NDArray
 from scipy.linalg import solve_triangular
 
-from SymbolicDSGE.kalman.filter import FilterResult
+from SymbolicDSGE.filters.filter import FilterResult
 
 NDF = NDArray[float64]
 

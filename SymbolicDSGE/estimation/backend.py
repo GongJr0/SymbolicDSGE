@@ -35,7 +35,7 @@ from ..core.resolvers import (
     shock_covariance,
     measurement_covariance,
 )
-from ..kalman.resolvers import FilterMode, _resolve_P0
+from ..filters.resolvers import FilterMode, _resolve_P0
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]

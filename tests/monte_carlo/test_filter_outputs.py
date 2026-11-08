@@ -15,7 +15,7 @@ import pytest
 
 from SymbolicDSGE._ckernels.monte_carlo._arenas import resolve_retention
 from SymbolicDSGE.core.solved_model import SolvedModel
-from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
+from SymbolicDSGE.filters.filter import FilterResult, UnscentedFilterResult
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult
 from SymbolicDSGE.monte_carlo.step_factories import (

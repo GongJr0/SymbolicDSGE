@@ -19,7 +19,7 @@ from .core import (
     compile_model,
     solve_model,
 )
-from .kalman import KalmanFilter
+from .filters import LinearKalman, ExtendedKalman, UnscentedKalman
 from .estimation import Estimator
 from .bundle import BundleBuilder, load_bundle
 from . import utils
@@ -36,8 +36,11 @@ __all__ = [
     # Shock API,
     "Shock",
     "ShockPath",
-    # Filtering and estimation API
-    "KalmanFilter",
+    # Filtering API
+    "LinearKalman",
+    "ExtendedKalman",
+    "UnscentedKalman",
+    # Estimation API
     "Estimator",
     # .sdsge bundle API
     "BundleBuilder",

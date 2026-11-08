@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import fields
 from typing import Any, Callable
 
 import pytest
 import numpy as np
 
-from SymbolicDSGE.kalman.filter import FilterResult, UnscentedFilterResult
 from SymbolicDSGE.monte_carlo import MCPipeline, OpType
 from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc
 from SymbolicDSGE.monte_carlo.postproc import run_kde as _run_kde
