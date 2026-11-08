@@ -110,6 +110,8 @@ def test_estimation_likelihood_runs_on_a_constrained_model(
 
     est_loglik = float(est.loglik())
     kf_loglik = float(
-        LinearKalman(joseph_cov=False).filter(solved, y=observations).loglik
+        LinearKalman(symmetrize=True, joseph_cov=False)
+        .filter(solved, y=observations)
+        .loglik
     )
     assert est_loglik == kf_loglik
