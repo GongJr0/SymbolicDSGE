@@ -9,6 +9,9 @@ from numpy.typing import NDArray
 
 from ..core.shock import Shock, ShockPath
 from ..core.shock.spec import _normalized_spec
+from ..filters.base import Filter
+from ..filters.gaussian import LinearKalman
+
 from .custom_op import NumbaCustomFunc
 from .mc_constructs import ColumnSelector, MCStep, OpType, _compile_source_args
 from .postproc import run_kde
@@ -134,15 +137,11 @@ def filter_step(
     obs_source: str,
     obs_field: str,
     obs_columns: ColumnSelector = None,
-    filter_mode: Literal["linear", "extended", "unscented"] = "linear",
+    filter: Filter = LinearKalman(),
     observables: list[str] | None = None,
-    x0: dict[str, float | np.float64] | list[float | np.float64] | NDF | None = None,
+    x0: dict[str, float] | list[float] | NDArray[np.float64] | None = None,
     P0: NDF | None = None,
     R: NDF | None = None,
-    jitter: float | np.float64 | None = None,
-    symmetrize: bool = True,
-    joseph_cov: bool = False,
-    return_shocks: bool = False,
 ) -> MCStep:
     """FILTER step to run a Kalman filter on the target model.
 
@@ -160,12 +159,8 @@ def filter_step(
         Two-dimensional output field to read from the producer.
     obs_columns : ColumnSelector
         Columns to select from that field; ``None`` selects all columns.
-    filter_mode : Literal["linear", "extended", "unscented"]
-        Mode of the kalman filter. "linear", "extended", or "unscented".
-        - "linear" -> Linear Gaussian KF
-        - "extended" -> Linear Gaussian KF with non-linear measurements allowed.
-        - "unscented" -> Unscented Kalman Filter (UKF) for second-order non-linearities
-        in states and non-linear measurement equations.
+    filter : Filter
+        Filter object to use for the filtering step. Can be any subclass of :class:`Filter` that's compatible with the target model.
     observables : list[str] | None
         Target-model observable names corresponding to the selected data columns, in order; ``None`` uses the model's full observation order.
     x0 : dict[str, float | np.float64] | list[float | np.float64] | NDF | None
@@ -175,14 +170,6 @@ def filter_step(
     R : NDArray | None
         Measurement noise covariance matrix for the Kalman filter. If None, the `calibration.measurement_noise`
         is used. If both are omitted, the call will raise.
-    jitter : float | np.float64 | None
-        Jitter to add when a cholesky decomposition fails. If ``None``, no jitter is added.
-    symmetrize : bool
-        Whether to symmetrize the covariance matrices in the filter kernel.
-    joseph_cov : bool
-        Whether to use the Joseph form of the covariance update in the filter kernel.
-    return_shocks : bool
-        Whether to return estimated shocks in the filter output. Unsupported for unscented filters.
 
     Returns
     -------
@@ -190,20 +177,19 @@ def filter_step(
         Step object to include in a :class:`MCPipeline`.
 
     """
+    filter_kwargs = {
+        "observables": observables,
+        "x0": x0,
+        "P0": P0,
+        "R": R,
+    } | filter.to_spec()
     return MCStep(
         name=name,
         op_type=OpType.FILTER,
         kwargs={
             "target": target,
-            "filter_mode": filter_mode,
-            "observables": observables,
-            "x0": x0,
-            "P0": P0,
-            "R": R,
-            "jitter": jitter,
-            "symmetrize": symmetrize,
-            "joseph_cov": joseph_cov,
-            "return_shocks": return_shocks,
+            "filter_mode": filter.mode.value,
+            **filter_kwargs,
         },
         step_type="filter",
         n_retain=n_retain,

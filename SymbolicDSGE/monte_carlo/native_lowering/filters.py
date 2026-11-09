@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import replace, fields
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -12,6 +12,7 @@ from ...filters.resolvers import (
     _build_P0,
     _build_unscented_z0,
 )
+from ...filters.mode_map import get_filter
 
 from ..._ckernels.monte_carlo import _offsets
 from ..._ckernels.monte_carlo._runner import (
@@ -98,6 +99,8 @@ def lower_filter_step(
     Q = shock_covariance(model.config)
     P0 = _build_P0(model, mode, step.kwargs.get("P0"))
 
+    knobs = _supplied(step.kwargs, *{f.name for f in fields(get_filter(mode))})
+
     if mode == "linear":
         C, d = model._build_C_d_from_obs(canonical_names)
         before_y = (
@@ -119,9 +122,7 @@ def lower_filter_step(
                 n_var,
                 n_obs,
                 n_exog,
-                **_supplied(
-                    step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
-                ),
+                **knobs,
             ),
             _filter_bindings(
                 before_y,
@@ -153,9 +154,7 @@ def lower_filter_step(
                 n_obs,
                 n_exog,
                 n_par,
-                **_supplied(
-                    step.kwargs, "symmetrize", "joseph_cov", "jitter", "return_shocks"
-                ),
+                **knobs,
             ),
             _filter_bindings(
                 before_y,
@@ -207,14 +206,7 @@ def lower_filter_step(
                 n_exog,
                 n_obs,
                 n_par,
-                **_supplied(
-                    step.kwargs,
-                    "alpha",
-                    "beta",
-                    "kappa",
-                    "symmetrize",
-                    "jitter",
-                ),
+                **knobs,
             ),
             _filter_bindings(before_y, binding, (z0, P0), input_offsets),
         )

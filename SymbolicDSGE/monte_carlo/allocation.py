@@ -21,7 +21,6 @@ from .._ckernels.monte_carlo._runner import (
     DEFAULT_LJUNG_BOX_LAGS,
     DEFAULT_MAX_ITER,
     DEFAULT_ORDER,
-    DEFAULT_RETURN_SHOCKS,
     DEFAULT_WINDOW,
 )
 from ..core.solved_model import SolvedModel
@@ -674,7 +673,7 @@ def _resolve_filter_fields(
                 comp.n_exog,
                 n_obs,
                 T,
-                bool(step.kwargs.get("return_shocks", DEFAULT_RETURN_SHOCKS)),
+                bool(step.kwargs.get("return_shocks", False)),
             )
         case "unscented":
             n_state = comp.n_state

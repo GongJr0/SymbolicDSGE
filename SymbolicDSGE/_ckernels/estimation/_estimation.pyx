@@ -320,7 +320,7 @@ cdef void _alloc_fill_kf(sdsge_linear_ctx *c, object kf_dto, object sol_dto,
     c.kf_ctx.y = _f64p2(kf_dto.y_reordered, hold)
     c.kf_ctx.x0 = &x0[0]
     c.kf_ctx.P0 = _alloc_P0(b, kf_dto, n_var, hold)
-    c.kf_ctx.symmetrize = <int>bool(kf_dto.sym)
+    c.kf_ctx.symmetrize = <int>bool(kf_dto.symmetrize)
     c.kf_ctx.joseph_cov = <int>bool(kf_dto.joseph_cov)
     c.kf_ctx.jitter = <double>kf_dto.jitter
     c.kf_ctx.return_shocks = 0
@@ -351,7 +351,7 @@ cdef void _alloc_fill_ekf(sdsge_extended_ctx *c, object kf_dto, object sol_dto,
     c.ekf_ctx.k = <int64_t>sol_dto.n_exog
     c.ekf_ctx.n_par = <int64_t>sol_dto.n_par
     c.ekf_ctx.jitter = <double>kf_dto.jitter
-    c.ekf_ctx.symmetrize = <int>bool(kf_dto.sym)
+    c.ekf_ctx.symmetrize = <int>bool(kf_dto.symmetrize)
     c.ekf_ctx.joseph_cov = <int>bool(kf_dto.joseph_cov)
     c.ekf_ctx.compute_y_filt = 0
     c.ekf_ctx.return_shocks = 0
@@ -397,7 +397,7 @@ cdef void _alloc_fill_ukf(sdsge_unscented_ctx *c, object kf_dto,
     c.ukf_ctx.beta = <double>kf_dto.beta
     c.ukf_ctx.kappa = <double>kf_dto.kappa
     c.ukf_ctx.jitter = <double>kf_dto.jitter
-    c.ukf_ctx.symmetrize = <int>bool(kf_dto.sym)
+    c.ukf_ctx.symmetrize = <int>bool(kf_dto.symmetrize)
     c.ukf_ctx.store_history = 0
 
 

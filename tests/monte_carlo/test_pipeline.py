@@ -5,6 +5,9 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
+from SymbolicDSGE.filters import LinearKalman, ExtendedKalman, UnscentedKalman
+from SymbolicDSGE.filters.base import Filter
+
 from SymbolicDSGE._diag_tests.breusch_godfrey import breusch_godfrey
 from SymbolicDSGE._diag_tests.breusch_pagan import (
     breusch_pagan,
@@ -917,9 +920,11 @@ def test_output_specs_for_non_ols_regressions(solved_test, kind: str) -> None:
     )
 
 
-@pytest.mark.parametrize("filter_mode", ("linear", "extended"))
+@pytest.mark.parametrize(
+    "filter", (LinearKalman(return_shocks=True), ExtendedKalman(return_shocks=True))
+)
 def test_output_shape_resolution_includes_linear_filter_fields(
-    solved_test, filter_mode: str
+    solved_test, filter: Filter
 ) -> None:
     """A filter step's fields are sized off the model, not off its input.
 
@@ -939,9 +944,8 @@ def test_output_shape_resolution_includes_linear_filter_fields(
                 target="reference",
                 obs_source="datagen",
                 obs_field="observables",
-                filter_mode=filter_mode,
+                filter=filter,
                 observables=list(names),
-                return_shocks=True,
             ),
         ]
     )
@@ -1056,7 +1060,7 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
                 target="reference",
                 obs_source="datagen",
                 obs_field="observables",
-                filter_mode="unscented",
+                filter=UnscentedKalman(),
             ),
         ]
     )

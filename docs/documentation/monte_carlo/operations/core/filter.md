@@ -13,15 +13,11 @@ filter_step(
     obs_source: str,
     obs_field: str,
     obs_columns: ColumnSelector = None,
-    filter_mode: Literal["linear", "extended", "unscented"] = "linear",
+    filter: Filter = LinearKalman(),
     observables: list[str] | None = None,
     x0: dict[str, float | float64] | list[float | float64] | ndarray | None = None,
     P0: ndarray | None = None,
     R: ndarray | None = None,
-    jitter: float | None = None,
-    symmetrize: bool = True,
-    joseph_cov: bool = False,
-    return_shocks: bool = False,
 ) -> MCStep
 ```
 
@@ -39,16 +35,12 @@ __Inputs:__
 | obs_source | Required | Producer step supplying observed data. |
 | obs_field | Required | Two-dimensional output field to read from the producer. |
 | obs_columns | `None` | Column index, sequence of indices, or slice; `None` selects all columns. |
-| filter_mode | `"linear"` | Filter mode: `"linear"`, `"extended"`, or `"unscented"`. |
+| filter | `LinearKalman()` | Filter to use. Can be any `Filter` subclass that's suitable with the target model. |
 | n_retain | `-1` | Number of replications to retain. `-1` retains all replications. |
 | observables | `None` | Target-model observable names corresponding to the selected columns, in order. |
 | x0 | `None` | Initial state override in levels. It is the prior for the first observation in linear and extended modes, and the state before the first observation in unscented mode. |
 | P0 | `None` | Initial state covariance override with the same timing as `x0`. `None` uses the stationary state covariance. |
 | R | `None` | Measurement error covariance override. `None` uses the calibration's `measurement_noise` block to build `R`. |
-| jitter | `None` | Filter jitter override. |
-| symmetrize | `True` | Symmetrize covariance matrices during filtering. |
-| joseph_cov | `False` | Use the Joseph covariance update for linear and extended filtering. `False` is faster but less robust. |
-| return_shocks | `False` | Return shock estimates when supported by the selected filter mode. |
 
 __Downstream Fields:__
 
@@ -59,6 +51,3 @@ __Downstream Fields:__
 | `innov`, `std_innov` | Raw and standardized innovations. |
 | `eps_hat` | Shock estimates for modes that support `return_shocks=True`. |
 | `x1_pred`, `x2_pred`, `x1_filt`, `x2_filt` | Unscented first and second state blocks. |
-
-???+ warning "Unscented shock estimates"
-    `return_shocks=True` is not supported with `filter_mode="unscented"`.

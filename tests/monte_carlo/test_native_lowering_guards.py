@@ -224,23 +224,6 @@ def test_filter_rejects_a_datagen_whose_width_it_cannot_match(
         _lower(steps, reference=solved_post82)
 
 
-def test_unscented_filtering_cannot_return_shocks(solved_post82: SolvedModel) -> None:
-    steps = [
-        simulation_step("sim", target="reference", T=T, observables=True),
-        filter_step(
-            "filter",
-            target="reference",
-            obs_source="sim",
-            obs_field="observables",
-            filter_mode="unscented",
-            return_shocks=True,
-        ),
-    ]
-
-    with pytest.raises(ValueError, match="does not support return_shocks"):
-        _lower(steps, reference=solved_post82)
-
-
 def test_an_unknown_filter_mode_is_rejected(solved_post82: SolvedModel) -> None:
     """The interface resolves the mode before lowering picks a kernel for it."""
     step = filter_step(

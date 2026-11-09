@@ -6,6 +6,7 @@ import warnings
 from time import perf_counter
 from typing import Any, Literal, Mapping, Sequence, cast
 from copy import deepcopy
+from dataclasses import fields
 
 import numpy as np
 import pandas as pd
@@ -130,7 +131,6 @@ class Estimator:
         self.ss_seed = ss_seed
         self.R = R
         self.P0 = P0
-        self.filter = filter
         self._prepared_filter = b.prepare_filter_run(
             compiled=compiled,
             y=y,
@@ -174,11 +174,16 @@ class Estimator:
 
         """
         priors = {name: prior.to_spec() for name, prior in (self.priors or {}).items()}
-
+        dto = self._prepared_filter
+        filter_par = {
+            f.name: getattr(dto, f.name)
+            for f in fields(get_filter(dto.mode))
+            if hasattr(dto, f.name)
+        }
         params = EstimatorParams(
-            observables=self._prepared_filter.observables,
-            filter_mode=self.filter.mode.value,
-            filter_params=self.filter.to_spec(),
+            observables=dto.observables,
+            filter_mode=dto.mode,
+            filter_params=filter_par,
             P0=self.P0.tolist() if self.P0 is not None else None,
             R=self.R.tolist() if self.R is not None else None,
             estimated_params=self.estimated_params,
@@ -186,7 +191,7 @@ class Estimator:
             ss_seed=_coerce_ss_seed(self.ss_seed),
         )
 
-        y = self._prepared_filter.y_reordered.tolist()
+        y = dto.y_reordered.tolist()
 
         return EstimatorSpec(
             y=y,

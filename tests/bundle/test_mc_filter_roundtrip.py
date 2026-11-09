@@ -14,6 +14,8 @@ import pytest
 
 from SymbolicDSGE.bundle import BundleBuilder, load_bundle
 from SymbolicDSGE.core.solved_model import SolvedModel
+from SymbolicDSGE.filters import LinearKalman, ExtendedKalman, UnscentedKalman
+from SymbolicDSGE.filters.base import Filter
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.mc_constructs import MCFilterResult
 from SymbolicDSGE.monte_carlo.step_factories import (
@@ -93,9 +95,9 @@ def _assert_same(before: MCFilterResult, after: MCFilterResult) -> None:
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["linear", "extended"])
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
 def test_a_filter_round_trips_every_field_it_produced(
-    solved_post82: SolvedModel, mode: str, tmp_path
+    solved_post82: SolvedModel, filter: Filter, tmp_path
 ) -> None:
     pipeline = _pipeline(
         solved_post82,
@@ -104,14 +106,14 @@ def test_a_filter_round_trips_every_field_it_produced(
             target="reference",
             obs_source="data",
             obs_field="observables",
-            filter_mode=mode,
+            filter=filter,
         ),
     )
 
     before, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     _assert_same(before["filt"], after["filt"])
-    assert after["filt"].filter_mode == mode
+    assert after["filt"].filter_mode == filter.mode
 
 
 def test_the_unscented_pruned_state_survives_the_bundle(
@@ -125,7 +127,7 @@ def test_the_unscented_pruned_state_survives_the_bundle(
             target="reference",
             obs_source="data",
             obs_field="observables",
-            filter_mode="unscented",
+            filter=UnscentedKalman(),
         ),
     )
 
@@ -149,7 +151,7 @@ def test_the_mode_is_read_back_rather_than_inferred(
             target="reference",
             obs_source="data",
             obs_field="observables",
-            filter_mode="extended",
+            filter=ExtendedKalman(),
         ),
     )
 
@@ -176,14 +178,14 @@ def test_requested_shocks_come_back_and_absent_ones_stay_absent(
             target="reference",
             obs_source="data",
             obs_field="observables",
-            return_shocks=True,
+            filter=LinearKalman(return_shocks=True),
         ),
         filter_step(
             "without_shocks",
             target="reference",
             obs_source="data",
             obs_field="observables",
-            return_shocks=False,
+            filter=LinearKalman(return_shocks=False),
         ),
     )
 
@@ -296,14 +298,14 @@ def test_filters_round_trip_keyed_by_step_name(
             target="reference",
             obs_source="data",
             obs_field="observables",
-            filter_mode="linear",
+            filter=LinearKalman(),
         ),
         filter_step(
             "ekf",
             target="reference",
             obs_source="data",
             obs_field="observables",
-            filter_mode="extended",
+            filter=ExtendedKalman(),
         ),
     )
 
@@ -326,7 +328,7 @@ def test_filters_round_trip_through_csv_members(
             target="reference",
             obs_source="data",
             obs_field="observables",
-            return_shocks=True,
+            filter=LinearKalman(return_shocks=True),
         ),
     )
 

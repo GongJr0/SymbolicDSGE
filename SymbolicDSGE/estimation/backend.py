@@ -41,7 +41,7 @@ from ..filters.gaussian import (
     ExtendedKalman,
     UnscentedKalman,
 )
-from ..filters.resolvers import FilterMode, _resolve_P0
+from ..filters.resolvers import _resolve_P0
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
@@ -113,7 +113,7 @@ class FilterDTO:
 class GaussianFilterDTO(FilterDTO):
     P0: NDF | None
     jitter: float
-    sym: bool
+    symmetrize: bool
 
 
 @dataclass(frozen=True)
@@ -602,7 +602,7 @@ def prepare_linear(
         P0=_resolve_P0(filter.mode, compiled.n_state, compiled.n_var, P0),
         jac_addr=compiled.construct_measurement_jacobian_cfunc(obs).address,
         jitter=filter.jitter,
-        sym=filter.symmetrize,
+        symmetrize=filter.symmetrize,
         joseph_cov=bool(filter.joseph_cov),
         T=y_reordered.shape[0],
         n_obs=y_reordered.shape[1],
@@ -627,7 +627,7 @@ def prepare_extended(
         n_obs=y_reordered.shape[1],
         P0=_resolve_P0(filter.mode, compiled.n_state, compiled.n_var, P0),
         jitter=filter.jitter,
-        sym=filter.symmetrize,
+        symmetrize=filter.symmetrize,
         joseph_cov=bool(filter.joseph_cov),
         jac_addr=compiled.construct_measurement_jacobian_cfunc(obs).address,
     )
@@ -651,10 +651,10 @@ def prepare_unscented(
         n_obs=y_reordered.shape[1],
         P0=_resolve_P0(filter.mode, compiled.n_state, compiled.n_var, P0),
         jitter=filter.jitter,
-        sym=filter.symmetrize,
-        alpha=float64(filter.alpha),
-        beta=float64(filter.beta),
-        kappa=float64(filter.kappa),
+        symmetrize=filter.symmetrize,
+        alpha=filter.alpha,
+        beta=filter.beta,
+        kappa=filter.kappa,
     )
 
 
