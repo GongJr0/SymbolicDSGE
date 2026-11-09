@@ -136,6 +136,7 @@ def test_load_estimation_optimization_result_dispatch(parsed_test, compiled_test
         {
             "observables": ["Infl", "Rate"],
             "filter_mode": "linear",
+            "filter_params": {},
             "P0": None,
             "R": [[1e-4, 0.0], [0.0, 1e-4]],
             "estimated_params": ["beta"],

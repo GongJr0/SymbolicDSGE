@@ -193,7 +193,7 @@ def _post82_estimator(solved, y, **kwargs):
 
 
 def test_estimator_loglik_linear_matches_model_kalman(solved_post82, y_post82):
-    est = _post82_estimator(solved_post82, y_post82, filter_mode="linear")
+    est = _post82_estimator(solved_post82, y_post82, filter=LinearKalman())
     ll_model_lin = (
         LinearKalman()
         .filter(solved_post82, y_post82, observables=["Infl", "Rate"])
@@ -203,7 +203,7 @@ def test_estimator_loglik_linear_matches_model_kalman(solved_post82, y_post82):
 
 
 def test_estimator_loglik_extended_matches_model_kalman(solved_post82, y_post82):
-    est = _post82_estimator(solved_post82, y_post82, filter_mode="extended")
+    est = _post82_estimator(solved_post82, y_post82, filter=ExtendedKalman())
     ll_model_ext = (
         ExtendedKalman()
         .filter(solved_post82, y=y_post82, observables=["Infl", "Rate"])
@@ -215,8 +215,8 @@ def test_estimator_loglik_extended_matches_model_kalman(solved_post82, y_post82)
 def test_estimator_loglik_respects_R_override_and_mode_validation(
     solved_post82, y_post82
 ):
-    with pytest.raises(ValueError, match="is not a valid FilterMode"):
-        _post82_estimator(solved_post82, y_post82, filter_mode="bad_mode")
+    with pytest.raises(ValueError, match="Unknown filter type:"):
+        _post82_estimator(solved_post82, y_post82, filter=object())
 
     calib = solved_post82.config.calibration
     scaled_R = 2.0 * cov_from_spec(
@@ -226,9 +226,9 @@ def test_estimator_loglik_respects_R_override_and_mode_validation(
         subset=["Infl", "Rate"],
     )
     overridden = _post82_estimator(
-        solved_post82, y_post82, filter_mode="linear", R=scaled_R
+        solved_post82, y_post82, filter=LinearKalman(), R=scaled_R
     )
-    from_config = _post82_estimator(solved_post82, y_post82, filter_mode="linear")
+    from_config = _post82_estimator(solved_post82, y_post82, filter=LinearKalman())
     assert not np.isclose(
         float(overridden.loglik()),
         float(from_config.loglik()),
@@ -353,13 +353,14 @@ def test_estimator_loglik_unscented_matches_model_kalman(solved_rbc_so, rbc_ukf_
         compiled=compiled,
         y=y,
         observables=["c_obs"],
-        filter_mode="unscented",
+        filter=UnscentedKalman(symmetrize=True),
         estimated_params=["rho"],
-        symmetrize=True,
     )
     ll_est = float(est.loglik())
 
-    ll_ref = float(UnscentedKalman().filter(solved, y, observables=["c_obs"]).loglik)
+    ll_ref = float(
+        UnscentedKalman(symmetrize=True).filter(solved, y, observables=["c_obs"]).loglik
+    )
 
     assert np.isfinite(ll_est)
     assert ll_est == pytest.approx(ll_ref, rel=1e-9, abs=1e-9)
@@ -375,8 +376,7 @@ def test_estimator_loglik_unscented_accepts_full_length_x0(solved_rbc_so, rbc_uk
         compiled=compiled,
         y=rbc_ukf_y,
         observables=["c_obs"],
-        filter_mode="unscented",
+        filter=UnscentedKalman(symmetrize=True),
         estimated_params=["rho"],
-        symmetrize=True,
     )
     assert np.isfinite(float(est.loglik()))

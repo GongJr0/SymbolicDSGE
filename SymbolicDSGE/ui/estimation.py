@@ -14,6 +14,8 @@ from ..core.config import ModelConfig
 from ..core.compiled_model import CompiledModel
 from ..core.solved_model.base import SolvedModel
 from ..core.solver import solve_model
+from ..filters.base import Filter
+from ..filters.gaussian import LinearKalman
 from ..bayesian.priors import Prior, make_prior
 from ..estimation.estimator import Estimator
 from ..estimation.results import MLEResult, MAPResult, MCMCResult, OptimizationResult
@@ -134,74 +136,23 @@ def estimate_and_solve(
     theta0: Mapping[str, float] | None = None,
     posterior_point: Literal["mean", "map", "last"] = "mean",
     observables: list[str] | None = None,
-    filter_mode: Literal["linear", "extended", "unscented"] = "linear",
+    filter: Filter = LinearKalman(),
     estimated_params: list[str] | Mapping[str, Prior] | None = None,
     ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
     P0: np.ndarray | None = None,
-    jitter: float | None = None,
-    symmetrize: bool = True,
     R: np.ndarray | None = None,
     **method_kwargs: Any,
 ) -> tuple[MLEResult | MAPResult | MCMCResult, SolvedModel]:
-    """Estimate and solve a model specification.
-
-    Parameters
-    ----------
-    config : ModelConfig
-        Model specification to estimate.
-    y : np.ndarray | pd.DataFrame
-        Observed data, Array in observable order or ``DataFrame`` with columns named for the observables.
-    compiled : CompiledModel | None
-        Optional pre-compiled model carrying the residual, incidence, ect.
-        If None, the model is compiled from the config once at construction of the Estimator.
-    order : int | None
-        Perturbation order for the final solution. `None` uses the lowest order compatible with the
-        selected filter mode: 1 for linear and extended, 2 for unscented.
-    routine : Literal["mle", "map", "mcmc"]
-        "mle" (Maximum Likelihood Estimation), "map" (Maximum A Posteriori), or "mcmc" (Markov Chain Monte Carlo).
-        "map" and "mcmc" require `estimated_params` to be in the `{name: Prior}` mapping form.
-    theta0 : np.ndarray | Mapping[str, float] | None
-        Initial guess for estimatied parameters. Mapping of {name: guess} or array in order of appearance in calibration.
-        If None, the calibration values are used as initial guess.
-    posterior_point : Literal["mean", "map", "last"]
-        Point estimates to use when sampling a posterior distribution with MCMC {"mean", "map", "last"}.
-    observables : list[str] | None
-        Names of model observables to use in the estimation. If None, all observables are used.
-    filter_mode : Literal["linear", "extended", "unscented"]
-        Kalman filter routine to use. "linear" (linear Gaussian), "extended" (linear Gaussian with nonlinear measurements), "unscented" (pruned unscented)
-    estimated_params : list[str] | Mapping[str, Prior] | None
-        Names of estimated parameters, or mapping with priors to use in MAP or MCMC. `None` estimates all parameters and uses no priors.
-    ss_seed : list[float] | np.ndarray | dict[str, float] | None
-        Initial guess of the steady state Newton solver. List or array in declaration order or
-        mapping of {name: guess} for the model's declared variables.
-    P0 : np.ndarray | None
-        Initial state covariance matrix for the Kalman filter. If None, the stationary state covariance is used.
-    jitter : float | None
-        Jitter to add in the Kalman kernels when a cholesky decomposition fails. If None, no jitter is added.
-    symmetrize : bool
-        Whether to symmetrize the covariance matrices in the Kalman filter.
-    R : np.ndarray | None
-        Measurement noise covariance matrix for the Kalman filter. If None, the `calibration.measurement_noise`
-        is used. If both are omitted, the call will raise.
-
-    Returns
-    -------
-    tuple[MLEResult | MAPResult | MCMCResult, SolvedModel]
-        Estimation result and solved model produced with the estimated parameters.
-
-    """
-    order = _resolve_order(order, filter_mode)
+    order = _resolve_order(order, filter.mode.value)
     est = _estimator(
         config=config,
         y=y,
         compiled=compiled,
         observables=observables,
-        filter_mode=filter_mode,
+        filter=filter,
         estimated_params=estimated_params,
         ss_seed=ss_seed,
         P0=P0,
-        jitter=jitter,
-        symmetrize=symmetrize,
         R=R,
     )
 
@@ -239,62 +190,19 @@ def estimate(
     routine: Literal["mle", "map", "mcmc"] = "mle",
     theta0: Mapping[str, float] | None = None,
     observables: list[str] | None = None,
-    filter_mode: Literal["linear", "extended", "unscented"] = "linear",
+    filter: Filter = LinearKalman(),
     estimated_params: list[str] | Mapping[str, Prior] | None = None,
     ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
     P0: np.ndarray | None = None,
-    jitter: float | None = None,
-    symmetrize: bool = True,
     R: np.ndarray | None = None,
     **method_kwargs: Any,
 ) -> MLEResult | MAPResult | MCMCResult:
-    """Estimate a model specification without producing a solved model object.
-
-    Parameters
-    ----------
-    config : ModelConfig
-        Model specification to estimate.
-    y : np.ndarray | pd.DataFrame
-        Observed data, Array in observable order or ``DataFrame`` with columns named for the observables.
-    compiled : CompiledModel | None
-        Optional pre-compiled model carrying the residual, incidence, ect.
-        If None, the model is compiled from the config once at construction of the Estimator.
-    routine : Literal["mle", "map", "mcmc"]
-        "mle" (Maximum Likelihood Estimation), "map" (Maximum A Posteriori), or "mcmc" (Markov Chain Monte Carlo).
-        "map" and "mcmc" require `estimated_params` to be in the `{name: Prior}` mapping form.
-    theta0 : np.ndarray | Mapping[str, float] | None
-        Initial guess for estimatied parameters. Mapping of {name: guess} or array in order of appearance in calibration.
-    observables : list[str] | None
-        Names of model observables to use in the estimation. If None, all observables are used.
-    filter_mode : Literal["linear", "extended", "unscented"]
-        Kalman filter routine to use. "linear" (linear Gaussian), "extended" (linear Gaussian with nonlinear measurements), "unscented" (pruned unscented)
-    estimated_params : list[str] | Mapping[str, Prior] | None
-        Names of estimated parameters, or mapping with priors to use in MAP or MCMC. `None` estimates all parameters and uses no priors.
-    ss_seed : list[float] | np.ndarray | dict[str, float] | None
-        Initial guess of the steady state Newton solver. List or array in declaration order or
-        mapping of {name: guess} for the model's declared variables.
-    P0 : np.ndarray | None
-        Initial state covariance matrix for the Kalman filter. If None, the stationary state covariance is used.
-    jitter : float | None
-        Jitter to add in the Kalman kernels when a cholesky decomposition fails. If None, no jitter is added.
-    symmetrize : bool
-        Whether to symmetrize the covariance matrices in the Kalman filter.
-    R : np.ndarray | None
-        Measurement noise covariance matrix for the Kalman filter. If None, the `calibration.measurement_noise`
-        is used. If both are omitted, the call will raise.
-
-    Returns
-    -------
-    MLEResult | MAPResult | MCMCResult
-        Result of the estimation routine.
-
-    """
     est = _estimator(
         config=config,
         y=y,
         compiled=compiled,
         observables=observables,
-        filter_mode=filter_mode,
+        filter=filter,
         estimated_params=estimated_params,
         ss_seed=(
             np.asarray(ss_seed, dtype=np.float64)
@@ -302,8 +210,6 @@ def estimate(
             else ss_seed
         ),
         P0=P0,
-        jitter=jitter,
-        symmetrize=symmetrize,
         R=R,
     )
 
@@ -324,13 +230,11 @@ def _estimator(
     y: np.ndarray,
     compiled: CompiledModel | None = None,
     observables: list[str] | None = None,
-    filter_mode: str = "linear",
+    filter: Filter = LinearKalman(),
     estimated_params: list[str] | Mapping[str, Prior] | None = None,
     ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
     x0: np.ndarray | None = None,
     P0: np.ndarray | None = None,
-    jitter: float | None = None,
-    symmetrize: bool = True,
     R: np.ndarray | None = None,
 ) -> Estimator:
     return Estimator(
@@ -338,7 +242,7 @@ def _estimator(
         compiled=compiled,
         y=y,
         observables=observables,
-        filter_mode=filter_mode,
+        filter=filter,
         estimated_params=estimated_params,
         ss_seed=(
             np.asarray(ss_seed, dtype=np.float64)
@@ -346,8 +250,6 @@ def _estimator(
             else ss_seed
         ),
         P0=P0,
-        jitter=jitter,
-        symmetrize=symmetrize,
         R=R,
     )
 

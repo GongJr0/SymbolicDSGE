@@ -18,7 +18,7 @@ from SymbolicDSGE.filters.gaussian import LinearKalman, ExtendedKalman, Unscente
 
 
 def _native_loglik(
-    *, config, compiled, y, observables, filter_mode, estimated, ss_seed, **kwargs
+    *, config, compiled, y, observables, filter, estimated, ss_seed, **kwargs
 ) -> float:
     """The native loglik at the base calibration, through the production path."""
     est = Estimator(
@@ -26,7 +26,7 @@ def _native_loglik(
         compiled=compiled,
         y=y,
         observables=list(observables),
-        filter_mode=filter_mode,
+        filter=filter,
         estimated_params=[estimated],
         ss_seed=ss_seed,
         **kwargs,
@@ -44,7 +44,7 @@ def test_native_objective_matches_model_kalman(solved_post82, y_post82, filter):
         compiled=compiled,
         y=y_post82,
         observables=obs,
-        filter_mode=filter.mode.value,
+        filter=filter,
         estimated="psi_pi",
         ss_seed=solved_post82.policy.steady_state,
     )
@@ -81,11 +81,9 @@ def test_native_unscented_objective_matches_model_kalman(solved_rbc_so):
         compiled=compiled,
         y=y,
         observables=obs,
-        filter_mode="unscented",
+        filter=UnscentedKalman(jitter=jitter, symmetrize=symmetrize),
         estimated="rho",
         ss_seed=None,
-        jitter=jitter,
-        symmetrize=symmetrize,
     )
     ll_model = (
         UnscentedKalman(jitter=jitter, symmetrize=symmetrize)

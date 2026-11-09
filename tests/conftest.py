@@ -329,6 +329,7 @@ def post82_estimator(solved_post82, y_post82):
     ``estimated_params`` carries the priors.
     """
     from SymbolicDSGE.estimation import Estimator
+    from SymbolicDSGE.filters.mode_map import get_filter
 
     config = solved_post82.config
     compiled = solved_post82.compiled
@@ -339,7 +340,7 @@ def post82_estimator(solved_post82, y_post82):
             compiled=compiled,
             y=y_post82,
             observables=compiled.observable_names,
-            filter_mode=mode,
+            filter=get_filter(mode)(),
             estimated_params=estimated_params,
             ss_seed=solved_post82.policy.steady_state,
         )

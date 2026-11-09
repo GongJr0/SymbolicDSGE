@@ -27,6 +27,8 @@ from ..core.model_parser import ModelParser
 from ..core.solved_model.base import SolvedModel
 from ..core.config_emitter import emit_config_yaml
 
+from ..filters.gaussian import LinearKalman
+
 from .schemas import (
     EstimationRunRequest,
     FunctionKind,
@@ -372,15 +374,17 @@ class UISession:
             routine=request["routine"],
         )
 
-        # Built before the run, not after: the spec describes the estimator
-        # about to be constructed, so a prior that cannot be projected says so
-        # here rather than discarding a result that already cost the compute.
         spec_wire = estimator_spec_wire(
             EstimatorSpec(
                 y=y.tolist(),
                 params=EstimatorParams(
                     observables=observables,
                     filter_mode="linear",
+                    filter_params={
+                        "jitter": 1e-8,
+                        "symmetrize": True,
+                        "joseph_cov": True,
+                    },
                     P0=None,
                     R=None,
                     estimated_params=names,
@@ -390,9 +394,6 @@ class UISession:
                         else None
                     ),
                     ss_seed=request["ss_seed"],
-                    jitter=0.0,
-                    symmetrize=True,
-                    joseph_cov=False,
                 ),
             )
         )
@@ -431,6 +432,7 @@ class UISession:
             "observables": observables,
             "estimated_params": priors if priors is not None else names,
             "ss_seed": request["ss_seed"],
+            "filter": LinearKalman(jitter=1e-8, symmetrize=True, joseph_cov=True),
             **kwargs,
         }
         solved = False

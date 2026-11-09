@@ -102,10 +102,8 @@ def test_estimation_likelihood_runs_on_a_constrained_model(
         config=solved.config,
         compiled=solved.compiled,
         y=observations,
-        filter_mode="linear",
+        filter=LinearKalman(symmetrize=True, joseph_cov=False),
         estimated_params=_ESTIMATED,
-        symmetrize=True,
-        joseph_cov=False,
     )
 
     est_loglik = float(est.loglik())

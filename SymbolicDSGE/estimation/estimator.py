@@ -16,6 +16,9 @@ from ..bayesian.priors import Prior
 from ..core.config import ModelConfig
 from ..core.compiled_model import CompiledModel
 from ..core.solver import compile_model
+from ..filters.base import Filter
+from ..filters.gaussian import LinearKalman
+from ..filters.mode_map import get_filter
 
 from .._ckernels.estimation import (
     run_estimation,
@@ -46,6 +49,9 @@ class Estimator:
     ----------
     config : ModelConfig
         Model configuration object containing the target model specification.
+    estimated_params : Sequence[str] | Mapping[str, Prior] | None
+        Names of the parameters to be estimated, or a mapping of parameter names to their `Prior`s.
+        MAP and MCMC require priors; MLE ignores any provided priors. `None` uses all parameters and no priors.
     compiled : CompiledModel | None
         Optional pre-compiled model object containing the target model's information.
         If None, the model is compiled once at the Estimator's initialization.
@@ -53,19 +59,10 @@ class Estimator:
         Observed data for the estimation procedure. Array in declared observable order or a DataFrame with columns matching the observable names.
     observables : Sequence[str] | None
         Declared observable names in the order they appear in (array) data. If none, all observables in the model are used in the order they were declared in the config.
-    filter_mode : str
-        Filter mode to use for the estimation procedure. One of 'linear', 'extended', or 'unscented'.
-    estimated_params : Sequence[str] | Mapping[str, Prior] | None
-        Names of the parameters to be estimated, or a mapping of parameter names to their `Prior`s.
-        MAP and MCMC require priors; MLE ignores any provided priors. `None` uses all parameters and no priors.
+    filter : Filter
+        Filter to use for likelihood evaluation. Defaults to a linear Kalman filter.
     ss_seed : Sequence[float] | NDF | Mapping[str, float] | None
         Initial guess for the Newton steady state solver.
-    jitter : float | None
-        Jitter to add when a cholesky decomposition fails in the Kalman filter. If none, no jitter is added.
-    symmetrize : bool
-        Whether to symmetrize the covariance matrices in the Kalman filter.
-    joseph_cov : bool
-        Whether to use the Joseph form of the covariance update in the Kalman filter.
     R : NDF | None
         Observation covariance matrix. If none, the model configuration must provide it.
     P0 : NDF | None
@@ -97,15 +94,12 @@ class Estimator:
         self,
         *,
         config: ModelConfig,
+        estimated_params: Sequence[str] | Mapping[str, Prior] | None = None,
         y: NDF | pd.DataFrame,
         compiled: CompiledModel | None = None,
         observables: Sequence[str] | None = None,
-        filter_mode: str = "linear",
-        estimated_params: Sequence[str] | Mapping[str, Prior] | None = None,
+        filter: Filter = LinearKalman(),
         ss_seed: Sequence[float] | NDF | Mapping[str, float] | None = None,
-        jitter: float | None = None,
-        symmetrize: bool = True,
-        joseph_cov: bool = False,
         R: NDF | None = None,
         P0: NDF | None = None,
     ) -> None:
@@ -136,14 +130,12 @@ class Estimator:
         self.ss_seed = ss_seed
         self.R = R
         self.P0 = P0
+        self.filter = filter
         self._prepared_filter = b.prepare_filter_run(
             compiled=compiled,
             y=y,
             observables=observables,
-            filter_mode=filter_mode,
-            jitter=jitter,
-            symmetrize=symmetrize,
-            joseph_cov=bool(joseph_cov),
+            filter=filter,
             P0=P0,
         )
 
@@ -185,15 +177,13 @@ class Estimator:
 
         params = EstimatorParams(
             observables=self._prepared_filter.observables,
-            filter_mode=self._prepared_filter.mode,
+            filter_mode=self.filter.mode.value,
+            filter_params=self.filter.to_spec(),
             P0=self.P0.tolist() if self.P0 is not None else None,
             R=self.R.tolist() if self.R is not None else None,
             estimated_params=self.estimated_params,
             priors=priors or None,
             ss_seed=_coerce_ss_seed(self.ss_seed),
-            jitter=self._prepared_filter.jitter,
-            symmetrize=self._prepared_filter.sym,
-            joseph_cov=self._prepared_filter.joseph_cov,
         )
 
         y = self._prepared_filter.y_reordered.tolist()
@@ -223,6 +213,8 @@ class Estimator:
 
         """
         params = spec.params
+        filterT = get_filter(params["filter_mode"])
+        filter = filterT.from_spec(params["filter_params"])
         y = np.asarray(spec.y, dtype=float64)
         R = np.asarray(params["R"], dtype=float64) if params["R"] is not None else None
         P0 = (
@@ -240,12 +232,9 @@ class Estimator:
             compiled=compiled,
             y=y,
             observables=params["observables"],
-            filter_mode=params["filter_mode"],
+            filter=filter,
             estimated_params=estimated_params,
             ss_seed=params["ss_seed"],
-            jitter=params["jitter"],
-            symmetrize=params["symmetrize"],
-            joseph_cov=params["joseph_cov"],
             R=R,
             P0=P0,
         )
