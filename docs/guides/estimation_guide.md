@@ -22,7 +22,7 @@ We will cover:
 ## Parse Configs and Compile
 
 ```python
-from SymbolicDSGE import parse_config, solve_model, Estimator
+from SymbolicDSGE import parse_config, solve_model, Estimator, LinearKalman
 from SymbolicDSGE.utils import FRED
 from SymbolicDSGE.utils.math_utils import HP_two_sided, annualized_log_percent
 from SymbolicDSGE.bayesian import make_prior
@@ -112,7 +112,7 @@ est = Estimator(
 
 1. Observed data we want to calibrate against
 2. Which observables to use from the model specification. If not specified, all observables will be used. Number of columns in `y` must match the number of observables.
-3. The filter used to compute the likelihood. Can be any of the [`Filter`](./filters/index.md) subclasses (that's suitable with the model being supplied).
+3. The filter used to compute the likelihood. Can be any of the [`Filter`](../documentation/filters/index.md) subclasses (that's suitable with the model being supplied).
 4. Dictionary of `{name: Prior}` or a list of names for the unpriored case.
 
 ## Running the Estimation
