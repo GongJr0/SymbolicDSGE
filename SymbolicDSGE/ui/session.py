@@ -34,7 +34,7 @@ from .schemas import (
     FunctionKind,
     WorkspaceTab,
 )
-from ..estimation.spec import EstimatorParams, EstimatorSpec
+from ..estimation.estimator import Estimator
 
 from .estimation import (
     build_estimation_inputs,
@@ -348,9 +348,9 @@ class UISession:
 
     def run_estimation(self, request: EstimationRunRequest) -> dict[str, Any]:
         slot = self._slot(request["model_name"])
+        if slot.model_config is None:
+            raise ValueError(f"No model is loaded for '{request['model_name']}'.")
         if slot.compiled is None:
-            if slot.model_config is None:
-                raise ValueError(f"No model is loaded for '{request['model_name']}'.")
             slot.compiled = compile_model(slot.model_config)
 
         y = np.asarray(request["y"], dtype=np.float64)
@@ -374,36 +374,26 @@ class UISession:
             routine=request["routine"],
         )
         filter = LinearKalman(jitter=1e-8, symmetrize=True, joseph_cov=True)
-        spec_wire = estimator_spec_wire(
-            EstimatorSpec(
-                y=y.tolist(),
-                params=EstimatorParams(
-                    observables=observables,
-                    filter_mode=filter.mode.value,
-                    filter_params=filter.to_spec(),
-                    P0=None,
-                    R=None,
-                    estimated_params=names,
-                    priors=(
-                        {n: pr.to_spec() for n, pr in priors.items() if pr is not None}
-                        if priors is not None
-                        else None
-                    ),
-                    ss_seed=request["ss_seed"],
-                ),
-            )
+        est = Estimator(
+            config=slot.model_config,
+            estimated_params=priors if priors is not None else names,
+            y=y,
+            compiled=slot.compiled,
+            observables=observables,
+            filter=filter,
+            ss_seed=request["ss_seed"],
+            R=None,
+            P0=None,
         )
+
         kwargs = dict(request["method_kwargs"])
         reserved = {
+            "est",
             "bounds",
-            "compiled",
-            "estimated_params",
-            "observables",
             "posterior_point",
             "routine",
             "ss_seed",
             "theta0",
-            "y",
         }
         overlap = sorted(reserved.intersection(kwargs))
         if overlap:
@@ -420,21 +410,16 @@ class UISession:
             )
 
         common: dict[str, Any] = {
-            "config": slot.model_config,
-            "compiled": slot.compiled,
-            "y": y,
+            "est": est,
             "routine": request["routine"],
             "theta0": theta0,
-            "observables": observables,
-            "estimated_params": priors if priors is not None else names,
-            "ss_seed": request["ss_seed"],
-            "filter": filter,
             **kwargs,
         }
         solved = False
         if request["estimate_and_solve"]:
             result, model = estimate_and_solve(
                 posterior_point=request["posterior_point"],
+                ss_seed=request["ss_seed"],
                 **common,
             )
             slot.solved = model
@@ -453,7 +438,7 @@ class UISession:
         # The bundle-bound slots, filled from the run that just produced them.
         # The client's view is untouched: it already shows this.
         state = self.workspace.estimation.setdefault(request["model_name"], TabState())
-        state.spec = spec_wire
+        state.spec = estimator_spec_wire(est.to_spec())
         state.result = result_wire
         return payload
 

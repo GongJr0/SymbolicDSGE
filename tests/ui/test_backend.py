@@ -13,7 +13,6 @@ from SymbolicDSGE.ui.estimation import (
     serialize_estimation_result,
 )
 from SymbolicDSGE.ui.mc import build_pipeline, serialize_pipeline_result
-from SymbolicDSGE.ui.estimation import _resolve_order
 from SymbolicDSGE.estimation.spec import PriorSpec
 from SymbolicDSGE.ui.schemas import EstimationParameterSpec
 from SymbolicDSGE.ui.serializers import decode_array, encode_array
@@ -384,16 +383,16 @@ def test_ui_estimation_serializes_mcmc_traces_for_charts() -> None:
 
 
 def test_ui_backend_dispatches_estimation_and_estimate_and_solve(
-    monkeypatch, test_model_path
+    monkeypatch, post82_test_model_path
 ) -> None:
     app = create_app()
     client = TestClient(app)
     loaded = client.post(
         "/api/model/load-yaml",
-        json={"model_name": "reference", "path": str(test_model_path)},
+        json={"model_name": "reference", "path": str(post82_test_model_path)},
     )
     assert loaded.status_code == 200
-    assert loaded.json()["parameter_values"]["beta"] == 0.99
+    assert loaded.json()["parameter_values"]["beta"] == 0.971
 
     catalog = client.get("/api/estimation/catalog")
     assert catalog.status_code == 200
@@ -442,7 +441,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(
             {
                 "name": "beta",
                 "estimate": True,
-                "initial": 0.99,
+                "initial": 0.971,
                 "lower": 0.9,
                 "upper": 1.0,
             }
@@ -460,8 +459,7 @@ def test_ui_backend_dispatches_estimation_and_estimate_and_solve(
     assert body["solved"] is False
     assert body["result"]["theta"] == {"beta": 0.98}
     assert captured["routine"] == "mle"
-    assert captured["theta0"] == {"beta": 0.99}
-    assert captured["estimated_params"] == ["beta"]
+    assert captured["theta0"] == {"beta": 0.971}
     assert captured["bounds"] == {"beta": (0.9, 1.0)}
     assert captured["maxiter"] == 25
     # `method` is the optimizer and is no longer reserved, so it rides through
@@ -1484,7 +1482,7 @@ def test_ui_backend_rejects_invalid_custom_op_on_run(test_model_path) -> None:
 
 @pytest.mark.parametrize("routine", ["mle", "map"])
 def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
-    monkeypatch, routine, test_model_path
+    monkeypatch, routine, post82_test_model_path
 ):
     """The kwargs the form posts must bind to the method that receives them.
 
@@ -1503,7 +1501,7 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
     assert (
         client.post(
             "/api/model/load-yaml",
-            json={"model_name": "reference", "path": str(test_model_path)},
+            json={"model_name": "reference", "path": str(post82_test_model_path)},
         ).status_code
         == 200
     )
@@ -1538,18 +1536,18 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
             "model_name": "reference",
             "routine": routine,
             "y": [[0.1], [0.2], [0.3]],
-            "observables": ["Obs"],
+            "observables": ["Rate"],
             "parameters": [
                 {
                     "name": "beta",
                     "estimate": True,
-                    "initial": 0.99,
+                    "initial": 0.971,
                     "lower": 0.9,
                     "upper": 1.0,
                     # MAP requires a prior per estimated parameter; MLE ignores it.
                     "prior": {
                         "distribution": "normal",
-                        "parameters": {"mean": 0.99, "std": 0.01},
+                        "parameters": {"mean": 0.971, "std": 0.01},
                         "transform": "identity",
                     },
                 }
@@ -1571,32 +1569,3 @@ def test_ui_estimation_kwargs_bind_to_the_optimizer_signature(
 
     target = Estimator.mle if routine == "mle" else Estimator.map
     inspect.signature(target).bind_partial(Estimator, **forwarded)
-
-
-def test_resolve_order_defaults_to_the_filter_minimum():
-    assert _resolve_order(None, "linear") == 1
-    assert _resolve_order(None, "extended") == 1
-    assert _resolve_order(None, "unscented") == 2
-
-
-def test_resolve_order_keeps_an_explicit_order_at_or_above_the_minimum():
-    # A filter reads nothing above the order it needs, so every order from its
-    # minimum up produces the same likelihood and the choice is the caller's.
-    assert _resolve_order(1, "linear") == 1
-    assert _resolve_order(2, "linear") == 2
-    assert _resolve_order(2, "unscented") == 2
-
-
-def test_resolve_order_rejects_first_order_under_the_ukf():
-    with pytest.raises(ValueError, match="UKF requires second-order tensors"):
-        _resolve_order(1, "unscented")
-
-
-def test_resolve_order_rejects_an_order_no_solve_produces():
-    with pytest.raises(ValueError, match="order must be 1 or 2"):
-        _resolve_order(3, "linear")
-
-
-def test_resolve_order_rejects_an_unknown_filter_mode():
-    with pytest.raises(ValueError, match="Unrecognized filter_mode"):
-        _resolve_order(None, "kalman")

@@ -11,11 +11,9 @@ from ..bayesian.transforms.transform_dispatch import (
 )
 
 from ..core.config import ModelConfig
-from ..core.compiled_model import CompiledModel
 from ..core.solved_model.base import SolvedModel
 from ..core.solver import solve_model
-from ..filters.base import Filter
-from ..filters.gaussian import LinearKalman
+from ..filters.resolvers import FilterMode
 from ..bayesian.priors import Prior, make_prior
 from ..estimation.estimator import Estimator
 from ..estimation.results import MLEResult, MAPResult, MCMCResult, OptimizationResult
@@ -128,34 +126,14 @@ def emit_estimation_wire(
 
 def estimate_and_solve(
     *,
-    config: ModelConfig,
-    y: np.ndarray,
-    compiled: CompiledModel | None = None,
-    order: int | None = None,
+    est: Estimator,
     routine: Literal["mle", "map", "mcmc"] = "mle",
     theta0: Mapping[str, float] | None = None,
     posterior_point: Literal["mean", "map", "last"] = "mean",
-    observables: list[str] | None = None,
-    filter: Filter = LinearKalman(),
-    estimated_params: list[str] | Mapping[str, Prior] | None = None,
     ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
-    P0: np.ndarray | None = None,
-    R: np.ndarray | None = None,
     **method_kwargs: Any,
 ) -> tuple[MLEResult | MAPResult | MCMCResult, SolvedModel]:
-    order = _resolve_order(order, filter.mode.value)
-    est = _estimator(
-        config=config,
-        y=y,
-        compiled=compiled,
-        observables=observables,
-        filter=filter,
-        estimated_params=estimated_params,
-        ss_seed=ss_seed,
-        P0=P0,
-        R=R,
-    )
-
+    order = 2 if est.filter.mode == FilterMode.UNSCENTED else 1
     result: MLEResult | MAPResult | MCMCResult
     solve_params: Mapping[str, float]
     match routine.lower():
@@ -171,11 +149,10 @@ def estimate_and_solve(
         case _:
             raise ValueError("`routine` must be one of {'mle', 'map', 'mcmc'}.")
 
-    # New config
-    conf = config.with_parameters(solve_params)
+    conf = est.config.with_parameters(solve_params)
     solved = solve_model(
         config=conf,
-        compiled=compiled,
+        compiled=est.compiled,
         order=order,
         ss_seed=ss_seed,
     )
@@ -184,35 +161,11 @@ def estimate_and_solve(
 
 def estimate(
     *,
-    config: ModelConfig,
-    y: np.ndarray,
-    compiled: CompiledModel | None = None,
+    est: Estimator,
     routine: Literal["mle", "map", "mcmc"] = "mle",
     theta0: Mapping[str, float] | None = None,
-    observables: list[str] | None = None,
-    filter: Filter = LinearKalman(),
-    estimated_params: list[str] | Mapping[str, Prior] | None = None,
-    ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
-    P0: np.ndarray | None = None,
-    R: np.ndarray | None = None,
     **method_kwargs: Any,
 ) -> MLEResult | MAPResult | MCMCResult:
-    est = _estimator(
-        config=config,
-        y=y,
-        compiled=compiled,
-        observables=observables,
-        filter=filter,
-        estimated_params=estimated_params,
-        ss_seed=(
-            np.asarray(ss_seed, dtype=np.float64)
-            if isinstance(ss_seed, list)
-            else ss_seed
-        ),
-        P0=P0,
-        R=R,
-    )
-
     match routine.lower():
         case "mle":
             return est.mle(theta0=theta0, **method_kwargs)
@@ -222,36 +175,6 @@ def estimate(
             return est.mcmc(theta0=theta0, **method_kwargs)
         case _:
             raise ValueError("`routine` must be one of {'mle', 'map', 'mcmc'}.")
-
-
-def _estimator(
-    *,
-    config: ModelConfig,
-    y: np.ndarray,
-    compiled: CompiledModel | None = None,
-    observables: list[str] | None = None,
-    filter: Filter = LinearKalman(),
-    estimated_params: list[str] | Mapping[str, Prior] | None = None,
-    ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
-    x0: np.ndarray | None = None,
-    P0: np.ndarray | None = None,
-    R: np.ndarray | None = None,
-) -> Estimator:
-    return Estimator(
-        config=config,
-        compiled=compiled,
-        y=y,
-        observables=observables,
-        filter=filter,
-        estimated_params=estimated_params,
-        ss_seed=(
-            np.asarray(ss_seed, dtype=np.float64)
-            if isinstance(ss_seed, list)
-            else ss_seed
-        ),
-        P0=P0,
-        R=R,
-    )
 
 
 def _emit_optimization_wire(
@@ -276,23 +199,6 @@ def _emit_optimization_wire(
         "cov_status": int(obj.cov_status),
         "optimizer_config": dict(obj.optimizer_config),
     }
-
-
-def _resolve_order(order: int | None, filter_mode: str) -> int:
-    if order is not None:
-        if order not in (1, 2):
-            raise ValueError(f"order must be 1 or 2, got {order}.")
-        if order == 1 and filter_mode == "unscented":
-            raise ValueError("UKF requires second-order tensors, use `order=2`.")
-        return order
-
-    if filter_mode == "unscented":
-        return 2
-    if filter_mode in ("linear", "extended"):
-        return 1
-    raise ValueError(
-        f"Unrecognized filter_mode {filter_mode!r}, must be one of {{'linear', 'extended', 'unscented'}}."
-    )
 
 
 def _emit_scalar(value: Any) -> float | None:
