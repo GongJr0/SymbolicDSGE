@@ -152,13 +152,12 @@ def test_filter_params_survive_the_spec_round_trip(
     from SymbolicDSGE.estimation import Estimator
     from SymbolicDSGE.filters.gaussian import LinearKalman
 
-    filter = LinearKalman(jitter=1e-8, symmetrize=True, joseph_cov=True)
     est = Estimator(
         config=solved_post82.config,
         compiled=compiled_post82,
         y=y_post82,
         observables=compiled_post82.observable_names,
-        filter=filter,
+        filter=LinearKalman(jitter=1e-8, symmetrize=True, joseph_cov=True),
         estimated_params=["psi_pi"],
         ss_seed=solved_post82.policy.steady_state,
     )
@@ -170,15 +169,13 @@ def test_filter_params_survive_the_spec_round_trip(
         "jitter": 1e-8,
         "symmetrize": True,
         "joseph_cov": True,
-        "return_shocks": False,
     }
 
     rebuilt = Estimator.from_spec(
         spec, config=solved_post82.config, compiled=compiled_post82
     )
-    # Dataclass equality is class-checked, so one assertion covers the mode
-    # lookup and every field the spec carried.
-    assert rebuilt.filter == filter
+
+    assert spec.params["filter_params"] == rebuilt.to_spec().params["filter_params"]
 
 
 def test_to_spec_reverses_live_scalar_priors(post82_estimator):

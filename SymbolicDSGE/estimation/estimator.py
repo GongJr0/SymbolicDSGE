@@ -175,15 +175,14 @@ class Estimator:
         """
         priors = {name: prior.to_spec() for name, prior in (self.priors or {}).items()}
         dto = self._prepared_filter
-        mode = dto.mode
         filter_par = {
             f.name: getattr(dto, f.name)
-            for f in fields(get_filter(mode))
+            for f in fields(get_filter(dto.mode))
             if hasattr(dto, f.name)
         }
         params = EstimatorParams(
-            observables=self._prepared_filter.observables,
-            filter_mode=self._prepared_filter.mode,
+            observables=dto.observables,
+            filter_mode=dto.mode,
             filter_params=filter_par,
             P0=self.P0.tolist() if self.P0 is not None else None,
             R=self.R.tolist() if self.R is not None else None,
@@ -192,7 +191,7 @@ class Estimator:
             ss_seed=_coerce_ss_seed(self.ss_seed),
         )
 
-        y = self._prepared_filter.y_reordered.tolist()
+        y = dto.y_reordered.tolist()
 
         return EstimatorSpec(
             y=y,

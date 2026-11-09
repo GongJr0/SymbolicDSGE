@@ -9,7 +9,7 @@ tags:
     You can find a demonstration notebook [here](../assets/monte_carlo.ipynb).
 
 ???+ warning "Read the Quickstart Guide and Kalman Filter Docs"
-    This guide assumes familiarity with `SolvedModel.sim(...)`, `Shock`, and `SolvedModel.kalman(...)`.
+    This guide assumes familiarity with [`SolvedModel.sim(...)`](../documentation/SolvedModel.md), [`Shock`](../documentation/Shock.md), and [`Filter`](../documentation/filters/index.md).
 
 This guides demonstrates the setup of an example Monte Carlo experiment.
 The `monte_carlo` module is written for two cases:
@@ -25,7 +25,7 @@ This demonstration focuses on the first case where two models are present.
 import numpy as np
 import pandas as pd
 
-from SymbolicDSGE import Shock, parse_config, solve_model
+from SymbolicDSGE import Shock, parse_config, solve_model, LinearKalman
 from SymbolicDSGE.monte_carlo import (
     MCPipeline,
     custom_transform,
@@ -47,10 +47,8 @@ ss_seed = np.zeros(5, dtype=np.float64)  # (1)!
 model = parse_config("../../MODELS/POST82.yaml") # (2)!
 reference = solve_model(model, ss_seed=ss_seed)
 
-dgp_model = parse_config("../../MODELS/POST82.yaml")
-dgp_model.calibration.parameters.update({"psi_x": 0.2, "psi_pi": 3.0}) # (3)!
+dgp_model = model.with_parameters({"psi_x": 0.2, "psi_pi": 3.0}) # (3)!
 dgp = solve_model(dgp_model, ss_seed=ss_seed)
-
 ```
 
 1. Both models use the same steady-state seed.
@@ -138,10 +136,10 @@ The first step after datagen is filtering the reference model using a Kalman fil
 ```python
 from SymbolicDSGE.monte_carlo.step_factories import filter_step
 
-kf_step = filter_step(target="reference", obs_source="datagen", obs_field="observables")
+kf_step = filter_step(target="reference", obs_source="datagen", obs_field="observables", filter=LinearKalman())
 ```
 
-`filter_step` accepts `filter_mode`, `observables`, `x0`, `P0`, `R`, `jitter`, `symmetrize`, `joseph_cov`, and `return_shocks`, mirroring the `SolvedModel.kalman` configuration.
+`filter_step` additionally accepts `observables`, `x0`, `P0`, `R`, mirroring the `Filter.filter(...)` signature.
 
 ### Testing
 
@@ -320,19 +318,19 @@ mc = pipeline.run(
     The native loop only collects per-step profiling when it is asked to. At any lower verbosity `meta.step_elapsed_s`, `meta.step_counts`, and `meta.step_failures` are empty dictionaries.
 
 ```bash
->>> MC run concluded successfully in 0.02s with 58602.22 it/s.
+>>> MC run concluded successfully in 0.02s with 55655.12 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 41868.16 worker it/s (0.02 worker-s), 58602.22 wall it/s.
-    filter: 0 failures, 3944.12 worker it/s (0.25 worker-s), 58602.22 wall it/s.
-    custom_std: 0 failures, 186216.28 worker it/s (0.01 worker-s), 58602.22 wall it/s.
-    builtin_std: 0 failures, 168466.45 worker it/s (0.01 worker-s), 58602.22 wall it/s.
-    std_innov_mean: 0 failures, 91945.57 worker it/s (0.01 worker-s), 58602.22 wall it/s.
+    datagen: 0 failures, 39143.54 worker it/s (0.03 worker-s), 55655.12 wall it/s.
+    filter: 0 failures, 3793.83 worker it/s (0.26 worker-s), 55655.12 wall it/s.
+    custom_std: 0 failures, 194654.87 worker it/s (0.01 worker-s), 55655.12 wall it/s.
+    builtin_std: 0 failures, 157980.29 worker it/s (0.01 worker-s), 55655.12 wall it/s.
+    std_innov_mean: 0 failures, 78649.14 worker it/s (0.01 worker-s), 55655.12 wall it/s.
 
 Post-processing Report:
 
-    custom_postproc: Succeeded in 0.0031s.
-    builtin_kde: Succeeded in 1.4295s.
+    custom_postproc: Succeeded in 0.0024s.
+    builtin_kde: Succeeded in 1.3965s.
 ```
 
 ???+ note "Worker Time vs Wall Time"
