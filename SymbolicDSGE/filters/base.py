@@ -40,12 +40,12 @@ class Filter(ABC, Generic[ResultT]):
         x0: Mapping[str, float] | None = None,
     ) -> ResultT: ...
 
-    def to_spec(self) -> dict:
+    def to_spec(self) -> dict[str, Any]:
         """Convert the filter to a specification dictionary."""
         spec = {f.name: _normalize(getattr(self, f.name)) for f in fields(self)}
         return spec
 
     @classmethod
-    def from_spec(cls, spec: dict) -> Filter[ResultT]:
+    def from_spec(cls, spec: dict[str, Any]) -> Filter[ResultT]:
         """Create a filter from a specification dictionary."""
         return cls(**spec)

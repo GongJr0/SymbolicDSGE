@@ -35,6 +35,12 @@ from ..core.resolvers import (
     shock_covariance,
     measurement_covariance,
 )
+from ..filters.base import Filter
+from ..filters.gaussian import (
+    LinearKalman,
+    ExtendedKalman,
+    UnscentedKalman,
+)
 from ..filters.resolvers import FilterMode, _resolve_P0
 
 NDF = NDArray[np.float64]
@@ -93,56 +99,40 @@ class PyCovSpec(NamedTuple):
 
 @dataclass(frozen=True)
 class FilterDTO:
-    """Composed filter run inputs, ready for native evaluation.
-
-    Attributes
-    ----------
-    observables : list[str]
-        List of observables in the order they are passed to the filter.
-    y_reordered : NDArray[float64]
-        Observed data, reordered to match ``observables``.
-    mode : str
-        Filter mode; one of "linear", "extended", or "unscented".
-    meas_addr : int
-        Pointer to the measurement evaluation callable (``numba.cfunc`` address).
-    jac_addr : int
-        Pointer to the measurement jacobian evaluation callable (``numba.cfunc`` address).
-    P0 : NDArray[float64] | None
-        State covariance initialization matrix, or None if not provided.
-    jitter : float64
-        Jitter to add to covariance matrices when cholesky decomposition fails.
-    sym : bool
-        Whether to symmetrize covariance matrices in the Kalman kernels.
-    joseph_cov : bool
-        Whether to use the Joseph form for covariance updates in the Kalman filter.
-    alpha : float | None
-        Alpha parameter for the unscented Kalman filter, or None if not applicable.
-    beta : float | None
-        Beta parameter for the unscented Kalman filter, or None if not applicable.
-    kappa : float | None
-        Kappa parameter for the unscented Kalman filter, or None if not applicable.
-    T : int
-        Number of time steps in the observation data.
-    n_obs : int
-        Number of observables (columns) in the observation data.
-
-    """
 
     observables: list[str]
     y_reordered: NDF
     mode: str
     meas_addr: int
-    jac_addr: int
-    P0: NDF | None
-    jitter: float64
-    sym: bool
-    joseph_cov: bool
-    alpha: float | None
-    beta: float | None
-    kappa: float | None
     # Allocation dimensions for filters
     T: int
     n_obs: int
+
+
+@dataclass(frozen=True)
+class GaussianFilterDTO(FilterDTO):
+    P0: NDF | None
+    jitter: float
+    sym: bool
+
+
+@dataclass(frozen=True)
+class LinearKalmanDTO(GaussianFilterDTO):
+    joseph_cov: bool
+    jac_addr: int
+
+
+@dataclass(frozen=True)
+class ExtendedKalmanDTO(GaussianFilterDTO):
+    joseph_cov: bool
+    jac_addr: int
+
+
+@dataclass(frozen=True)
+class UnscentedKalmanDTO(GaussianFilterDTO):
+    alpha: float
+    beta: float
+    kappa: float
 
 
 class SolveDTO(NamedTuple):
@@ -595,13 +585,77 @@ def _build_R(
     )
 
 
-def resolve_filter_options(
-    jitter: float | float64 | None,
-    symmetrize: bool,
-) -> tuple[float64, bool]:
-    kf_jitter = float64(0.0) if jitter is None else float64(jitter)
-    kf_sym = False if symmetrize is None else bool(symmetrize)
-    return kf_jitter, kf_sym
+def prepare_linear(
+    *,
+    compiled: CompiledModel,
+    y: NDF | pd.DataFrame,
+    observables: Sequence[str] | None,
+    filter: LinearKalman,
+    P0: NDF | None = None,
+) -> LinearKalmanDTO:
+    obs, y_reordered = reorder_observables(compiled, observables, y)
+    return LinearKalmanDTO(
+        observables=obs,
+        y_reordered=y_reordered,
+        mode=filter.mode.value,
+        meas_addr=compiled.construct_measurement_cfunc(obs).address,
+        P0=_resolve_P0(filter.mode, compiled.n_state, compiled.n_var, P0),
+        jac_addr=compiled.construct_measurement_jacobian_cfunc(obs).address,
+        jitter=filter.jitter,
+        sym=filter.symmetrize,
+        joseph_cov=bool(filter.joseph_cov),
+        T=y_reordered.shape[0],
+        n_obs=y_reordered.shape[1],
+    )
+
+
+def prepare_extended(
+    *,
+    compiled: CompiledModel,
+    y: NDF | pd.DataFrame,
+    observables: Sequence[str] | None,
+    filter: ExtendedKalman,
+    P0: NDF | None = None,
+) -> ExtendedKalmanDTO:
+    obs, y_reordered = reorder_observables(compiled, observables, y)
+    return ExtendedKalmanDTO(
+        observables=obs,
+        y_reordered=y_reordered,
+        mode=filter.mode.value,
+        meas_addr=compiled.construct_measurement_cfunc(obs).address,
+        T=y_reordered.shape[0],
+        n_obs=y_reordered.shape[1],
+        P0=_resolve_P0(filter.mode, compiled.n_state, compiled.n_var, P0),
+        jitter=filter.jitter,
+        sym=filter.symmetrize,
+        joseph_cov=bool(filter.joseph_cov),
+        jac_addr=compiled.construct_measurement_jacobian_cfunc(obs).address,
+    )
+
+
+def prepare_unscented(
+    *,
+    compiled: CompiledModel,
+    y: NDF | pd.DataFrame,
+    observables: Sequence[str] | None,
+    filter: UnscentedKalman,
+    P0: NDF | None = None,
+) -> UnscentedKalmanDTO:
+    obs, y_reordered = reorder_observables(compiled, observables, y)
+    return UnscentedKalmanDTO(
+        observables=obs,
+        y_reordered=y_reordered,
+        mode=filter.mode.value,
+        meas_addr=compiled.construct_measurement_cfunc(obs).address,
+        T=y_reordered.shape[0],
+        n_obs=y_reordered.shape[1],
+        P0=_resolve_P0(filter.mode, compiled.n_state, compiled.n_var, P0),
+        jitter=filter.jitter,
+        sym=filter.symmetrize,
+        alpha=float64(filter.alpha),
+        beta=float64(filter.beta),
+        kappa=float64(filter.kappa),
+    )
 
 
 def prepare_filter_run(
@@ -609,32 +663,24 @@ def prepare_filter_run(
     compiled: CompiledModel,
     y: NDF | pd.DataFrame,
     observables: Sequence[str] | None,
-    filter_mode: str,
-    jitter: float | float64 | None,
-    symmetrize: bool,
-    joseph_cov: bool = False,
+    filter: Filter,
     P0: NDF | None = None,
 ) -> FilterDTO:
-    obs, y_reordered = reorder_observables(compiled, observables, y)
-    mode = filter_mode
-
-    kf_jitter, kf_sym = resolve_filter_options(jitter, symmetrize)
-    return FilterDTO(
-        observables=obs,
-        y_reordered=y_reordered,
-        mode=mode,
-        meas_addr=compiled.construct_measurement_cfunc(obs).address,
-        jac_addr=compiled.construct_measurement_jacobian_cfunc(obs).address,
-        P0=_resolve_P0(FilterMode(mode), compiled.n_state, compiled.n_var, P0),
-        jitter=kf_jitter,
-        sym=kf_sym,
-        joseph_cov=bool(joseph_cov),
-        alpha=1.0,
-        beta=2.0,
-        kappa=1.0,
-        T=y_reordered.shape[0],
-        n_obs=y_reordered.shape[1],
-    )
+    match filter:
+        case LinearKalman():
+            return prepare_linear(
+                compiled=compiled, y=y, observables=observables, filter=filter, P0=P0
+            )
+        case ExtendedKalman():
+            return prepare_extended(
+                compiled=compiled, y=y, observables=observables, filter=filter, P0=P0
+            )
+        case UnscentedKalman():
+            return prepare_unscented(
+                compiled=compiled, y=y, observables=observables, filter=filter, P0=P0
+            )
+        case _:
+            raise ValueError(f"Unknown filter type: {type(filter).__name__}.")
 
 
 def _corr_chol_from_unconstrained(z: NDF, K: int) -> NDF:

@@ -306,6 +306,19 @@ def test_resolve_p0_embeds_state_block_for_unscented():
     )
 
 
+def test_get_filter_maps_every_mode_and_rejects_an_unknown_one():
+    from SymbolicDSGE.filters.gaussian import ExtendedKalman
+    from SymbolicDSGE.filters.mode_map import get_filter
+
+    assert get_filter("linear") is LinearKalman
+    assert get_filter("extended") is ExtendedKalman
+    assert get_filter(FilterMode.UNSCENTED) is UnscentedKalman
+
+    # The lookup a bundle's recorded ``filter_mode`` goes through.
+    with pytest.raises(ValueError, match="is not a recognized filter mode"):
+        get_filter("kalman")
+
+
 def test_resolve_observations_aligns_dataframe_and_ndarray_inputs(solved_multishock):
     model = solved_multishock
     canonical = np.array([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]], dtype=FLOAT)

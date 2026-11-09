@@ -22,7 +22,7 @@ We will cover:
 ## Parse Configs and Compile
 
 ```python
-from SymbolicDSGE import parse_config, solve_model, Estimator
+from SymbolicDSGE import parse_config, solve_model, Estimator, LinearKalman
 from SymbolicDSGE.utils import FRED
 from SymbolicDSGE.utils.math_utils import HP_two_sided, annualized_log_percent
 from SymbolicDSGE.bayesian import make_prior
@@ -104,7 +104,7 @@ est = Estimator(
     config=model,
     y=observed.loc[observed.index >= "1984-01-01", :], # (1)!
     observables=["Infl", "Rate"], # (2)!
-    filter_mode="linear", # (3)!
+    filter=LinearKalman(jitter=1e-8), # (3)!
     estimated_params=estimated,  # (4)!
     ss_seed=[0.0, 0.0, 0.0, 0.0, 0.0]
 )
@@ -112,8 +112,7 @@ est = Estimator(
 
 1. Observed data we want to calibrate against
 2. Which observables to use from the model specification. If not specified, all observables will be used. Number of columns in `y` must match the number of observables.
-3. Mode of the Kalman Filter used to compute the likelihood. Chosen from
-`{'linear', 'extended', 'unscented'}`.
+3. The filter used to compute the likelihood. Can be any of the [`Filter`](../documentation/filters/index.md) subclasses (that's suitable with the model being supplied).
 4. Dictionary of `{name: Prior}` or a list of names for the unpriored case.
 
 ## Running the Estimation
@@ -135,13 +134,13 @@ res = est.mcmc(
 4. Seed the draws for reproducibility. If `None`, the draws are not seeded.
 
 ```text
-MCMC sampling concluded in 5.92 seconds with 18573.03 iterations per second.
+MCMC sampling concluded in 5.78 seconds with 19034.66 iterations per second.
 [Estimator:mcmc] BK stability warnings encountered during search: 0
 ```
 
-???+ note "Filter Mode Selection"
-    Filter modes increase in capability and complexity as follows: `linear` < `extended` < `unscented`. Linear doesn't support any non-linearities in the model (transitions and measurements). Extended allows for non-linearities in measurements, but not in transitions. Unscented, which is by far the slowest,
-    requires a non-linear (`order>=2`) solution and supports non-linearities in both transitions and measurements. In general, it is recommended to use the simplest possible filter mode that is compatible with a given model. (Note that `extended` on a linear model is equivalent to `linear` but slower.)
+???+ note "Filter Selection"
+    Filter modes increase in capability and complexity as follows: `LinearKalman` < `ExtendedKalman` < `UnscentedKalman`. Linear doesn't support any non-linearities in the model (transitions and measurements). Extended allows for non-linearities in measurements, but not in transitions. Unscented, which is by far the slowest,
+    requires a non-linear (`order>=2`) solution and supports non-linearities in both transitions and measurements. In general, it is recommended to use the simplest possible filter mode that is compatible with a given model. (Note that `ExtendedKalman` on a linear model is equivalent to `LinearKalman` but slower.)
 
 ???+ note "Draw Count Calculation"
     `n_draws` directly lets you specify the Effective Sample Size (ESS) you want to retain. Given `n_draws`, `burn_in`, and `thin`, the total number of draws an estimation routine will perform is `n_draws * thin + burn_in`.

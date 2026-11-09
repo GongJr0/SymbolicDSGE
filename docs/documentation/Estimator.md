@@ -12,31 +12,25 @@ from SymbolicDSGE import Estimator
 Estimator(
     *,
     config: ModelConfig
-    y: np.ndarray | pd.DataFrame, # (1)!
-    compiled: CompiledModel, # (2)!
+    estimated_params: Sequence[str] | Mapping[str, Prior] | None = None, # (1)!
+    y: np.ndarray | pd.DataFrame, # (2)!
+    compiled: CompiledModel, # (3)!
     observables: list[str] | None = None,
-    filter_mode: str = "linear", # (3)!
-    estimated_params: Sequence[str] | Mapping[str, Prior] | None = None, # (4)!
+    filter: Filter = LinearKalman(), # (4)!
     ss_seed: np.ndarray | dict[str, float] | None = None,
-    jitter: float | None = None,
-    symmetrize: bool = True,
-    joseph_cov: bool = False,
     R: np.ndarray | None = None, # (5)!
     P0: np.ndarray | None = None, # (6)!
 )
 ```
-
-1. Measurement data for Kalman likelihood.
-2. Compiled model from `compile_model(...)`.
-3. Filter algorithm for the likelihood: `#!python "linear"`, `#!python "extended"` (EKF), or `#!python "unscented"` (UKF). Chosen explicitly, not inferred.
-4. Parameter names to estimate, or a mapping from parameter name to `Prior` object. If `None`, all parameters are estimated with uniform priors. `map()` and `mcmc()` require priors to be specified and `mle()` ignores them.
+1. Parameter names to estimate, or a mapping from parameter name to `Prior` object. If `None`, all parameters are estimated with uniform priors. `map()` and `mcmc()` require priors to be specified and `mle()` ignores them.
+2. Measurement data for Kalman likelihood.
+3. Compiled model from `compile_model(...)`.
+4. Filter algorithm for the likelihood can be any of the [`Filter`](./filters/index.md) subclasses.
 5. Optional constant observation-covariance override. If omitted, `R` is built from the calibration's `measurement_noise` block.
 6. Optional initial state-covariance override. If omitted, the stationary state-space covariance is used. Supply a full `(n_var, n_var)` matrix in compiled variable order; for `unscented` mode its state block is embedded automatically.
 
 ???+ info "Filter Initial Conditions"
-    In linear and extended likelihoods, `P0` is the prior covariance for the first observation. In unscented likelihoods, it covariance before the first observation.
-
-`joseph_cov=True` uses the Joseph covariance update for linear and extended likelihoods. `False` applies a simplw update, which is faster but less numerically robust.
+    In linear and extended likelihoods, `P0` is the prior covariance for the first observation. In unscented likelihoods, its the covariance before the first observation.
 
 ## Likelihood / Posterior Evaluation
 

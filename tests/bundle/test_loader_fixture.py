@@ -136,15 +136,16 @@ def test_load_estimation_optimization_result_dispatch(parsed_test, compiled_test
         {
             "observables": ["Infl", "Rate"],
             "filter_mode": "linear",
+            "filter_params": {
+                "jitter": 0.0,
+                "symmetrize": True,
+                "joseph_cov": True,
+            },
             "P0": None,
             "R": [[1e-4, 0.0], [0.0, 1e-4]],
             "estimated_params": ["beta"],
             "priors": None,
             "ss_seed": None,
-            "x0": None,
-            "jitter": 0.0,
-            "symmetrize": True,
-            "joseph_cov": True,
         }
     )
     result_json = json.dumps({"type": "map", "data": _OPT_META})

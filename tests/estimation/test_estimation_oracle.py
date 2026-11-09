@@ -26,6 +26,8 @@ import pytest
 
 from SymbolicDSGE.estimation import Estimator, make_prior
 from SymbolicDSGE.estimation.results import MLEResult, MAPResult
+from SymbolicDSGE.filters.gaussian import LinearKalman
+from SymbolicDSGE.filters.mode_map import get_filter
 
 # The POST82 model is the session-wide bundle; ``y_post82`` lives in
 # tests/estimation/conftest.py.
@@ -45,7 +47,7 @@ def _mle_estimator(solved, y, mode: str) -> Estimator:
         compiled=compiled,
         y=y,
         observables=compiled.observable_names,
-        filter_mode=mode,
+        filter=get_filter(mode)(),
         estimated_params=["psi_pi", "rho_r"],
         ss_seed=solved.policy.steady_state,
         P0=P0,
@@ -99,7 +101,7 @@ def test_map_lbfgsb_oracle(solved_post82, y_post82):
         compiled=compiled,
         y=y_post82,
         observables=compiled.observable_names,
-        filter_mode="linear",
+        filter=LinearKalman(),
         estimated_params={"psi_pi": prior},
         ss_seed=solved_post82.policy.steady_state,
     )

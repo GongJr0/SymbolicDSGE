@@ -71,6 +71,8 @@ class EstimatorParams(TypedDict):
         therefore cannot be `None` in any `.sdsge` file.
     filter_mode : str
         Kalman filter mode. One of "linear", "extended", or "unscented".
+    filter_params : dict[str, Any]
+        Parameters for the filter instance being serialized.
     P0 : Sequence[Sequence[float]] | None
         Initial state covariance matrix. If ``None``, the stationary covariance is used.
     R : Sequence[Sequence[float]] | None
@@ -92,14 +94,12 @@ class EstimatorParams(TypedDict):
 
     observables: Sequence[str] | None
     filter_mode: str
+    filter_params: dict[str, Any]
     P0: Sequence[Sequence[float]] | None
     R: Sequence[Sequence[float]] | None
     estimated_params: Sequence[str]
     priors: Mapping[str, PriorSpec] | None
     ss_seed: Sequence[float] | Mapping[str, float] | None
-    jitter: float
-    symmetrize: bool
-    joseph_cov: bool
 
 
 @dataclass

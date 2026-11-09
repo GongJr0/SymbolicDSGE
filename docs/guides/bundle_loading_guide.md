@@ -144,11 +144,11 @@ mc_repro = pipeline.run(
 ```
 
 ```text
->>> MC run concluded successfully in 0.00s with 544840.36 it/s.
+>>> MC run concluded successfully in 0.00s with 526814.87 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 53655.84 worker it/s (0.02 worker-s), 544840.36 wall it/s.
-    jb_test: 0 failures, 1179245.13 worker it/s (0.00 worker-s), 544840.36 wall it/s.
+	datagen: 0 failures, 50642.39 worker it/s (0.02 worker-s), 526814.87 wall it/s.
+	jb_test: 0 failures, 1026906.66 worker it/s (0.00 worker-s), 526814.87 wall it/s.
 ```
 
 ```python

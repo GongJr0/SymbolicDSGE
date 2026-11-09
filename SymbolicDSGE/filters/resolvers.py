@@ -11,7 +11,7 @@ individual resolvers and stages the arrays itself.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Sequence, TypedDict, Mapping
+from typing import TYPE_CHECKING, NoReturn, Sequence, TypedDict, Mapping
 
 import numpy as np
 import pandas as pd
@@ -45,6 +45,13 @@ class FilterMode(StrEnum):
     LINEAR = "linear"
     EXTENDED = "extended"
     UNSCENTED = "unscented"
+
+    @classmethod
+    def _missing_(cls, value: object) -> NoReturn:
+        raise ValueError(
+            f"Mode {value!r} is not a recognized filter mode. "
+            f"Valid modes are: {list(cls._value2member_map_.keys())!r}"
+        )
 
 
 class LinearRunArgs(TypedDict):

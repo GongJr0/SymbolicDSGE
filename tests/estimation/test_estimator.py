@@ -146,6 +146,41 @@ def test_to_spec_captures_construction_state(
     assert "method" not in spec.params
 
 
+def test_filter_params_survive_the_spec_round_trip(
+    solved_post82, compiled_post82, y_post82
+):
+    from SymbolicDSGE.estimation import Estimator
+    from SymbolicDSGE.filters.gaussian import LinearKalman
+
+    filter = LinearKalman(jitter=1e-8, symmetrize=True, joseph_cov=True)
+    est = Estimator(
+        config=solved_post82.config,
+        compiled=compiled_post82,
+        y=y_post82,
+        observables=compiled_post82.observable_names,
+        filter=filter,
+        estimated_params=["psi_pi"],
+        ss_seed=solved_post82.policy.steady_state,
+    )
+
+    spec = est.to_spec()
+
+    assert spec.params["filter_mode"] == "linear"
+    assert spec.params["filter_params"] == {
+        "jitter": 1e-8,
+        "symmetrize": True,
+        "joseph_cov": True,
+        "return_shocks": False,
+    }
+
+    rebuilt = Estimator.from_spec(
+        spec, config=solved_post82.config, compiled=compiled_post82
+    )
+    # Dataclass equality is class-checked, so one assertion covers the mode
+    # lookup and every field the spec carried.
+    assert rebuilt.filter == filter
+
+
 def test_to_spec_reverses_live_scalar_priors(post82_estimator):
     from SymbolicDSGE.bayesian.priors import make_prior
 
@@ -1141,7 +1176,9 @@ def test_mcmc_adaptation_runs_for_scalar_and_vector(post82_estimator, estimated)
     assert out.samples.shape == (10, len(estimated))
 
 
-def test_estimate_and_solve_leaves_the_given_config_alone(solved_post82, y_post82):
+def test_estimate_and_solve_leaves_the_given_config_alone(
+    solved_post82, post82_estimator
+):
     """The estimates reach the solve through a copy, not through the caller's
     config."""
     config = solved_post82.config
@@ -1152,11 +1189,7 @@ def test_estimate_and_solve_leaves_the_given_config_alone(solved_post82, y_post8
     before = calibration()
 
     result, solved = estimate_and_solve(
-        config=config,
-        compiled=solved_post82.compiled,
-        y=y_post82,
-        observables=solved_post82.compiled.observable_names,
-        estimated_params=["psi_pi", "rho_r"],
+        est=post82_estimator(estimated_params=("psi_pi", "rho_r")),
         ss_seed=solved_post82.policy.steady_state,
         theta0=_POST82_START,
         bounds=_POST82_BOUNDS,
