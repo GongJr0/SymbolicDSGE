@@ -585,15 +585,6 @@ def _build_R(
     )
 
 
-def resolve_filter_options(
-    jitter: float | float64 | None,
-    symmetrize: bool,
-) -> tuple[float64, bool]:
-    kf_jitter = float64(0.0) if jitter is None else float64(jitter)
-    kf_sym = False if symmetrize is None else bool(symmetrize)
-    return kf_jitter, kf_sym
-
-
 def prepare_linear(
     *,
     compiled: CompiledModel,
@@ -603,18 +594,15 @@ def prepare_linear(
     P0: NDF | None = None,
 ) -> LinearKalmanDTO:
     obs, y_reordered = reorder_observables(compiled, observables, y)
-    jitter, sym = resolve_filter_options(filter.jitter, filter.symmetrize)
     return LinearKalmanDTO(
         observables=obs,
         y_reordered=y_reordered,
         mode=filter.mode.value,
         meas_addr=compiled.construct_measurement_cfunc(obs).address,
-        P0=_resolve_P0(
-            FilterMode(filter.mode.value), compiled.n_state, compiled.n_var, P0
-        ),
+        P0=_resolve_P0(filter.mode, compiled.n_state, compiled.n_var, P0),
         jac_addr=compiled.construct_measurement_jacobian_cfunc(obs).address,
-        jitter=jitter,
-        sym=sym,
+        jitter=filter.jitter,
+        sym=filter.symmetrize,
         joseph_cov=bool(filter.joseph_cov),
         T=y_reordered.shape[0],
         n_obs=y_reordered.shape[1],
@@ -630,7 +618,6 @@ def prepare_extended(
     P0: NDF | None = None,
 ) -> ExtendedKalmanDTO:
     obs, y_reordered = reorder_observables(compiled, observables, y)
-    jitter, sym = resolve_filter_options(filter.jitter, filter.symmetrize)
     return ExtendedKalmanDTO(
         observables=obs,
         y_reordered=y_reordered,
@@ -638,11 +625,9 @@ def prepare_extended(
         meas_addr=compiled.construct_measurement_cfunc(obs).address,
         T=y_reordered.shape[0],
         n_obs=y_reordered.shape[1],
-        P0=_resolve_P0(
-            FilterMode(filter.mode.value), compiled.n_state, compiled.n_var, P0
-        ),
-        jitter=jitter,
-        sym=sym,
+        P0=_resolve_P0(filter.mode, compiled.n_state, compiled.n_var, P0),
+        jitter=filter.jitter,
+        sym=filter.symmetrize,
         joseph_cov=bool(filter.joseph_cov),
         jac_addr=compiled.construct_measurement_jacobian_cfunc(obs).address,
     )
@@ -657,7 +642,6 @@ def prepare_unscented(
     P0: NDF | None = None,
 ) -> UnscentedKalmanDTO:
     obs, y_reordered = reorder_observables(compiled, observables, y)
-    jitter, sym = resolve_filter_options(filter.jitter, filter.symmetrize)
     return UnscentedKalmanDTO(
         observables=obs,
         y_reordered=y_reordered,
@@ -665,11 +649,9 @@ def prepare_unscented(
         meas_addr=compiled.construct_measurement_cfunc(obs).address,
         T=y_reordered.shape[0],
         n_obs=y_reordered.shape[1],
-        P0=_resolve_P0(
-            FilterMode(filter.mode.value), compiled.n_state, compiled.n_var, P0
-        ),
-        jitter=jitter,
-        sym=sym,
+        P0=_resolve_P0(filter.mode, compiled.n_state, compiled.n_var, P0),
+        jitter=filter.jitter,
+        sym=filter.symmetrize,
         alpha=float64(filter.alpha),
         beta=float64(filter.beta),
         kappa=float64(filter.kappa),

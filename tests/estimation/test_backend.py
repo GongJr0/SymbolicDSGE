@@ -247,12 +247,6 @@ def test_corr_chol_unconstrained_parameterization():
     assert np.allclose(z_from_corr, z, atol=1e-10, rtol=0.0)
 
 
-def test_resolve_filter_options_prefers_defaults_and_honors_overrides():
-    # jitter/symmetrize are call-site concerns; defaulted when unset, else honored.
-    assert backend.resolve_filter_options(None, None) == pytest.approx((0.0, False))
-    assert backend.resolve_filter_options(0.5, True) == pytest.approx((0.5, True))
-
-
 def test_measurement_covariance_error_branches(injected_measurement_noise):
     params = {"s_o": 1.0, "s_i": 1.0}
 

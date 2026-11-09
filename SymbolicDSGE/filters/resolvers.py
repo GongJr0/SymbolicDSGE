@@ -49,7 +49,7 @@ class FilterMode(StrEnum):
     @classmethod
     def _missing_(cls, value: object) -> None:
         raise ValueError(
-            f"Mode {value!r} is not a recognized filter mode."
+            f"Mode {value!r} is not a recognized filter mode. "
             f"Valid modes are: {list(cls._value2member_map_.keys())!r}"
         )
 

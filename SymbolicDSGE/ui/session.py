@@ -373,18 +373,14 @@ class UISession:
             request["parameters"],
             routine=request["routine"],
         )
-
+        filter = LinearKalman(jitter=1e-8, symmetrize=True, joseph_cov=True)
         spec_wire = estimator_spec_wire(
             EstimatorSpec(
                 y=y.tolist(),
                 params=EstimatorParams(
                     observables=observables,
-                    filter_mode="linear",
-                    filter_params={
-                        "jitter": 1e-8,
-                        "symmetrize": True,
-                        "joseph_cov": True,
-                    },
+                    filter_mode=filter.mode.value,
+                    filter_params=filter.to_spec(),
                     P0=None,
                     R=None,
                     estimated_params=names,
@@ -432,7 +428,7 @@ class UISession:
             "observables": observables,
             "estimated_params": priors if priors is not None else names,
             "ss_seed": request["ss_seed"],
-            "filter": LinearKalman(jitter=1e-8, symmetrize=True, joseph_cov=True),
+            "filter": filter,
             **kwargs,
         }
         solved = False
