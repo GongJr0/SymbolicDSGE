@@ -133,7 +133,7 @@ def estimate_and_solve(
     ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
     **method_kwargs: Any,
 ) -> tuple[MLEResult | MAPResult | MCMCResult, SolvedModel]:
-    order = 2 if est.filter.mode == FilterMode.UNSCENTED else 1
+    order = 2 if est._prepared_filter.mode == FilterMode.UNSCENTED else 1
     result: MLEResult | MAPResult | MCMCResult
     solve_params: Mapping[str, float]
     match routine.lower():
