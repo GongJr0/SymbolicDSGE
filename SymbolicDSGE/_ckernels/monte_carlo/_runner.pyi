@@ -37,13 +37,6 @@ class NativeStep:
         self,
     ) -> DistributionParameter | tuple[DistributionParameter, ...] | None: ...
 
-DEFAULT_SYMMETRIZE: bool
-DEFAULT_JOSEPH_COV: bool
-DEFAULT_JITTER: float
-DEFAULT_RETURN_SHOCKS: bool
-DEFAULT_UKF_ALPHA: float
-DEFAULT_UKF_BETA: float
-DEFAULT_UKF_KAPPA: float
 DEFAULT_DDOF: int
 DEFAULT_OFFSET: float
 DEFAULT_ORDER: int

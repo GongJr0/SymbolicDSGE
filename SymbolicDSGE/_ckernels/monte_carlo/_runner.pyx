@@ -615,13 +615,6 @@ class NativeRunResult(NamedTuple):
 # Step-builder defaults. A knob is valued once here and shared by every builder
 # that carries it, so a caller that omits one still narrows a complete context.
 # Callers that size arenas before a step exists read the same names.
-DEFAULT_SYMMETRIZE = True
-DEFAULT_JOSEPH_COV = False
-DEFAULT_JITTER = 0.0
-DEFAULT_RETURN_SHOCKS = False
-DEFAULT_UKF_ALPHA = 1.0
-DEFAULT_UKF_BETA = 2.0
-DEFAULT_UKF_KAPPA = 1.0
 DEFAULT_DDOF = 0
 DEFAULT_OFFSET = 0.0
 DEFAULT_ORDER = 1
@@ -937,10 +930,10 @@ def filter_linear_step(
     int64_t n_var,
     int64_t n_obs,
     int64_t n_exog,
-    bint symmetrize=DEFAULT_SYMMETRIZE,
-    bint joseph_cov=DEFAULT_JOSEPH_COV,
-    double jitter=DEFAULT_JITTER,
-    bint return_shocks=DEFAULT_RETURN_SHOCKS,
+    bint symmetrize,
+    bint joseph_cov,
+    double jitter,
+    bint return_shocks,
 ):
     """Bind a linear Kalman filter with resolved scalar settings."""
     cdef NativeStep step = NativeStep()
@@ -974,10 +967,10 @@ def filter_extended_step(
     int64_t n_obs,
     int64_t n_exog,
     int64_t n_par,
-    bint symmetrize=DEFAULT_SYMMETRIZE,
-    bint joseph_cov=DEFAULT_JOSEPH_COV,
-    double jitter=DEFAULT_JITTER,
-    bint return_shocks=DEFAULT_RETURN_SHOCKS,
+    bint symmetrize,
+    bint joseph_cov,
+    double jitter,
+    bint return_shocks,
 ):
     """Bind an extended Kalman filter with resolved callbacks and settings."""
     cdef NativeStep step = NativeStep()
@@ -1016,11 +1009,11 @@ def filter_unscented_step(
     int64_t n_exog,
     int64_t n_obs,
     int64_t n_par,
-    double alpha=DEFAULT_UKF_ALPHA,
-    double beta=DEFAULT_UKF_BETA,
-    double kappa=DEFAULT_UKF_KAPPA,
-    bint symmetrize=DEFAULT_SYMMETRIZE,
-    double jitter=DEFAULT_JITTER,
+    double alpha,
+    double beta,
+    double kappa,
+    bint symmetrize,
+    double jitter,
 ):
     """Bind an unscented Kalman filter with resolved callback and settings."""
     cdef NativeStep step = NativeStep()
