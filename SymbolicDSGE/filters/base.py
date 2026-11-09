@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 from abc import ABC, abstractmethod
-from typing import Any, Mapping, TypeVar, ClassVar, Generic
+from typing import Any, TypeVar, ClassVar, Generic
 
 from numpy.typing import NDArray
 from numpy import float64, ndarray
@@ -37,7 +37,7 @@ class Filter(ABC, Generic[ResultT]):
         y: NDArray[float64],
         observables: list[str] | tuple[str, ...] | None = None,
         R: NDArray[float64] | None = None,
-        x0: Mapping[str, float] | None = None,
+        x0: dict[str, float] | list[float] | NDArray[float64] | None = None,
     ) -> ResultT: ...
 
     def to_spec(self) -> dict[str, Any]:

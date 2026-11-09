@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, Mapping
+from typing import ClassVar
 
 from numpy import float64
 from numpy.typing import NDArray
@@ -43,7 +43,7 @@ class LinearKalman(GaussianFilter[FilterResult]):
         y: NDArray[float64],
         observables: list[str] | tuple[str, ...] | None = None,
         R: NDArray[float64] | None = None,
-        x0: Mapping[str, float] | None = None,
+        x0: dict[str, float] | list[float] | NDArray[float64] | None = None,
         P0: NDArray[float64] | None = None,
     ) -> FilterResult:
         """Run a linear Kalman filter on the given model and data.
@@ -105,7 +105,7 @@ class ExtendedKalman(GaussianFilter[FilterResult]):
         y: NDArray[float64],
         observables: list[str] | tuple[str, ...] | None = None,
         R: NDArray[float64] | None = None,
-        x0: Mapping[str, float] | None = None,
+        x0: dict[str, float] | list[float] | NDArray[float64] | None = None,
         P0: NDArray[float64] | None = None,
     ) -> FilterResult:
         """Run an extended Kalman filter on the given model and data.
@@ -169,7 +169,7 @@ class UnscentedKalman(GaussianFilter[UnscentedFilterResult]):
         y: NDArray[float64],
         observables: list[str] | tuple[str, ...] | None = None,
         R: NDArray[float64] | None = None,
-        x0: Mapping[str, float] | None = None,
+        x0: dict[str, float] | list[float] | NDArray[float64] | None = None,
         P0: NDArray[float64] | None = None,
     ) -> UnscentedFilterResult:
         """Run an extended Kalman filter on the given model and data.

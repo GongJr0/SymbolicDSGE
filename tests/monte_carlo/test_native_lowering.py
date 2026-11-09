@@ -476,7 +476,7 @@ def test_native_lowering_runs_linear_and_extended_filters(solved_post82) -> None
                     target="reference",
                     obs_source="sim",
                     obs_field="observables",
-                    filter_mode=filter.mode.value,
+                    filter=filter,
                 ),
             ]
         )
@@ -534,7 +534,7 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides(
                 target="reference",
                 obs_source="sim",
                 obs_field="observables",
-                filter_mode="linear",
+                filter=LinearKalman(return_shocks=True),
                 obs_columns=[
                     list(solved.compiled.observable_names).index(name)
                     for name in requested
@@ -543,7 +543,6 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides(
                 x0=x0,
                 P0=P0,
                 R=R,
-                return_shocks=True,
             ),
         ]
     )
@@ -601,7 +600,7 @@ def test_native_lowering_runs_unscented_filter_with_rbc_fixture(
                 target="reference",
                 obs_source="data",
                 obs_field="observables",
-                filter_mode="unscented",
+                filter=UnscentedKalman(),
             ),
         ]
     )

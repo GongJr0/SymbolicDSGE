@@ -126,8 +126,8 @@ def _run(
                 target="reference",
                 obs_source="data",
                 obs_field="observables",
-                **filter_kwargs,
-            ),  # type: ignore[arg-type]
+                **filter_kwargs,  # type: ignore[arg-type]
+            ),
         ]
     )
     return pipeline.run({"reference": solved}, n_rep=n_rep, verbosity=0)
@@ -138,15 +138,15 @@ def _run(
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["linear", "extended"])
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
 def test_the_result_carries_the_mode_that_selected_the_kernel(
-    solved_post82: SolvedModel, mode: str
+    solved_post82: SolvedModel, filter: Filter
 ) -> None:
     """Lowering consumes the mode to pick a kernel and keeps no note of it."""
     y = _observations(solved_post82)
-    result = _run(solved_post82, y, filter_mode=mode)
+    result = _run(solved_post82, y, filter=filter)
 
-    assert result.filter_outputs["filt"].filter_mode == mode
+    assert result.filter_outputs["filt"].filter_mode == filter.mode
 
 
 def test_the_mode_defaults_the_way_the_planner_defaults_it(
@@ -161,7 +161,7 @@ def test_the_mode_defaults_the_way_the_planner_defaults_it(
 
 def test_unscented_reports_its_own_mode(solved_rbc_so: SolvedModel) -> None:
     y = _observations(solved_rbc_so)
-    result = _run(solved_rbc_so, y, filter_mode="unscented")
+    result = _run(solved_rbc_so, y, filter=UnscentedKalman())
 
     assert result.filter_outputs["filt"].filter_mode == "unscented"
 
@@ -171,15 +171,15 @@ def test_unscented_reports_its_own_mode(solved_rbc_so: SolvedModel) -> None:
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["linear", "extended"])
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
 def test_every_field_is_restored_to_its_planned_shape(
-    solved_post82: SolvedModel, mode: str
+    solved_post82: SolvedModel, filter: Filter
 ) -> None:
     comp = solved_post82.compiled
     dims = {"T": T, "n_var": comp.n_var, "n_obs": len(comp.observable_names)}
     y = _observations(solved_post82)
 
-    filt = _run(solved_post82, y, filter_mode=mode).filter_outputs["filt"]
+    filt = _run(solved_post82, y, filter=filter).filter_outputs["filt"]
 
     for field, axes in _SHARED_FIELDS:
         expected = (N_REP, *(dims[axis] for axis in axes))
@@ -207,7 +207,7 @@ def test_unscented_covariances_are_in_the_augmented_frame(
     n_z = 2 * comp.n_state
     y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
+    filt = _run(solved_rbc_so, y, filter=UnscentedKalman()).filter_outputs["filt"]
 
     assert filt.P_pred.shape == (N_REP, T, n_z, n_z)
     assert filt.P_filt.shape == (N_REP, T, n_z, n_z)
@@ -227,7 +227,9 @@ def test_shocks_are_absent_unless_the_step_asked_for_them(
     """The layout sizes ``eps_hat`` to nothing, which reads as "not produced"."""
     y = _observations(solved_post82)
 
-    filt = _run(solved_post82, y, return_shocks=False).filter_outputs["filt"]
+    filt = _run(
+        solved_post82, y, filter=LinearKalman(return_shocks=False)
+    ).filter_outputs["filt"]
 
     assert filt.eps_hat is None
 
@@ -237,21 +239,23 @@ def test_requested_shocks_come_back_shaped_by_the_exogenous_count(
 ) -> None:
     y = _observations(solved_post82)
 
-    filt = _run(solved_post82, y, return_shocks=True).filter_outputs["filt"]
+    filt = _run(
+        solved_post82, y, filter=LinearKalman(return_shocks=True)
+    ).filter_outputs["filt"]
 
     assert filt.eps_hat is not None
     assert filt.eps_hat.shape == (N_REP, T, solved_post82.compiled.n_exog)
 
 
-@pytest.mark.parametrize("mode", ["linear", "extended"])
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
 @pytest.mark.parametrize("field", _UNSCENTED_ONLY)
 def test_the_pruned_state_is_unavailable_off_the_unscented_path(
-    solved_post82: SolvedModel, mode: str, field: str
+    solved_post82: SolvedModel, filter: Filter, field: str
 ) -> None:
     """Those layouts reserve no buffer at all, so the result must not invent one."""
     y = _observations(solved_post82)
 
-    filt = _run(solved_post82, y, filter_mode=mode).filter_outputs["filt"]
+    filt = _run(solved_post82, y, filter=filter).filter_outputs["filt"]
 
     with pytest.raises(AttributeError, match="only available for unscented"):
         getattr(filt, field)
@@ -263,7 +267,7 @@ def test_the_unscented_layout_reserves_nothing_for_shocks(
     """The unscented kernel cannot return shocks, so the field is simply absent."""
     y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
+    filt = _run(solved_rbc_so, y, filter=UnscentedKalman()).filter_outputs["filt"]
 
     assert filt.eps_hat is None
 
@@ -281,9 +285,7 @@ def test_each_replication_matches_the_reference_filter_on_its_own_data(
 ) -> None:
     y = _observations(solved_post82)
 
-    filt = _run(
-        solved_post82, y, filter_mode=filter.mode.value, return_shocks=True
-    ).filter_outputs["filt"]
+    filt = _run(solved_post82, y, filter=filter).filter_outputs["filt"]
 
     for rep in range(N_REP):
         expected = filter.filter(solved_post82, y=y[rep])
@@ -307,7 +309,7 @@ def test_unscented_replications_match_the_reference_filter(
 ) -> None:
     y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
+    filt = _run(solved_rbc_so, y, filter=UnscentedKalman()).filter_outputs["filt"]
 
     for rep in range(N_REP):
         expected = UnscentedKalman().filter(solved_rbc_so, y=y[rep])
@@ -346,7 +348,7 @@ def test_a_replication_of_an_unscented_run_carries_the_pruned_state(
 ) -> None:
     y = _observations(solved_rbc_so)
 
-    filt = _run(solved_rbc_so, y, filter_mode="unscented").filter_outputs["filt"]
+    filt = _run(solved_rbc_so, y, filter=UnscentedKalman()).filter_outputs["filt"]
     one = filt.replication(1)
 
     assert isinstance(one, UnscentedFilterResult)
@@ -458,14 +460,14 @@ def test_filters_are_keyed_by_step_name(solved_post82: SolvedModel) -> None:
                 target="reference",
                 obs_source="data",
                 obs_field="observables",
-                filter_mode="linear",
+                filter=LinearKalman(),
             ),
             filter_step(
                 "ekf",
                 target="reference",
                 obs_source="data",
                 obs_field="observables",
-                filter_mode="extended",
+                filter=ExtendedKalman(),
             ),
         ]
     )
