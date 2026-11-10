@@ -52,17 +52,20 @@ static inline void sdsge_haario_update(const f64 *SDSGE_RESTRICT x, i64 d,
                                        f64 *SDSGE_RESTRICT m0,
                                        f64 *SDSGE_RESTRICT C) {
   const f64 inv = 1.0 / (f64)n;
+  const f64 carry = (f64)(n - 1) * inv;
+
   memcpy(m0, m, d * sizeof(f64));
   for (i64 i = 0; i < d; ++i) {
-    m[i] = (m0[i] * (f64)(n - 1) + x[i]) * inv;
+    m[i] += (x[i] - m[i]) * inv;
   }
-  const f64 carry = (f64)(n - 1) * inv;
-  for (i64 i = 0; i < d; ++i) {
-    for (i64 j = 0; j < d; ++j) {
-      const f64 inc = (f64)n * m0[i] * m0[j] - (f64)(n + 1) * m[i] * m[j] +
-                      x[i] * x[j] + (i == j ? eps : 0.0);
 
-      C[i * d + j] = carry * C[i * d + j] + inc * inv;
+  for (i64 i = 0; i < d; ++i) {
+    const f64 di = x[i] - m0[i];
+    for (i64 j = 0; j < d; ++j) {
+      const f64 dj = x[j] - m[j];
+
+      C[i * d + j] =
+          carry * C[i * d + j] + inv * (di * dj + (i == j ? eps : 0.0));
     }
   }
 }
@@ -84,15 +87,16 @@ static inline void sdsge_proposal_factor(const f64 *SDSGE_RESTRICT C, i64 d,
  * themselves: every estimated scalar through its inverse transform, every CPC
  * block through the correlation its z encodes. Returns the log-jacobian the
  * prior carries at this theta, which is what the chain's logpost folded in
- * (include_logjac == 1) and what the caller takes back out to report a density
- * over the parameters.
+ * (include_logjac == 1) and what the caller takes back out to report a
+ * density over the parameters.
  *
  * The two passes read different tables on purpose. Values come off the param
- * map and the cov specs, which cover every estimated entry; the jacobian comes
- * off the prior tables, which cover only the entries carrying a density. A std
- * with no prior still walks in log space, and a CPC block with no LKJ is still
- * a reparameterization, so neither is reported raw, and neither owes a
- * jacobian. ``Lblk`` is scratch for the widest block's Cholesky factor. */
+ * map and the cov specs, which cover every estimated entry; the jacobian
+ * comes off the prior tables, which cover only the entries carrying a
+ * density. A std with no prior still walks in log space, and a CPC block with
+ * no LKJ is still a reparameterization, so neither is reported raw, and
+ * neither owes a jacobian. ``Lblk`` is scratch for the widest block's
+ * Cholesky factor. */
 static inline f64 sdsge_unconstrained_to_params(const sdsge_obj_common *b,
                                                 const f64 *SDSGE_RESTRICT theta,
                                                 f64 *SDSGE_RESTRICT Lblk,
@@ -156,8 +160,8 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   /* One workspace allocation up front, freed on return.
    * 5 vectors of d and 3 matrices of d*d. The last matrix is the refactor
    * scratch, dead by the time a draw is kept, so the block inversion borrows
-   * it; it is widened only when K*K outgrows d*d, which takes a block estimated
-   * with nothing alongside it. */
+   * it; it is widened only when K*K outgrows d*d, which takes a block
+   * estimated with nothing alongside it. */
   const size_t nm = d * d;
   const size_t nlast = (size_t)max_i64(d * d, kblk * kblk);
   f64 *work = (f64 *)malloc((5 * d + 2 * nm + nlast) * sizeof(f64));
@@ -175,8 +179,6 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   f64 *m0 = m + d;
   f64 *C = m0 + d;
   f64 *Ltmp = C + nm;
-
-  const f64 scale = (2.38 * 2.38) / (f64)d;
 
   /* Initial proposal: cov0 = scale * H^-1, L = chol(cov0). The Hessian is
    * computed at the MAP as a finite-difference approximation of the negative
@@ -208,8 +210,8 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   // hessian itself is supplied.
   if (opt->needs_hessian) {
     // The allocation past `L` is dead at cov_factor time, and it is the exact
-    // size the factor needs. `prop` is therefore passed as the work buffer, and
-    // `L` is the output.
+    // size the factor needs. `prop` is therefore passed as the work buffer,
+    // and `L` is the output.
     f64 *hessian_work = prop;
     const i64 hessian_status = sdsge_estimation_cov_factor(
         logpost, obj_ctx, current, d, opt->hessian_fd_step_scale,
@@ -236,7 +238,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     memcpy(C, hessian, nm * sizeof(f64));
   }
 
-  const f64 factor_scale = sqrt(scale);
+  const f64 factor_scale = sqrt((2.38 * 2.38) / (f64)d) * opt->proposal_scale;
   for (i64 i = 0; i < d * d; ++i) {
     L[i] *= factor_scale;
   }
@@ -250,8 +252,8 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
 
   i64 accepted = 0;
   i64 keep_i = 0;
-  i64 next_keep = opt->burn_in; /* init with post-burn-in */
-
+  i64 next_keep = opt->burn_in;      /* init with post-burn-in */
+  i64 next_adapt = opt->adapt_start; /* init with first adaptation */
   /* clock stores */
   const f64 base_t = sdsge_monotime_sec();
   f64 init_t = base_t; /* == base_t if burn_in == 0, else set at first
@@ -288,7 +290,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     /* Haario adaptation over the whole chain: below adapt_start only the
      * running mean accumulates, above it the covariance recursion runs and
      * the factor is refactored every step. */
-    if (opt->adapt) {
+    if (opt->adapt && t <= opt->adapt_end) {
       ++n;
       if (n <= opt->adapt_start) {
         for (i64 i = 0; i < d; ++i) {
@@ -296,7 +298,10 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
         }
       } else {
         sdsge_haario_update(current, d, n, opt->adapt_epsilon, m, m0, C);
-        sdsge_proposal_factor(C, d, factor_scale, Ltmp, L);
+        if (t == next_adapt) {
+          next_adapt += opt->adapt_interval;
+          sdsge_proposal_factor(C, d, factor_scale, Ltmp, L);
+        }
       }
     }
 

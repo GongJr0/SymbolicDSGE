@@ -627,6 +627,8 @@ cdef dict _do_mcmc(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
     mopt.needs_map = <int>bool(opts["compute_map"])
     mopt.adapt = <int>bool(opts["adapt"])
     mopt.adapt_start = opts["adapt_start"]
+    mopt.adapt_end = opts["adapt_end"]
+    mopt.adapt_interval = opts["adapt_interval"]
     mopt.adapt_epsilon = opts["adapt_epsilon"]
     mopt.proposal_scale = opts["proposal_scale"]
     mopt.needs_hessian = <int>bool(opts["needs_hessian"])
@@ -836,7 +838,9 @@ def run_mcmc(
     int64_t thin=1,
     bint adapt=True,
     int64_t adapt_start=100,
-    double proposal_scale=0.1,
+    int64_t adapt_end=-1,
+    int64_t adapt_interval=1,
+    double proposal_scale=1,
     proposal_cov=None,
     double cov_fd_step_scale=1.0,
     double cov_fd_absolute_floor=0.1,
@@ -905,6 +909,8 @@ def run_mcmc(
         "thin": thin,
         "adapt": adapt,
         "adapt_start": adapt_start,
+        "adapt_end": adapt_end,
+        "adapt_interval": adapt_interval,
         "proposal_scale": proposal_scale,
         "proposal_cov": proposal_cov,
         "cov_fd_step_scale": cov_fd_step_scale,

@@ -269,6 +269,8 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
         "theta0",
         "adapt",
         "adapt_start",
+        "adapt_end",
+        "adapt_interval",
         "proposal_scale",
         "adapt_epsilon",
         "compute_map",

@@ -328,6 +328,8 @@ cdef extern from "mcmc.h":
         int needs_map
         int adapt
         int64_t adapt_start
+        int64_t adapt_end
+        int64_t adapt_interval
         double adapt_epsilon
         double proposal_scale
         int needs_hessian

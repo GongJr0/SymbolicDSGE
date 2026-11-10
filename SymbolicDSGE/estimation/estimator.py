@@ -647,7 +647,9 @@ class Estimator:
         random_state: int | None = None,
         adapt: bool = True,
         adapt_start: int = 100,
-        proposal_scale: float = 0.1,
+        adapt_end: int | None = None,
+        adapt_interval: int = 1,
+        proposal_scale: float = 1,
         adapt_epsilon: float = 1e-8,
         compute_map: bool = True,
         map_options: dict[str, Any] | None = None,
@@ -674,8 +676,13 @@ class Estimator:
             ``False`` is a regular Random Walk Metropolis-Hastings sampler with fixed proposal covariance.
         adapt_start : int
             When to start adapting the proposal covariance. Must be less than ``n_draws``.
+        adapt_end : int | None
+            When to stop adapting the proposal covariance. ``None`` adapts until the end of the burn-in period and -1 adapts indefinitely starting from ``adapt_start``.
+        adapt_interval : int
+            Number of iterations between adaptation steps. Must be at least 1.
         proposal_scale : float
-            Scaling factor for the proposal covariance.
+            Scaling factor for proposal **standard deviation**: `2.38/sqrt(d) * proposal_scale`.
+            The default of 1 corresponds to the standard "optimal" point for a Gaussian random-walk MH.
         adapt_epsilon : float
             Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
         compute_map : bool
@@ -698,6 +705,16 @@ class Estimator:
         """
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
+
+        if adapt_end is None:
+            adapt_end = burn_in - 1
+        elif adapt_end == -1:
+            adapt_end = n_draws * thin + burn_in - 1
+        elif adapt_end < min(adapt_start, 0):
+            raise ValueError(
+                "`adapt_end` must be greater than `adapt_start` and zero. "
+                f"Got {adapt_end!r}."
+            )
 
         rng = np.random.default_rng(random_state)
 
@@ -724,6 +741,8 @@ class Estimator:
             thin=thin,
             adapt=adapt,
             adapt_start=adapt_start,
+            adapt_end=adapt_end,
+            adapt_interval=adapt_interval,
             proposal_scale=proposal_scale,
             proposal_cov=proposal_cov,
             cov_fd_step_scale=cov_fd_step_scale,
@@ -764,6 +783,8 @@ class Estimator:
                 "theta0": dict(theta0) if theta0 is not None else None,
                 "adapt": bool(adapt),
                 "adapt_start": int(adapt_start),
+                "adapt_end": int(adapt_end),
+                "adapt_interval": int(adapt_interval),
                 "proposal_scale": float(proposal_scale),
                 "adapt_epsilon": float(adapt_epsilon),
                 "compute_map": bool(compute_map),

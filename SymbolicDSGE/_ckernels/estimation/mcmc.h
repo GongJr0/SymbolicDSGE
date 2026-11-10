@@ -18,6 +18,8 @@ typedef struct {
 
   int adapt;
   i64 adapt_start;
+  i64 adapt_end;
+  i64 adapt_interval;
   f64 adapt_epsilon;
   f64 proposal_scale;
   int needs_hessian; // False if user supplied a hessian for the hessian
