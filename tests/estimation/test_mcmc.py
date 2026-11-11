@@ -44,8 +44,6 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
     assert cfg["proposal_cov"] is None
     assert out.to_spec().meta["sampler_config"] == cfg
 
-    # a run driven by a user matrix has to be distinguishable from one that
-    # built its own, or the result cannot be reconstructed from its config
     mode = mcmc_estimator.map(theta0=_OFF_MODE, jacobian=True)
     supplied = mcmc_estimator.mcmc(
         theta0=mode.theta, compute_map=False, proposal_cov=mode.vcov, **_MCMC_KW
@@ -56,21 +54,33 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
     assert np.array_equal(np.asarray(cfg["proposal_cov"], dtype=np.float64), mode.vcov)
 
 
-def test_mcmc_rejects_invalid_draw_counts(mcmc_estimator):
-    """``run_mcmc`` owns these, so they raise past ``_build_native_context``."""
+def test_mcmc_rejects_invalid_arguments(mcmc_estimator):
     with pytest.raises(ValueError, match="n_draws must be positive"):
         mcmc_estimator.mcmc(n_draws=0)
     with pytest.raises(ValueError, match="burn_in must be non-negative"):
         mcmc_estimator.mcmc(n_draws=1, burn_in=-1)
     with pytest.raises(ValueError, match="thin must be positive"):
         mcmc_estimator.mcmc(n_draws=1, thin=0)
+    with pytest.raises(ValueError, match="proposal_scale must be positive"):
+        mcmc_estimator.mcmc(n_draws=1, proposal_scale=0.0)
+    with pytest.raises(ValueError, match="finite-difference settings"):
+        mcmc_estimator.mcmc(n_draws=1, cov_fd_step_scale=0.0)
+    with pytest.raises(ValueError, match="finite-difference settings"):
+        mcmc_estimator.mcmc(n_draws=1, cov_fd_absolute_floor=0.0)
+    with pytest.raises(ValueError, match="adapt_start must be positive"):
+        mcmc_estimator.mcmc(n_draws=1, adapt_start=0)
+    with pytest.raises(ValueError, match="must not exceed adapt_end"):
+        mcmc_estimator.mcmc(n_draws=10, burn_in=4, adapt_start=9)
+    with pytest.raises(ValueError, match="adapt_interval must be positive"):
+        mcmc_estimator.mcmc(n_draws=1, adapt_interval=0)
+    with pytest.raises(ValueError, match="adapt_epsilon must be non-negative"):
+        mcmc_estimator.mcmc(n_draws=1, adapt_epsilon=-1e-8)
+    with pytest.raises(ValueError, match="unsupported MAP option"):
+        mcmc_estimator.mcmc(n_draws=1, map_options={"nope": 1})
 
 
 def test_mcmc_precomputed_mode_reproduces_the_internal_map_chain(mcmc_estimator):
-    """Skipping the MAP changes who finds the mode, not the chain that follows.
-
-    The flag also has to move where the chain starts, or it is doing nothing.
-    """
+    """Skipping the MAP changes who finds the mode, not the chain that follows."""
     found = mcmc_estimator.mcmc(theta0=_OFF_MODE, compute_map=True, **_MCMC_KW)
     at_theta0 = mcmc_estimator.mcmc(theta0=_OFF_MODE, compute_map=False, **_MCMC_KW)
     mode = mcmc_estimator.map(theta0=_OFF_MODE)
@@ -88,12 +98,6 @@ def test_mcmc_supplied_covariance_reproduces_the_internal_hessian_chain(
 ):
     """The documented workflow: pay for the MAP once, hand the sampler its
     covariance, and get the chain the sampler would have built for itself.
-
-    ``jacobian=True`` is what makes the mode reusable (the chain walks theta), and
-    the covariance rides along with it. The comparison is to roundoff rather than
-    exact: the internal path factors the Hessian straight into ``chol(H)^-T``,
-    while a supplied covariance is refactored out of ``vcov = F @ F.T``, so the
-    two factors agree only up to the round trip.
     """
     mode = mcmc_estimator.map(theta0=_OFF_MODE, jacobian=True)
     found = mcmc_estimator.mcmc(theta0=_OFF_MODE, compute_map=True, **_MCMC_KW)
@@ -109,12 +113,7 @@ def test_mcmc_supplied_covariance_reproduces_the_internal_hessian_chain(
 
 
 def test_mcmc_supplied_covariance_seeds_the_adaptation_recursion(mcmc_estimator):
-    """The supplied matrix is the Haario seed too, not just the first factor.
-
-    ``_MCMC_KW`` never reaches the default ``adapt_start``, so the covariance it
-    pins is only the one the proposal opens with. Dropping the start low enough
-    for the recursion to run puts the seed on the same footing.
-    """
+    """The supplied matrix is the Haario seed too, not just the first factor."""
     kw = dict(n_draws=20, burn_in=10, random_state=7, adapt=True, adapt_start=5)
     mode = mcmc_estimator.map(theta0=_OFF_MODE, jacobian=True)
 
@@ -131,7 +130,6 @@ def test_mcmc_supplied_covariance_seeds_the_adaptation_recursion(mcmc_estimator)
 
 def test_mcmc_proposal_covariance_sets_the_proposal_width(mcmc_estimator):
     """Scaling the matrix has to move the acceptance rate, or it is being ignored.
-
     Adaptation is off so the supplied factor governs every step of the run.
     """
     kw = dict(n_draws=25, burn_in=5, random_state=7, adapt=False)
@@ -162,12 +160,6 @@ def test_mcmc_proposal_covariance_sets_the_proposal_width(mcmc_estimator):
 def test_mcmc_rejects_a_proposal_covariance_that_is_not_positive_definite(
     mcmc_estimator, cov
 ):
-    """A covariance with no Cholesky factor has no proposal, so the run stops.
-
-    The exception type is the native status trampoline's, shared by every
-    non-zero ``sdsge_mcmc_result.status``; the message is what identifies the
-    failure.
-    """
     with pytest.raises(MemoryError, match="not positive definite"):
         mcmc_estimator.mcmc(
             theta0=_OFF_MODE, compute_map=False, proposal_cov=cov, **_MCMC_KW
@@ -175,7 +167,6 @@ def test_mcmc_rejects_a_proposal_covariance_that_is_not_positive_definite(
 
 
 def test_mcmc_rejects_a_proposal_covariance_with_the_wrong_shape(mcmc_estimator):
-    """The matrix is indexed against the estimated set, so it is sized by it."""
     with pytest.raises(ValueError, match=r"Expected shape \(2, 2\), got \(3, 3\)"):
         mcmc_estimator.mcmc(
             theta0=_OFF_MODE,
@@ -186,7 +177,6 @@ def test_mcmc_rejects_a_proposal_covariance_with_the_wrong_shape(mcmc_estimator)
 
 
 def test_mcmc_rejects_a_proposal_covariance_alongside_compute_map(mcmc_estimator):
-    """The internal MAP builds its own covariance, which would silently win."""
     mode = mcmc_estimator.map(theta0=_OFF_MODE, jacobian=True)
     with pytest.raises(ValueError, match="compute_map"):
         mcmc_estimator.mcmc(
@@ -198,11 +188,7 @@ def test_mcmc_rejects_a_proposal_covariance_alongside_compute_map(mcmc_estimator
 
 
 def test_map_with_logjac_is_the_mode_the_sampler_starts_from(transformed_estimator):
-    """``jacobian=True`` is what makes a precomputed mode reusable.
-
-    The chain walks theta, so the MAP it finds for itself carries the jacobian.
-    A mode found without it starts the chain somewhere else.
-    """
+    """``jacobian=True`` is what makes a precomputed mode reusable."""
     kw = dict(n_draws=30, burn_in=5, random_state=11, cov_fd_step_scale=0.5)
     found = transformed_estimator.mcmc(**kw)
 
@@ -211,8 +197,7 @@ def test_map_with_logjac_is_the_mode_the_sampler_starts_from(transformed_estimat
         theta0=dict(over_theta.theta), compute_map=False, **kw
     )
     # A theta0 is parameter space, so reusing a mode re-forwards it through the
-    # transform. That round trip is not bit-exact under a logit, which puts the
-    # two chains within tolerance of each other rather than on top.
+    # transform. That round trip is not bit-exact under a logit.
     np.testing.assert_allclose(found.samples, reused.samples, rtol=0, atol=1e-9)
 
     over_params = transformed_estimator.map(cov=False)
