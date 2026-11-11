@@ -707,7 +707,7 @@ class Estimator:
         -----
         The parameters regarding adaptation are only checked if ``adapt=True``.
         Inconsistent parameterizations will not raise if adaptation is disabled.
-
+        `adapt_start` == `adapt_end` is allowed but no adaptation will occur.
         """
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")

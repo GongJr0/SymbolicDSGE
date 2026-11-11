@@ -128,10 +128,33 @@ def test_mcmc_supplied_covariance_seeds_the_adaptation_recursion(mcmc_estimator)
     assert np.unique(found.samples, axis=0).shape[0] > 1
 
 
+def test_mcmc_adaptation_over_an_empty_window_is_a_no_op(mcmc_estimator):
+    kw = dict(n_draws=5, burn_in=0, thin=1, theta0=_POST82_START, random_state=7)
+
+    empty = mcmc_estimator.mcmc(adapt=True, adapt_start=5, adapt_end=5, **kw)
+    off = mcmc_estimator.mcmc(adapt=False, **kw)
+
+    assert np.array_equal(empty.samples, off.samples)
+    assert np.array_equal(empty.logpost_trace, off.logpost_trace)
+
+
+def test_mcmc_clamps_adapt_end_to_the_chain_length(mcmc_estimator):
+    out = mcmc_estimator.mcmc(
+        n_draws=3,
+        burn_in=1,
+        thin=1,
+        theta0=_POST82_START,
+        random_state=7,
+        adapt=True,
+        adapt_end=125,
+    )
+
+    cfg = out.sampler_config
+    assert cfg["adapt_end"] == 4
+    assert cfg["adapt_start"] == 2
+
+
 def test_mcmc_proposal_covariance_sets_the_proposal_width(mcmc_estimator):
-    """Scaling the matrix has to move the acceptance rate, or it is being ignored.
-    Adaptation is off so the supplied factor governs every step of the run.
-    """
     kw = dict(n_draws=25, burn_in=5, random_state=7, adapt=False)
     mode = mcmc_estimator.map(theta0=_OFF_MODE, jacobian=True)
     cov = np.asarray(mode.vcov)
