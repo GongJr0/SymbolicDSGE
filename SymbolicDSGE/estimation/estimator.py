@@ -722,11 +722,6 @@ class Estimator:
         if adapt_start is None:
             adapt_start = max(1, min((adapt_end + 1) // 2, 1000))
 
-        if adapt and adapt_end < adapt_start:
-            raise ValueError(
-                f"adapt_end ({adapt_end}) must be greater than adapt_start ({adapt_start})"
-            )
-
         rng = np.random.default_rng(random_state)
 
         map_bounds = None if map_options is None else map_options.get("bounds")

@@ -872,8 +872,10 @@ def run_mcmc(
     if adapt:
         if adapt_start <= 0:
             raise ValueError("adapt_start must be positive.")
-        if adapt_end <= adapt_start:
-            raise ValueError("adapt_end must be greater than adapt_start and zero.")
+        if adapt_start > adapt_end:
+            raise ValueError(
+                f"adapt_start ({adapt_start}) must not exceed adapt_end ({adapt_end})."
+            )
         if adapt_interval <= 0:
             raise ValueError("adapt_interval must be positive.")
         if adapt_epsilon < 0.0:
