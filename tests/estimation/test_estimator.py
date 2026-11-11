@@ -1170,7 +1170,6 @@ def test_mcmc_adaptation_runs_for_scalar_and_vector(post82_estimator, estimated)
         thin=1,
         random_state=123,
         adapt=True,
-        adapt_start=0,
     )
     assert out.samples.shape == (10, len(estimated))
 

@@ -214,7 +214,8 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     // directly into the covariance buffer for update/adaptation.
     if (sdsge_chol_upper(pcov, 0.0, L, d) != SDSGE_OK) {
       out->status = SDSGE_ESTIMATION_ENOTSPD;
-      out->message = "User-supplied Hessian is not positive definite";
+      out->message =
+          "User-supplied proposal covariance is not positive definite";
       free(work);
       return SDSGE_ESTIMATION_ENOTSPD;
     }
@@ -269,9 +270,8 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
       }
     }
 
-    /* Haario adaptation over the specified span. n == t + 1: the window is the
-     * contiguous prefix [0, adapt_end], so the loop counter is the count. */
-    if (opt->adapt && t <= opt->adapt_end) {
+    /* Haario adaptation over the specified span. */
+    if (opt->adapt && t < opt->adapt_end) {
       const i64 n = t + 1;
       if (t < opt->adapt_start) {
         const f64 inv = 1.0 / (f64)n;

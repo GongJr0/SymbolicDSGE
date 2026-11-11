@@ -346,6 +346,8 @@ _SAMPLER_KNOBS = [
     "proposal_scale",
     "adapt",
     "adapt_start",
+    "adapt_end",
+    "adapt_interval",
     "adapt_epsilon",
     "compute_map",
     "map_options",

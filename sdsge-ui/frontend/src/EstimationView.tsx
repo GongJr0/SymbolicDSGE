@@ -32,9 +32,11 @@ const DEFAULTS = {
     burn_in: 1000,
     thin: 1,
     random_state: 0,
-    proposal_scale: 0.1,
+    proposal_scale: 1,
     adapt: true,
     adapt_start: 100,
+    adapt_end: "burn_in" as number | "burn_in" | null,
+    adapt_interval: 1,
     adapt_epsilon: 1e-8,
     posterior_point: "mean",
     cov: true,
@@ -60,7 +62,7 @@ const SAMPLER_KWARGS = [
     "cov_fd_step_scale",
     "cov_fd_absolute_floor",
 ] as const;
-const ADAPT_KWARGS = ["adapt_start", "adapt_epsilon"] as const;
+const ADAPT_KWARGS = ["adapt_start", "adapt_end", "adapt_interval", "adapt_epsilon"] as const;
 const OPTIMIZER_KWARGS = [
     "maxiter",
     "maxfun",
@@ -113,6 +115,18 @@ function pick<K extends keyof Knobs>(
         Knobs,
         K
     >;
+}
+
+/** `adapt_end`'s three settings as one select value, and back. The explicit
+ * mode seeds from `burn_in`, which is what the other two resolve against. */
+function adaptEndMode(value: number | "burn_in" | null): string {
+    if (value === "burn_in") return "burn_in";
+    return value === null ? "chain" : "iteration";
+}
+
+function adaptEndFrom(mode: string, burnIn: number): number | "burn_in" | null {
+    if (mode === "chain") return null;
+    return mode === "iteration" ? burnIn : "burn_in";
 }
 
 
@@ -484,6 +498,39 @@ export function EstimationView({
                                                 label="Adapt start"
                                                 value={knobs.adapt_start}
                                                 onChange={(value) => setKnob("adapt_start", value)}
+                                            />
+                                            <label>
+                                                Adapt end
+                                                <select
+                                                    value={adaptEndMode(knobs.adapt_end)}
+                                                    onChange={(event) =>
+                                                        setKnob(
+                                                            "adapt_end",
+                                                            adaptEndFrom(
+                                                                event.target.value,
+                                                                knobs.burn_in,
+                                                            ),
+                                                        )
+                                                    }
+                                                >
+                                                    <option value="burn_in">End of burn-in</option>
+                                                    <option value="chain">Whole chain</option>
+                                                    <option value="iteration">At iteration</option>
+                                                </select>
+                                            </label>
+                                            {typeof knobs.adapt_end === "number" && (
+                                                <NumberField
+                                                    label="End iteration"
+                                                    value={knobs.adapt_end}
+                                                    onChange={(value) => setKnob("adapt_end", value)}
+                                                />
+                                            )}
+                                            <NumberField
+                                                label="Adapt interval"
+                                                value={knobs.adapt_interval}
+                                                onChange={(value) =>
+                                                    setKnob("adapt_interval", value)
+                                                }
                                             />
                                             <NumberField
                                                 label="Adapt epsilon"

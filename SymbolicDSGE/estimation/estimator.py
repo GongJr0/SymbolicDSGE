@@ -649,8 +649,8 @@ class Estimator:
         adapt_start: int | None = None,
         adapt_end: int | Literal["burn_in"] | None = "burn_in",
         adapt_interval: int = 1,
-        proposal_scale: float = 1,
         adapt_epsilon: float = 1e-8,
+        proposal_scale: float = 1,
         compute_map: bool = True,
         map_options: dict[str, Any] | None = None,
         proposal_cov: NDF | None = None,
@@ -668,7 +668,7 @@ class Estimator:
         thin : int
             Thinning factor: keep every ``thin``-th draw after burn-in.
         theta0 : NDF | Mapping[str, float] | None
-            Initial guess for the unconstrained parameter vector. If None, uses the model calibration.
+            Initial guess for the parameter vector. If None, uses the model calibration.
         random_state : int | None
             Seed for the random number generator. If None, uses a random seed.
         adapt : bool
@@ -681,11 +681,11 @@ class Estimator:
             When to stop adapting the proposal covariance. "burn_in" adapts until the end of the burn-in period and ``None`` adapts indefinitely starting from ``adapt_start``.
         adapt_interval : int
             Number of iterations between adaptation steps. Must be at least 1.
+        adapt_epsilon : float
+            Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
         proposal_scale : float
             Scaling factor for proposal **standard deviation**: `2.38/sqrt(d) * proposal_scale`.
             The default of 1 corresponds to the standard "optimal" point for a Gaussian random-walk MH.
-        adapt_epsilon : float
-            Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
         compute_map : bool
             Whether to compute the MAP estimate to use it as initial guess and the hessian point for the (initial or fixed) proposal covariance.
         map_options : dict[str, Any] | None
@@ -705,7 +705,7 @@ class Estimator:
 
         Notes
         -----
-        The paramters regarding adaptation are only checked if ``adapt=True``.
+        The parameters regarding adaptation are only checked if ``adapt=True``.
         Inconsistent parameterizations will not raise if adaptation is disabled.
 
         """
@@ -714,7 +714,7 @@ class Estimator:
 
         total_draws = n_draws * thin + burn_in
         if adapt_end == "burn_in":
-            adapt_end = burn_in
+            adapt_end = max(1, burn_in)
         elif adapt_end is None:
             adapt_end = total_draws
         adapt_end = min(adapt_end, total_draws)
@@ -722,8 +722,10 @@ class Estimator:
         if adapt_start is None:
             adapt_start = max(1, min((adapt_end + 1) // 2, 1000))
 
-        if adapt:
-            adapt = bool(adapt_end > adapt_start)
+        if adapt and adapt_end < adapt_start:
+            raise ValueError(
+                f"adapt_end ({adapt_end}) must be greater than adapt_start ({adapt_start})"
+            )
 
         rng = np.random.default_rng(random_state)
 

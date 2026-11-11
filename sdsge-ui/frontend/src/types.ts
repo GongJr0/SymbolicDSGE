@@ -85,6 +85,8 @@ export interface EstimationViewState {
     proposal_scale: number;
     adapt: boolean;
     adapt_start: number;
+    adapt_end: number | "burn_in" | null;
+    adapt_interval: number;
     adapt_epsilon: number;
     posterior_point: string;
     // No control on a fresh form. A bundle whose run set one away from its
