@@ -17,56 +17,47 @@
 
 /* Native adaptive random-walk Metropolis mainloop (issue #331).
  *
- * A clean transcription of the numpy-era Estimator.mcmc loop, taken fully
- * native under the statistical-equivalence contract (option b): numpy's draws
- * stay bit-exact (the standard-normal / uniform fills advance numpy's own PCG64
- * via `bg`), but the two pieces of deterministic linear algebra are ours, NOT
- * numpy's:
+ * proposal:   prop = current + L @ z,  z ~ N(0, I), where L is the lower
+ *             Cholesky of the proposal covariance.
+ * adaptation: the Haario et al. (2001) covariance recursion, seeded from
+ *             the mode-Hessian covariance and carried forward at (n-1)/n.
  *
- *   - proposal:   prop = current + L @ z,  z ~ N(0, I), where L is OUR lower
- *                 Cholesky of the proposal covariance (not numpy's SVD-based
- *                 multivariate_normal map).
- *   - adaptation: the Haario et al. (2001) covariance recursion, seeded from
- *                 the mode-Hessian covariance and carried forward at (n-1)/n,
- *                 not a batch np.cov recomputed from stored history.
- *
- * The recursion spans the whole chain rather than burn-in alone, so the
- * proposal is never frozen and an early, under-dispersed history is damped by
- * the seed at weight adapt_start/n instead of replacing it outright.
- *
- * Consequences of dropping stored history: memory is O(n_draws*d + d^2) and the
- * loop has no d==1 special case (a 1x1 covariance subsumes it). The resulting
- * chain is a principled, reproducible native stream, statistically equivalent
- * to the numpy chain (matched stationary marginals + acceptance), not a
- * draw-for-draw reproduction of it.
+ * Memory is O(n_draws*d + d^2) and the loop has no d==1 special case (a 1x1
+ * covariance subsumes it).
  *
  * `logpost` returns +logpost (the estimation trampoline passes the objective
  * WITHOUT the optimizer's negation); a BK violation / non-finite eval surfaces
  * as -inf and auto-rejects through the finiteness gate. The BK-violation count
  * lives on the objective's own ctx (the objective owns that counter); the
- * Cython caller reads it off the ctx after the run, so `out->bk_violations` is
- * left 0 here to keep this loop a generic sampler over an opaque `obj_ctx`. */
+ * Cython caller reads it off the ctx after the run. */
 
 static inline void sdsge_haario_update(const f64 *SDSGE_RESTRICT x, i64 d,
                                        i64 n, f64 eps, f64 *SDSGE_RESTRICT m,
-                                       f64 *SDSGE_RESTRICT m0,
+                                       f64 *SDSGE_RESTRICT dev,
                                        f64 *SDSGE_RESTRICT C) {
   const f64 inv = 1.0 / (f64)n;
   const f64 carry = (f64)(n - 1) * inv;
 
-  memcpy(m0, m, d * sizeof(f64));
+  /* (x - m_old)(x - m_new)' == carry * (x - m_old)(x - m_old)' exactly, which
+   * collapses the scatter increment to a rank-1 update on one centered
+   * vector. */
+  const f64 w = carry * inv;
+
   for (i64 i = 0; i < d; ++i) {
-    m[i] += (x[i] - m[i]) * inv;
+    dev[i] = x[i] - m[i];
+    m[i] += dev[i] * inv;
   }
 
+  /* Lower triangle only: C is read solely by sdsge_chol, which touches
+   * j <= i. The upper triangle keeps the seed's values and goes stale. */
   for (i64 i = 0; i < d; ++i) {
-    const f64 di = x[i] - m0[i];
-    for (i64 j = 0; j < d; ++j) {
-      const f64 dj = x[j] - m[j];
+    f64 *SDSGE_RESTRICT Ci = C + i * d;
+    const f64 wi = w * dev[i];
 
-      C[i * d + j] =
-          carry * C[i * d + j] + inv * (di * dj + (i == j ? eps : 0.0));
+    for (i64 j = 0; j <= i; ++j) {
+      Ci[j] = carry * Ci[j] + wi * dev[j];
     }
+    Ci[i] += inv * eps;
   }
 }
 
@@ -83,20 +74,16 @@ static inline void sdsge_proposal_factor(const f64 *SDSGE_RESTRICT C, i64 d,
   memcpy(L, Ltmp, d * d * sizeof(f64));
 }
 
-/* One draw, out of the sampler's unconstrained theta and into the parameters
- * themselves: every estimated scalar through its inverse transform, every CPC
- * block through the correlation its z encodes. Returns the log-jacobian the
- * prior carries at this theta, which is what the chain's logpost folded in
- * (include_logjac == 1) and what the caller takes back out to report a
- * density over the parameters.
+/* Sampler's unconstrained theta into the parameter space via inverse
+ * transforms. Returns the log-jacobian the prior carries at this theta. The
+ * chain folds it into the logpost (include_logjac == 1) and parameter space
+ * reporting needs it subtracted out.
  *
- * The two passes read different tables on purpose. Values come off the param
- * map and the cov specs, which cover every estimated entry; the jacobian
- * comes off the prior tables, which cover only the entries carrying a
- * density. A std with no prior still walks in log space, and a CPC block with
- * no LKJ is still a reparameterization, so neither is reported raw, and
- * neither owes a jacobian. ``Lblk`` is scratch for the widest block's
- * Cholesky factor. */
+ * A std with no prior still walks in log space, and a CPC block with
+ * no LKJ is still a reparameterization, both have logjac=0.0 but are
+ * reparameterizations.
+ *
+ * ``Lblk`` is scratch for the widest block's Cholesky factor. */
 static inline f64 sdsge_unconstrained_to_params(const sdsge_obj_common *b,
                                                 const f64 *SDSGE_RESTRICT theta,
                                                 f64 *SDSGE_RESTRICT Lblk,
@@ -137,7 +124,7 @@ static inline f64 sdsge_unconstrained_to_params(const sdsge_obj_common *b,
 
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
                    const f64 *SDSGE_RESTRICT theta0, i64 d,
-                   const f64 *SDSGE_RESTRICT hessian,
+                   const f64 *SDSGE_RESTRICT pcov,
                    const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
                    sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out) {
@@ -157,11 +144,8 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
       max_i64(sdsge_spec_has_block(&cb->q.spec) ? cb->q.spec.K : 0,
               sdsge_spec_has_block(&cb->r.spec) ? cb->r.spec.K : 0);
 
-  /* One workspace allocation up front, freed on return.
-   * 5 vectors of d and 3 matrices of d*d. The last matrix is the refactor
-   * scratch, dead by the time a draw is kept, so the block inversion borrows
-   * it; it is widened only when K*K outgrows d*d, which takes a block
-   * estimated with nothing alongside it. */
+  /* Workspace allocation: 5 vectors of d and 3 matrices of d*d. The last matrix
+   * is the refactor scratch, the block inversion shares it. */
   const size_t nm = d * d;
   const size_t nlast = (size_t)max_i64(d * d, kblk * kblk);
   f64 *work = (f64 *)malloc((5 * d + 2 * nm + nlast) * sizeof(f64));
@@ -176,8 +160,8 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   f64 *prop = L + nm;
   f64 *z = prop + d;
   f64 *m = z + d;
-  f64 *m0 = m + d;
-  f64 *C = m0 + d;
+  f64 *dev = m + d;
+  f64 *C = dev + d;
   f64 *Ltmp = C + nm;
 
   /* Initial proposal: cov0 = scale * H^-1, L = chol(cov0). The Hessian is
@@ -206,8 +190,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
 
   // needs_hessian is guaranteed to be True if needs_map is
   // True. This block being separately gated allows a user to skip the MAP and
-  // get the Hessian at a user-supplied point, never to skip both unless the
-  // hessian itself is supplied.
+  // get the Hessian at a supplied point.
   if (opt->needs_hessian) {
     // The allocation past `L` is dead at cov_factor time, and it is the exact
     // size the factor needs. `prop` is therefore passed as the work buffer,
@@ -227,15 +210,15 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     sdsge_matmul_abt(L, L, C, d, d, d);
 
   } else {
-    // User supplied a Hessian; factor it for the proposal and copy directly
-    // into the covariance buffer.
-    if (sdsge_chol_upper(hessian, 0.0, L, d) != SDSGE_OK) {
+    // User supplied a proposal covariance; factor it for the proposal and copy
+    // directly into the covariance buffer for update/adaptation.
+    if (sdsge_chol_upper(pcov, 0.0, L, d) != SDSGE_OK) {
       out->status = SDSGE_ESTIMATION_ENOTSPD;
       out->message = "User-supplied Hessian is not positive definite";
       free(work);
       return SDSGE_ESTIMATION_ENOTSPD;
     }
-    memcpy(C, hessian, nm * sizeof(f64));
+    memcpy(C, pcov, nm * sizeof(f64));
   }
 
   const f64 factor_scale = sqrt((2.38 * 2.38) / (f64)d) * opt->proposal_scale;
@@ -246,7 +229,6 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   for (i64 i = 0; i < d; ++i) {
     m[i] = 0.0;
   }
-  i64 n = 0;
 
   f64 cur_lp = logpost(current, obj_ctx);
 
@@ -287,17 +269,17 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
       }
     }
 
-    /* Haario adaptation over the whole chain: below adapt_start only the
-     * running mean accumulates, above it the covariance recursion runs and
-     * the factor is refactored every step. */
+    /* Haario adaptation over the specified span. n == t + 1: the window is the
+     * contiguous prefix [0, adapt_end], so the loop counter is the count. */
     if (opt->adapt && t <= opt->adapt_end) {
-      ++n;
-      if (n <= opt->adapt_start) {
+      const i64 n = t + 1;
+      if (t < opt->adapt_start) {
+        const f64 inv = 1.0 / (f64)n;
         for (i64 i = 0; i < d; ++i) {
-          m[i] += (current[i] - m[i]) / (f64)n;
+          m[i] += (current[i] - m[i]) * inv;
         }
       } else {
-        sdsge_haario_update(current, d, n, opt->adapt_epsilon, m, m0, C);
+        sdsge_haario_update(current, d, n, opt->adapt_epsilon, m, dev, C);
         if (t == next_adapt) {
           next_adapt += opt->adapt_interval;
           sdsge_proposal_factor(C, d, factor_scale, Ltmp, L);

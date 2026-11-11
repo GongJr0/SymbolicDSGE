@@ -646,8 +646,8 @@ class Estimator:
         theta0: Mapping[str, float] | None = None,
         random_state: int | None = None,
         adapt: bool = True,
-        adapt_start: int = 100,
-        adapt_end: int | None = None,
+        adapt_start: int | None = None,
+        adapt_end: int | Literal["burn_in"] | None = "burn_in",
         adapt_interval: int = 1,
         proposal_scale: float = 1,
         adapt_epsilon: float = 1e-8,
@@ -674,10 +674,11 @@ class Estimator:
         adapt : bool
             Whether to adapt the proposal covariance, ``True`` corresponds to Haario et al. (2001) adaptive MCMC;
             ``False`` is a regular Random Walk Metropolis-Hastings sampler with fixed proposal covariance.
-        adapt_start : int
-            When to start adapting the proposal covariance. Must be less than ``n_draws``.
-        adapt_end : int | None
-            When to stop adapting the proposal covariance. ``None`` adapts until the end of the burn-in period and -1 adapts indefinitely starting from ``adapt_start``.
+        adapt_start : int | None
+            When to start adapting the proposal covariance. `None` starts the adaptation half-way between the run's start and `adapt_end`, with an upper limit of 1000.
+            Must be greater than zero, the zero-th draw is reserved to have a single sample at the initial covariance (required for the adaptation algorithm).
+        adapt_end : int | Literal["burn_in"] | None
+            When to stop adapting the proposal covariance. "burn_in" adapts until the end of the burn-in period and ``None`` adapts indefinitely starting from ``adapt_start``.
         adapt_interval : int
             Number of iterations between adaptation steps. Must be at least 1.
         proposal_scale : float
@@ -702,19 +703,27 @@ class Estimator:
         MCMCResult
             Results of the MCMC sampling, including the samples, acceptance rate, and other diagnostics.
 
+        Notes
+        -----
+        The paramters regarding adaptation are only checked if ``adapt=True``.
+        Inconsistent parameterizations will not raise if adaptation is disabled.
+
         """
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
 
-        if adapt_end is None:
-            adapt_end = burn_in - 1
-        elif adapt_end == -1:
-            adapt_end = n_draws * thin + burn_in - 1
-        elif adapt_end < min(adapt_start, 0):
-            raise ValueError(
-                "`adapt_end` must be greater than `adapt_start` and zero. "
-                f"Got {adapt_end!r}."
-            )
+        total_draws = n_draws * thin + burn_in
+        if adapt_end == "burn_in":
+            adapt_end = burn_in
+        elif adapt_end is None:
+            adapt_end = total_draws
+        adapt_end = min(adapt_end, total_draws)
+
+        if adapt_start is None:
+            adapt_start = max(1, min((adapt_end + 1) // 2, 1000))
+
+        if adapt:
+            adapt = bool(adapt_end > adapt_start)
 
         rng = np.random.default_rng(random_state)
 
