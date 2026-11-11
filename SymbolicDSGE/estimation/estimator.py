@@ -646,9 +646,11 @@ class Estimator:
         theta0: Mapping[str, float] | None = None,
         random_state: int | None = None,
         adapt: bool = True,
-        adapt_start: int = 100,
-        proposal_scale: float = 0.1,
+        adapt_start: int | None = None,
+        adapt_end: int | Literal["burn_in"] | None = "burn_in",
+        adapt_interval: int = 1,
         adapt_epsilon: float = 1e-8,
+        proposal_scale: float = 1,
         compute_map: bool = True,
         map_options: dict[str, Any] | None = None,
         proposal_cov: NDF | None = None,
@@ -666,18 +668,24 @@ class Estimator:
         thin : int
             Thinning factor: keep every ``thin``-th draw after burn-in.
         theta0 : NDF | Mapping[str, float] | None
-            Initial guess for the unconstrained parameter vector. If None, uses the model calibration.
+            Initial guess for the parameter vector. If None, uses the model calibration.
         random_state : int | None
             Seed for the random number generator. If None, uses a random seed.
         adapt : bool
             Whether to adapt the proposal covariance, ``True`` corresponds to Haario et al. (2001) adaptive MCMC;
             ``False`` is a regular Random Walk Metropolis-Hastings sampler with fixed proposal covariance.
-        adapt_start : int
-            When to start adapting the proposal covariance. Must be less than ``n_draws``.
-        proposal_scale : float
-            Scaling factor for the proposal covariance.
+        adapt_start : int | None
+            When to start adapting the proposal covariance. `None` starts the adaptation half-way between the run's start and `adapt_end`, with an upper limit of 1000.
+            Must be greater than zero, the zero-th draw is reserved to have a single sample at the initial covariance (required for the adaptation algorithm).
+        adapt_end : int | Literal["burn_in"] | None
+            When to stop adapting the proposal covariance. "burn_in" adapts until the end of the burn-in period and ``None`` adapts indefinitely starting from ``adapt_start``.
+        adapt_interval : int
+            Number of iterations between adaptation steps. Must be at least 1.
         adapt_epsilon : float
             Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
+        proposal_scale : float
+            Scaling factor for proposal **standard deviation**: `2.38/sqrt(d) * proposal_scale`.
+            The default of 1 corresponds to the standard "optimal" point for a Gaussian random-walk MH.
         compute_map : bool
             Whether to compute the MAP estimate to use it as initial guess and the hessian point for the (initial or fixed) proposal covariance.
         map_options : dict[str, Any] | None
@@ -695,9 +703,24 @@ class Estimator:
         MCMCResult
             Results of the MCMC sampling, including the samples, acceptance rate, and other diagnostics.
 
+        Notes
+        -----
+        The parameters regarding adaptation are only checked if ``adapt=True``.
+        Inconsistent parameterizations will not raise if adaptation is disabled.
+        `adapt_start` == `adapt_end` is allowed but no adaptation will occur.
         """
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
+
+        total_draws = n_draws * thin + burn_in
+        if adapt_end == "burn_in":
+            adapt_end = max(1, burn_in)
+        elif adapt_end is None:
+            adapt_end = total_draws
+        adapt_end = min(adapt_end, total_draws)
+
+        if adapt_start is None:
+            adapt_start = max(1, min((adapt_end + 1) // 2, 1000))
 
         rng = np.random.default_rng(random_state)
 
@@ -724,6 +747,8 @@ class Estimator:
             thin=thin,
             adapt=adapt,
             adapt_start=adapt_start,
+            adapt_end=adapt_end,
+            adapt_interval=adapt_interval,
             proposal_scale=proposal_scale,
             proposal_cov=proposal_cov,
             cov_fd_step_scale=cov_fd_step_scale,
@@ -764,6 +789,8 @@ class Estimator:
                 "theta0": dict(theta0) if theta0 is not None else None,
                 "adapt": bool(adapt),
                 "adapt_start": int(adapt_start),
+                "adapt_end": int(adapt_end),
+                "adapt_interval": int(adapt_interval),
                 "proposal_scale": float(proposal_scale),
                 "adapt_epsilon": float(adapt_epsilon),
                 "compute_map": bool(compute_map),

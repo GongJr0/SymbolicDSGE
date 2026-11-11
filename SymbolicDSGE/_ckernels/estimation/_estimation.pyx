@@ -627,6 +627,8 @@ cdef dict _do_mcmc(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
     mopt.needs_map = <int>bool(opts["compute_map"])
     mopt.adapt = <int>bool(opts["adapt"])
     mopt.adapt_start = opts["adapt_start"]
+    mopt.adapt_end = opts["adapt_end"]
+    mopt.adapt_interval = opts["adapt_interval"]
     mopt.adapt_epsilon = opts["adapt_epsilon"]
     mopt.proposal_scale = opts["proposal_scale"]
     mopt.needs_hessian = <int>bool(opts["needs_hessian"])
@@ -776,20 +778,20 @@ def run_estimation(
     double[::1] theta0,
     double[::1] lo,
     double[::1] hi,
-    bint has_priors=False,
-    bint include_logjac=False,
-    int m=10,
-    int maxiter=15000,
-    int maxfun=15000,
-    int maxls=20,
-    double factr=1e7,
-    double pgtol=1e-5,
-    double fd_step=0.0,
-    double xatol=1e-4,
-    double fatol=1e-4,
-    bint compute_cov=True,
-    double cov_fd_step_scale=1.0,
-    double cov_fd_absolute_floor=0.1,
+    bint has_priors,
+    bint include_logjac,
+    int m,
+    int maxiter,
+    int maxfun,
+    int maxls,
+    double factr,
+    double pgtol,
+    double fd_step,
+    double xatol,
+    double fatol,
+    bint compute_cov,
+    double cov_fd_step_scale,
+    double cov_fd_absolute_floor,
 ):
     """Native MLE/MAP over the linear / extended / unscented objective. Marshal
     the mode's context DTO into its C ctx, then minimize ``-loglik``
@@ -832,17 +834,19 @@ def run_mcmc(
     double[::1] theta0,
     object rng,
     int64_t n_draws,
-    int64_t burn_in=1000,
-    int64_t thin=1,
-    bint adapt=True,
-    int64_t adapt_start=100,
-    double proposal_scale=0.1,
-    proposal_cov=None,
-    double cov_fd_step_scale=1.0,
-    double cov_fd_absolute_floor=0.1,
-    double adapt_epsilon=1e-8,
-    bint compute_map=True,
-    dict map_options=None,
+    int64_t burn_in,
+    int64_t thin,
+    bint adapt,
+    int64_t adapt_start,
+    int64_t adapt_end,
+    int64_t adapt_interval,
+    double proposal_scale,
+    proposal_cov,
+    double cov_fd_step_scale,
+    double cov_fd_absolute_floor,
+    double adapt_epsilon,
+    bint compute_map,
+    dict map_options,
 ):
     """Native adaptive random-walk Metropolis over the linear / extended /
     unscented objective. Returns the kept draws (in parameter space) plus
@@ -863,6 +867,20 @@ def run_mcmc(
         raise ValueError("thin must be positive.")
     if cov_fd_step_scale <= 0.0 or cov_fd_absolute_floor <= 0.0:
         raise ValueError("Hessian finite-difference settings must be positive.")
+    if proposal_scale <= 0.0:
+        raise ValueError("proposal_scale must be positive.")
+    if adapt:
+        if adapt_start <= 0:
+            raise ValueError("adapt_start must be positive.")
+        if adapt_start > adapt_end:
+            raise ValueError(
+                f"adapt_start ({adapt_start}) must not exceed adapt_end ({adapt_end})."
+            )
+        if adapt_interval <= 0:
+            raise ValueError("adapt_interval must be positive.")
+        if adapt_epsilon < 0.0:
+            raise ValueError("adapt_epsilon must be non-negative.")
+
     map_options = {} if map_options is None else dict(map_options)
     unknown_map_options = set(map_options) - {
         "method", "lo", "hi", "m", "maxiter", "maxfun", "maxls", "factr",
@@ -905,6 +923,8 @@ def run_mcmc(
         "thin": thin,
         "adapt": adapt,
         "adapt_start": adapt_start,
+        "adapt_end": adapt_end,
+        "adapt_interval": adapt_interval,
         "proposal_scale": proposal_scale,
         "proposal_cov": proposal_cov,
         "cov_fd_step_scale": cov_fd_step_scale,

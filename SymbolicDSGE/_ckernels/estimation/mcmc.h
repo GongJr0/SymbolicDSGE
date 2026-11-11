@@ -18,6 +18,8 @@ typedef struct {
 
   int adapt;
   i64 adapt_start;
+  i64 adapt_end;
+  i64 adapt_interval;
   f64 adapt_epsilon;
   f64 proposal_scale;
   int needs_hessian; // False if user supplied a hessian for the hessian
@@ -59,7 +61,7 @@ typedef struct {
 /* HOT LOOP DRIVER */
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
                    const f64 *SDSGE_RESTRICT theta0, i64 d,
-                   const f64 *SDSGE_RESTRICT hessian,
+                   const f64 *SDSGE_RESTRICT pcov,
                    const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
                    sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out);

@@ -133,12 +133,14 @@ Estimator.mcmc(
     theta0: Mapping[str, float] | None = None, # (4)!
     random_state: int | None = None,
     adapt: bool = True,
-    adapt_start: int = 100,
-    proposal_scale: float = 0.1,
-    adapt_epsilon: float = 1e-8,
+    adapt_start: int | None = None,  #(5)!
+    adapt_end: int | Literal["burn_in"] | None = "burn_in",  # (6)!
+    adapt_interval: int = 1, # (7)!
+    adapt_epsilon: float = 1e-8,  # (8)!
+    proposal_scale: float = 1,  # (9)!
     compute_map: bool = True,
-    map_options: dict[str, Any] | None = None,  # (5)!
-    proposal_cov: np.ndarray | None = None,  # (6)!
+    map_options: dict[str, Any] | None = None,  # (10)!
+    proposal_cov: np.ndarray | None = None,  # (11)!
     cov_fd_step_scale: float = 1.0,
     cov_fd_absolute_floor: float = 0.1,
 ) -> MCMCResult
@@ -149,8 +151,15 @@ Estimator.mcmc(
 3. Retain every `thin`-th iteration after burn-in.
 4. `None` uses calibration defaults. When `compute_map=True`, the MAP estimate is computed first and used as the starting point for the chain.
 The proposal covariance will use the MAP point to compute the Hessian if `compute_map=True`.
-5. Passed to `map(...)` if `compute_map=True`. If `None`, defaults are used. Refer to [Estimator.map](#map) for the available options.
-6. Proposal covariance for the sampler. It's mutually exclusive with `compute_map=True` since the MAP estimate is used as the differentiation point for the proposal covariance and the `theta0` a chain starts at.
+5. `None` defaults to half-way between `0` and `adapt_end` and cannot exceed `1000`.
+Integer iteration indices must be greater than `0`, the adaptation algorithm requires at least one sample to be collected.
+6. `None` continues adaptation until the end of the chain, `"burn_in"` stops adaptation
+after the burn-in phase, and integer values are the iteration at which adaptation stops.
+7. Number of iterations between adaptation steps. Must be at least 1.
+8. Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
+9. Scaling factor for proposal **standard deviation**: `2.38/sqrt(d) * proposal_scale`. The default of 1 corresponds to the standard "optimal" point for a Gaussian random-walk MH.
+10. Passed to `map(...)` if `compute_map=True`. If `None`, defaults are used. Refer to [Estimator.map](#map) for the available options.
+11. Proposal covariance for the sampler. It's mutually exclusive with `compute_map=True` since the MAP estimate is used as the differentiation point for the proposal covariance and the `theta0` a chain starts at.
 
 ???+ note "Thinning Semantics"
     Thinning is applied after burn-in using `(t - burn_in) % thin == 0`.

@@ -328,6 +328,8 @@ cdef extern from "mcmc.h":
         int needs_map
         int adapt
         int64_t adapt_start
+        int64_t adapt_end
+        int64_t adapt_interval
         double adapt_epsilon
         double proposal_scale
         int needs_hessian
@@ -351,7 +353,7 @@ cdef extern from "mcmc.h":
 
     int64_t sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
                            bitgen_t *bg, const double *theta0,
-                           int64_t d, const double *hessian,
+                           int64_t d, const double *pcov,
                            const sdsge_mcmc_options *opt,
                            const sdsge_estimation_options *map_opt,
                            sdsge_mcmc_buffers *buf,
