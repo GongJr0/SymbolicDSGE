@@ -55,15 +55,16 @@ typedef struct {
 
 /* status codes for sdsge_mcmc_result.status */
 #define SDSGE_MCMC_OK 0
-#define SDSGE_MCMC_EALLOC (-1601)
 #define SDSGE_MCMC_EMAP (-1604)
 
 /* HOT LOOP DRIVER */
+arena_size sdsge_mcmc_arena_size(i64 d, const void *obj_ctx);
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
                    const f64 *SDSGE_RESTRICT theta0, i64 d,
                    const f64 *SDSGE_RESTRICT pcov,
                    const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
-                   sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out);
+                   sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
+                   f64 *SDSGE_RESTRICT work);
 
 #endif /* SDSGE_MCMC_H */
