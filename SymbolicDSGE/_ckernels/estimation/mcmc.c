@@ -122,12 +122,23 @@ static inline f64 sdsge_unconstrained_to_params(const sdsge_obj_common *b,
   return lj;
 }
 
+arena_size sdsge_mcmc_arena_size(i64 d, const void *obj_ctx) {
+  const sdsge_obj_common *cb = (const sdsge_obj_common *)obj_ctx;
+
+  const i64 kblk =
+      max_i64(sdsge_spec_has_block(&cb->q.spec) ? cb->q.spec.K : 0,
+              sdsge_spec_has_block(&cb->r.spec) ? cb->r.spec.K : 0);
+  const size_t nm = d * d;
+  const size_t nlast = (size_t)max_i64(d * d, kblk * kblk);
+  return make_sizer(5 * d + 2 * nm + nlast, 0);
+}
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
                    const f64 *SDSGE_RESTRICT theta0, i64 d,
                    const f64 *SDSGE_RESTRICT pcov,
                    const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
-                   sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out) {
+                   sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
+                   f64 *SDSGE_RESTRICT work) {
   const i64 total_steps = opt->burn_in + opt->n_draws * opt->thin;
   out->total_steps = total_steps;
   out->accepted_burn_in = 0;   /* filled at first post-burn-in draw */
@@ -138,22 +149,11 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   out->status = SDSGE_MCMC_OK;
   out->message = "ok";
 
-  /* Widest CPC block the keep-time inversion has to factor. */
   const sdsge_obj_common *cb = (const sdsge_obj_common *)obj_ctx;
-  const i64 kblk =
-      max_i64(sdsge_spec_has_block(&cb->q.spec) ? cb->q.spec.K : 0,
-              sdsge_spec_has_block(&cb->r.spec) ? cb->r.spec.K : 0);
 
-  /* Workspace allocation: 5 vectors of d and 3 matrices of d*d. The last matrix
+  /* Workspace slice: 5 vectors of d and 3 matrices of d*d. The last matrix
    * is the refactor scratch, the block inversion shares it. */
   const size_t nm = d * d;
-  const size_t nlast = (size_t)max_i64(d * d, kblk * kblk);
-  f64 *work = (f64 *)malloc((5 * d + 2 * nm + nlast) * sizeof(f64));
-  if (work == NULL) {
-    out->status = SDSGE_MCMC_EALLOC;
-    out->message = "mcmc workspace allocation failed";
-    return SDSGE_MCMC_EALLOC;
-  }
 
   f64 *current = work;
   f64 *L = current + d;
@@ -183,7 +183,6 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
       out->status = SDSGE_MCMC_EMAP;
       out->message =
           map_out.base.message != NULL ? map_out.base.message : "MAP failed";
-      free(work);
       return SDSGE_MCMC_EMAP;
     }
   }
@@ -204,7 +203,6 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
       out->message = hessian_status == SDSGE_ESTIMATION_ENOTSPD
                          ? "MAP Hessian is not positive definite"
                          : "MCMC Hessian construction failed";
-      free(work);
       return hessian_status;
     }
     sdsge_matmul_abt(L, L, C, d, d, d);
@@ -216,7 +214,6 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
       out->status = SDSGE_ESTIMATION_ENOTSPD;
       out->message =
           "User-supplied proposal covariance is not positive definite";
-      free(work);
       return SDSGE_ESTIMATION_ENOTSPD;
     }
     memcpy(C, pcov, nm * sizeof(f64));
@@ -227,13 +224,11 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     L[i] *= factor_scale;
   }
 
-  for (i64 i = 0; i < d; ++i) {
-    m[i] = 0.0;
-  }
-
+  memset(m, 0, d * sizeof(f64));
   f64 cur_lp = logpost(current, obj_ctx);
 
   i64 accepted = 0;
+  i64 accepted_burn_in = 0;
   i64 keep_i = 0;
   i64 next_keep = opt->burn_in;      /* init with post-burn-in */
   i64 next_adapt = opt->adapt_start; /* init with first adaptation */
@@ -248,7 +243,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
      * draw and record the current accepted count for warmup diagnostics. */
     if (t == opt->burn_in) {
       init_t = sdsge_monotime_sec();
-      out->accepted_burn_in = accepted;
+      accepted_burn_in = accepted;
     }
 
     /* Propose: prop = current + L @ z,  z ~ N(0, I). */
@@ -298,9 +293,9 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     }
   }
   halt_t = sdsge_monotime_sec();
-  out->accepted_in_sample = accepted - out->accepted_burn_in;
+  out->accepted_burn_in = accepted_burn_in;
+  out->accepted_in_sample = accepted - accepted_burn_in;
   out->burn_in_t = init_t - base_t;
   out->in_sample_t = halt_t - init_t;
-  free(work);
   return SDSGE_MCMC_OK;
 }

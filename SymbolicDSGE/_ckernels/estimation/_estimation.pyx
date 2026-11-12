@@ -587,6 +587,9 @@ cdef dict _do_mcmc(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
     buf.kept_lp = &keptlpv[0]
     buf.kept_lj = &keptljv[0]
 
+    cdef arena_size wsize = sdsge_mcmc_arena_size(d, ctxp)
+    cdef double[::1] work = np.empty(wsize.n_float, np.float64)
+
     # The MAP leg the chain may start from, driven through the same options
     # struct a point estimate uses.
     mo = opts["map_options"]
@@ -642,7 +645,7 @@ cdef dict _do_mcmc(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
     b.bk_violations = 0
     with nogil:
         sdsge_mcmc_run(logpost, ctxp, bg, &th0[0], d, &pcov[0, 0], &mopt,
-                       &map_opt, &buf, &res)
+                       &map_opt, &buf, &res, &work[0])
 
     if res.status != 0:
         raise MemoryError(

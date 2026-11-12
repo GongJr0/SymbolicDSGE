@@ -351,10 +351,11 @@ cdef extern from "mcmc.h":
         double burn_in_t
         double in_sample_t
 
+    arena_size sdsge_mcmc_arena_size(int64_t d, const void *obj_ctx) nogil
     int64_t sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
                            bitgen_t *bg, const double *theta0,
                            int64_t d, const double *pcov,
                            const sdsge_mcmc_options *opt,
                            const sdsge_estimation_options *map_opt,
                            sdsge_mcmc_buffers *buf,
-                           sdsge_mcmc_result *out) nogil
+                           sdsge_mcmc_result *out, double *work) nogil
