@@ -30,6 +30,11 @@ _EXTRA_DEPS = {
     "occbin": ["core"],
 }
 
+# Subsystems whose hand-written C carries `#pragma omp`. An extension links the
+# OpenMP runtime iff it compiles one of these: either it IS one, or it depends
+# on one directly or transitively.
+_OPENMP_OWNERS = {"monte_carlo", "estimation"}
+
 # Subsystems whose hand-written C draws randoms through numpy's low-level RNG
 # C-API (numpy/random headers + the `npyrandom` static lib). An extension needs
 # the numpy include path and the `npyrandom` link iff it compiles `rng` sources:
@@ -58,6 +63,13 @@ def _dependency_closure(subname: str) -> list[str]:
 
     visit(subname)
     return dependencies
+
+
+def _needs_openmp(subname: str) -> bool:
+    """Whether ``subname`` compiles OpenMP pragmas, its own or a dependency's."""
+    return subname in _OPENMP_OWNERS or any(
+        dep in _OPENMP_OWNERS for dep in _dependency_closure(subname)
+    )
 
 
 def _hand_c(subdir: str) -> list[str]:
@@ -142,9 +154,12 @@ class ClangCLBuildExt(build_ext):
             return
 
         # cibuildwheel repairs wheels with delvewheel. Local in-place builds
-        # instead need the dynamic runtime alongside the importing extension.
-        target_dir = os.path.join("SymbolicDSGE", "_ckernels", "monte_carlo")
-        shutil.copy2(libomp_dll, target_dir)
+        # instead need the runtime beside each importing extension: a .pyd's own
+        # directory is searched for its dependencies, its siblings are not.
+        for ext in self.extensions or []:
+            parts = ext.name.split(".")
+            if _needs_openmp(parts[-2]):
+                shutil.copy2(libomp_dll, os.path.join(*parts[:-1]))
 
     def build_extensions(self) -> None:
         toolchain = os.environ.get("SDSGE_TOOLCHAIN", "").lower()
@@ -236,7 +251,7 @@ def _extensions() -> list[Extension]:
                 os.path.join(os.path.dirname(np.__file__), "random", "lib")
             )
             libraries.append("npyrandom")
-        if clang_cl_lib_dir is not None and subname == "monte_carlo":
+        if clang_cl_lib_dir is not None and _needs_openmp(subname):
             library_dirs.append(clang_cl_lib_dir)
             libraries.append("libomp")
         if library_dirs:
