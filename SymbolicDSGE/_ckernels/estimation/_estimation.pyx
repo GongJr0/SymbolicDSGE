@@ -648,7 +648,7 @@ cdef dict _do_mcmc(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
                        &map_opt, &buf, &res, &work[0])
 
     if res.status != 0:
-        raise MemoryError(
+        raise ValueError(
             (<bytes>res.message).decode()
             if res.message != NULL
             else "native MCMC run failed"

@@ -1,8 +1,5 @@
 #include "mcmc.h"
-
-#include <float.h>
 #include <math.h>
-#include <stdlib.h>
 #include <string.h>
 
 /* Direct includes for the primitives used here (native-include hygiene). */
@@ -122,103 +119,74 @@ static inline f64 sdsge_unconstrained_to_params(const sdsge_obj_common *b,
   return lj;
 }
 
-arena_size sdsge_mcmc_arena_size(i64 d, const void *obj_ctx) {
-  const sdsge_obj_common *cb = (const sdsge_obj_common *)obj_ctx;
-
-  const i64 kblk =
-      max_i64(sdsge_spec_has_block(&cb->q.spec) ? cb->q.spec.K : 0,
-              sdsge_spec_has_block(&cb->r.spec) ? cb->r.spec.K : 0);
-  const size_t nm = d * d;
-  const size_t nlast = (size_t)max_i64(d * d, kblk * kblk);
-  return make_sizer(5 * d + 2 * nm + nlast, 0);
-}
-i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
-                   const f64 *SDSGE_RESTRICT theta0, i64 d,
-                   const f64 *SDSGE_RESTRICT pcov,
-                   const sdsge_mcmc_options *opt,
-                   const sdsge_estimation_options *map_opt,
-                   sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
-                   f64 *SDSGE_RESTRICT work) {
-  const i64 total_steps = opt->burn_in + opt->n_draws * opt->thin;
-  out->total_steps = total_steps;
-  out->accepted_burn_in = 0;   /* filled at first post-burn-in draw */
-  out->accepted_in_sample = 0; /* filled at last draw */
+static void sdsge_mcmc_init_out(sdsge_mcmc_result *out,
+                                const sdsge_mcmc_options *opt) {
+  out->total_steps = opt->burn_in + opt->n_draws * opt->thin;
+  out->accepted_burn_in = 0;
+  out->accepted_in_sample = 0;
   out->burn_in_t = 0.0;
   out->in_sample_t = 0.0;
-  out->bk_violations = 0; /* filled by the caller off the objective ctx */
+  out->bk_violations = 0;
   out->status = SDSGE_MCMC_OK;
   out->message = "ok";
+}
 
-  const sdsge_obj_common *cb = (const sdsge_obj_common *)obj_ctx;
-
-  /* Workspace slice: 5 vectors of d and 3 matrices of d*d. The last matrix
-   * is the refactor scratch, the block inversion shares it. */
-  const size_t nm = d * d;
-
-  f64 *current = work;
-  f64 *L = current + d;
-  f64 *prop = L + nm;
-  f64 *z = prop + d;
-  f64 *m = z + d;
-  f64 *dev = m + d;
-  f64 *C = dev + d;
-  f64 *Ltmp = C + nm;
-
-  /* Initial proposal: cov0 = scale * H^-1, L = chol(cov0). The Hessian is
-   * computed at the MAP as a finite-difference approximation of the negative
-   * log-posterior.
-   *
-   * MAP is only computed if the user did not supply a mode for the Hessian
-   * proposal factor.
-   */
-
-  memcpy(current, theta0, d * sizeof(f64));
-  if (opt->needs_map) {
-    /* The sampler builds its own factor below, so the MAP call is asked for
-     * the point only; vcov stays NULL. */
-    sdsge_estimation_result map_out;
-    map_out.vcov = NULL;
-    sdsge_run_estimation(obj_ctx, d, current, map_opt, &map_out);
-    if (!map_out.base.success) {
-      out->status = SDSGE_MCMC_EMAP;
-      out->message =
-          map_out.base.message != NULL ? map_out.base.message : "MAP failed";
-      return SDSGE_MCMC_EMAP;
-    }
+static void sdsge_mcmc_map_point(void *obj_ctx, i64 n_theta,
+                                 f64 *SDSGE_RESTRICT theta,
+                                 const sdsge_estimation_options *map_opt,
+                                 sdsge_mcmc_result *out) {
+  sdsge_estimation_result map_out;
+  /* Defensive, blocks the covariance solve (compute_cov=0 in cython). */
+  map_out.vcov = NULL;
+  sdsge_run_estimation(obj_ctx, n_theta, theta, map_opt, &map_out);
+  if (!map_out.base.success) {
+    out->status = SDSGE_MCMC_EMAP;
+    out->message =
+        map_out.base.message != NULL ? map_out.base.message : "MAP failed";
   }
+}
 
-  // needs_hessian is guaranteed to be True if needs_map is
-  // True. This block being separately gated allows a user to skip the MAP and
-  // get the Hessian at a supplied point.
+static void
+sdsge_mcmc_resolve_pcov(sdsge_objective_fn logpost, void *obj_ctx,
+                        const sdsge_mcmc_options *opt, i64 d,
+                        const f64 *SDSGE_RESTRICT pcov,
+                        f64 *SDSGE_RESTRICT current, f64 *SDSGE_RESTRICT L,
+                        f64 *C, // aliases hessian_work by design, no *restrict
+                        f64 *hessian_work, sdsge_mcmc_result *out) {
   if (opt->needs_hessian) {
-    // The allocation past `L` is dead at cov_factor time, and it is the exact
-    // size the factor needs. `prop` is therefore passed as the work buffer,
-    // and `L` is the output.
-    f64 *hessian_work = prop;
-    const i64 hessian_status = sdsge_estimation_cov_factor(
+    i64 status = sdsge_estimation_cov_factor(
         logpost, obj_ctx, current, d, opt->hessian_fd_step_scale,
         opt->hessian_fd_absolute_floor, L, hessian_work);
-    if (hessian_status != SDSGE_ESTIMATION_OK) {
-      out->status = hessian_status;
-      out->message = hessian_status == SDSGE_ESTIMATION_ENOTSPD
+    if (status != SDSGE_ESTIMATION_OK) {
+      out->status = status;
+      out->message = status == SDSGE_ESTIMATION_ENOTSPD
                          ? "MAP Hessian is not positive definite"
                          : "MCMC Hessian construction failed";
-      return hessian_status;
+      return;
     }
-    sdsge_matmul_abt(L, L, C, d, d, d);
-
+    sdsge_matmul_abt(L, L, C, d, d, d); /* C = L @ L^T */
   } else {
-    // User supplied a proposal covariance; factor it for the proposal and copy
-    // directly into the covariance buffer for update/adaptation.
     if (sdsge_chol_upper(pcov, 0.0, L, d) != SDSGE_OK) {
       out->status = SDSGE_ESTIMATION_ENOTSPD;
       out->message =
           "User-supplied proposal covariance is not positive definite";
-      return SDSGE_ESTIMATION_ENOTSPD;
+      return;
     }
-    memcpy(C, pcov, nm * sizeof(f64));
+    memcpy(C, pcov, d * d * sizeof(f64));
   }
+}
 
+static void sdsge_mcmc_kernel(sdsge_objective_fn logpost, void *obj_ctx,
+                              const sdsge_mcmc_options *opt, bitgen_t *bg,
+                              i64 d, f64 *SDSGE_RESTRICT current,
+                              f64 *SDSGE_RESTRICT L, f64 *SDSGE_RESTRICT prop,
+                              f64 *SDSGE_RESTRICT z, f64 *SDSGE_RESTRICT m,
+                              f64 *SDSGE_RESTRICT dev, f64 *SDSGE_RESTRICT C,
+                              f64 *SDSGE_RESTRICT Ltmp, sdsge_mcmc_buffers *buf,
+                              sdsge_mcmc_result *out) {
+
+  const sdsge_obj_common *cb = (const sdsge_obj_common *)obj_ctx;
+  const i64 total_steps = opt->burn_in + opt->n_draws * opt->thin;
   const f64 factor_scale = sqrt((2.38 * 2.38) / (f64)d) * opt->proposal_scale;
   for (i64 i = 0; i < d * d; ++i) {
     L[i] *= factor_scale;
@@ -232,6 +200,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   i64 keep_i = 0;
   i64 next_keep = opt->burn_in;      /* init with post-burn-in */
   i64 next_adapt = opt->adapt_start; /* init with first adaptation */
+
   /* clock stores */
   const f64 base_t = sdsge_monotime_sec();
   f64 init_t = base_t; /* == base_t if burn_in == 0, else set at first
@@ -297,5 +266,70 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
   out->accepted_in_sample = accepted - accepted_burn_in;
   out->burn_in_t = init_t - base_t;
   out->in_sample_t = halt_t - init_t;
-  return SDSGE_MCMC_OK;
+}
+
+arena_size sdsge_mcmc_arena_size(i64 d, const void *obj_ctx) {
+  const sdsge_obj_common *cb = (const sdsge_obj_common *)obj_ctx;
+
+  const i64 kblk =
+      max_i64(sdsge_spec_has_block(&cb->q.spec) ? cb->q.spec.K : 0,
+              sdsge_spec_has_block(&cb->r.spec) ? cb->r.spec.K : 0);
+  const size_t nm = d * d;
+  const size_t nlast = (size_t)max_i64(d * d, kblk * kblk);
+  return make_sizer(5 * d + 2 * nm + nlast, 0);
+}
+i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
+                   const f64 *SDSGE_RESTRICT theta0, i64 d,
+                   const f64 *SDSGE_RESTRICT pcov,
+                   const sdsge_mcmc_options *opt,
+                   const sdsge_estimation_options *map_opt,
+                   sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
+                   f64 *SDSGE_RESTRICT work) {
+
+  sdsge_mcmc_init_out(out, opt);
+
+  /* Workspace slice: 5 vectors of d and 3 matrices of d*d. The last matrix
+   * is the refactor scratch, the block inversion shares it. */
+  const size_t nm = d * d;
+
+  f64 *current = work;
+  f64 *L = current + d;
+  f64 *prop = L + nm;
+  f64 *z = prop + d;
+  f64 *m = z + d;
+  f64 *dev = m + d;
+  f64 *C = dev + d;
+  f64 *Ltmp = C + nm;
+
+  memcpy(current, theta0, d * sizeof(f64));
+
+  /* Initial proposal: cov0 = scale * H^-1, L = chol(cov0). The Hessian is
+   * computed at the MAP as a finite-difference approximation of the negative
+   * log-posterior.
+   *
+   * MAP is only computed if the user did not supply a mode for the Hessian
+   * proposal factor.
+   */
+
+  if (opt->needs_map) {
+    sdsge_mcmc_map_point(obj_ctx, d, current, map_opt, out);
+    if (out->status != SDSGE_MCMC_OK) {
+      return out->status;
+    }
+  }
+
+  /* The allocation past `L` at this call (aka prop and onward) is dead and is
+   * the exact size the FD Hessian needs as scratch. Note that `C` is
+   * overwritable as scratch during the solve. C=LL^T executes immediately
+   * after, the covariance isn't corrupted regardless of `needs_hessian` status.
+   */
+  sdsge_mcmc_resolve_pcov(logpost, obj_ctx, opt, d, pcov, current, L, C, prop,
+                          out);
+  if (out->status != SDSGE_MCMC_OK) {
+    return out->status;
+  }
+
+  sdsge_mcmc_kernel(logpost, obj_ctx, opt, bg, d, current, L, prop, z, m, dev,
+                    C, Ltmp, buf, out);
+  return out->status;
 }
