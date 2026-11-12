@@ -318,11 +318,11 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     }
   }
 
-  /* The allocation past `L` at this call (aka prop and onward) is dead and is
-   * the exact size the FD Hessian needs as scratch. Note that `C` is
-   * overwritable as scratch during the solve. C=LL^T executes immediately
-   * after a succesful solve, the covariance isn't corrupted  regardless of the
-   * `needs_hessian` flag. */
+  /* The allocation past `L` (aka prop and onward) at this call is dead; and is
+   * the exact size FD Hessian needs as scratch. Note that `C` is overwritable
+   * as scratch during the solve. C=LL^T executes immediately after a succesful
+   * solve, the covariance isn't corrupted regardless of the `needs_hessian`
+   * flag. */
   sdsge_mcmc_resolve_pcov(logpost, obj_ctx, opt, d, pcov, current, L, C, prop,
                           out);
   if (out->status != SDSGE_MCMC_OK) {
