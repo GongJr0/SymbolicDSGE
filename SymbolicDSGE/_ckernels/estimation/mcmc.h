@@ -59,7 +59,7 @@ typedef struct {
 /* status codes for sdsge_mcmc_result.status */
 #define SDSGE_MCMC_OK 0
 #define SDSGE_MCMC_EMAP (-1604)
-
+#define SDSGE_MCMC_EMULTICHAIN (-1605)
 /* HOT LOOP DRIVER */
 arena_size sdsge_mcmc_arena_size(i64 d, const void *obj_ctx);
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,

@@ -801,7 +801,7 @@ class Estimator:
                 ),
                 "cov_fd_step_scale": float(cov_fd_step_scale),
                 "cov_fd_absolute_floor": float(cov_fd_absolute_floor),
-                "random_state": (None if random_state is None else int(random_state)),
+                "random_state": int(seed),
             },
         )
         self._report_search_warning_count("mcmc", out["bk_violations"])
