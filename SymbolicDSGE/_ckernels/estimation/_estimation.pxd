@@ -8,10 +8,7 @@ so those have to be declared before ``estimation.h``.
 Same stem as ``_estimation.pyx``, so these are visible there with no cimport.
 """
 
-from libc.stdint cimport int64_t
-
-from numpy.random cimport bitgen_t
-
+from libc.stdint cimport int64_t, uint64_t
 
 cdef extern from "../_common/sdsge_complex.h":
     ctypedef struct c128:
@@ -335,6 +332,7 @@ cdef extern from "mcmc.h":
         int needs_hessian
         double hessian_fd_step_scale
         double hessian_fd_absolute_floor
+        uint64_t seed
 
     ctypedef struct sdsge_mcmc_buffers:
         double *kept
@@ -353,7 +351,7 @@ cdef extern from "mcmc.h":
 
     arena_size sdsge_mcmc_arena_size(int64_t d, const void *obj_ctx) nogil
     int64_t sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
-                           bitgen_t *bg, const double *theta0,
+                           const double *theta0,
                            int64_t d, const double *pcov,
                            const sdsge_mcmc_options *opt,
                            const sdsge_estimation_options *map_opt,

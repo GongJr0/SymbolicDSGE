@@ -4,7 +4,6 @@
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_linalg.h"
 #include "../optim/optim.h"
-#include "../rng/rng.h"
 #include "estimation.h"
 
 /* MCMC INPUTS */
@@ -28,6 +27,7 @@ typedef struct {
 
   f64 hessian_fd_step_scale;
   f64 hessian_fd_absolute_floor;
+  u64 seed;
 } sdsge_mcmc_options;
 
 typedef struct {
@@ -53,13 +53,16 @@ typedef struct {
   f64 in_sample_t;
 } sdsge_mcmc_result;
 
+/* Module Code for Philox RNG */
+#define SDSGE_MCMC_MODCODE ((u64)1600 << 48)
+
 /* status codes for sdsge_mcmc_result.status */
 #define SDSGE_MCMC_OK 0
 #define SDSGE_MCMC_EMAP (-1604)
 
 /* HOT LOOP DRIVER */
 arena_size sdsge_mcmc_arena_size(i64 d, const void *obj_ctx);
-i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
+i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
                    const f64 *SDSGE_RESTRICT theta0, i64 d,
                    const f64 *SDSGE_RESTRICT pcov,
                    const sdsge_mcmc_options *opt,

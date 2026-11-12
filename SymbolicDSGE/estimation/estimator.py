@@ -722,8 +722,6 @@ class Estimator:
         if adapt_start is None:
             adapt_start = max(1, min((adapt_end + 1) // 2, 1000))
 
-        rng = np.random.default_rng(random_state)
-
         map_bounds = None if map_options is None else map_options.get("bounds")
         ctx, theta, map_lo, map_hi = self._build_call_context(
             priored=True, theta0=theta0, bounds=map_bounds
@@ -734,14 +732,17 @@ class Estimator:
         native_map_options["lo"] = map_lo
         native_map_options["hi"] = map_hi
 
-        # The chain runs entirely in native nogil code; ``rng`` (numpy's own
-        # PCG64) is borrowed for the run and must outlive it, which the local
-        # reference here guarantees. Timing wraps only the native call.
+        if random_state is None:
+            rng = np.random.default_rng()
+            seed = rng.integers(0, 2**64, dtype=np.uint64)
+        else:
+            seed = np.uint64(int(random_state) & 0xFFFFFFFFFFFFFFFF)
+
         t0 = perf_counter()
         out = run_mcmc(
             ctx,
             theta,
-            rng,
+            seed,
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,

@@ -6,19 +6,15 @@ context struct and calls the native objective. Python never assembles the struct
 by hand.
 """
 
-from libc.stdint cimport int64_t
+from libc.stdint cimport int64_t, uint64_t
 
 from cpython.pycapsule cimport (
     PyCapsule_GetName,
     PyCapsule_GetPointer,
-    PyCapsule_IsValid,
 )
 
 import numpy as np
 import scipy.linalg.cython_lapack as _cython_lapack
-
-from numpy.random cimport bitgen_t
-
 
 cdef object _zgges_capsule = _cython_lapack.__pyx_capi__["zgges"]
 cdef klein_zgges_fn _zgges = <klein_zgges_fn>PyCapsule_GetPointer(
@@ -402,24 +398,6 @@ cdef void _alloc_fill_ukf(sdsge_unscented_ctx *c, object kf_dto,
 
 
 # --- Native MLE/MAP driver over the per-mode objective (issue #330) ----------
-#
-# numpy tags the BitGenerator capsule with this exact name; a mismatch makes
-# PyCapsule_GetPointer reject the pointer, so a foreign capsule can't be
-# dereferenced. Mirrors the rng subsystem's own unwrap.
-cdef const char *_BITGEN_CAPSULE_NAME = b"BitGenerator"
-
-
-cdef bitgen_t *_bitgen_ptr(object rng) except NULL:
-    """Borrow the ``bitgen_t*`` from a numpy ``Generator``. The caller MUST keep
-    ``rng`` alive for the whole native run (the capsule pointer is borrowed)."""
-    capsule = rng.bit_generator.capsule
-    if not PyCapsule_IsValid(capsule, _BITGEN_CAPSULE_NAME):
-        raise ValueError(
-            "random_state must resolve to a numpy Generator exposing a valid "
-            "BitGenerator capsule."
-        )
-    return <bitgen_t *>PyCapsule_GetPointer(capsule, _BITGEN_CAPSULE_NAME)
-
 
 cdef void _check_theta(object ctx_dto, object theta) except *:
     if np.shape(theta)[0] != ctx_dto.n_theta:
@@ -558,14 +536,8 @@ cdef dict _do_eval(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
 
 
 cdef dict _do_mcmc(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
-    """Native adaptive random-walk Metropolis.
-
-    `rng` is held by `opts` for the duration, which is what keeps the borrowed
-    bitgen_t pointer valid across the nogil chain."""
+    """Native adaptive random-walk Metropolis."""
     b.prior.include_logjac = 1
-
-    rng = opts["rng"]
-    cdef bitgen_t *bg = _bitgen_ptr(rng)
 
     cdef double[::1] th0 = np.ascontiguousarray(opts["theta0"], dtype=np.float64)
     cdef int64_t d = th0.shape[0]
@@ -637,14 +609,14 @@ cdef dict _do_mcmc(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
     mopt.needs_hessian = <int>bool(opts["needs_hessian"])
     mopt.hessian_fd_step_scale = opts["cov_fd_step_scale"]
     mopt.hessian_fd_absolute_floor = opts["cov_fd_absolute_floor"]
-
+    mopt.seed = <uint64_t>opts["seed"]
     # +logpost, unnegated: MCMC samples a posterior.
     cdef sdsge_objective_fn logpost = sdsge_select_objective(0, 1, filter_mode)
 
     cdef sdsge_mcmc_result res
     b.bk_violations = 0
     with nogil:
-        sdsge_mcmc_run(logpost, ctxp, bg, &th0[0], d, &pcov[0, 0], &mopt,
+        sdsge_mcmc_run(logpost, ctxp, &th0[0], d, &pcov[0, 0], &mopt,
                        &map_opt, &buf, &res, &work[0])
 
     if res.status != 0:
@@ -835,7 +807,7 @@ def run_estimation(
 def run_mcmc(
     object ctx_dto,
     double[::1] theta0,
-    object rng,
+    uint64_t seed,
     int64_t n_draws,
     int64_t burn_in,
     int64_t thin,
@@ -853,11 +825,7 @@ def run_mcmc(
 ):
     """Native adaptive random-walk Metropolis over the linear / extended /
     unscented objective. Returns the kept draws (in parameter space) plus
-    the acceptance / BK counters. ``rng`` must be a numpy ``Generator``;
-    it is held for the whole native run (the ``bitgen_t*`` is borrowed).
-    Draws stay bit-exact numpy; the proposal (Cholesky) and covariance
-    adaptation are statistically equivalent but not bit exact against a
-    numpy chain.
+    the acceptance / BK counters.
 
     ``theta0`` is where the chain begins. With ``compute_map`` the MAP is found
     from it first and the chain begins at the mode instead; without, ``theta0``
@@ -920,7 +888,7 @@ def run_mcmc(
     cdef str mode = ctx_dto.filter_ctx.mode
     return _dispatch(ctx_dto, mode, _ACT_MCMC, {
         "theta0": theta0,
-        "rng": rng,
+        "seed": seed,
         "n_draws": n_draws,
         "burn_in": burn_in,
         "thin": thin,

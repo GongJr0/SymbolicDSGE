@@ -7,7 +7,7 @@
 #include "../_common/sdsge_linalg.h" /* sdsge_chol, sdsge_backward_subst_chol_t,
                                         sdsge_matmul_abt, sdsge_matvec */
 #include "../optim/optim.h"          /* sdsge_optim_result */
-#include "../rng/rng.h" /* sdsge_rng_standard_{normal,uniform}_fill */
+#include "../rng/philox.h" /* sdsge_philox_standard_{normal,uniform}_fill, sdsge_philox_seed */
 #include "estimation.h" /* sdsge_run_estimation, sdsge_objective_fn */
 #include "prior_program.h"
 #include "sdsge_time.h" /* sdsge_monotime_sec */
@@ -176,14 +176,12 @@ sdsge_mcmc_resolve_pcov(sdsge_objective_fn logpost, void *obj_ctx,
   }
 }
 
-static void sdsge_mcmc_kernel(sdsge_objective_fn logpost, void *obj_ctx,
-                              const sdsge_mcmc_options *opt, bitgen_t *bg,
-                              i64 d, f64 *SDSGE_RESTRICT current,
-                              f64 *SDSGE_RESTRICT L, f64 *SDSGE_RESTRICT prop,
-                              f64 *SDSGE_RESTRICT z, f64 *SDSGE_RESTRICT m,
-                              f64 *SDSGE_RESTRICT dev, f64 *SDSGE_RESTRICT C,
-                              f64 *SDSGE_RESTRICT Ltmp, sdsge_mcmc_buffers *buf,
-                              sdsge_mcmc_result *out) {
+static void sdsge_mcmc_kernel(
+    sdsge_objective_fn logpost, void *obj_ctx, const sdsge_mcmc_options *opt,
+    sdsge_philox_state *st, i64 d, f64 *SDSGE_RESTRICT current,
+    f64 *SDSGE_RESTRICT L, f64 *SDSGE_RESTRICT prop, f64 *SDSGE_RESTRICT z,
+    f64 *SDSGE_RESTRICT m, f64 *SDSGE_RESTRICT dev, f64 *SDSGE_RESTRICT C,
+    f64 *SDSGE_RESTRICT Ltmp, sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out) {
 
   const sdsge_obj_common *cb = (const sdsge_obj_common *)obj_ctx;
   const i64 total_steps = opt->burn_in + opt->n_draws * opt->thin;
@@ -216,7 +214,7 @@ static void sdsge_mcmc_kernel(sdsge_objective_fn logpost, void *obj_ctx,
     }
 
     /* Propose: prop = current + L @ z,  z ~ N(0, I). */
-    sdsge_rng_standard_normal_fill(bg, d, z);
+    sdsge_philox_standard_normal_fill(st, d, z);
     sdsge_matvec(L, z, prop, d, d);
     for (i64 i = 0; i < d; ++i) {
       prop[i] += current[i];
@@ -226,7 +224,7 @@ static void sdsge_mcmc_kernel(sdsge_objective_fn logpost, void *obj_ctx,
     if (isfinite(prop_lp)) {
       const f64 log_alpha = prop_lp - cur_lp;
       f64 u;
-      sdsge_rng_standard_uniform_fill(bg, 1, &u);
+      sdsge_philox_standard_uniform_fill(st, 1, &u);
       if (log(u) < log_alpha) {
         memcpy(current, prop, d * sizeof(f64));
         cur_lp = prop_lp;
@@ -278,13 +276,16 @@ arena_size sdsge_mcmc_arena_size(i64 d, const void *obj_ctx) {
   const size_t nlast = (size_t)max_i64(d * d, kblk * kblk);
   return make_sizer(5 * d + 2 * nm + nlast, 0);
 }
-i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
+i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
                    const f64 *SDSGE_RESTRICT theta0, i64 d,
                    const f64 *SDSGE_RESTRICT pcov,
                    const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
                    sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
                    f64 *SDSGE_RESTRICT work) {
+  sdsge_philox_state st;
+  /* (seed, modcode, chain_idx, substream) */
+  sdsge_philox_seed(&st, opt->seed, SDSGE_MCMC_MODCODE, 0, 0);
 
   sdsge_mcmc_init_out(out, opt);
 
@@ -329,7 +330,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx, bitgen_t *bg,
     return out->status;
   }
 
-  sdsge_mcmc_kernel(logpost, obj_ctx, opt, bg, d, current, L, prop, z, m, dev,
+  sdsge_mcmc_kernel(logpost, obj_ctx, opt, &st, d, current, L, prop, z, m, dev,
                     C, Ltmp, buf, out);
   return out->status;
 }
