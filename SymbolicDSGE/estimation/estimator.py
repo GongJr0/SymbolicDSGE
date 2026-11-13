@@ -722,8 +722,6 @@ class Estimator:
         if adapt_start is None:
             adapt_start = max(1, min((adapt_end + 1) // 2, 1000))
 
-        rng = np.random.default_rng(random_state)
-
         map_bounds = None if map_options is None else map_options.get("bounds")
         ctx, theta, map_lo, map_hi = self._build_call_context(
             priored=True, theta0=theta0, bounds=map_bounds
@@ -734,14 +732,17 @@ class Estimator:
         native_map_options["lo"] = map_lo
         native_map_options["hi"] = map_hi
 
-        # The chain runs entirely in native nogil code; ``rng`` (numpy's own
-        # PCG64) is borrowed for the run and must outlive it, which the local
-        # reference here guarantees. Timing wraps only the native call.
+        if random_state is None:
+            rng = np.random.default_rng()
+            seed = rng.integers(0, 2**64, dtype=np.uint64)
+        else:
+            seed = np.uint64(int(random_state) & 0xFFFFFFFFFFFFFFFF)
+
         t0 = perf_counter()
         out = run_mcmc(
             ctx,
             theta,
-            rng,
+            seed,
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
@@ -759,8 +760,8 @@ class Estimator:
         )
         elapsed = max(perf_counter() - t0, np.finfo(float).eps)
 
-        total_steps = int(out["total_steps"])
-        kept = out["samples"]
+        total_steps = int(out["total_steps"][0])
+        kept = out["samples"][0]
 
         print(
             f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
@@ -773,12 +774,12 @@ class Estimator:
         result = MCMCResult(
             param_names=tuple(self.param_names),
             samples=kept,
-            logpost_trace=out["logpost_trace"],
-            logjac_trace=out["logjac_trace"],
-            accepted_burn_in=out["accepted_burn_in"],
-            accepted_in_sample=out["accepted_in_sample"],
-            burn_in_seconds=out["burn_in_t"],
-            in_sample_seconds=out["in_sample_t"],
+            logpost_trace=out["logpost_trace"][0],
+            logjac_trace=out["logjac_trace"][0],
+            accepted_burn_in=out["accepted_burn_in"][0],
+            accepted_in_sample=out["accepted_in_sample"][0],
+            burn_in_seconds=out["burn_in_t"][0],
+            in_sample_seconds=out["in_sample_t"][0],
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
@@ -800,7 +801,7 @@ class Estimator:
                 ),
                 "cov_fd_step_scale": float(cov_fd_step_scale),
                 "cov_fd_absolute_floor": float(cov_fd_absolute_floor),
-                "random_state": (None if random_state is None else int(random_state)),
+                "random_state": int(seed),
             },
         )
         self._report_search_warning_count("mcmc", out["bk_violations"])

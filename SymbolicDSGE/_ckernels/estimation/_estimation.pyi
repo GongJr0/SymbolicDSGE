@@ -39,7 +39,7 @@ def run_estimation(
 def run_mcmc(
     ctx_dto: Any,
     theta0: _F64,
-    rng: np.random.Generator,
+    seed: np.uint64,
     n_draws: int,
     burn_in: int,
     thin: int,
