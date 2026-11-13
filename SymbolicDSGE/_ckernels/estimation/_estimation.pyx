@@ -37,12 +37,7 @@ cdef sdsge_dormqr_fn _dormqr = <sdsge_dormqr_fn>PyCapsule_GetPointer(
 #
 # `hold` is why the normalization is safe here at all. When the input is NOT
 # already conformant, ascontiguousarray returns a NEW array that nothing else
-# holds. Appending the result keeps it alive for the caller's frame, which is
-# where the native call happens.
-#
-# A zero-length table hands back its base address like any other. No kernel
-# branches on these pointers being NULL  and every C reader walks the paired
-# count before touching the table.
+# holds. Appending the result keeps it alive.
 
 cdef inline object _held(object a, list hold):
     """Root an array this frame owns. Returns it so an allocation, its keepalive
@@ -152,13 +147,12 @@ cdef inline const double *_cov_ptr(sdsge_cov_build *cb):
 
 # --- allocators -------------------------------------------------------------
 #
-# Each one allocates a struct's buffers and publishes their addresses in the same
-# breath, so a buffer and the field that points at it are never apart. The arrays
-# are rooted in `hold`, a list the CALLER owns, which is what lets the allocation
-# live in a helper while the pointer outlives it.
+# Each one allocates a struct's buffers and populates the given struct with pointers
+# to them. The arrays are rooted in `hold`, a list the CALLER owns. That way, the
+# callsite and lifetime of allocations are separately managed.
 
-cdef object _alloc_base(sdsge_obj_common *b, object sol_dto, int64_t n_obs,
-                        arena_size asz, list hold):
+cdef void _alloc_base(sdsge_obj_common *b, object sol_dto, int64_t n_obs,
+                      arena_size asz, list hold) except *:
     cdef int64_t n_par = sol_dto.n_par
     cdef int64_t n_exog = sol_dto.n_exog
 
@@ -186,10 +180,10 @@ cdef object _alloc_base(sdsge_obj_common *b, object sol_dto, int64_t n_obs,
     b.iarena = &ia[0]
 
     b.bk_violations = 0
-    return params
 
 
-cdef void _alloc_solve1(sdsge_solve1 *o, object sol_dto, int64_t nd, list hold):
+cdef void _alloc_solve1(sdsge_solve1 *o, object sol_dto, int64_t nd,
+                        list hold) except *:
     cdef int64_t n_var = sol_dto.n_var
     cdef int64_t n_state = sol_dto.n_state
     cdef int64_t n_ctrl = sol_dto.n_ctrl
@@ -229,7 +223,8 @@ cdef void _alloc_solve1(sdsge_solve1 *o, object sol_dto, int64_t nd, list hold):
     o.order = &od[0]
 
 
-cdef void _alloc_solve2(sdsge_solve2 *o, object sol_dto, list hold):
+cdef void _alloc_solve2(sdsge_solve2 *o, object sol_dto,
+                        list hold) except *:
     cdef int64_t n_var = sol_dto.n_var
     cdef int64_t n_state = sol_dto.n_state
     cdef int64_t n_ctrl = sol_dto.n_ctrl
@@ -281,12 +276,6 @@ cdef const double *_alloc_P0(sdsge_obj_common *b, object kf_dto, int64_t fdim,
 #
 # One per mode, allocating the filter's own buffers and then writing the input
 # struct in field order so it reads as the checklist the C header is.
-#
-# Nothing here is per-draw: every pointer addresses a buffer whose location is
-# fixed for the run, and the solve, the measurement build, and the covariance
-# build rewrite those buffers in place each draw. MUST run after the mode's solve
-# outputs are wired, because it copies their addresses out of the ctx.
-#
 # `y` and a supplied `P0` are the only DTO-rooted pointers in these structs.
 
 cdef void _alloc_fill_kf(sdsge_linear_ctx *c, object kf_dto, object sol_dto,
@@ -397,7 +386,94 @@ cdef void _alloc_fill_ukf(sdsge_unscented_ctx *c, object kf_dto,
     c.ukf_ctx.store_history = 0
 
 
-# --- Native MLE/MAP driver over the per-mode objective (issue #330) ----------
+# --- objective ctx struct fills -------------------------------------------------
+#
+# Per-mode fillers receive typed structs from the outer _get_obj_ctx.
+# The getter passes caller owned structs and returns the one that matches the mode
+# after filling it.
+
+cdef void _fill_obj_ctx_linear(object ctx_dto, sdsge_linear_ctx *c, object sol,
+                               object kf, const signed char *inc, int64_t nd,
+                               arena_size asz, list hold) except *:
+    cdef sdsge_obj_common *b = &c.base
+    _alloc_base(b, sol, kf.n_obs, asz, hold)
+    _fill_param_map(&b.pmap, ctx_dto.pmap, hold)
+    _fill_cov_build(&b.q, ctx_dto.q_spec, hold)
+    _fill_cov_build(&b.r, ctx_dto.r_spec, hold)
+    _fill_prior(&b.prior, ctx_dto.prior, hold)
+    _fill_klein_spec(&c.solve_ctx, sol, hold, b.params, inc)
+    _alloc_solve1(&c.solve_out, sol, nd, hold)
+    _alloc_fill_kf(c, kf, sol, hold)
+    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>sol.n_par)
+
+
+cdef void _fill_obj_ctx_extended(object ctx_dto, sdsge_extended_ctx *c, object sol,
+                                 object kf, const signed char *inc, int64_t nd,
+                                 arena_size asz, list hold) except *:
+    cdef sdsge_obj_common *b = &c.base
+    _alloc_base(b, sol, kf.n_obs, asz, hold)
+    _fill_param_map(&b.pmap, ctx_dto.pmap, hold)
+    _fill_cov_build(&b.q, ctx_dto.q_spec, hold)
+    _fill_cov_build(&b.r, ctx_dto.r_spec, hold)
+    _fill_prior(&b.prior, ctx_dto.prior, hold)
+    _fill_klein_spec(&c.solve_ctx, sol, hold, b.params, inc)
+    _alloc_solve1(&c.solve_out, sol, nd, hold)
+    _alloc_fill_ekf(c, kf, sol, hold)
+    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>sol.n_par)
+
+
+cdef void _fill_obj_ctx_unscented(object ctx_dto, sdsge_unscented_ctx *c,
+                                  object sol, object kf, const signed char *inc,
+                                  int64_t nd, arena_size asz, list hold) except *:
+    cdef sdsge_obj_common *b = &c.base
+    _alloc_base(b, sol, kf.n_obs, asz, hold)
+    _fill_param_map(&b.pmap, ctx_dto.pmap, hold)
+    _fill_cov_build(&b.q, ctx_dto.q_spec, hold)
+    _fill_cov_build(&b.r, ctx_dto.r_spec, hold)
+    _fill_prior(&b.prior, ctx_dto.prior, hold)
+    _fill_klein_spec(&c.solve_ctx.first, sol, hold, b.params, inc)
+    _alloc_solve1(&c.solve1_out, sol, nd, hold)
+    _alloc_solve2(&c.solve2_out, sol, hold)
+    _alloc_fill_ukf(c, kf, sol, hold)
+    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>sol.n_par)
+
+
+cdef void *_get_obj_ctx(object ctx_dto, str mode, list hold,
+                        sdsge_linear_ctx *kf_ctx,
+                        sdsge_extended_ctx *ekf_ctx,
+                        sdsge_unscented_ctx *ukf_ctx,
+                        int *filter_mode) except NULL:
+    cdef object sol = ctx_dto.solve_ctx
+    cdef object kf = ctx_dto.filter_ctx
+    cdef const signed char *inc = _i8p(sol.incidence, hold)
+    cdef int64_t nd = sdsge_pencil_dim(inc, <int64_t>sol.n_var)
+    cdef arena_size asz
+
+    if mode == "linear":
+        asz = sdsge_linear_obj_arena_size(
+            sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
+            kf.n_obs, nd)
+        _fill_obj_ctx_linear(ctx_dto, kf_ctx, sol, kf, inc, nd, asz, hold)
+        filter_mode[0] = 0
+        return <void*>kf_ctx
+    if mode == "extended":
+        asz = sdsge_extended_obj_arena_size(
+            sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
+            kf.n_obs, nd)
+        _fill_obj_ctx_extended(ctx_dto, ekf_ctx, sol, kf, inc, nd, asz, hold)
+        filter_mode[0] = 1
+        return <void*>ekf_ctx
+    if mode == "unscented":
+        asz = sdsge_unscented_obj_arena_size(
+            sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
+            kf.n_obs, nd)
+        _fill_obj_ctx_unscented(ctx_dto, ukf_ctx, sol, kf, inc, nd, asz, hold)
+        filter_mode[0] = 2
+        return <void*>ukf_ctx
+    raise ValueError(f"unsupported native filter mode {mode!r}")
+
+
+# --- argument checks ---------------------------------------------------------
 
 cdef void _check_theta(object ctx_dto, object theta) except *:
     if np.shape(theta)[0] != ctx_dto.n_theta:
@@ -406,20 +482,7 @@ cdef void _check_theta(object ctx_dto, object theta) except *:
         )
 
 
-# --- actions -----------------------------------------------------------------
-#
-# What a wired ctx is driven with. These never touch scratch, only `ctxp` and the
-# base, so they do not have to live in the frame that owns the allocations: the
-# three per-mode builders below each wire their ctx and then hand off here, which
-# is what keeps the driver logic from being written once per mode.
-#
-# `opts` carries the entry point's own arguments. It is read once per call, next
-# to a marshal that already dominates it.
-
-cdef int _ACT_ESTIMATE = 0
-cdef int _ACT_MCMC = 1
-cdef int _ACT_EVAL = 2
-
+# --- options fills -----------------------------------------------------------
 
 cdef void _fill_nbd(double[::1] lo, double[::1] hi, int64_t d,
                     int64_t[::1] nbd) except *:
@@ -444,307 +507,70 @@ cdef int _method_code(str method) except -1:
     raise ValueError(f"unsupported native method {method!r}")
 
 
-cdef dict _do_estimate(void *ctxp, sdsge_obj_common *b, int filter_mode,
-                       dict opts, object params):
-    """Native MLE/MAP: minimize -loglik or -logpost from theta0, then resolve
-    params and the log-prior at the optimum.
+cdef void _fill_map_options(sdsge_estimation_options *est, list hold,
+                            int64_t d, int filter_mode,
+                            dict map_options) except *:
+    """The MAP leg's options, read off the mapping the public API accepts.
+
+    The fallbacks are the native side's own: an omitted key takes one rather
+    than erroring, which is what lets `map_options` be partial. `hold` roots
+    the bound arrays, because `est` keeps pointers into them.
     """
-    cdef bint has_priors = opts["has_priors"]
-    b.prior.include_logjac = <int>bool(opts["include_logjac"])
-
-    x = np.array(opts["theta0"], dtype=np.float64, copy=True)
-    cdef double[::1] xv = x
-    cdef int64_t d = xv.shape[0]
-
-    cdef double[::1] lo = np.ascontiguousarray(opts["lo"], dtype=np.float64)
-    cdef double[::1] hi = np.ascontiguousarray(opts["hi"], dtype=np.float64)
+    cdef double[::1] lo = _held(
+        np.ascontiguousarray(map_options["lo"], dtype=np.float64), hold)
+    cdef double[::1] hi = _held(
+        np.ascontiguousarray(map_options["hi"], dtype=np.float64), hold)
     if lo.shape[0] != d or hi.shape[0] != d:
         raise ValueError(
-            f"lo and hi must run to theta0's length; got {lo.shape[0]} and "
+            f"MAP lo and hi must run to theta0's length; got {lo.shape[0]} and "
             f"{hi.shape[0]} against {d}."
         )
-    cdef int64_t[::1] nbd = np.zeros(d, dtype=np.int64)
+    cdef int64_t[::1] nbd = _held(np.zeros(d, dtype=np.int64), hold)
     _fill_nbd(lo, hi, d, nbd)
 
-    cdef sdsge_estimation_options est
     est.filter_mode = filter_mode
-    est.method = _method_code(opts["method"])
-    est.has_priors = has_priors
+    est.method = _method_code(map_options.get("method", "L-BFGS-B"))
+    est.has_priors = 1
     est.lo = &lo[0]
     est.hi = &hi[0]
     est.nbd = &nbd[0] if np.sum(nbd) > 0 else NULL
-    est.optim.m = opts["m"]
-    est.optim.maxiter = opts["maxiter"]
-    est.optim.maxfun = opts["maxfun"]
-    est.optim.maxls = opts["maxls"]
-    est.optim.factr = opts["factr"]
-    est.optim.pgtol = opts["pgtol"]
-    est.optim.fd_step = opts["fd_step"]
-    est.optim.xatol = opts["xatol"]
-    est.optim.fatol = opts["fatol"]
-    cdef bint compute_cov = opts["compute_cov"]
-    est.compute_cov = compute_cov
-    est.cov_fd_step_scale = opts["cov_fd_step_scale"]
-    est.cov_fd_absolute_floor = opts["cov_fd_absolute_floor"]
-
-    vcov = np.empty((d, d), dtype=np.float64)
-    se = np.empty(d, dtype=np.float64)
-    cdef double[:, ::1] vcovv = vcov
-    cdef double[::1] sev = se
-
-    cdef sdsge_estimation_result res
-    res.vcov = &vcovv[0, 0]
-    res.se = &sev[0]
-
-    cdef double lpr = 0.0
-    with nogil:
-        sdsge_run_estimation(ctxp, d, &xv[0], &est, &res)
-        if has_priors:
-            lpr = sdsge_logprior_at(b, &xv[0])
-
-    return {
-        "x": x,
-        "params": np.array(params, dtype=np.float64, copy=True),
-        "fun": res.base.fun,
-        "nfev": int(res.base.nfev),
-        "nit": int(res.base.nit),
-        "success": bool(res.base.success),
-        "status": int(res.base.status),
-        "message": (
-            (<bytes>res.base.message).decode() if res.base.message != NULL else ""
-        ),
-        "bk_violations": int(b.bk_violations),
-        "logprior": float(lpr),
-        "vcov": vcov if compute_cov else None,
-        "se": se if compute_cov else None,
-        "cov_status": int(res.cov_status),
-    }
+    est.optim.m = map_options.get("m", 10)
+    est.optim.maxiter = map_options.get("maxiter", 15000)
+    est.optim.maxfun = map_options.get("maxfun", 15000)
+    est.optim.maxls = map_options.get("maxls", 20)
+    est.optim.factr = map_options.get("factr", 1e7)
+    est.optim.pgtol = map_options.get("pgtol", 1e-5)
+    est.optim.fd_step = map_options.get("fd_step", 0.0)
+    est.optim.xatol = map_options.get("xatol", 1e-4)
+    est.optim.fatol = map_options.get("fatol", 1e-4)
+    est.compute_cov = 0
+    est.cov_fd_step_scale = 1.0
+    est.cov_fd_absolute_floor = 0.1
 
 
-cdef dict _do_eval(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
+# --- objective evaluation ----------------------------------------------------
+#
+# `loglik` and `logpost` share `_do_eval` and decide
+# whether the logprior goes into the output.
+#
+# `sdsge_obj_common` is the first member of all three ctx structs,
+# casting the void pointer safely reaches the common fields.
+
+
+cdef object _do_eval(void *ctxp, int filter_mode, object theta,
+                     bint has_prior, bint jacobian):
     """One objective evaluation at a theta. `negate` is 0 here: these report a
     density rather than feeding a minimizer."""
-    cdef double[::1] th = np.ascontiguousarray(opts["theta"], dtype=np.float64)
-    cdef int has_prior = <int>bool(opts["has_prior"])
-    b.prior.include_logjac = <int>bool(opts["jacobian"])
+    cdef sdsge_obj_common *b = <sdsge_obj_common*>ctxp
+    cdef double[::1] th = np.ascontiguousarray(theta, dtype=np.float64)
+    b.prior.include_logjac = <int>jacobian
     b.bk_violations = 0
-    cdef sdsge_objective_fn fn = sdsge_select_objective(0, has_prior, filter_mode)
+    cdef sdsge_objective_fn fn = sdsge_select_objective(
+        0, <int>has_prior, filter_mode)
     cdef double out
     with nogil:
         out = fn(&th[0], ctxp)
-    return {"value": np.float64(out)}
-
-
-cdef dict _do_mcmc(void *ctxp, sdsge_obj_common *b, int filter_mode, dict opts):
-    """Native adaptive random-walk Metropolis."""
-    b.prior.include_logjac = 1
-
-    cdef double[::1] th0 = np.ascontiguousarray(opts["theta0"], dtype=np.float64)
-    cdef int64_t d = th0.shape[0]
-    if d <= 0:
-        raise ValueError("No estimated parameters were provided.")
-
-    cdef double[:, ::1] pcov = opts["proposal_cov"]
-
-    cdef int64_t n_draws = opts["n_draws"]
-    kept = np.empty((n_draws, d), dtype=np.float64)
-    kept_lp = np.empty(n_draws, dtype=np.float64)
-    kept_lj = np.empty(n_draws, dtype=np.float64)
-    cdef double[:, ::1] keptv = kept
-    cdef double[::1] keptlpv = kept_lp
-    cdef double[::1] keptljv = kept_lj
-
-    cdef sdsge_mcmc_buffers buf
-    buf.kept = &keptv[0, 0]
-    buf.kept_lp = &keptlpv[0]
-    buf.kept_lj = &keptljv[0]
-
-    cdef arena_size wsize = sdsge_mcmc_arena_size(d, ctxp)
-    cdef double[::1] work = np.empty(wsize.n_float, np.float64)
-
-    # The MAP leg the chain may start from, driven through the same options
-    # struct a point estimate uses.
-    mo = opts["map_options"]
-    cdef double[::1] mlo = np.ascontiguousarray(mo["lo"], dtype=np.float64)
-    cdef double[::1] mhi = np.ascontiguousarray(mo["hi"], dtype=np.float64)
-    if mlo.shape[0] != d or mhi.shape[0] != d:
-        raise ValueError(
-            f"MAP lo and hi must run to theta0's length; got {mlo.shape[0]} and "
-            f"{mhi.shape[0]} against {d}."
-        )
-    cdef int64_t[::1] mnbd = np.zeros(d, dtype=np.int64)
-    _fill_nbd(mlo, mhi, d, mnbd)
-
-    cdef sdsge_estimation_options map_opt
-    map_opt.filter_mode = filter_mode
-    map_opt.method = _method_code(mo.get("method", "L-BFGS-B"))
-    map_opt.has_priors = 1
-    map_opt.lo = &mlo[0]
-    map_opt.hi = &mhi[0]
-    map_opt.nbd = &mnbd[0] if np.sum(mnbd) > 0 else NULL
-    map_opt.optim.m = mo.get("m", 10)
-    map_opt.optim.maxiter = mo.get("maxiter", 15000)
-    map_opt.optim.maxfun = mo.get("maxfun", 15000)
-    map_opt.optim.maxls = mo.get("maxls", 20)
-    map_opt.optim.factr = mo.get("factr", 1e7)
-    map_opt.optim.pgtol = mo.get("pgtol", 1e-5)
-    map_opt.optim.fd_step = mo.get("fd_step", 0.0)
-    map_opt.optim.xatol = mo.get("xatol", 1e-4)
-    map_opt.optim.fatol = mo.get("fatol", 1e-4)
-    map_opt.compute_cov = 0
-    map_opt.cov_fd_step_scale = 1.0
-    map_opt.cov_fd_absolute_floor = 0.1
-
-    cdef sdsge_mcmc_options mopt
-    mopt.n_draws = n_draws
-    mopt.burn_in = opts["burn_in"]
-    mopt.thin = opts["thin"]
-    mopt.needs_map = <int>bool(opts["compute_map"])
-    mopt.adapt = <int>bool(opts["adapt"])
-    mopt.adapt_start = opts["adapt_start"]
-    mopt.adapt_end = opts["adapt_end"]
-    mopt.adapt_interval = opts["adapt_interval"]
-    mopt.adapt_epsilon = opts["adapt_epsilon"]
-    mopt.proposal_scale = opts["proposal_scale"]
-    mopt.needs_hessian = <int>bool(opts["needs_hessian"])
-    mopt.hessian_fd_step_scale = opts["cov_fd_step_scale"]
-    mopt.hessian_fd_absolute_floor = opts["cov_fd_absolute_floor"]
-    mopt.seed = <uint64_t>opts["seed"]
-    # +logpost, unnegated: MCMC samples a posterior.
-    cdef sdsge_objective_fn logpost = sdsge_select_objective(0, 1, filter_mode)
-
-    cdef sdsge_mcmc_result res
-    b.bk_violations = 0
-    with nogil:
-        sdsge_mcmc_run(logpost, ctxp, &th0[0], d, &pcov[0, 0], &mopt,
-                       &map_opt, &buf, &res, &work[0])
-
-    if res.status != 0:
-        raise ValueError(
-            (<bytes>res.message).decode()
-            if res.message != NULL
-            else "native MCMC run failed"
-        )
-
-    return {
-        "samples": kept,
-        "logpost_trace": kept_lp,
-        "logjac_trace": kept_lj,
-        "accepted_burn_in": int(res.accepted_burn_in),
-        "accepted_in_sample": int(res.accepted_in_sample),
-        "total_steps": int(res.total_steps),
-        "bk_violations": int(b.bk_violations),
-        "burn_in_t": float(res.burn_in_t),
-        "in_sample_t": float(res.in_sample_t),
-    }
-
-
-cdef dict _run(void *ctxp, sdsge_obj_common *b, int filter_mode, int action,
-               dict opts, object params):
-    """What a wired ctx gets driven with."""
-    if action == _ACT_ESTIMATE:
-        return _do_estimate(ctxp, b, filter_mode, opts, params)
-    if action == _ACT_MCMC:
-        return _do_mcmc(ctxp, b, filter_mode, opts)
-    return _do_eval(ctxp, b, filter_mode, opts)
-
-
-# --- per-mode builders ------------------------------------------------------
-#
-# One per filter mode, each owning its concretely typed ctx. The ctx is a local
-# of THIS frame, which is also the frame the native call runs in, and `hold` is
-# what keeps every buffer alive for exactly that long. Moving the ctx or `hold`
-# out of one of these would leave the struct pointing at freed memory with no
-# diagnostic.
-
-cdef dict _build_and_run_kf(object ctx_dto, int action, dict opts):
-    cdef object sol = ctx_dto.solve_ctx
-    cdef object kf = ctx_dto.filter_ctx
-    cdef list hold = []
-    cdef sdsge_linear_ctx c
-    cdef sdsge_obj_common *b = &c.base
-
-    cdef const signed char *inc = _i8p(sol.incidence, hold)
-    cdef int64_t nd = sdsge_pencil_dim(inc, <int64_t>sol.n_var)
-    cdef arena_size asz = sdsge_linear_obj_arena_size(
-        sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
-        kf.n_obs, nd)
-
-    params = _alloc_base(b, sol, kf.n_obs, asz, hold)
-    _fill_param_map(&b.pmap, ctx_dto.pmap, hold)
-    _fill_cov_build(&b.q, ctx_dto.q_spec, hold)
-    _fill_cov_build(&b.r, ctx_dto.r_spec, hold)
-    _fill_prior(&b.prior, ctx_dto.prior, hold)
-    _fill_klein_spec(&c.solve_ctx, sol, hold, b.params, inc)
-    _alloc_solve1(&c.solve_out, sol, nd, hold)
-    _alloc_fill_kf(&c, kf, sol, hold)
-    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>sol.n_par)
-
-    return _run(<void*>&c, b, 0, action, opts, params)
-
-
-cdef dict _build_and_run_ekf(object ctx_dto, int action, dict opts):
-    cdef object sol = ctx_dto.solve_ctx
-    cdef object kf = ctx_dto.filter_ctx
-    cdef list hold = []
-    cdef sdsge_extended_ctx c
-    cdef sdsge_obj_common *b = &c.base
-
-    cdef const signed char *inc = _i8p(sol.incidence, hold)
-    cdef int64_t nd = sdsge_pencil_dim(inc, <int64_t>sol.n_var)
-    cdef arena_size asz = sdsge_extended_obj_arena_size(
-        sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
-        kf.n_obs, nd)
-
-    params = _alloc_base(b, sol, kf.n_obs, asz, hold)
-    _fill_param_map(&b.pmap, ctx_dto.pmap, hold)
-    _fill_cov_build(&b.q, ctx_dto.q_spec, hold)
-    _fill_cov_build(&b.r, ctx_dto.r_spec, hold)
-    _fill_prior(&b.prior, ctx_dto.prior, hold)
-    _fill_klein_spec(&c.solve_ctx, sol, hold, b.params, inc)
-    _alloc_solve1(&c.solve_out, sol, nd, hold)
-    _alloc_fill_ekf(&c, kf, sol, hold)
-    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>sol.n_par)
-
-    return _run(<void*>&c, b, 1, action, opts, params)
-
-
-cdef dict _build_and_run_ukf(object ctx_dto, int action, dict opts):
-    cdef object sol = ctx_dto.solve_ctx
-    cdef object kf = ctx_dto.filter_ctx
-    cdef list hold = []
-    cdef sdsge_unscented_ctx c
-    cdef sdsge_obj_common *b = &c.base
-
-    cdef const signed char *inc = _i8p(sol.incidence, hold)
-    cdef int64_t nd = sdsge_pencil_dim(inc, <int64_t>sol.n_var)
-    cdef arena_size asz = sdsge_unscented_obj_arena_size(
-        sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
-        kf.n_obs, nd)
-
-    params = _alloc_base(b, sol, kf.n_obs, asz, hold)
-    _fill_param_map(&b.pmap, ctx_dto.pmap, hold)
-    _fill_cov_build(&b.q, ctx_dto.q_spec, hold)
-    _fill_cov_build(&b.r, ctx_dto.r_spec, hold)
-    _fill_prior(&b.prior, ctx_dto.prior, hold)
-    _fill_klein_spec(&c.solve_ctx.first, sol, hold, b.params, inc)
-    _alloc_solve1(&c.solve1_out, sol, nd, hold)
-    _alloc_solve2(&c.solve2_out, sol, hold)
-    _alloc_fill_ukf(&c, kf, sol, hold)
-    sdsge_init_params(b.params, b.pmap.base_params, <int64_t>sol.n_par)
-
-    return _run(<void*>&c, b, 2, action, opts, params)
-
-
-cdef dict _dispatch(object ctx_dto, str mode, int action, dict opts):
-    """Mode picks the builder, which owns the ctx and its scratch for the call."""
-    if mode == "linear":
-        return _build_and_run_kf(ctx_dto, action, opts)
-    if mode == "extended":
-        return _build_and_run_ekf(ctx_dto, action, opts)
-    if mode == "unscented":
-        return _build_and_run_ukf(ctx_dto, action, opts)
-    raise ValueError(f"unsupported native filter mode {mode!r}")
+    return np.float64(out)
 
 
 def run_estimation(
@@ -782,26 +608,81 @@ def run_estimation(
     positive definite there leaves NaN throughout and reports it on
     ``cov_status``; the estimate itself is unaffected."""
     cdef str mode = ctx_dto.filter_ctx.mode
-    return _dispatch(ctx_dto, mode, _ACT_ESTIMATE, {
-        "theta0": theta0,
-        "lo": lo,
-        "hi": hi,
-        "method": method,
-        "has_priors": has_priors,
-        "include_logjac": include_logjac,
-        "m": m,
-        "maxiter": maxiter,
-        "maxfun": maxfun,
-        "maxls": maxls,
-        "factr": factr,
-        "pgtol": pgtol,
-        "fd_step": fd_step,
-        "xatol": xatol,
-        "fatol": fatol,
-        "compute_cov": compute_cov,
-        "cov_fd_step_scale": cov_fd_step_scale,
-        "cov_fd_absolute_floor": cov_fd_absolute_floor,
-    })
+    cdef list hold = []
+    cdef sdsge_linear_ctx c_kf
+    cdef sdsge_extended_ctx c_ekf
+    cdef sdsge_unscented_ctx c_ukf
+    cdef int filter_mode
+    cdef void *ctxp = _get_obj_ctx(
+        ctx_dto, mode, hold, &c_kf, &c_ekf, &c_ukf, &filter_mode
+    )
+    cdef sdsge_obj_common *b = <sdsge_obj_common*>ctxp
+    cdef int64_t n_par = ctx_dto.solve_ctx.n_par
+    b.prior.include_logjac = <int>include_logjac
+
+    x = np.array(theta0, dtype=np.float64, copy=True)
+    cdef double[::1] xv = x
+    cdef int64_t d = xv.shape[0]
+    if lo.shape[0] != d or hi.shape[0] != d:
+        raise ValueError(
+            f"lo and hi must run to theta0's length; got {lo.shape[0]} and "
+            f"{hi.shape[0]} against {d}."
+        )
+    cdef int64_t[::1] nbd = np.zeros(d, dtype=np.int64)
+    _fill_nbd(lo, hi, d, nbd)
+
+    cdef sdsge_estimation_options est
+    est.filter_mode = filter_mode
+    est.method = _method_code(method)
+    est.has_priors = has_priors
+    est.lo = &lo[0]
+    est.hi = &hi[0]
+    est.nbd = &nbd[0] if np.sum(nbd) > 0 else NULL
+    est.optim.m = m
+    est.optim.maxiter = maxiter
+    est.optim.maxfun = maxfun
+    est.optim.maxls = maxls
+    est.optim.factr = factr
+    est.optim.pgtol = pgtol
+    est.optim.fd_step = fd_step
+    est.optim.xatol = xatol
+    est.optim.fatol = fatol
+    est.compute_cov = compute_cov
+    est.cov_fd_step_scale = cov_fd_step_scale
+    est.cov_fd_absolute_floor = cov_fd_absolute_floor
+
+    vcov = np.empty((d, d), dtype=np.float64)
+    se = np.empty(d, dtype=np.float64)
+    cdef double[:, ::1] vcovv = vcov
+    cdef double[::1] sev = se
+
+    cdef sdsge_estimation_result res
+    res.vcov = &vcovv[0, 0]
+    res.se = &sev[0]
+
+    cdef double lpr = 0.0
+    with nogil:
+        sdsge_run_estimation(ctxp, d, &xv[0], &est, &res)
+        if has_priors:
+            lpr = sdsge_logprior_at(b, &xv[0])
+
+    return {
+        "x": x,
+        "params": np.array(<double[:n_par]>b.params, dtype=np.float64, copy=True),
+        "fun": res.base.fun,
+        "nfev": int(res.base.nfev),
+        "nit": int(res.base.nit),
+        "success": bool(res.base.success),
+        "status": int(res.base.status),
+        "message": (
+            (<bytes>res.base.message).decode() if res.base.message != NULL else ""
+        ),
+        "bk_violations": int(b.bk_violations),
+        "logprior": float(lpr),
+        "vcov": vcov if compute_cov else None,
+        "se": se if compute_cov else None,
+        "cov_status": int(res.cov_status),
+    }
 
 
 def run_mcmc(
@@ -863,6 +744,8 @@ def run_mcmc(
         )
 
     cdef int64_t d = theta0.shape[0]
+    if d <= 0:
+        raise ValueError("No estimated parameters were provided.")
     map_options.setdefault("lo", np.full(d, -np.inf, dtype=np.float64))
     map_options.setdefault("hi", np.full(d, np.inf, dtype=np.float64))
 
@@ -886,38 +769,81 @@ def run_mcmc(
         proposal_cov = np.zeros((d, d), dtype=np.float64)
 
     cdef str mode = ctx_dto.filter_ctx.mode
-    return _dispatch(ctx_dto, mode, _ACT_MCMC, {
-        "theta0": theta0,
-        "seed": seed,
-        "n_draws": n_draws,
-        "burn_in": burn_in,
-        "thin": thin,
-        "adapt": adapt,
-        "adapt_start": adapt_start,
-        "adapt_end": adapt_end,
-        "adapt_interval": adapt_interval,
-        "proposal_scale": proposal_scale,
-        "proposal_cov": proposal_cov,
-        "cov_fd_step_scale": cov_fd_step_scale,
-        "cov_fd_absolute_floor": cov_fd_absolute_floor,
-        "adapt_epsilon": adapt_epsilon,
-        "compute_map": compute_map,
-        "needs_hessian": needs_hessian,
-        "map_options": map_options,
-    })
+    cdef list hold = []
+    cdef sdsge_linear_ctx c_kf
+    cdef sdsge_extended_ctx c_ekf
+    cdef sdsge_unscented_ctx c_ukf
+    cdef int filter_mode
+    cdef void *ctxp = _get_obj_ctx(
+        ctx_dto, mode, hold, &c_kf, &c_ekf, &c_ukf, &filter_mode
+    )
+    cdef sdsge_obj_common *b = <sdsge_obj_common*>ctxp
+    b.prior.include_logjac = 1
 
+    cdef double[:, ::1] pcov = proposal_cov
 
-# Point objectives at an arbitrary theta. Each call marshals its own context from
-# the DTO and drops it on return, so nothing is shared between calls: the scratch
-# arena, `include_logjac` and the BK counter are all call-local, and concurrent
-# callers cannot reach each other's state.
-#
-# The rebuild is not an optimization choice to revisit. An `Estimator` is mutable
-# between calls (`y`, `priors`, `R`, `P0`, `estimated_params` and `ss_seed` are
-# all public and rebindable, and their arrays can be written in place), so a
-# cached context would be stale with nothing able to detect it. Any key sound
-# enough to trust would have to hash the array contents, which costs what the
-# rebuild costs.
+    kept = np.empty((n_draws, d), dtype=np.float64)
+    kept_lp = np.empty(n_draws, dtype=np.float64)
+    kept_lj = np.empty(n_draws, dtype=np.float64)
+    cdef double[:, ::1] keptv = kept
+    cdef double[::1] keptlpv = kept_lp
+    cdef double[::1] keptljv = kept_lj
+
+    cdef sdsge_mcmc_buffers buf
+    buf.kept = &keptv[0, 0]
+    buf.kept_lp = &keptlpv[0]
+    buf.kept_lj = &keptljv[0]
+
+    cdef arena_size wsize = sdsge_mcmc_arena_size(d, ctxp)
+    cdef double[::1] work = np.empty(wsize.n_float, np.float64)
+
+    # The MAP leg the chain may start from, driven through the same options
+    # struct a point estimate uses.
+    cdef sdsge_estimation_options map_opt
+    _fill_map_options(&map_opt, hold, d, filter_mode, map_options)
+
+    cdef sdsge_mcmc_options mopt
+    mopt.n_draws = n_draws
+    mopt.burn_in = burn_in
+    mopt.thin = thin
+    mopt.needs_map = <int>compute_map
+    mopt.adapt = <int>adapt
+    mopt.adapt_start = adapt_start
+    mopt.adapt_end = adapt_end
+    mopt.adapt_interval = adapt_interval
+    mopt.adapt_epsilon = adapt_epsilon
+    mopt.proposal_scale = proposal_scale
+    mopt.needs_hessian = <int>needs_hessian
+    mopt.hessian_fd_step_scale = cov_fd_step_scale
+    mopt.hessian_fd_absolute_floor = cov_fd_absolute_floor
+    mopt.seed = seed
+    # +logpost, unnegated: MCMC samples a posterior.
+    cdef sdsge_objective_fn logpost = sdsge_select_objective(0, 1, filter_mode)
+
+    cdef sdsge_mcmc_result res
+    b.bk_violations = 0
+    with nogil:
+        sdsge_mcmc_run(logpost, ctxp, &theta0[0], d, &pcov[0, 0], &mopt,
+                       &map_opt, &buf, &res, &work[0])
+
+    if res.status != 0:
+        raise ValueError(
+            (<bytes>res.message).decode()
+            if res.message != NULL
+            else "native MCMC run failed"
+        )
+
+    return {
+        "samples": kept,
+        "logpost_trace": kept_lp,
+        "logjac_trace": kept_lj,
+        "accepted_burn_in": int(res.accepted_burn_in),
+        "accepted_in_sample": int(res.accepted_in_sample),
+        "total_steps": int(res.total_steps),
+        "bk_violations": int(b.bk_violations),
+        "burn_in_t": float(res.burn_in_t),
+        "in_sample_t": float(res.in_sample_t),
+    }
 
 
 def loglik(object ctx_dto, theta not None):
@@ -925,11 +851,15 @@ def loglik(object ctx_dto, theta not None):
     evaluated, so this is the same quantity the MLE objective maximizes."""
     _check_theta(ctx_dto, theta)
     cdef str mode = ctx_dto.filter_ctx.mode
-    return _dispatch(ctx_dto, mode, _ACT_EVAL, {
-        "theta": theta,
-        "has_prior": False,
-        "jacobian": False,
-    })["value"]
+    cdef list hold = []
+    cdef sdsge_linear_ctx c_kf
+    cdef sdsge_extended_ctx c_ekf
+    cdef sdsge_unscented_ctx c_ukf
+    cdef int filter_mode
+    cdef void *ctxp = _get_obj_ctx(
+        ctx_dto, mode, hold, &c_kf, &c_ekf, &c_ukf, &filter_mode
+    )
+    return _do_eval(ctxp, filter_mode, theta, False, False)
 
 
 def logpost(object ctx_dto, theta not None, bint jacobian=False):
@@ -939,11 +869,16 @@ def logpost(object ctx_dto, theta not None, bint jacobian=False):
     prior."""
     _check_theta(ctx_dto, theta)
     cdef str mode = ctx_dto.filter_ctx.mode
-    return _dispatch(ctx_dto, mode, _ACT_EVAL, {
-        "theta": theta,
-        "has_prior": bool(ctx_dto.prior.has_prior),
-        "jacobian": jacobian,
-    })["value"]
+    cdef list hold = []
+    cdef sdsge_linear_ctx c_kf
+    cdef sdsge_extended_ctx c_ekf
+    cdef sdsge_unscented_ctx c_ukf
+    cdef int filter_mode
+    cdef void *ctxp = _get_obj_ctx(
+        ctx_dto, mode, hold, &c_kf, &c_ekf, &c_ukf, &filter_mode
+    )
+    return _do_eval(ctxp, filter_mode, theta,
+                    bool(ctx_dto.prior.has_prior), jacobian)
 
 
 def logprior(object ctx_dto, theta not None, bint jacobian=False):

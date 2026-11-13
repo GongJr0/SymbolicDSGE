@@ -357,3 +357,12 @@ cdef extern from "mcmc.h":
                            const sdsge_estimation_options *map_opt,
                            sdsge_mcmc_buffers *buf,
                            sdsge_mcmc_result *out, double *work) nogil
+    arena_size sdsge_multichain_arena_size(int64_t d, int64_t n_chains,
+                                           const void *obj_ctx) nogil
+    int64_t sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
+                                 const double *theta0, int64_t d,
+                                 int64_t n_chains, const double *pcov,
+                                 const sdsge_mcmc_options *opt,
+                                 const sdsge_estimation_options *map_opt,
+                                 sdsge_mcmc_buffers *buf,
+                                 sdsge_mcmc_result *out, double *work) nogil

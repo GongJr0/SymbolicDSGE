@@ -345,18 +345,12 @@ i64 sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
                          const f64 *SDSGE_RESTRICT pcov,
                          const sdsge_mcmc_options *opt,
                          const sdsge_estimation_options *map_opt,
-                         sdsge_mcmc_buffers **buf, sdsge_mcmc_result **out,
+                         sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
                          f64 *SDSGE_RESTRICT work) {
-  arena_size work_per = sdsge_mcmc_arena_size(d, obj_ctx);
-  for (i64 c = 1; c < n_chains; ++c) {
-    memcpy(work + c * work_per.n_float, work, work_per.n_float * sizeof(f64));
-    sdsge_mcmc_init_out(out[c], opt);
-  }
 
   /* Initialize workpace for the first chain:
    * Resolve MAP and hessian into the first slice and copy into next workers'
-   * slices.
-   * */
+   * slices. */
   f64 *base_current = work;
   f64 *base_L = base_current + d;
   f64 *base_prop = base_L + d * d;
@@ -367,11 +361,17 @@ i64 sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
   f64 *base_Ltmp = base_C + d * d;
   memcpy(base_current, theta0, d * sizeof(f64));
 
-  sdsge_mcmc_result *base_out = out[0];
+  sdsge_mcmc_result *base_out = out;
+  sdsge_mcmc_init_out(base_out, opt);
 
   if (opt->needs_map) {
     sdsge_mcmc_map_point(obj_ctx[0], d, base_current, map_opt, base_out);
     if (base_out->status != SDSGE_MCMC_OK) {
+      for (i64 c = 1; c < n_chains; ++c) {
+        sdsge_mcmc_init_out(&out[c], opt);
+        out[c].status = base_out->status;
+        out[c].message = base_out->message;
+      }
       return base_out->status;
     }
   }
@@ -379,10 +379,21 @@ i64 sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
   sdsge_mcmc_resolve_pcov(logpost, obj_ctx[0], opt, d, pcov, base_current,
                           base_L, base_C, base_prop, base_out);
   if (base_out->status != SDSGE_MCMC_OK) {
+    for (i64 c = 1; c < n_chains; ++c) {
+      sdsge_mcmc_init_out(&out[c], opt);
+      out[c].status = base_out->status;
+      out[c].message = base_out->message;
+    }
     return base_out->status;
   }
 
-#pragma omp parallel for schedule(static)
+  arena_size work_per = sdsge_mcmc_arena_size(d, obj_ctx[0]);
+  for (i64 c = 1; c < n_chains; ++c) {
+    memcpy(work + c * work_per.n_float, work, work_per.n_float * sizeof(f64));
+    sdsge_mcmc_init_out(&out[c], opt);
+  }
+
+#pragma omp parallel for if (n_chains > 1) schedule(static)
   for (i64 c = 0; c < n_chains; ++c) {
     sdsge_philox_state st;
     sdsge_philox_seed(&st, opt->seed, SDSGE_MCMC_MODCODE, c, 0);
@@ -395,10 +406,10 @@ i64 sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
     f64 *C = dev + d;
     f64 *Ltmp = C + d * d;
     sdsge_mcmc_kernel(logpost, obj_ctx[c], opt, &st, d, current, L, prop, z, m,
-                      dev, C, Ltmp, buf[c], out[c]);
+                      dev, C, Ltmp, &buf[c], &out[c]);
   }
   for (i64 c = 0; c < n_chains; ++c) {
-    if (out[c]->status != SDSGE_MCMC_OK) {
+    if (out[c].status != SDSGE_MCMC_OK) {
       return SDSGE_MCMC_EMULTICHAIN;
     }
   }
