@@ -61,23 +61,13 @@ typedef struct {
 #define SDSGE_MCMC_EMAP (-1604)
 #define SDSGE_MCMC_EMULTICHAIN (-1605)
 /* HOT LOOP DRIVER */
-arena_size sdsge_mcmc_arena_size(i64 d, const void *obj_ctx);
-i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
-                   const f64 *SDSGE_RESTRICT theta0, i64 d,
+arena_size sdsge_mcmc_arena_size(i64 d, i64 n_chains, const void *obj_ctx);
+i64 sdsge_mcmc_run(sdsge_objective_fn logpost, sdsge_obj_ctx *obj_ctx,
+                   const f64 *SDSGE_RESTRICT theta0, i64 d, i64 n_chains,
                    const f64 *SDSGE_RESTRICT pcov,
                    const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
                    sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
                    f64 *SDSGE_RESTRICT work);
-
-arena_size sdsge_multichain_arena_size(i64 d, i64 n_chains,
-                                       const void *obj_ctx);
-i64 sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
-                         const f64 *SDSGE_RESTRICT theta0, i64 d, i64 n_chains,
-                         const f64 *SDSGE_RESTRICT pcov,
-                         const sdsge_mcmc_options *opt,
-                         const sdsge_estimation_options *map_opt,
-                         sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
-                         f64 *SDSGE_RESTRICT work);
 
 #endif /* SDSGE_MCMC_H */

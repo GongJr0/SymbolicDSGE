@@ -760,8 +760,8 @@ class Estimator:
         )
         elapsed = max(perf_counter() - t0, np.finfo(float).eps)
 
-        total_steps = int(out["total_steps"])
-        kept = out["samples"]
+        total_steps = int(out["total_steps"][0])
+        kept = out["samples"][0]
 
         print(
             f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
@@ -774,12 +774,12 @@ class Estimator:
         result = MCMCResult(
             param_names=tuple(self.param_names),
             samples=kept,
-            logpost_trace=out["logpost_trace"],
-            logjac_trace=out["logjac_trace"],
-            accepted_burn_in=out["accepted_burn_in"],
-            accepted_in_sample=out["accepted_in_sample"],
-            burn_in_seconds=out["burn_in_t"],
-            in_sample_seconds=out["in_sample_t"],
+            logpost_trace=out["logpost_trace"][0],
+            logjac_trace=out["logjac_trace"][0],
+            accepted_burn_in=out["accepted_burn_in"][0],
+            accepted_in_sample=out["accepted_in_sample"][0],
+            burn_in_seconds=out["burn_in_t"][0],
+            in_sample_seconds=out["in_sample_t"][0],
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,

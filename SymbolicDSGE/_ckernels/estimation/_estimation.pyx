@@ -8,6 +8,8 @@ by hand.
 
 from libc.stdint cimport int64_t, uint64_t
 
+from cpython.mem cimport PyMem_Malloc, PyMem_Free
+
 from cpython.pycapsule cimport (
     PyCapsule_GetName,
     PyCapsule_GetPointer,
@@ -389,8 +391,8 @@ cdef void _alloc_fill_ukf(sdsge_unscented_ctx *c, object kf_dto,
 # --- objective ctx struct fills -------------------------------------------------
 #
 # Per-mode fillers receive typed structs from the outer _get_obj_ctx.
-# The getter passes caller owned structs and returns the one that matches the mode
-# after filling it.
+# The getter takes one caller owned union slot, fills the arm the mode names,
+# and hands it back as the void the native entry points take.
 
 cdef void _fill_obj_ctx_linear(object ctx_dto, sdsge_linear_ctx *c, object sol,
                                object kf, const signed char *inc, int64_t nd,
@@ -439,9 +441,7 @@ cdef void _fill_obj_ctx_unscented(object ctx_dto, sdsge_unscented_ctx *c,
 
 
 cdef void *_get_obj_ctx(object ctx_dto, str mode, list hold,
-                        sdsge_linear_ctx *kf_ctx,
-                        sdsge_extended_ctx *ekf_ctx,
-                        sdsge_unscented_ctx *ukf_ctx,
+                        sdsge_obj_ctx *storage,
                         int *filter_mode) except NULL:
     cdef object sol = ctx_dto.solve_ctx
     cdef object kf = ctx_dto.filter_ctx
@@ -453,24 +453,26 @@ cdef void *_get_obj_ctx(object ctx_dto, str mode, list hold,
         asz = sdsge_linear_obj_arena_size(
             sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
             kf.n_obs, nd)
-        _fill_obj_ctx_linear(ctx_dto, kf_ctx, sol, kf, inc, nd, asz, hold)
+        _fill_obj_ctx_linear(
+            ctx_dto, &storage.linear, sol, kf, inc, nd, asz, hold)
         filter_mode[0] = 0
-        return <void*>kf_ctx
-    if mode == "extended":
+    elif mode == "extended":
         asz = sdsge_extended_obj_arena_size(
             sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
             kf.n_obs, nd)
-        _fill_obj_ctx_extended(ctx_dto, ekf_ctx, sol, kf, inc, nd, asz, hold)
+        _fill_obj_ctx_extended(
+            ctx_dto, &storage.extended, sol, kf, inc, nd, asz, hold)
         filter_mode[0] = 1
-        return <void*>ekf_ctx
-    if mode == "unscented":
+    elif mode == "unscented":
         asz = sdsge_unscented_obj_arena_size(
             sol.n_var, sol.n_state, sol.n_ctrl, sol.n_par, sol.n_exog,
             kf.n_obs, nd)
-        _fill_obj_ctx_unscented(ctx_dto, ukf_ctx, sol, kf, inc, nd, asz, hold)
+        _fill_obj_ctx_unscented(
+            ctx_dto, &storage.unscented, sol, kf, inc, nd, asz, hold)
         filter_mode[0] = 2
-        return <void*>ukf_ctx
-    raise ValueError(f"unsupported native filter mode {mode!r}")
+    else:
+        raise ValueError(f"unsupported native filter mode {mode!r}")
+    return <void*>storage
 
 
 # --- argument checks ---------------------------------------------------------
@@ -609,13 +611,9 @@ def run_estimation(
     ``cov_status``; the estimate itself is unaffected."""
     cdef str mode = ctx_dto.filter_ctx.mode
     cdef list hold = []
-    cdef sdsge_linear_ctx c_kf
-    cdef sdsge_extended_ctx c_ekf
-    cdef sdsge_unscented_ctx c_ukf
+    cdef sdsge_obj_ctx c
     cdef int filter_mode
-    cdef void *ctxp = _get_obj_ctx(
-        ctx_dto, mode, hold, &c_kf, &c_ekf, &c_ukf, &filter_mode
-    )
+    cdef void *ctxp = _get_obj_ctx(ctx_dto, mode, hold, &c, &filter_mode)
     cdef sdsge_obj_common *b = <sdsge_obj_common*>ctxp
     cdef int64_t n_par = ctx_dto.solve_ctx.n_par
     b.prior.include_logjac = <int>include_logjac
@@ -703,6 +701,7 @@ def run_mcmc(
     double adapt_epsilon,
     bint compute_map,
     dict map_options,
+    int64_t n_chains=1,
 ):
     """Native adaptive random-walk Metropolis over the linear / extended /
     unscented objective. Returns the kept draws (in parameter space) plus
@@ -710,13 +709,21 @@ def run_mcmc(
 
     ``theta0`` is where the chain begins. With ``compute_map`` the MAP is found
     from it first and the chain begins at the mode instead; without, ``theta0``
-    is taken to be that mode already and the proposal Hessian is built there."""
+    is taken to be that mode already and the proposal Hessian is built there.
+
+    ``n_chains`` above 1 runs that many chains off the same ``theta0``,
+    MAP, and proposal factor, each on its own Philox substream, and
+    returns chain-major arrays with a per-chain ``status``. A chain that
+    failed is reported there instead of raised, and its slice of the
+    draw buffers is undefined."""
     if n_draws <= 0:
         raise ValueError("n_draws must be positive.")
     if burn_in < 0:
         raise ValueError("burn_in must be non-negative.")
     if thin <= 0:
         raise ValueError("thin must be positive.")
+    if n_chains <= 0:
+        raise ValueError("n_chains must be positive.")
     if cov_fd_step_scale <= 0.0 or cov_fd_absolute_floor <= 0.0:
         raise ValueError("Hessian finite-difference settings must be positive.")
     if proposal_scale <= 0.0:
@@ -770,80 +777,119 @@ def run_mcmc(
 
     cdef str mode = ctx_dto.filter_ctx.mode
     cdef list hold = []
-    cdef sdsge_linear_ctx c_kf
-    cdef sdsge_extended_ctx c_ekf
-    cdef sdsge_unscented_ctx c_ukf
     cdef int filter_mode
-    cdef void *ctxp = _get_obj_ctx(
-        ctx_dto, mode, hold, &c_kf, &c_ekf, &c_ukf, &filter_mode
-    )
-    cdef sdsge_obj_common *b = <sdsge_obj_common*>ctxp
-    b.prior.include_logjac = 1
+    cdef int64_t i
+    cdef sdsge_obj_common *bi
+    cdef sdsge_obj_ctx *ctxs = NULL
+    cdef sdsge_mcmc_buffers *bufs = NULL
+    cdef sdsge_mcmc_result *outs = NULL
 
     cdef double[:, ::1] pcov = proposal_cov
 
-    kept = np.empty((n_draws, d), dtype=np.float64)
-    kept_lp = np.empty(n_draws, dtype=np.float64)
-    kept_lj = np.empty(n_draws, dtype=np.float64)
-    cdef double[:, ::1] keptv = kept
-    cdef double[::1] keptlpv = kept_lp
-    cdef double[::1] keptljv = kept_lj
+    # Chain-major even at n_chains == 1, so one fill loop serves both drivers.
+    # The single-chain return slices chain 0 back out.
+    kept = np.empty((n_chains, n_draws, d), dtype=np.float64)
+    kept_lp = np.empty((n_chains, n_draws), dtype=np.float64)
+    kept_lj = np.empty((n_chains, n_draws), dtype=np.float64)
+    cdef double[:, :, ::1] keptv = kept
+    cdef double[:, ::1] keptlpv = kept_lp
+    cdef double[:, ::1] keptljv = kept_lj
 
-    cdef sdsge_mcmc_buffers buf
-    buf.kept = &keptv[0, 0]
-    buf.kept_lp = &keptlpv[0]
-    buf.kept_lj = &keptljv[0]
-
-    cdef arena_size wsize = sdsge_mcmc_arena_size(d, ctxp)
-    cdef double[::1] work = np.empty(wsize.n_float, np.float64)
-
-    # The MAP leg the chain may start from, driven through the same options
-    # struct a point estimate uses.
+    cdef arena_size wsize
+    cdef double[::1] work
     cdef sdsge_estimation_options map_opt
-    _fill_map_options(&map_opt, hold, d, filter_mode, map_options)
-
     cdef sdsge_mcmc_options mopt
-    mopt.n_draws = n_draws
-    mopt.burn_in = burn_in
-    mopt.thin = thin
-    mopt.needs_map = <int>compute_map
-    mopt.adapt = <int>adapt
-    mopt.adapt_start = adapt_start
-    mopt.adapt_end = adapt_end
-    mopt.adapt_interval = adapt_interval
-    mopt.adapt_epsilon = adapt_epsilon
-    mopt.proposal_scale = proposal_scale
-    mopt.needs_hessian = <int>needs_hessian
-    mopt.hessian_fd_step_scale = cov_fd_step_scale
-    mopt.hessian_fd_absolute_floor = cov_fd_absolute_floor
-    mopt.seed = seed
-    # +logpost, unnegated: MCMC samples a posterior.
-    cdef sdsge_objective_fn logpost = sdsge_select_objective(0, 1, filter_mode)
+    cdef sdsge_objective_fn logpost
+    cdef int64_t[::1] accb, accs, nstep, bk, status
+    cdef double[::1] tburn, tsamp
 
-    cdef sdsge_mcmc_result res
-    b.bk_violations = 0
-    with nogil:
-        sdsge_mcmc_run(logpost, ctxp, &theta0[0], d, &pcov[0, 0], &mopt,
-                       &map_opt, &buf, &res, &work[0])
+    try:
+        ctxs = <sdsge_obj_ctx*>PyMem_Malloc(n_chains * sizeof(sdsge_obj_ctx))
+        bufs = <sdsge_mcmc_buffers*>PyMem_Malloc(
+            n_chains * sizeof(sdsge_mcmc_buffers))
+        outs = <sdsge_mcmc_result*>PyMem_Malloc(
+            n_chains * sizeof(sdsge_mcmc_result))
+        if ctxs == NULL or bufs == NULL or outs == NULL:
+            raise MemoryError("could not allocate MCMC chain scaffolding")
 
-    if res.status != 0:
-        raise ValueError(
-            (<bytes>res.message).decode()
-            if res.message != NULL
-            else "native MCMC run failed"
-        )
+        # One context per chain. Every mutable buffer a context points at is
+        # allocated inside the fill, so chains share nothing the kernel writes;
+        # what they do share is const and DTO-rooted.
+        for i in range(n_chains):
+            _get_obj_ctx(ctx_dto, mode, hold, &ctxs[i], &filter_mode)
+            bi = <sdsge_obj_common*>&ctxs[i]
+            bi.prior.include_logjac = 1
+            bufs[i].kept = &keptv[i, 0, 0]
+            bufs[i].kept_lp = &keptlpv[i, 0]
+            bufs[i].kept_lj = &keptljv[i, 0]
 
-    return {
-        "samples": kept,
-        "logpost_trace": kept_lp,
-        "logjac_trace": kept_lj,
-        "accepted_burn_in": int(res.accepted_burn_in),
-        "accepted_in_sample": int(res.accepted_in_sample),
-        "total_steps": int(res.total_steps),
-        "bk_violations": int(b.bk_violations),
-        "burn_in_t": float(res.burn_in_t),
-        "in_sample_t": float(res.in_sample_t),
-    }
+        # The MAP leg the chain may start from, driven through the same options
+        # struct a point estimate uses.
+        _fill_map_options(&map_opt, hold, d, filter_mode, map_options)
+
+        mopt.n_draws = n_draws
+        mopt.burn_in = burn_in
+        mopt.thin = thin
+        mopt.needs_map = <int>compute_map
+        mopt.adapt = <int>adapt
+        mopt.adapt_start = adapt_start
+        mopt.adapt_end = adapt_end
+        mopt.adapt_interval = adapt_interval
+        mopt.adapt_epsilon = adapt_epsilon
+        mopt.proposal_scale = proposal_scale
+        mopt.needs_hessian = <int>needs_hessian
+        mopt.hessian_fd_step_scale = cov_fd_step_scale
+        mopt.hessian_fd_absolute_floor = cov_fd_absolute_floor
+        mopt.seed = seed
+        # +logpost, unnegated: MCMC samples a posterior.
+        logpost = sdsge_select_objective(0, 1, filter_mode)
+
+        wsize = sdsge_mcmc_arena_size(d, n_chains, &ctxs[0])
+        work = np.empty(wsize.n_float, np.float64)
+        with nogil:
+            sdsge_mcmc_run(logpost, ctxs, &theta0[0], d, n_chains,
+                           &pcov[0, 0], &mopt, &map_opt, bufs, outs,
+                           &work[0])
+
+        if outs[0].status != 0:
+            raise ValueError(
+                (<bytes>outs[0].message).decode()
+                if outs[0].message != NULL else
+                "MCMC failed with an unknown error."
+            )
+
+        accb = np.empty(n_chains, dtype=np.int64)
+        accs = np.empty(n_chains, dtype=np.int64)
+        nstep = np.empty(n_chains, dtype=np.int64)
+        bk = np.empty(n_chains, dtype=np.int64)
+        status = np.empty(n_chains, dtype=np.int64)
+        tburn = np.empty(n_chains, dtype=np.float64)
+        tsamp = np.empty(n_chains, dtype=np.float64)
+        for i in range(n_chains):
+            accb[i] = outs[i].accepted_burn_in
+            accs[i] = outs[i].accepted_in_sample
+            nstep[i] = outs[i].total_steps
+            bk[i] = outs[i].bk_violations
+            status[i] = outs[i].status
+            tburn[i] = outs[i].burn_in_t
+            tsamp[i] = outs[i].in_sample_t
+
+        return {
+            "samples": kept,
+            "logpost_trace": kept_lp,
+            "logjac_trace": kept_lj,
+            "accepted_burn_in": accb,
+            "accepted_in_sample": accs,
+            "total_steps": nstep,
+            "bk_violations": bk,
+            "burn_in_t": tburn,
+            "in_sample_t": tsamp,
+            "status": status,
+        }
+    finally:
+        PyMem_Free(ctxs)
+        PyMem_Free(bufs)
+        PyMem_Free(outs)
 
 
 def loglik(object ctx_dto, theta not None):
@@ -852,13 +898,9 @@ def loglik(object ctx_dto, theta not None):
     _check_theta(ctx_dto, theta)
     cdef str mode = ctx_dto.filter_ctx.mode
     cdef list hold = []
-    cdef sdsge_linear_ctx c_kf
-    cdef sdsge_extended_ctx c_ekf
-    cdef sdsge_unscented_ctx c_ukf
+    cdef sdsge_obj_ctx c
     cdef int filter_mode
-    cdef void *ctxp = _get_obj_ctx(
-        ctx_dto, mode, hold, &c_kf, &c_ekf, &c_ukf, &filter_mode
-    )
+    cdef void *ctxp = _get_obj_ctx(ctx_dto, mode, hold, &c, &filter_mode)
     return _do_eval(ctxp, filter_mode, theta, False, False)
 
 
@@ -870,13 +912,9 @@ def logpost(object ctx_dto, theta not None, bint jacobian=False):
     _check_theta(ctx_dto, theta)
     cdef str mode = ctx_dto.filter_ctx.mode
     cdef list hold = []
-    cdef sdsge_linear_ctx c_kf
-    cdef sdsge_extended_ctx c_ekf
-    cdef sdsge_unscented_ctx c_ukf
+    cdef sdsge_obj_ctx c
     cdef int filter_mode
-    cdef void *ctxp = _get_obj_ctx(
-        ctx_dto, mode, hold, &c_kf, &c_ekf, &c_ukf, &filter_mode
-    )
+    cdef void *ctxp = _get_obj_ctx(ctx_dto, mode, hold, &c, &filter_mode)
     return _do_eval(ctxp, filter_mode, theta,
                     bool(ctx_dto.prior.has_prior), jacobian)
 

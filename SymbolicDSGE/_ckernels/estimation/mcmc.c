@@ -264,9 +264,10 @@ static void sdsge_mcmc_kernel(
   out->accepted_in_sample = accepted - accepted_burn_in;
   out->burn_in_t = init_t - base_t;
   out->in_sample_t = halt_t - init_t;
+  out->bk_violations = cb->bk_violations;
 }
 
-arena_size sdsge_mcmc_arena_size(i64 d, const void *obj_ctx) {
+arena_size sdsge_chain_arena_size(i64 d, const void *obj_ctx) {
   const sdsge_obj_common *cb = (const sdsge_obj_common *)obj_ctx;
 
   const i64 kblk =
@@ -276,77 +277,17 @@ arena_size sdsge_mcmc_arena_size(i64 d, const void *obj_ctx) {
   const size_t nlast = (size_t)max_i64(d * d, kblk * kblk);
   return make_sizer(5 * d + 2 * nm + nlast, 0);
 }
-i64 sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
-                   const f64 *SDSGE_RESTRICT theta0, i64 d,
+arena_size sdsge_mcmc_arena_size(i64 d, i64 n_chains, const void *obj_ctx) {
+  arena_size single = sdsge_chain_arena_size(d, obj_ctx);
+  return make_sizer(single.n_float * n_chains, 0);
+}
+i64 sdsge_mcmc_run(sdsge_objective_fn logpost, sdsge_obj_ctx *obj_ctx,
+                   const f64 *SDSGE_RESTRICT theta0, i64 d, i64 n_chains,
                    const f64 *SDSGE_RESTRICT pcov,
                    const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
                    sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
                    f64 *SDSGE_RESTRICT work) {
-  sdsge_philox_state st;
-  /* (seed, modcode, chain_idx, substream) */
-  sdsge_philox_seed(&st, opt->seed, SDSGE_MCMC_MODCODE, 0, 0);
-
-  sdsge_mcmc_init_out(out, opt);
-
-  /* Workspace slice: 5 vectors of d and 3 matrices of d*d. The last matrix
-   * is the refactor scratch, the block inversion shares it. */
-  const size_t nm = d * d;
-
-  f64 *current = work;
-  f64 *L = current + d;
-  f64 *prop = L + nm;
-  f64 *z = prop + d;
-  f64 *m = z + d;
-  f64 *dev = m + d;
-  f64 *C = dev + d;
-  f64 *Ltmp = C + nm;
-
-  memcpy(current, theta0, d * sizeof(f64));
-
-  /* Initial proposal: cov0 = scale * H^-1, L = chol(cov0). The Hessian is
-   * computed at the MAP as a finite-difference approximation of the negative
-   * log-posterior.
-   *
-   * MAP is only computed if the user did not supply a mode for the Hessian
-   * proposal factor.
-   */
-
-  if (opt->needs_map) {
-    sdsge_mcmc_map_point(obj_ctx, d, current, map_opt, out);
-    if (out->status != SDSGE_MCMC_OK) {
-      return out->status;
-    }
-  }
-
-  /* The allocation past `L` (aka prop and onward) at this call is dead; and is
-   * the exact size FD Hessian needs as scratch. Note that `C` is overwritable
-   * as scratch during the solve. C=LL^T executes immediately after a succesful
-   * solve, the covariance isn't corrupted regardless of the `needs_hessian`
-   * flag. */
-  sdsge_mcmc_resolve_pcov(logpost, obj_ctx, opt, d, pcov, current, L, C, prop,
-                          out);
-  if (out->status != SDSGE_MCMC_OK) {
-    return out->status;
-  }
-
-  sdsge_mcmc_kernel(logpost, obj_ctx, opt, &st, d, current, L, prop, z, m, dev,
-                    C, Ltmp, buf, out);
-  return out->status;
-}
-
-arena_size sdsge_multichain_arena_size(i64 d, i64 n_chains,
-                                       const void *obj_ctx) {
-  arena_size single = sdsge_mcmc_arena_size(d, obj_ctx);
-  return make_sizer(single.n_float * n_chains, 0);
-}
-i64 sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
-                         const f64 *SDSGE_RESTRICT theta0, i64 d, i64 n_chains,
-                         const f64 *SDSGE_RESTRICT pcov,
-                         const sdsge_mcmc_options *opt,
-                         const sdsge_estimation_options *map_opt,
-                         sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
-                         f64 *SDSGE_RESTRICT work) {
 
   /* Initialize workpace for the first chain:
    * Resolve MAP and hessian into the first slice and copy into next workers'
@@ -354,18 +295,14 @@ i64 sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
   f64 *base_current = work;
   f64 *base_L = base_current + d;
   f64 *base_prop = base_L + d * d;
-  f64 *base_z = base_prop + d;
-  f64 *base_m = base_z + d;
-  f64 *base_dev = base_m + d;
-  f64 *base_C = base_dev + d;
-  f64 *base_Ltmp = base_C + d * d;
+  f64 *base_C = base_prop + 4 * d;
   memcpy(base_current, theta0, d * sizeof(f64));
 
   sdsge_mcmc_result *base_out = out;
   sdsge_mcmc_init_out(base_out, opt);
 
   if (opt->needs_map) {
-    sdsge_mcmc_map_point(obj_ctx[0], d, base_current, map_opt, base_out);
+    sdsge_mcmc_map_point(&obj_ctx[0], d, base_current, map_opt, base_out);
     if (base_out->status != SDSGE_MCMC_OK) {
       for (i64 c = 1; c < n_chains; ++c) {
         sdsge_mcmc_init_out(&out[c], opt);
@@ -376,7 +313,7 @@ i64 sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
     }
   }
 
-  sdsge_mcmc_resolve_pcov(logpost, obj_ctx[0], opt, d, pcov, base_current,
+  sdsge_mcmc_resolve_pcov(logpost, &obj_ctx[0], opt, d, pcov, base_current,
                           base_L, base_C, base_prop, base_out);
   if (base_out->status != SDSGE_MCMC_OK) {
     for (i64 c = 1; c < n_chains; ++c) {
@@ -387,7 +324,7 @@ i64 sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
     return base_out->status;
   }
 
-  arena_size work_per = sdsge_mcmc_arena_size(d, obj_ctx[0]);
+  arena_size work_per = sdsge_chain_arena_size(d, &obj_ctx[0]);
   for (i64 c = 1; c < n_chains; ++c) {
     memcpy(work + c * work_per.n_float, work, work_per.n_float * sizeof(f64));
     sdsge_mcmc_init_out(&out[c], opt);
@@ -405,7 +342,7 @@ i64 sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
     f64 *dev = m + d;
     f64 *C = dev + d;
     f64 *Ltmp = C + d * d;
-    sdsge_mcmc_kernel(logpost, obj_ctx[c], opt, &st, d, current, L, prop, z, m,
+    sdsge_mcmc_kernel(logpost, &obj_ctx[c], opt, &st, d, current, L, prop, z, m,
                       dev, C, Ltmp, &buf[c], &out[c]);
   }
   for (i64 c = 0; c < n_chains; ++c) {

@@ -119,6 +119,12 @@ typedef struct {
   sdsge_solve2 solve2_out;
 } sdsge_unscented_ctx;
 
+typedef union {
+  sdsge_linear_ctx linear;
+  sdsge_extended_ctx extended;
+  sdsge_unscented_ctx unscented;
+} sdsge_obj_ctx;
+
 /* Scratch for one whole objective evaluation. The solve, the filter, and the
  * stationary-covariance P0 derivation run one after another off the same
  * buffer, each reading its inputs from explicitly stored outputs rather than

@@ -280,6 +280,11 @@ cdef extern from "estimation.h":
         double cov_fd_step_scale
         double cov_fd_absolute_floor
 
+    ctypedef union sdsge_obj_ctx:
+        sdsge_linear_ctx linear
+        sdsge_extended_ctx extended
+        sdsge_unscented_ctx unscented
+
     ctypedef struct sdsge_estimation_result:
         sdsge_optim_result base
         double *vcov
@@ -349,20 +354,13 @@ cdef extern from "mcmc.h":
         double burn_in_t
         double in_sample_t
 
-    arena_size sdsge_mcmc_arena_size(int64_t d, const void *obj_ctx) nogil
-    int64_t sdsge_mcmc_run(sdsge_objective_fn logpost, void *obj_ctx,
-                           const double *theta0,
-                           int64_t d, const double *pcov,
+    arena_size sdsge_mcmc_arena_size(int64_t d, int64_t n_chains,
+                                     const void *obj_ctx) nogil
+    int64_t sdsge_mcmc_run(sdsge_objective_fn logpost,
+                           sdsge_obj_ctx *obj_ctx,
+                           const double *theta0, int64_t d,
+                           int64_t n_chains, const double *pcov,
                            const sdsge_mcmc_options *opt,
                            const sdsge_estimation_options *map_opt,
                            sdsge_mcmc_buffers *buf,
                            sdsge_mcmc_result *out, double *work) nogil
-    arena_size sdsge_multichain_arena_size(int64_t d, int64_t n_chains,
-                                           const void *obj_ctx) nogil
-    int64_t sdsge_multichain_run(sdsge_objective_fn logpost, void **obj_ctx,
-                                 const double *theta0, int64_t d,
-                                 int64_t n_chains, const double *pcov,
-                                 const sdsge_mcmc_options *opt,
-                                 const sdsge_estimation_options *map_opt,
-                                 sdsge_mcmc_buffers *buf,
-                                 sdsge_mcmc_result *out, double *work) nogil
