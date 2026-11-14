@@ -637,6 +637,118 @@ class Estimator:
             ),
         )
 
+    def _mcmc_sample(
+        self,
+        n_chains: int,
+        n_draws: int,
+        burn_in: int,
+        thin: int,
+        theta0: Mapping[str, float] | None,
+        random_state: int | None,
+        adapt: bool,
+        adapt_start: int | None,
+        adapt_end: int | Literal["burn_in"] | None,
+        adapt_interval: int,
+        adapt_epsilon: float,
+        init_scale: float,
+        proposal_scale: float,
+        compute_map: bool,
+        map_options: dict[str, Any] | None,
+        proposal_cov: NDF | None,
+        cov_fd_step_scale: float,
+        cov_fd_absolute_floor: float,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if self.priors is None:
+            raise ValueError("MCMC requires priors to define a posterior.")
+
+        total_draws = n_chains * (n_draws * thin + burn_in)
+        if adapt_end == "burn_in":
+            adapt_end = max(1, burn_in)
+        elif adapt_end is None:
+            adapt_end = total_draws
+        adapt_end = min(adapt_end, total_draws)
+
+        if adapt_start is None:
+            adapt_start = max(1, min((adapt_end + 1) // 2, 1000))
+
+        map_bounds = None if map_options is None else map_options.get("bounds")
+        ctx, theta, map_lo, map_hi = self._build_call_context(
+            priored=True, theta0=theta0, bounds=map_bounds
+        )
+
+        native_map_options = dict(map_options or {})
+        native_map_options.pop("bounds", None)
+        native_map_options["lo"] = map_lo
+        native_map_options["hi"] = map_hi
+
+        if random_state is None:
+            rng = np.random.default_rng()
+            seed = rng.integers(0, 2**64, dtype=np.uint64)
+        else:
+            seed = np.uint64(int(random_state) & 0xFFFFFFFFFFFFFFFF)
+
+        t0 = perf_counter()
+        out = run_mcmc(
+            ctx_dto=ctx,
+            theta0=theta,
+            seed=seed,
+            n_chains=1,
+            n_draws=n_draws,
+            burn_in=burn_in,
+            thin=thin,
+            adapt=adapt,
+            adapt_start=adapt_start,
+            adapt_end=adapt_end,
+            adapt_interval=adapt_interval,
+            adapt_epsilon=adapt_epsilon,
+            init_scale=1.0,
+            proposal_scale=proposal_scale,
+            proposal_cov=proposal_cov,
+            cov_fd_step_scale=cov_fd_step_scale,
+            cov_fd_absolute_floor=cov_fd_absolute_floor,
+            compute_map=compute_map,
+            map_options=native_map_options,
+        )
+        elapsed = max(perf_counter() - t0, np.finfo(float).eps)
+
+        total_steps = int(sum(out["total_steps"]))
+
+        print(
+            f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
+        )
+        self._report_search_warning_count("mcmc", out["bk_violations"])
+
+        usr_opts = dict(map_options) if map_options is not None else None
+        if usr_opts and "bounds" in usr_opts:
+            usr_opts["bounds"] = r.serialize_bounds(usr_opts["bounds"])
+
+        sampler_config = {
+            "n_draws": int(n_draws),
+            "burn_in": int(burn_in),
+            "thin": int(thin),
+            "theta0": dict(theta0) if theta0 is not None else None,
+            "adapt": bool(adapt),
+            "adapt_start": int(adapt_start),
+            "adapt_end": int(adapt_end),
+            "adapt_interval": int(adapt_interval),
+            "proposal_scale": float(proposal_scale),
+            "adapt_epsilon": float(adapt_epsilon),
+            "compute_map": bool(compute_map),
+            "map_options": usr_opts,
+            "proposal_cov": (
+                proposal_cov.tolist() if proposal_cov is not None else None
+            ),
+            "cov_fd_step_scale": float(cov_fd_step_scale),
+            "cov_fd_absolute_floor": float(cov_fd_absolute_floor),
+            "random_state": int(seed),
+        }
+
+        if n_chains > 1:
+            sampler_config["n_chains"] = int(n_chains)
+            sampler_config["init_scale"] = float(init_scale)
+
+        return out, sampler_config
+
     def mcmc(
         self,
         *,
@@ -709,44 +821,13 @@ class Estimator:
         Inconsistent parameterizations will not raise if adaptation is disabled.
         `adapt_start` == `adapt_end` is allowed but no adaptation will occur.
         """
-        if self.priors is None:
-            raise ValueError("MCMC requires priors to define a posterior.")
-
-        total_draws = n_draws * thin + burn_in
-        if adapt_end == "burn_in":
-            adapt_end = max(1, burn_in)
-        elif adapt_end is None:
-            adapt_end = total_draws
-        adapt_end = min(adapt_end, total_draws)
-
-        if adapt_start is None:
-            adapt_start = max(1, min((adapt_end + 1) // 2, 1000))
-
-        map_bounds = None if map_options is None else map_options.get("bounds")
-        ctx, theta, map_lo, map_hi = self._build_call_context(
-            priored=True, theta0=theta0, bounds=map_bounds
-        )
-
-        native_map_options = dict(map_options or {})
-        native_map_options.pop("bounds", None)
-        native_map_options["lo"] = map_lo
-        native_map_options["hi"] = map_hi
-
-        if random_state is None:
-            rng = np.random.default_rng()
-            seed = rng.integers(0, 2**64, dtype=np.uint64)
-        else:
-            seed = np.uint64(int(random_state) & 0xFFFFFFFFFFFFFFFF)
-
-        t0 = perf_counter()
-        out = run_mcmc(
-            ctx_dto=ctx,
-            theta0=theta,
-            seed=seed,
+        out, sampler_config = self._mcmc_sample(
             n_chains=1,
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
+            theta0=theta0,
+            random_state=random_state,
             adapt=adapt,
             adapt_start=adapt_start,
             adapt_end=adapt_end,
@@ -758,24 +839,12 @@ class Estimator:
             cov_fd_step_scale=cov_fd_step_scale,
             cov_fd_absolute_floor=cov_fd_absolute_floor,
             compute_map=compute_map,
-            map_options=native_map_options,
+            map_options=map_options,
         )
-        elapsed = max(perf_counter() - t0, np.finfo(float).eps)
-
-        total_steps = int(out["total_steps"][0])
-        kept = out["samples"][0]
-
-        print(
-            f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
-        )
-
-        usr_opts = dict(map_options) if map_options is not None else None
-        if usr_opts and "bounds" in usr_opts:
-            usr_opts["bounds"] = r.serialize_bounds(usr_opts["bounds"])
 
         result = MCMCResult(
             param_names=tuple(self.param_names),
-            samples=kept,
+            samples=out["samples"][0],
             logpost_trace=out["logpost_trace"][0],
             logjac_trace=out["logjac_trace"][0],
             accepted_burn_in=out["accepted_burn_in"][0],
@@ -785,26 +854,113 @@ class Estimator:
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
-            sampler_config={
-                "n_draws": int(n_draws),
-                "burn_in": int(burn_in),
-                "thin": int(thin),
-                "theta0": dict(theta0) if theta0 is not None else None,
-                "adapt": bool(adapt),
-                "adapt_start": int(adapt_start),
-                "adapt_end": int(adapt_end),
-                "adapt_interval": int(adapt_interval),
-                "proposal_scale": float(proposal_scale),
-                "adapt_epsilon": float(adapt_epsilon),
-                "compute_map": bool(compute_map),
-                "map_options": usr_opts,
-                "proposal_cov": (
-                    proposal_cov.tolist() if proposal_cov is not None else None
-                ),
-                "cov_fd_step_scale": float(cov_fd_step_scale),
-                "cov_fd_absolute_floor": float(cov_fd_absolute_floor),
-                "random_state": int(seed),
-            },
+            sampler_config=sampler_config,
         )
-        self._report_search_warning_count("mcmc", out["bk_violations"])
         return result
+
+    def mcmc_chains(
+        self,
+        *,
+        n_chains: int,
+        n_draws: int,
+        burn_in: int = 1000,
+        thin: int = 1,
+        theta0: Mapping[str, float] | None = None,
+        random_state: int | None = None,
+        adapt: bool = True,
+        adapt_start: int | None = None,
+        adapt_end: int | Literal["burn_in"] | None = "burn_in",
+        adapt_interval: int = 1,
+        adapt_epsilon: float = 1e-8,
+        proposal_scale: float = 1,
+        compute_map: bool = True,
+        map_options: dict[str, Any] | None = None,
+        proposal_cov: NDF | None = None,
+        cov_fd_step_scale: float = 1.0,
+        cov_fd_absolute_floor: float = 0.1,
+    ) -> dict[str, Any]:
+        """Multi-chain Markov Chain Monte Carlo sampling of the posterior distribution over the estimated parameters.
+
+        Parameters
+        ----------
+        n_chains : int
+            Number of independent MCMC chains to run. Must be greater than 1.
+            Use ``mcmc`` for a single chain.
+        n_draws : int
+            Number of MCMC draws to generate (after burn-in and thinning).
+        burn_in : int
+            Number of initial draws to discard as burn-in.
+        thin : int
+            Thinning factor: keep every ``thin``-th draw after burn-in.
+        theta0 : NDF | Mapping[str, float] | None
+            Initial guess for the parameter vector. If None, uses the model calibration.
+        random_state : int | None
+            Seed for the random number generator. If None, uses a random seed.
+        adapt : bool
+            Whether to adapt the proposal covariance, ``True`` corresponds to Haario et al. (2001) adaptive MCMC;
+            ``False`` is a regular Random Walk Metropolis-Hastings sampler with fixed proposal covariance.
+        adapt_start : int | None
+            When to start adapting the proposal covariance. `None` starts the adaptation half-way between the run's start and `adapt_end`, with an upper limit of 1000.
+            Must be greater than zero, the zero-th draw is reserved to have a single sample at the initial covariance (required for the adaptation algorithm).
+        adapt_end : int | Literal["burn_in"] | None
+            When to stop adapting the proposal covariance. "burn_in" adapts until the end of the burn-in period and ``None`` adapts indefinitely starting from ``adapt_start``.
+        adapt_interval : int
+            Number of iterations between adaptation steps. Must be at least 1.
+        adapt_epsilon : float
+            Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
+        init_scale : float
+            Scaling factor to apply to the proposal covariance for perturbing the initial point of each chain.
+            The default draws random points with 1 proposal standard deviation of spread from the theta0 point.
+        proposal_scale : float
+            Scaling factor for proposal **standard deviation**: `2.38/sqrt(d) * proposal_scale`.
+            The default of 1 corresponds to the standard "optimal" point for a Gaussian random-walk MH.
+        compute_map : bool
+            Whether to compute the MAP estimate to use it as initial guess and the hessian point for the (initial or fixed) proposal covariance.
+        map_options : dict[str, Any] | None
+            Keyword arguments to pass when calling :meth:`map` to compute the MAP estimate. ``None`` uses the default options.
+            Refer to :meth:`map` for the available options.
+        proposal_cov : NDF | None
+            Direct, user-specified proposal covariance matrix. Cannot be used when ``compute_map=True``.
+        cov_fd_step_scale : float
+            Scale of the finite difference approximation step used to compute the Hessian for the proposal covariance. Used when solving for the proposal covariance from the MAP estimate. Ignored if ``proposal_cov`` is provided.
+        cov_fd_absolute_floor : float
+            Absolute floor for the finite difference approximation step used to compute the Hessian for the proposal covariance. Used when solving for the proposal covariance from the MAP estimate. Ignored if ``proposal_cov`` is provided.
+
+        Returns
+        -------
+        MCMCResult
+            Results of the MCMC sampling, including the samples, acceptance rate, and other diagnostics.
+
+        Notes
+        -----
+        The parameters regarding adaptation are only checked if ``adapt=True``.
+        Inconsistent parameterizations will not raise if adaptation is disabled.
+        `adapt_start` == `adapt_end` is allowed but no adaptation will occur.
+        """
+        if n_chains < 2:
+            raise ValueError(
+                "`mcmc_chains` requires n_chains > 2 to produce reliable multi-chain diagnostics. "
+                f"Use `mcmc` for a single chain. Got {n_chains}."
+            )
+
+        out, sampler_config = self._mcmc_sample(
+            n_chains=n_chains,
+            n_draws=n_draws,
+            burn_in=burn_in,
+            thin=thin,
+            theta0=theta0,
+            random_state=random_state,
+            adapt=adapt,
+            adapt_start=adapt_start,
+            adapt_end=adapt_end,
+            adapt_interval=adapt_interval,
+            adapt_epsilon=adapt_epsilon,
+            init_scale=1.0,
+            proposal_scale=proposal_scale,
+            proposal_cov=proposal_cov,
+            cov_fd_step_scale=cov_fd_step_scale,
+            cov_fd_absolute_floor=cov_fd_absolute_floor,
+            compute_map=compute_map,
+            map_options=map_options,
+        )
+        return out
