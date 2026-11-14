@@ -27,6 +27,12 @@ typedef struct {
 
   f64 hessian_fd_step_scale;
   f64 hessian_fd_absolute_floor;
+
+  f64 init_scale; // Scaling factor for the standard deviation of the proposal
+                  // covariance. Initial thetas for multiple chain runs draw
+                  // standard normal and factor by `init_scale * L`, where LL^T
+                  // = pcov.
+
   u64 seed;
 } sdsge_mcmc_options;
 
@@ -34,6 +40,7 @@ typedef struct {
   f64 *kept;
   f64 *kept_lp;
   f64 *kept_lj;
+  f64 *init_theta;
 } sdsge_mcmc_buffers;
 
 /* MCMC OUTPUTS */
@@ -60,6 +67,7 @@ typedef struct {
 #define SDSGE_MCMC_OK 0
 #define SDSGE_MCMC_EMAP (-1604)
 #define SDSGE_MCMC_EMULTICHAIN (-1605)
+#define SDSGE_MCMC_EPOINTINIT (-1606)
 /* HOT LOOP DRIVER */
 arena_size sdsge_mcmc_arena_size(i64 d, i64 n_chains, const void *obj_ctx);
 i64 sdsge_mcmc_run(sdsge_objective_fn logpost, sdsge_obj_ctx *obj_ctx,
@@ -67,7 +75,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, sdsge_obj_ctx *obj_ctx,
                    const f64 *SDSGE_RESTRICT pcov,
                    const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
-                   sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
-                   f64 *SDSGE_RESTRICT work);
+                   sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out, f64 *wall_t,
+                   f64 *init_t, f64 *SDSGE_RESTRICT work);
 
 #endif /* SDSGE_MCMC_H */

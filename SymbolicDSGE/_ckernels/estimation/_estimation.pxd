@@ -337,12 +337,14 @@ cdef extern from "mcmc.h":
         int needs_hessian
         double hessian_fd_step_scale
         double hessian_fd_absolute_floor
+        double init_scale
         uint64_t seed
 
     ctypedef struct sdsge_mcmc_buffers:
         double *kept
         double *kept_lp
         double *kept_lj
+        double *init_theta
 
     ctypedef struct sdsge_mcmc_result:
         int64_t accepted_burn_in
@@ -363,4 +365,5 @@ cdef extern from "mcmc.h":
                            const sdsge_mcmc_options *opt,
                            const sdsge_estimation_options *map_opt,
                            sdsge_mcmc_buffers *buf,
-                           sdsge_mcmc_result *out, double *work) nogil
+                           sdsge_mcmc_result *out, double *wall_t,
+                           double *init_t, double *work) nogil

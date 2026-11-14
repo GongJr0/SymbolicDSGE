@@ -740,9 +740,10 @@ class Estimator:
 
         t0 = perf_counter()
         out = run_mcmc(
-            ctx,
-            theta,
-            seed,
+            ctx_dto=ctx,
+            theta0=theta,
+            seed=seed,
+            n_chains=1,
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
@@ -750,11 +751,12 @@ class Estimator:
             adapt_start=adapt_start,
             adapt_end=adapt_end,
             adapt_interval=adapt_interval,
+            adapt_epsilon=adapt_epsilon,
+            init_scale=1.0,
             proposal_scale=proposal_scale,
             proposal_cov=proposal_cov,
             cov_fd_step_scale=cov_fd_step_scale,
             cov_fd_absolute_floor=cov_fd_absolute_floor,
-            adapt_epsilon=adapt_epsilon,
             compute_map=compute_map,
             map_options=native_map_options,
         )

@@ -183,7 +183,7 @@ def test_mcmc_proposal_covariance_sets_the_proposal_width(mcmc_estimator):
 def test_mcmc_rejects_a_proposal_covariance_that_is_not_positive_definite(
     mcmc_estimator, cov
 ):
-    with pytest.raises(ValueError, match="not positive definite"):
+    with pytest.raises(RuntimeError, match="not positive definite"):
         mcmc_estimator.mcmc(
             theta0=_OFF_MODE, compute_map=False, proposal_cov=cov, **_MCMC_KW
         )
