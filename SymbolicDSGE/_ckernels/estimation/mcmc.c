@@ -4,11 +4,12 @@
 
 /* Direct includes for the primitives used here (native-include hygiene). */
 #include "../_common/sdsge_common.h" /* max_i64 */
-#include "../_common/sdsge_linalg.h" /* sdsge_chol, sdsge_backward_subst_chol_t,
-                                        sdsge_matmul_abt, sdsge_matvec */
+#include "../_common/sdsge_linalg.h" /* sdsge_chol, sdsge_matmul_abt,
+                                      * sdsge_matvec, sdsge_matvec_plus_vec */
 #include "../optim/optim.h"          /* sdsge_optim_result */
-#include "../rng/philox.h" /* sdsge_philox_standard_{normal,uniform}_fill, sdsge_philox_seed */
-#include "estimation.h" /* sdsge_run_estimation, sdsge_objective_fn */
+#include "../rng/philox.h" /* sdsge_philox_standard_{normal,uniform}_fill,
+                            * sdsge_philox_seed */
+#include "estimation.h"    /* sdsge_run_estimation, sdsge_objective_fn */
 #include "prior_program.h"
 #include "sdsge_time.h" /* sdsge_monotime_sec */
 
