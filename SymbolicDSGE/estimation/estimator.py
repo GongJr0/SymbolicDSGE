@@ -657,6 +657,7 @@ class Estimator:
         proposal_cov: NDF | None,
         cov_fd_step_scale: float,
         cov_fd_absolute_floor: float,
+        n_jobs: int | None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
@@ -692,7 +693,7 @@ class Estimator:
             ctx_dto=ctx,
             theta0=theta,
             seed=seed,
-            n_chains=1,
+            n_chains=n_chains,
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
@@ -708,6 +709,7 @@ class Estimator:
             cov_fd_absolute_floor=cov_fd_absolute_floor,
             compute_map=compute_map,
             map_options=native_map_options,
+            n_jobs=n_jobs,
         )
         elapsed = max(perf_counter() - t0, np.finfo(float).eps)
 
@@ -840,6 +842,7 @@ class Estimator:
             cov_fd_absolute_floor=cov_fd_absolute_floor,
             compute_map=compute_map,
             map_options=map_options,
+            n_jobs=1,
         )
 
         result = MCMCResult(
@@ -872,12 +875,14 @@ class Estimator:
         adapt_end: int | Literal["burn_in"] | None = "burn_in",
         adapt_interval: int = 1,
         adapt_epsilon: float = 1e-8,
+        init_scale: float = 1.0,
         proposal_scale: float = 1,
         compute_map: bool = True,
         map_options: dict[str, Any] | None = None,
         proposal_cov: NDF | None = None,
         cov_fd_step_scale: float = 1.0,
         cov_fd_absolute_floor: float = 0.1,
+        n_jobs: int | None = None,
     ) -> dict[str, Any]:
         """Multi-chain Markov Chain Monte Carlo sampling of the posterior distribution over the estimated parameters.
 
@@ -925,6 +930,8 @@ class Estimator:
             Scale of the finite difference approximation step used to compute the Hessian for the proposal covariance. Used when solving for the proposal covariance from the MAP estimate. Ignored if ``proposal_cov`` is provided.
         cov_fd_absolute_floor : float
             Absolute floor for the finite difference approximation step used to compute the Hessian for the proposal covariance. Used when solving for the proposal covariance from the MAP estimate. Ignored if ``proposal_cov`` is provided.
+        n_jobs : int | None
+            Number of parallel jobs to run for the MCMC chains. If None or -1, uses `min(n_chains, os.cpu_count())`.
 
         Returns
         -------
@@ -939,7 +946,7 @@ class Estimator:
         """
         if n_chains < 2:
             raise ValueError(
-                "`mcmc_chains` requires n_chains > 2 to produce reliable multi-chain diagnostics. "
+                "`mcmc_chains` requires n_chains >= 2 to produce reliable multi-chain diagnostics. "
                 f"Use `mcmc` for a single chain. Got {n_chains}."
             )
 
@@ -962,5 +969,6 @@ class Estimator:
             cov_fd_absolute_floor=cov_fd_absolute_floor,
             compute_map=compute_map,
             map_options=map_options,
+            n_jobs=n_jobs,
         )
         return out

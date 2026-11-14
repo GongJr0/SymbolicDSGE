@@ -34,6 +34,7 @@ typedef struct {
                   // = pcov.
 
   u64 seed;
+  i64 n_workers;
 } sdsge_mcmc_options;
 
 typedef struct {
