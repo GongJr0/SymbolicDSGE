@@ -174,7 +174,7 @@ sdsge_mcmc_resolve_pcov(sdsge_objective_fn logpost, void *obj_ctx,
     }
     sdsge_matmul_abt(L, L, C, d, d, d); /* C = L @ L^T */
   } else {
-    if (sdsge_chol_upper(pcov, 0.0, L, d) != SDSGE_OK) {
+    if (sdsge_chol(pcov, 0.0, L, d) != SDSGE_OK) {
       out->status = SDSGE_ESTIMATION_ENOTSPD;
       out->message =
           "User-supplied proposal covariance is not positive definite";
