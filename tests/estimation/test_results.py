@@ -7,10 +7,8 @@ from SymbolicDSGE.estimation.results import (
     MCMCResult,
     MLEResult,
     MAPResult,
-    _hpd_window_size,
-    _validate_hpd_alpha,
 )
-
+from SymbolicDSGE.estimation.results.mcmc import _hpd_window_size, _validate_hpd_alpha
 from tests._result_helpers import make_mcmc_result
 
 
