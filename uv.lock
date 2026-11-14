@@ -967,16 +967,16 @@ wheels = [
 
 [[package]]
 name = "cython-lint"
-version = "0.22.0"
+version = "0.22.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cython" },
     { name = "pycodestyle" },
     { name = "tokenize-rt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/31/d5/893dc09b9512861789902d1eb05644e3267c422225beede3ff2a6be44e93/cython_lint-0.22.0.tar.gz", hash = "sha256:ec1f536fbd9d420de48700c36942603bf1918d38b9136ea2ae905443f1e8ea10", size = 32543, upload-time = "2026-10-07T07:07:09.877Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/0c/bff7cfb15c6d3aa17ea4b13173aed17ad1f1cd24628e40c3059dabc98c9f/cython_lint-0.22.1.tar.gz", hash = "sha256:38f0d186e4077a7baa617a874a45131f093253cf4ca2081525dcb2ee80129f57", size = 32915, upload-time = "2026-11-07T09:47:04.062Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a4/a1/b9998246e5b48549d0967b471dd204b01eb2b2818165b85e01de3c6bc340/cython_lint-0.22.0-py3-none-any.whl", hash = "sha256:b9cf60e92cccc33d14bc7b00be3c50c85136f8f2b0a7f5345f876c17ed3f0f16", size = 16813, upload-time = "2026-10-07T07:07:08.554Z" },
+    { url = "https://files.pythonhosted.org/packages/15/ab/2fbefec65671a6ee1c478bde840e26483e17ef6303b8b3e6893701c908f7/cython_lint-0.22.1-py3-none-any.whl", hash = "sha256:be7e0518ee9d315be5e1b7440ae2f27dd1dbe56e4ab692c8915c4a64ef6b7bfa", size = 16809, upload-time = "2026-11-07T09:47:02.683Z" },
 ]
 
 [[package]]
@@ -4432,7 +4432,7 @@ provides-extras = ["fred", "ui"]
 dev = [
     { name = "black", extras = ["jupyter"], specifier = ">=26.10.1" },
     { name = "cython", specifier = ">=3.3.1" },
-    { name = "cython-lint", specifier = ">=0.21.0" },
+    { name = "cython-lint", specifier = ">=0.22.1" },
     { name = "httpx2", specifier = ">=2.16.0" },
     { name = "matplotlib-stubs", specifier = ">=0.3.11" },
     { name = "mike", specifier = ">=2.1.3" },
