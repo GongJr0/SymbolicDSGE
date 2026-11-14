@@ -339,6 +339,7 @@ cdef extern from "mcmc.h":
         double hessian_fd_absolute_floor
         double init_scale
         uint64_t seed
+        int64_t n_workers
 
     ctypedef struct sdsge_mcmc_buffers:
         double *kept

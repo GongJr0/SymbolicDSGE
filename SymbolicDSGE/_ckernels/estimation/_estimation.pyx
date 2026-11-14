@@ -15,8 +15,10 @@ from cpython.pycapsule cimport (
     PyCapsule_GetPointer,
 )
 
+import os
 import numpy as np
 import scipy.linalg.cython_lapack as _cython_lapack
+from threadpoolctl import threadpool_limits
 
 cdef object _zgges_capsule = _cython_lapack.__pyx_capi__["zgges"]
 cdef klein_zgges_fn _zgges = <klein_zgges_fn>PyCapsule_GetPointer(
@@ -703,6 +705,7 @@ def run_mcmc(
     double cov_fd_absolute_floor,
     bint compute_map,
     dict map_options,
+    object n_jobs,
 ):
     """Native adaptive random-walk Metropolis over the linear / extended /
     unscented objective. Returns the kept draws (in parameter space) plus
@@ -739,6 +742,8 @@ def run_mcmc(
             raise ValueError("adapt_epsilon must be non-negative.")
     if init_scale <= 0.0:
         raise ValueError("init_scale must be positive.")
+
+    cdef int64_t n_workers = min(n_chains, resolve_n_workers(n_jobs))
 
     map_options = {} if map_options is None else dict(map_options)
     unknown_map_options = set(map_options) - {
@@ -812,8 +817,6 @@ def run_mcmc(
     cdef sdsge_estimation_options map_opt
     cdef sdsge_mcmc_options mopt
     cdef sdsge_objective_fn logpost
-    cdef int64_t[::1] accb, accs, nstep, bk, status
-    cdef double[::1] tburn, tsamp
     cdef double wall_t, init_t
     cdef int64_t rc
 
@@ -857,32 +860,33 @@ def run_mcmc(
         mopt.hessian_fd_absolute_floor = cov_fd_absolute_floor
         mopt.init_scale = init_scale
         mopt.seed = seed
+        mopt.n_workers = n_workers
         # +logpost, unnegated: MCMC samples a posterior.
         logpost = sdsge_select_objective(0, 1, filter_mode)
 
         wsize = sdsge_mcmc_arena_size(d, n_chains, &ctxs[0])
         work = np.empty(wsize.n_float, np.float64)
-
-        with nogil:
-            rc = sdsge_mcmc_run(logpost, ctxs, &theta0[0], d, n_chains,
-                                &pcov[0, 0], &mopt, &map_opt, bufs, outs,
-                                &wall_t, &init_t, &work[0])
+        with threadpool_limits(limits=1, user_api="blas"):
+            with nogil:
+                rc = sdsge_mcmc_run(logpost, ctxs, &theta0[0], d, n_chains,
+                                    &pcov[0, 0], &mopt, &map_opt, bufs, outs,
+                                    &wall_t, &init_t, &work[0])
 
         if rc != 0:
             codes = []
             messages = []
-            for i in range(n_chains):
+            for k in range(n_chains):
                 codes.append(outs[i].status)
                 messages.append(
-                    (<bytes>outs[i].message).decode()
-                    if outs[i].message != NULL
+                    (<bytes>outs[k].message).decode()
+                    if outs[k].message != NULL
                     else "unknown error."
                 )
             raise RuntimeError(
-                f"Chain(s) {[i for i, c in enumerate(codes) if c != 0]} failed.\n  "
+                f"Chain(s) {[j for j, c in enumerate(codes) if c != 0]} failed.\n  "
                 + "\n  ".join(
-                    f"Chain {i}: {m} ({c})"
-                    for i, (c, m) in enumerate(zip(codes, messages))
+                    f"Chain {j}: {m} ({c})"
+                    for j, (c, m) in enumerate(zip(codes, messages))
                     if c != 0
                 )
             )
@@ -977,3 +981,30 @@ def logprior(object ctx_dto, theta not None, bint jacobian=False):
     with nogil:
         out = sdsge_logprior_at(&b, &th[0])
     return np.float64(out)
+
+
+def resolve_n_workers(object n_jobs=None):
+    """Resolve joblib-style ``n_jobs`` to a positive native worker count."""
+    cdef int64_t n_jobs_value
+    cdef int64_t cpu_count
+
+    cpu_count = (
+        os.process_cpu_count()
+        if hasattr(os, "process_cpu_count")
+        else os.cpu_count()
+    )
+    if cpu_count is None:
+        cpu_count = 1
+
+    if n_jobs is None:
+        return 1
+    if isinstance(n_jobs, bool) or not isinstance(n_jobs, int):
+        raise TypeError("n_jobs must be an integer or None.")
+    n_jobs_value = n_jobs
+
+    if n_jobs_value == 0:
+        raise ValueError("n_jobs must not be zero.")
+    if n_jobs_value > 0:
+        return n_jobs_value
+
+    return max(1, cpu_count + 1 + n_jobs_value)
