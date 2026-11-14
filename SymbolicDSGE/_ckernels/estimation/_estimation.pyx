@@ -772,6 +772,16 @@ def run_mcmc(
                 "equal to the number of estimated parameters. "
                 f"Expected shape ({d}, {d}), got {proposal_cov.shape}."
             )
+        if not np.all(np.isfinite(proposal_cov)):
+            raise ValueError("proposal_cov must be finite.")
+
+        sym_tol = float(np.sqrt(np.finfo(np.float64).eps))
+        asym = np.abs(proposal_cov - proposal_cov.T).max()
+        if asym > sym_tol * np.abs(proposal_cov).max():
+            raise ValueError(
+                "proposal_cov is not symmetric under the relative tolerance "
+                f"{sym_tol:.3e}."
+            )
     else:
         proposal_cov = np.zeros((d, d), dtype=np.float64)
 

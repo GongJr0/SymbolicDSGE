@@ -199,6 +199,26 @@ def test_mcmc_rejects_a_proposal_covariance_with_the_wrong_shape(mcmc_estimator)
         )
 
 
+def test_mcmc_rejects_an_asymmetric_proposal_covariance(mcmc_estimator):
+    cov = np.array([[1.0, 0.5], [0.4, 1.0]], dtype=np.float64)
+
+    with pytest.raises(ValueError, match="not symmetric"):
+        mcmc_estimator.mcmc(
+            theta0=_OFF_MODE, compute_map=False, proposal_cov=cov, **_MCMC_KW
+        )
+
+
+@pytest.mark.parametrize("bad", [np.nan, np.inf])
+def test_mcmc_rejects_a_proposal_covariance_that_is_not_finite(mcmc_estimator, bad):
+    cov = np.eye(2, dtype=np.float64)
+    cov[0, 1] = cov[1, 0] = bad
+
+    with pytest.raises(ValueError, match="must be finite"):
+        mcmc_estimator.mcmc(
+            theta0=_OFF_MODE, compute_map=False, proposal_cov=cov, **_MCMC_KW
+        )
+
+
 def test_mcmc_rejects_a_proposal_covariance_alongside_compute_map(mcmc_estimator):
     mode = mcmc_estimator.map(theta0=_OFF_MODE, jacobian=True)
     with pytest.raises(ValueError, match="compute_map"):
