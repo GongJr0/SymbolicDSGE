@@ -156,11 +156,12 @@ f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
 #define SDSGE_ESTIMATION_EHESSIAN (-1801)
 #define SDSGE_ESTIMATION_ENOTSPD (-1802)
 
-/* Covariance of the estimate at `theta`, in factored form: `factor` satisfies
- * factor * factor^T = H^-1, where H = -d^2 logpost(theta). `fd_step_scale` and
- * `fd_absolute_floor` define h_i = max(abs(theta_i), fd_absolute_floor) *
- * DBL_EPSILON^(1/6) * fd_step_scale. The caller owns the d*d row-major
- * `factor` output and supplies `work`, at least 4*d + 2*d*d f64 of scratch. */
+/* Covariance of the estimate at `theta`, in factored form: `factor` is lower
+ * triangular and satisfies factor * factor^T = H^-1, where H = -d^2
+ * logpost(theta). `fd_step_scale` and `fd_absolute_floor` define h_i =
+ * max(abs(theta_i), fd_absolute_floor) * DBL_EPSILON^(1/6) * fd_step_scale. The
+ * caller owns the d*d row-major `factor` output and supplies `work`, at least
+ * 4*d + 2*d*d f64 of scratch. */
 i64 sdsge_estimation_cov_factor(sdsge_objective_fn logpost, void *obj_ctx,
                                 const f64 *SDSGE_RESTRICT theta, i64 d,
                                 f64 fd_step_scale, f64 fd_absolute_floor,

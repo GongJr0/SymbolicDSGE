@@ -687,6 +687,7 @@ def run_mcmc(
     object ctx_dto,
     double[::1] theta0,
     uint64_t seed,
+    int64_t n_chains,
     int64_t n_draws,
     int64_t burn_in,
     int64_t thin,
@@ -694,14 +695,14 @@ def run_mcmc(
     int64_t adapt_start,
     int64_t adapt_end,
     int64_t adapt_interval,
+    double adapt_epsilon,
+    double init_scale,
     double proposal_scale,
     proposal_cov,
     double cov_fd_step_scale,
     double cov_fd_absolute_floor,
-    double adapt_epsilon,
     bint compute_map,
     dict map_options,
-    int64_t n_chains=1,
 ):
     """Native adaptive random-walk Metropolis over the linear / extended /
     unscented objective. Returns the kept draws (in parameter space) plus
@@ -711,19 +712,16 @@ def run_mcmc(
     from it first and the chain begins at the mode instead; without, ``theta0``
     is taken to be that mode already and the proposal Hessian is built there.
 
-    ``n_chains`` above 1 runs that many chains off the same ``theta0``,
-    MAP, and proposal factor, each on its own Philox substream, and
-    returns chain-major arrays with a per-chain ``status``. A chain that
-    failed is reported there instead of raised, and its slice of the
-    draw buffers is undefined."""
+    ``n_chains`` above 1 runs that many chains, each starting from a perturbation
+    of chain 0's point."""
+    if n_chains <= 0:
+        raise ValueError("n_chains must be positive.")
     if n_draws <= 0:
         raise ValueError("n_draws must be positive.")
     if burn_in < 0:
         raise ValueError("burn_in must be non-negative.")
     if thin <= 0:
         raise ValueError("thin must be positive.")
-    if n_chains <= 0:
-        raise ValueError("n_chains must be positive.")
     if cov_fd_step_scale <= 0.0 or cov_fd_absolute_floor <= 0.0:
         raise ValueError("Hessian finite-difference settings must be positive.")
     if proposal_scale <= 0.0:
@@ -739,6 +737,8 @@ def run_mcmc(
             raise ValueError("adapt_interval must be positive.")
         if adapt_epsilon < 0.0:
             raise ValueError("adapt_epsilon must be non-negative.")
+    if init_scale <= 0.0:
+        raise ValueError("init_scale must be positive.")
 
     map_options = {} if map_options is None else dict(map_options)
     unknown_map_options = set(map_options) - {
@@ -772,6 +772,16 @@ def run_mcmc(
                 "equal to the number of estimated parameters. "
                 f"Expected shape ({d}, {d}), got {proposal_cov.shape}."
             )
+        if not np.all(np.isfinite(proposal_cov)):
+            raise ValueError("proposal_cov must be finite.")
+
+        sym_tol = float(np.sqrt(np.finfo(np.float64).eps))
+        asym = np.abs(proposal_cov - proposal_cov.T).max()
+        if asym > sym_tol * np.abs(proposal_cov).max():
+            raise ValueError(
+                "proposal_cov is not symmetric under the relative tolerance "
+                f"{sym_tol:.3e}."
+            )
     else:
         proposal_cov = np.zeros((d, d), dtype=np.float64)
 
@@ -791,9 +801,11 @@ def run_mcmc(
     kept = np.empty((n_chains, n_draws, d), dtype=np.float64)
     kept_lp = np.empty((n_chains, n_draws), dtype=np.float64)
     kept_lj = np.empty((n_chains, n_draws), dtype=np.float64)
+    init_theta = np.empty((n_chains, d), dtype=np.float64)
     cdef double[:, :, ::1] keptv = kept
     cdef double[:, ::1] keptlpv = kept_lp
     cdef double[:, ::1] keptljv = kept_lj
+    cdef double[:, ::1] thetaiv = init_theta
 
     cdef arena_size wsize
     cdef double[::1] work
@@ -802,6 +814,8 @@ def run_mcmc(
     cdef sdsge_objective_fn logpost
     cdef int64_t[::1] accb, accs, nstep, bk, status
     cdef double[::1] tburn, tsamp
+    cdef double wall_t, init_t
+    cdef int64_t rc
 
     try:
         ctxs = <sdsge_obj_ctx*>PyMem_Malloc(n_chains * sizeof(sdsge_obj_ctx))
@@ -822,6 +836,7 @@ def run_mcmc(
             bufs[i].kept = &keptv[i, 0, 0]
             bufs[i].kept_lp = &keptlpv[i, 0]
             bufs[i].kept_lj = &keptljv[i, 0]
+            bufs[i].init_theta = &thetaiv[i, 0]
 
         # The MAP leg the chain may start from, driven through the same options
         # struct a point estimate uses.
@@ -840,22 +855,36 @@ def run_mcmc(
         mopt.needs_hessian = <int>needs_hessian
         mopt.hessian_fd_step_scale = cov_fd_step_scale
         mopt.hessian_fd_absolute_floor = cov_fd_absolute_floor
+        mopt.init_scale = init_scale
         mopt.seed = seed
         # +logpost, unnegated: MCMC samples a posterior.
         logpost = sdsge_select_objective(0, 1, filter_mode)
 
         wsize = sdsge_mcmc_arena_size(d, n_chains, &ctxs[0])
         work = np.empty(wsize.n_float, np.float64)
-        with nogil:
-            sdsge_mcmc_run(logpost, ctxs, &theta0[0], d, n_chains,
-                           &pcov[0, 0], &mopt, &map_opt, bufs, outs,
-                           &work[0])
 
-        if outs[0].status != 0:
-            raise ValueError(
-                (<bytes>outs[0].message).decode()
-                if outs[0].message != NULL else
-                "MCMC failed with an unknown error."
+        with nogil:
+            rc = sdsge_mcmc_run(logpost, ctxs, &theta0[0], d, n_chains,
+                                &pcov[0, 0], &mopt, &map_opt, bufs, outs,
+                                &wall_t, &init_t, &work[0])
+
+        if rc != 0:
+            codes = []
+            messages = []
+            for i in range(n_chains):
+                codes.append(outs[i].status)
+                messages.append(
+                    (<bytes>outs[i].message).decode()
+                    if outs[i].message != NULL
+                    else "unknown error."
+                )
+            raise RuntimeError(
+                f"Chain(s) {[i for i, c in enumerate(codes) if c != 0]} failed.\n  "
+                + "\n  ".join(
+                    f"Chain {i}: {m} ({c})"
+                    for i, (c, m) in enumerate(zip(codes, messages))
+                    if c != 0
+                )
             )
 
         accb = np.empty(n_chains, dtype=np.int64)
@@ -882,8 +911,11 @@ def run_mcmc(
             "accepted_in_sample": accs,
             "total_steps": nstep,
             "bk_violations": bk,
+            "init_t": init_t,
+            "wall_t": wall_t,
             "burn_in_t": tburn,
             "in_sample_t": tsamp,
+            "init_theta": init_theta,
             "status": status,
         }
     finally:

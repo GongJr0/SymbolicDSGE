@@ -46,7 +46,7 @@ f64 sdsge_dot(const f64 *a, const f64 *b, i64 n);
 /* 2 * sum(log(diag(L))) for lower-triangular L(n,n) */
 f64 sdsge_logdet_from_chol(const f64 *L, i64 n);
 
-/* Lower Cholesky L(n,n) and Uppoer Cholesky U(n,n) of S(n,n) (+ jitter on the
+/* Lower Cholesky L(n,n) and Upper Cholesky U(n,n) of S(n,n) (+ jitter on the
  * diagonal). Returns SDSGE_OK, or SDSGE_NOT_PD if S is not positive definite.
  * Pass jitter == 0 for a plain factorization. */
 int sdsge_chol(const f64 *S, f64 jitter, f64 *L, i64 n);

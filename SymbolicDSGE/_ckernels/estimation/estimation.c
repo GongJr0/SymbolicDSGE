@@ -10,8 +10,7 @@
 #include <string.h>
 
 /* Direct includes for the primitives used here (native-include hygiene). */
-#include "../_common/sdsge_linalg.h" /* sdsge_chol, sdsge_backward_subst_chol_t,
-                                        sdsge_matmul_abt */
+#include "../_common/sdsge_linalg.h" /* sdsge_chol_upper, sdsge_matmul_abt */
 #include "prior_program.h"           /* sdsge_transform_inverse_and_logjac,
                               sdsge_corr_entries_from_unconstrained */
 #include "../_common/sdsge_common.h" /* arena_size, sdsge_max_arena, max_i64,
@@ -438,7 +437,8 @@ sdsge_objective_fn sdsge_select_objective(int negate, int has_priors,
  *
  * The off-diagonal stencil matches Dynare's hessian.m: it reuses the two
  * coordinate-direction evaluations and needs only the (++), (--) pair for each
- * i < j. After H = L L^T, solving L^T X = I gives X X^T = H^-1. */
+ * i < j. After H = U U^T, solving U^T X = I gives a lower-triangular X with
+ * X X^T = H^-1. */
 i64 sdsge_estimation_cov_factor(sdsge_objective_fn logpost, void *obj_ctx,
                                 const f64 *SDSGE_RESTRICT theta, i64 d,
                                 f64 fd_step_scale, f64 fd_absolute_floor,
@@ -460,7 +460,7 @@ i64 sdsge_estimation_cov_factor(sdsge_objective_fn logpost, void *obj_ctx,
   f64 *plus = h + nv;
   f64 *minus = plus + nv;
   f64 *H = minus + nv;
-  f64 *L = H + nm;
+  f64 *U = H + nm;
 
   memcpy(x, theta, nv * sizeof(f64));
   const f64 lp0 = logpost(theta, obj_ctx);
@@ -507,17 +507,23 @@ i64 sdsge_estimation_cov_factor(sdsge_objective_fn logpost, void *obj_ctx,
     }
   }
 
-  if (sdsge_chol(H, 0.0, L, d) != SDSGE_OK) {
+  if (sdsge_chol_upper(H, 0.0, U, d) != SDSGE_OK) {
     return SDSGE_ESTIMATION_ENOTSPD;
   }
 
+  /* Column j is U^T x = e_j, whose solution is zero for i < j, so each column
+   * starts at its diagonal and the result is lower triangular. */
   for (i64 j = 0; j < d; ++j) {
-    for (i64 i = 0; i < d; ++i) {
-      x[i] = i == j ? 1.0 : 0.0;
+    for (i64 i = 0; i < j; ++i) {
+      factor[i * d + j] = 0.0;
     }
-    sdsge_backward_subst_chol_t(L, x, x, d);
-    for (i64 i = 0; i < d; ++i) {
-      factor[i * d + j] = x[i];
+    factor[j * d + j] = 1.0 / U[j * d + j];
+    for (i64 i = j + 1; i < d; ++i) {
+      f64 s = 0.0;
+      for (i64 k = j; k < i; ++k) {
+        s += U[k * d + i] * factor[k * d + j];
+      }
+      factor[i * d + j] = -s / U[i * d + i];
     }
   }
 

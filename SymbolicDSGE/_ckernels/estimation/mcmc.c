@@ -4,11 +4,12 @@
 
 /* Direct includes for the primitives used here (native-include hygiene). */
 #include "../_common/sdsge_common.h" /* max_i64 */
-#include "../_common/sdsge_linalg.h" /* sdsge_chol, sdsge_backward_subst_chol_t,
-                                        sdsge_matmul_abt, sdsge_matvec */
+#include "../_common/sdsge_linalg.h" /* sdsge_chol, sdsge_matmul_abt,
+                                      * sdsge_matvec, sdsge_matvec_plus_vec */
 #include "../optim/optim.h"          /* sdsge_optim_result */
-#include "../rng/philox.h" /* sdsge_philox_standard_{normal,uniform}_fill, sdsge_philox_seed */
-#include "estimation.h" /* sdsge_run_estimation, sdsge_objective_fn */
+#include "../rng/philox.h" /* sdsge_philox_standard_{normal,uniform}_fill,
+                            * sdsge_philox_seed */
+#include "estimation.h"    /* sdsge_run_estimation, sdsge_objective_fn */
 #include "prior_program.h"
 #include "sdsge_time.h" /* sdsge_monotime_sec */
 
@@ -131,6 +132,14 @@ static void sdsge_mcmc_init_out(sdsge_mcmc_result *out,
   out->message = "ok";
 }
 
+static void sdsge_mcmc_nan_buffers(sdsge_mcmc_buffers *buf, i64 d,
+                                   i64 n_draws) {
+  memset(buf->kept, 0xFF, n_draws * d * sizeof(f64));
+  memset(buf->kept_lp, 0xFF, n_draws * sizeof(f64));
+  memset(buf->kept_lj, 0xFF, n_draws * sizeof(f64));
+  memset(buf->init_theta, 0xFF, d * sizeof(f64));
+}
+
 static void sdsge_mcmc_map_point(void *obj_ctx, i64 n_theta,
                                  f64 *SDSGE_RESTRICT theta,
                                  const sdsge_estimation_options *map_opt,
@@ -166,13 +175,55 @@ sdsge_mcmc_resolve_pcov(sdsge_objective_fn logpost, void *obj_ctx,
     }
     sdsge_matmul_abt(L, L, C, d, d, d); /* C = L @ L^T */
   } else {
-    if (sdsge_chol_upper(pcov, 0.0, L, d) != SDSGE_OK) {
+    if (sdsge_chol(pcov, 0.0, L, d) != SDSGE_OK) {
       out->status = SDSGE_ESTIMATION_ENOTSPD;
       out->message =
           "User-supplied proposal covariance is not positive definite";
       return;
     }
     memcpy(C, pcov, d * d * sizeof(f64));
+  }
+}
+
+static void sdsge_mcmc_init_point(sdsge_objective_fn logpost, void *obj_ctx,
+                                  const sdsge_mcmc_options *opt,
+                                  sdsge_philox_state *st, i64 d, f64 *current,
+                                  const f64 *L, f64 *z, sdsge_mcmc_result *out,
+                                  sdsge_mcmc_buffers *buf) {
+  f64 scale = opt->init_scale;
+  i64 scale_deflation_tries = 10;
+  i64 nodeflate_iter = 100;
+
+  /* The deflation at a factor of 0.8 produces 0.8^10 = 0.107 if the final
+   * reduction is reached. That is, if we don't find a finite logpost at ~10% of
+   * the user-supplied scale, the raise is taken to the user and they should
+   * decide to update their init_scale accordingly. */
+
+  while (1) {
+    sdsge_philox_standard_normal_fill(st, d, z);
+    for (i64 i = 0; i < d; ++i) {
+      z[i] *= scale;
+    }
+    sdsge_matvec_plus_vec(L, z, current, buf->init_theta, d, d);
+    const f64 cand_lp = logpost(buf->init_theta, obj_ctx);
+
+    if (isfinite(cand_lp)) {
+      memcpy(current, buf->init_theta, d * sizeof(f64));
+      return;
+    }
+
+    if (--nodeflate_iter == 0) {
+      if (scale_deflation_tries == 0) {
+        out->status = SDSGE_MCMC_EPOINTINIT;
+        out->message =
+            "MCMC initial point search failed: no finite logpost found";
+        return;
+      }
+
+      scale *= 0.8;
+      --scale_deflation_tries;
+      nodeflate_iter = 10;
+    }
   }
 }
 
@@ -200,16 +251,17 @@ static void sdsge_mcmc_kernel(
   i64 next_adapt = opt->adapt_start; /* init with first adaptation */
 
   /* clock stores */
-  const f64 base_t = sdsge_monotime_sec();
-  f64 init_t = base_t; /* == base_t if burn_in == 0, else set at first
+  const f64 start_cp = sdsge_monotime_sec();
+  f64 burn_cp = start_cp; /* == start_cp if burn_in == 0, else set at first
                           post-burn-in draw */
-  f64 halt_t;
+  f64 halt_cp;
 
   for (i64 t = 0; t < total_steps; ++t) {
-    /* Timing and acceptance accounting: start the clock at first post-burn-in
-     * draw and record the current accepted count for warmup diagnostics. */
+    /* Timing and acceptance accounting: start the clock at first
+     * post-burn-in draw and record the current accepted count for warmup
+     * diagnostics. */
     if (t == opt->burn_in) {
-      init_t = sdsge_monotime_sec();
+      burn_cp = sdsge_monotime_sec();
       accepted_burn_in = accepted;
     }
 
@@ -259,11 +311,11 @@ static void sdsge_mcmc_kernel(
       next_keep += opt->thin;
     }
   }
-  halt_t = sdsge_monotime_sec();
+  halt_cp = sdsge_monotime_sec();
   out->accepted_burn_in = accepted_burn_in;
   out->accepted_in_sample = accepted - accepted_burn_in;
-  out->burn_in_t = init_t - base_t;
-  out->in_sample_t = halt_t - init_t;
+  out->burn_in_t = burn_cp - start_cp;
+  out->in_sample_t = halt_cp - burn_cp;
   out->bk_violations = cb->bk_violations;
 }
 
@@ -286,62 +338,107 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, sdsge_obj_ctx *obj_ctx,
                    const f64 *SDSGE_RESTRICT pcov,
                    const sdsge_mcmc_options *opt,
                    const sdsge_estimation_options *map_opt,
-                   sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out,
-                   f64 *SDSGE_RESTRICT work) {
+                   sdsge_mcmc_buffers *buf, sdsge_mcmc_result *out, f64 *wall_t,
+                   f64 *init_t, f64 *SDSGE_RESTRICT work) {
+  *init_t = 0.0;
+  *wall_t = 0.0;
+  f64 start_cp = sdsge_monotime_sec();
 
-  /* Initialize workpace for the first chain:
-   * Resolve MAP and hessian into the first slice and copy into next workers'
-   * slices. */
+  /* Initialize workpace for the first chain. */
   f64 *base_current = work;
   f64 *base_L = base_current + d;
-  f64 *base_prop = base_L + d * d;
-  f64 *base_C = base_prop + 4 * d;
+  f64 *base_C = base_L + d * d;
   memcpy(base_current, theta0, d * sizeof(f64));
 
   sdsge_mcmc_result *base_out = out;
   sdsge_mcmc_init_out(base_out, opt);
 
+  /* MAP point as theta0 on first chain if requested. Following chains are
+   * standard normal perturbations of the first chain's initial point. */
   if (opt->needs_map) {
     sdsge_mcmc_map_point(&obj_ctx[0], d, base_current, map_opt, base_out);
     if (base_out->status != SDSGE_MCMC_OK) {
+      sdsge_mcmc_nan_buffers(&buf[0], d, opt->n_draws);
+
       for (i64 c = 1; c < n_chains; ++c) {
         sdsge_mcmc_init_out(&out[c], opt);
         out[c].status = base_out->status;
         out[c].message = base_out->message;
+        sdsge_mcmc_nan_buffers(&buf[c], d, opt->n_draws);
       }
       return base_out->status;
     }
   }
+  memcpy(buf[0].init_theta, base_current, d * sizeof(f64));
 
+  /* Proposal covariance of base, feeds successive chains directly. */
   sdsge_mcmc_resolve_pcov(logpost, &obj_ctx[0], opt, d, pcov, base_current,
-                          base_L, base_C, base_prop, base_out);
+                          base_L, base_C, base_C, base_out);
+
   if (base_out->status != SDSGE_MCMC_OK) {
+    sdsge_mcmc_nan_buffers(&buf[0], d, opt->n_draws);
+
     for (i64 c = 1; c < n_chains; ++c) {
       sdsge_mcmc_init_out(&out[c], opt);
       out[c].status = base_out->status;
       out[c].message = base_out->message;
+      sdsge_mcmc_nan_buffers(&buf[c], d, opt->n_draws);
     }
     return base_out->status;
   }
 
+  /* Initialize the remaining chains' workspace and out. */
   arena_size work_per = sdsge_chain_arena_size(d, &obj_ctx[0]);
   for (i64 c = 1; c < n_chains; ++c) {
     memcpy(work + c * work_per.n_float, work, work_per.n_float * sizeof(f64));
     sdsge_mcmc_init_out(&out[c], opt);
   }
 
+  /* Get perturbed theta0 per each non-first chain. */
+  if (n_chains > 1) {
+#pragma omp parallel for schedule(static)
+    for (i64 c = 1; c < n_chains; ++c) {
+      sdsge_philox_state st;
+      // (seed, modcode, chain, <0:sampler, 1:init_point>)
+      sdsge_philox_seed(&st, opt->seed, SDSGE_MCMC_MODCODE, c, 1);
+      f64 *current = work + c * work_per.n_float;
+      f64 *L = current + d;
+      f64 *z = L + 2 * d * d + d;
+      sdsge_mcmc_init_point(logpost, &obj_ctx[c], opt, &st, d, current, L, z,
+                            &out[c], &buf[c]);
+    }
+  }
+
+  i64 err = 0;
+  for (i64 c = 0; c < n_chains; ++c) {
+    if (out[c].status != SDSGE_MCMC_OK) {
+      // generic, chains that failed are located with the out[c].status
+      err = 1;
+    }
+  }
+  if (err) {
+    for (i64 c = 0; c < n_chains; ++c) {
+      sdsge_mcmc_nan_buffers(&buf[c], d, opt->n_draws);
+    }
+    return SDSGE_MCMC_EPOINTINIT;
+  }
+
+  f64 init_cp = sdsge_monotime_sec();
+
+  /* Kernel entry */
 #pragma omp parallel for if (n_chains > 1) schedule(static)
   for (i64 c = 0; c < n_chains; ++c) {
     sdsge_philox_state st;
     sdsge_philox_seed(&st, opt->seed, SDSGE_MCMC_MODCODE, c, 0);
     f64 *current = work + c * work_per.n_float;
     f64 *L = current + d;
-    f64 *prop = L + d * d;
+    f64 *C = L + d * d;
+    f64 *prop = C + d * d;
     f64 *z = prop + d;
     f64 *m = z + d;
     f64 *dev = m + d;
-    f64 *C = dev + d;
-    f64 *Ltmp = C + d * d;
+    f64 *Ltmp = dev + d;
+
     sdsge_mcmc_kernel(logpost, &obj_ctx[c], opt, &st, d, current, L, prop, z, m,
                       dev, C, Ltmp, &buf[c], &out[c]);
   }
@@ -350,5 +447,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, sdsge_obj_ctx *obj_ctx,
       return SDSGE_MCMC_EMULTICHAIN;
     }
   }
+  *init_t = init_cp - start_cp;
+  *wall_t = sdsge_monotime_sec() - start_cp;
   return SDSGE_MCMC_OK;
 }
