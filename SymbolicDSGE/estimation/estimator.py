@@ -962,7 +962,7 @@ class Estimator:
             adapt_end=adapt_end,
             adapt_interval=adapt_interval,
             adapt_epsilon=adapt_epsilon,
-            init_scale=1.0,
+            init_scale=init_scale,
             proposal_scale=proposal_scale,
             proposal_cov=proposal_cov,
             cov_fd_step_scale=cov_fd_step_scale,
