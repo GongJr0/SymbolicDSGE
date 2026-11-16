@@ -129,7 +129,7 @@ def estimate_and_solve(
     est: Estimator,
     routine: Literal["mle", "map", "mcmc"] = "mle",
     theta0: Mapping[str, float] | None = None,
-    posterior_point: Literal["mean", "map", "last"] = "mean",
+    posterior_point: Literal["mean", "map"] = "mean",
     ss_seed: list[float] | np.ndarray | dict[str, float] | None = None,
     **method_kwargs: Any,
 ) -> tuple[MLEResult | MAPResult | MCMCResult, SolvedModel]:

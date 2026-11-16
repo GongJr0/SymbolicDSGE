@@ -229,18 +229,18 @@ class MCMCResultSpec:
 
     Attributes
     ----------
-    samples : Sequence[Sequence[float]]
+    samples : Sequence[Sequence[Sequence[float]]]
         Posterior samples in bundle-ready ND array form.
-    logpost_trace : Sequence[float]
+    logpost_trace : Sequence[Sequence[float]]
         Log-posterior trace for the samples.
-    logjac_trace : Sequence[float]
+    logjac_trace : Sequence[Sequence[float]]
         Log-Jacobian trace for the samples.
     meta : MCMCResultMeta
         Inline JSON metadata for the MCMC run, including parameter names, sampler config, and trace lengths.
 
     """
 
-    samples: Sequence[Sequence[float]]
-    logpost_trace: Sequence[float]
-    logjac_trace: Sequence[float]
+    samples: Sequence[Sequence[Sequence[float]]]
+    logpost_trace: Sequence[Sequence[float]]
+    logjac_trace: Sequence[Sequence[float]]
     meta: MCMCResultMeta
