@@ -174,7 +174,7 @@ class MCMCResult:
             Effective sample size for each parameter, keyed by parameter name.
         """
         ess, _, status = self.__ess_rhat
-        ess = np.where(status != 0, ess, np.nan)
+        ess = np.where(status == 0, ess, np.nan)
 
         return dict(zip(self.param_names, np.clip(ess, 0.0, self.n_draws).tolist()))
 
@@ -262,7 +262,6 @@ class MCMCResult:
             out[name] = _nanrnd(float((col[i_hi] - col[i_lo]) / 2.0), digits)
         return out
 
-    # TODO: Rewrite methods below as n_chain aware.
     def hpd_intervals(
         self, alpha: float = 0.05, digits: int | None = None
     ) -> dict[str, tuple[float, float]]:
@@ -273,17 +272,19 @@ class MCMCResult:
         containing approximately ``1 - alpha`` of the retained posterior draws.
         """
         alpha64 = _validate_hpd_alpha(alpha)
-        n_draws = self.samples.shape[0]
-        window = _hpd_window_size(n_draws, alpha64)
+        n_chains, n_draws, n_par = self.samples.shape
+        window = _hpd_window_size(n_draws, n_chains, alpha64)
+
+        samples = self.samples.reshape(-1, n_par)
 
         out: dict[str, tuple[float, float]] = {}
         for i, name in enumerate(self.param_names):
-            col = np.sort(np.asarray(self.samples[:, i], dtype=float64))
+            col = np.sort(np.asarray(samples[:, i], dtype=float64))
             if window == n_draws:
                 low = float(col[0])
                 high = float(col[-1])
             else:
-                widths = col[window - 1 :] - col[: n_draws - window + 1]
+                widths = col[window - 1 :] - col[: n_chains * n_draws - window + 1]
                 start = int(np.argmin(widths))
                 low = float(col[start])
                 high = float(col[start + window - 1])
@@ -301,16 +302,19 @@ class MCMCResult:
         the original retained chain.
         """
         alpha64 = _validate_hpd_alpha(alpha)
-        n_draws = self.samples.shape[0]
+        n_chains, n_draws, n_par = self.samples.shape
 
-        window = _hpd_window_size(n_draws, alpha64)
-        order = np.argsort(self.logpost_trace)[::-1]
-        threshold = float(self.logpost_trace[order[window - 1]])
-        mask = np.asarray(self.logpost_trace >= threshold, dtype=bool)
+        logpost = self.logpost_trace.reshape(-1)
+        samples = self.samples.reshape(-1, n_par)
+
+        window = _hpd_window_size(n_draws, n_chains, alpha64)
+        order = np.argsort(logpost)[::-1]
+        threshold = float(logpost[order[window - 1]])
+        mask = np.asarray(logpost >= threshold, dtype=bool)
         idx = np.flatnonzero(mask).astype(np.int64, copy=False)
         return (
-            np.asarray(self.samples[idx, :], dtype=float64),
-            np.asarray(self.logpost_trace[idx], dtype=float64),
+            np.asarray(samples[idx, :], dtype=float64),
+            np.asarray(logpost[idx], dtype=float64),
             threshold,
             idx,
         )
@@ -326,6 +330,8 @@ class MCMCResult:
         from scipy.stats import gaussian_kde
         import matplotlib.pyplot as plt
 
+        samples = self.samples.reshape(-1, len(self.param_names))
+
         fig_sq = np.ceil(np.sqrt(len(self.param_names)))
         fig, axes = plt.subplots(
             int(fig_sq), int(fig_sq), figsize=(4 * fig_sq, 3 * fig_sq)
@@ -336,7 +342,7 @@ class MCMCResult:
             ax = ax[:-1]
 
         for i, name in enumerate(self.param_names):
-            col = np.asarray(self.samples[:, i], dtype=float64)
+            col = np.asarray(samples[:, i], dtype=float64)
             kde = gaussian_kde(col)
             x_min, x_max = col.min(), col.max()
             x_grid = np.linspace(x_min, x_max, grid_points)
@@ -345,36 +351,21 @@ class MCMCResult:
         plt.tight_layout()
         plt.show()
 
-    def posterior_traces(self) -> None:
-        """Produce trace plots for each parameter's posterior samples."""
-        import matplotlib.pyplot as plt
-
-        fig_sq = np.ceil(np.sqrt(len(self.param_names)))
-        fig, axes = plt.subplots(
-            int(fig_sq), int(fig_sq), figsize=(4 * fig_sq, 3 * fig_sq)
-        )
-
-        ax = axes.flatten()
-        while len(ax) > len(self.param_names):
-            fig.delaxes(ax[-1])
-            ax = ax[:-1]
-
-        for i, name in enumerate(self.param_names):
-            col = np.asarray(self.samples[:, i], dtype=float64)
-            ax[i].plot(col)
-            ax[i].set_title(name)
-        plt.tight_layout()
-        plt.show()
-
     def logpost_trace_plot(self) -> None:
         """Produce the log-posterior trace plot for the MCMC run."""
         import matplotlib.pyplot as plt
 
-        plt.figure(figsize=(8, 4))
-        plt.plot(self.logpost_trace)
-        plt.title("Log-Posterior Trace")
-        plt.xlabel("Iteration")
-        plt.ylabel("Log-Posterior")
+        fig, ax = plt.subplots(
+            self.n_chains, 1, figsize=(8, 3 * self.n_chains), sharex=True
+        )
+
+        for i in range(self.n_chains):
+            ax[i].set_title(f"Chain {i}")
+            ax[i].plot(self.logpost_trace[i])
+            ax[i].set_ylabel("Log-Posterior")
+
+        plt.suptitle("Log-Posterior Trace")
+        plt.xlabel("Draw")
         plt.tight_layout()
         plt.show()
 
@@ -387,11 +378,10 @@ class MCMCResult:
 
         Parameters
         ----------
-        point : Literal["mean", "map", "last"]
+        point : Literal["mean", "map"]
             Point estimate to return:
                 - "mean": Return the mean of the posterior samples.
                 - "map": Return the sample maximizing the log-posterior (MAP)
-                - "last": Return the last sample in the posterior chain.
         digits : int | None
             Number of decimals for rounding, `None` does not apply rounding.
 
@@ -402,15 +392,15 @@ class MCMCResult:
         """
         match point:
             case "mean":
-                theta_star = self.samples.mean(axis=0)
+                theta_star = self.samples.reshape(-1, len(self.param_names)).mean(
+                    axis=0
+                )
             case "map":
                 idx = int(np.argmax(self.logpost_trace))
                 theta_star = self.samples[idx]
-            case "last":
-                theta_star = self.samples[-1]
             case _:
                 raise ValueError(
-                    "`posterior_point` must be one of {'mean', 'map', 'last'}, got "
+                    "`posterior_point` must be one of {'mean', 'map'}, got "
                     f"{point!r}."
                 )
         return dict(
@@ -418,7 +408,7 @@ class MCMCResult:
         )
 
     def apply_to(
-        self, config: ModelConfig, point: Literal["mean", "map", "last"] = "mean"
+        self, config: ModelConfig, point: Literal["mean", "map"] = "mean"
     ) -> ModelConfig:
         """Return a new config with the parameter values set to the point estimate.
 
@@ -427,11 +417,10 @@ class MCMCResult:
         config : ModelConfig
             Config to take as a base.
             Must contain all parameter names in the result's ``param_names``.
-        point : Literal["mean", "map", "last"]
+        point : Literal["mean", "map"]
             Point estimate to return:
                 - "mean": Return the mean of the posterior samples.
                 - "map": Return the sample maximizing the log-posterior (MAP)
-                - "last": Return the last sample in the posterior chain.
 
         Returns
         -------
@@ -460,7 +449,14 @@ class MCMCResult:
             {
                 "mean": self.posterior_point(point="mean"),
                 "std": dict(
-                    zip(self.param_names, np.std(self.samples, axis=0, ddof=1))
+                    zip(
+                        self.param_names,
+                        np.std(
+                            self.samples.reshape(-1, len(self.param_names)),
+                            axis=0,
+                            ddof=1,
+                        ),
+                    )
                 ),
                 "ess": self.ess,
                 "ess_per_second": self.ess_per_second,
@@ -482,7 +478,7 @@ def _validate_hpd_alpha(alpha: float) -> float64:
     return alpha64
 
 
-def _hpd_window_size(n_draws: int, alpha: float64) -> int:
+def _hpd_window_size(n_draws: int, n_chains: int, alpha: float64) -> int:
     mass = float64(1.0 - alpha)
     return max(1, min(n_draws, int(np.ceil(float(n_draws) * float(mass)))))
 
