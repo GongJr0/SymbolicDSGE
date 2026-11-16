@@ -18,10 +18,11 @@ from ..spec import (
     MCMCResultSpec,
 )
 
-from ..._ckernels.estimation import ess, ess1d
+from ..._ckernels.estimation import ess_rhat
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
+NDB = NDArray[np.bool_]
 
 
 @dataclass(frozen=True)
@@ -72,10 +73,13 @@ class MCMCResult:
     samples: NDF
     logpost_trace: NDF
     logjac_trace: NDF
-    accepted_burn_in: int
-    accepted_in_sample: int
-    burn_in_seconds: float
-    in_sample_seconds: float
+    accepted_burn_in: NDI
+    accepted_in_sample: NDI
+    wall_seconds: float
+    init_seconds: float
+    burn_in_seconds: NDF
+    in_sample_seconds: NDF
+    n_chains: int
     n_draws: int
     burn_in: int
     thin: int
@@ -87,10 +91,13 @@ class MCMCResult:
         """Project to the scalar text metadata carried in a ``.sdsge`` bundle."""
         meta = MCMCResultMeta(
             param_names=list(self.param_names),
-            accepted_burn_in=int(self.accepted_burn_in),
-            accepted_in_sample=int(self.accepted_in_sample),
-            burn_in_seconds=float(self.burn_in_seconds),
-            in_sample_seconds=float(self.in_sample_seconds),
+            accepted_burn_in=list(self.accepted_burn_in),
+            accepted_in_sample=list(self.accepted_in_sample),
+            wall_seconds=float(self.wall_seconds),
+            init_seconds=float(self.init_seconds),
+            burn_in_seconds=list(self.burn_in_seconds),
+            in_sample_seconds=list(self.in_sample_seconds),
+            n_chains=int(self.n_chains),
             n_draws=int(self.n_draws),
             burn_in=int(self.burn_in),
             thin=int(self.thin),
@@ -125,32 +132,39 @@ class MCMCResult:
             samples=np.asarray(data.samples, dtype=float64),
             logpost_trace=np.asarray(data.logpost_trace, dtype=float64),
             logjac_trace=np.asarray(data.logjac_trace, dtype=float64),
-            accepted_burn_in=int(meta["accepted_burn_in"]),
-            accepted_in_sample=int(meta["accepted_in_sample"]),
-            burn_in_seconds=float(meta["burn_in_seconds"]),
-            in_sample_seconds=float(meta["in_sample_seconds"]),
+            accepted_burn_in=np.asarray(meta["accepted_burn_in"], dtype=np.int64),
+            accepted_in_sample=np.asarray(meta["accepted_in_sample"], dtype=np.int64),
+            wall_seconds=float(meta["wall_seconds"]),
+            init_seconds=float(meta["init_seconds"]),
+            burn_in_seconds=np.asarray(meta["burn_in_seconds"], dtype=float64),
+            in_sample_seconds=np.asarray(meta["in_sample_seconds"], dtype=float64),
+            n_chains=int(meta["n_chains"]),
             n_draws=int(meta["n_draws"]),
             burn_in=int(meta["burn_in"]),
             thin=int(meta["thin"]),
             sampler_config=dict(meta["sampler_config"]),
         )
 
+    @cached_property
+    def __ess_rhat(self) -> tuple[NDF, NDF, NDI]:
+        return ess_rhat(self.samples)
+
     @property
-    def accept_rate(self) -> float:
+    def accept_rate(self) -> list[float]:
         # `n_draws` counts retained draws; the proposals behind them are
         # `n_draws * thin`, which is what the kernel's step total is built from.
         total_steps = self.burn_in + self.n_draws * self.thin
-        return (self.accepted_burn_in + self.accepted_in_sample) / total_steps
+        return list((self.accepted_burn_in + self.accepted_in_sample) / total_steps)
 
     @property
-    def accept_rate_burn_in(self) -> float:
-        return self.accepted_burn_in / self.burn_in if self.burn_in > 0 else np.nan
+    def accept_rate_burn_in(self) -> list[float]:
+        return list(self.accepted_burn_in / self.burn_in)
 
     @property
-    def accept_rate_in_sample(self) -> float:
-        return self.accepted_in_sample / (self.n_draws * self.thin)
+    def accept_rate_in_sample(self) -> list[float]:
+        return list(self.accepted_in_sample / (self.n_draws * self.thin))
 
-    @cached_property
+    @property
     def ess(self) -> dict[str, float]:
         """Compute the effective sample size (ESS) for each parameter.
 
@@ -159,10 +173,10 @@ class MCMCResult:
         dict[str, float]
             Effective sample size for each parameter, keyed by parameter name.
         """
-        ess_vals = ess(self.samples)
-        return dict(
-            zip(self.param_names, np.clip(ess_vals, 0.0, self.n_draws).tolist())
-        )
+        ess, _, status = self.__ess_rhat
+        ess = np.where(status != 0, ess, np.nan)
+
+        return dict(zip(self.param_names, np.clip(ess, 0.0, self.n_draws).tolist()))
 
     @property
     def ess_per_second(self) -> dict[str, float]:
@@ -176,13 +190,13 @@ class MCMCResult:
         dict[str, float]
             Effective sample size per second for each parameter, keyed by parameter name.
         """
-        return {name: v / self.in_sample_seconds for name, v in self.ess.items()}
+        return {name: v / self.wall_seconds for name, v in self.ess.items()}
 
     @property
     def mcse(self) -> dict[str, float]:
         """Compute the Monte Carlo Standard Error (MCSE) of the mean for each parameter."""
         ess = self.ess
-        sd = np.std(self.samples, axis=0, ddof=1)
+        sd = np.std(self.samples.reshape(-1, len(self.param_names)), axis=0, ddof=1)
         return {
             name: float(sd[i] / np.sqrt(ess[name]))
             for i, name in enumerate(self.param_names)
@@ -217,27 +231,38 @@ class MCMCResult:
 
         if not (0.0 < q < 1.0):
             raise ValueError("q must satisfy 0 < q < 1.")
-        n_draws = self.samples.shape[0]
+
+        n_chains, n_draws, n_par = self.samples.shape
+        n_half = n_draws // 2
+        pooled = self.samples.reshape(-1, n_par)
+        n_pooled = pooled.shape[0]
+
+        x_q = np.quantile(pooled, q, axis=0, method="linear")
+        # ``self.samples`` rather than the sorted draws: the indicator's ESS
+        # measures autocorrelation, which only exists in draw order.
+        indicator = (self.samples <= x_q).astype(float64)
+        ess_q = np.clip(ess_rhat(indicator)[0], 0.0, float(2 * n_chains * n_half))
+
+        constant = _constant_subchains(indicator, n_half)
+        ess_q[constant] = np.nan
 
         out: dict[str, float] = {}
         for i, name in enumerate(self.param_names):
-            chain = np.asarray(self.samples[:, i], dtype=float64)
-            order = np.sort(chain)
-            x_q = np.quantile(order, q, method="linear")
-            # ``chain`` rather than ``order``: the indicator's ESS measures
-            # autocorrelation, which only exists in draw order.
-            ess_q = min(ess1d((chain <= x_q).astype(float64)), float(n_draws))
-            if not np.isfinite(ess_q):
+            ess_i = float(ess_q[i])
+            if not np.isfinite(ess_i):
                 out[name] = float(np.nan)
                 continue
             lo, hi = np.asarray(
-                beta.ppf(SIGMA_MASS, ess_q * q + 1.0, ess_q * (1.0 - q) + 1.0)
+                beta.ppf(SIGMA_MASS, ess_i * q + 1.0, ess_i * (1.0 - q) + 1.0)
             )
-            i_lo = int(np.clip(np.floor(lo * n_draws - 1.0), 0, n_draws - 1))
-            i_hi = int(np.clip(np.ceil(hi * n_draws - 1.0), 0, n_draws - 1))
-            out[name] = float((order[i_hi] - order[i_lo]) / 2.0)
+            i_lo = int(np.clip(np.floor(lo * n_pooled - 1.0), 0, n_pooled - 1))
+            i_hi = int(np.clip(np.ceil(hi * n_pooled - 1.0), 0, n_pooled - 1))
+            kth = np.unique((i_lo, i_hi))
+            col = np.partition(np.asarray(pooled[:, i], dtype=float64), kth)
+            out[name] = _nanrnd(float((col[i_hi] - col[i_lo]) / 2.0), digits)
         return out
 
+    # TODO: Rewrite methods below as n_chain aware.
     def hpd_intervals(
         self, alpha: float = 0.05, digits: int | None = None
     ) -> dict[str, tuple[float, float]]:
@@ -450,10 +475,6 @@ class MCMCResult:
         return summary_df
 
 
-@dataclass(frozen=True)
-class MultiChainResult: ...
-
-
 def _validate_hpd_alpha(alpha: float) -> float64:
     alpha64 = float64(alpha)
     if not (0.0 <= alpha64 < 1.0):
@@ -464,6 +485,18 @@ def _validate_hpd_alpha(alpha: float) -> float64:
 def _hpd_window_size(n_draws: int, alpha: float64) -> int:
     mass = float64(1.0 - alpha)
     return max(1, min(n_draws, int(np.ceil(float(n_draws) * float(mass)))))
+
+
+def _constant_subchains(indicator: NDF, n_half: int) -> NDB:
+    """Flag parameters whose 0/1 indicator never changes across a split half.
+
+    A constant half contributes no within-subchain variance, which understates
+    ``W`` without reaching the kernel's all-zero guard on the pooled sum.
+    """
+    first = indicator[:, :n_half, :].sum(axis=1)
+    second = indicator[:, n_half : 2 * n_half, :].sum(axis=1)
+    stuck = (first == 0) | (first == n_half) | (second == 0) | (second == n_half)
+    return np.asarray(stuck.sum(axis=0), dtype=np.bool_)
 
 
 def _nanrnd(val: float, digits: int | None) -> float:

@@ -1,6 +1,7 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 from libc.stdint cimport int64_t
 import numpy as np
+import os
 
 cdef extern from "sdsge_common.h":
     ctypedef struct arena_size:
@@ -14,9 +15,13 @@ cdef extern from "ess.h":
     int c_SDSGE_ESS_ENODECAY "SDSGE_ESS_ENODECAY"
     int c_SDSGE_ESS_ENONPOSTAU "SDSGE_ESS_ENONPOSTAU"
 
-    arena_size sdsge_ess_1d_arena_size(int64_t n) nogil
-    int sdsge_ess_1d(const double *x, int64_t n,
-                     double *arena, double *out) nogil
+    arena_size sdsge_ess_rhat_arena_size(const int64_t N,
+                                         const int64_t n_par,
+                                         const int64_t n_chains) nogil
+    void sdsge_ess_rhat(const double *x, const int64_t N,
+                        const int64_t n_par, const int64_t n_chains,
+                        const int64_t n_workers, double *arena, double *ess,
+                        double *rhat, int *status) nogil
 
 
 SDSGE_ESS_OK = c_SDSGE_ESS_OK
@@ -26,57 +31,69 @@ SDSGE_ESS_ENODECAY = c_SDSGE_ESS_ENODECAY
 SDSGE_ESS_ENONPOSTAU = c_SDSGE_ESS_ENONPOSTAU
 
 
-def ess1d(x):
-    cdef int64_t n = x.shape[0]
-    if n < 2:
-        raise ValueError("Input sample must have at least two elements")
+def ess_rhat(x):
+    if x.ndim != 3:
+        raise ValueError("Input must be a 3D array")
 
-    cdef double[::1] xv = np.ascontiguousarray(x, dtype=np.float64)
-    cdef int64_t asz = sdsge_ess_1d_arena_size(n).n_float
-    cdef double[::1] arena = np.empty(asz, dtype=np.float64)
-    cdef double out = 0.0
+    cdef int64_t n_chains = x.shape[0]
+    cdef int64_t N = x.shape[1]
+    cdef int64_t n_par = x.shape[2]
 
-    with nogil:
-        sdsge_ess_1d(&xv[0], n, &arena[0], &out)
-    return float(out)
+    if n_chains < 1:
+        raise ValueError("Input must have at least one chain.")
 
-
-def ess(x):
-    if x.ndim != 2:
-        raise ValueError("Input must be a 2D array")
-
-    cdef int64_t n = x.shape[0]
-    cdef int64_t p = x.shape[1]
-
-    if n < 2 or p == 0:
+    if N < 4 or n_par == 0:
         raise ValueError(
-            "Input samples must have at least two elements per column "
-            "and at least one column."
+            "Input samples must have at least four elements per "
+            "column and at least one parameter being sampled."
         )
 
-    cdef double[::1] col
-    cdef int64_t asz = sdsge_ess_1d_arena_size(n).n_float
+    cdef int64_t asz = sdsge_ess_rhat_arena_size(N, n_par, n_chains).n_float
     cdef double[::1] arena = np.empty(asz, dtype=np.float64)
 
-    out_arr = np.empty(p, dtype=np.float64)
-    cdef double[::1] out = out_arr
+    cdef double[::1] outv, rhatv
+    cdef int[::1] statusv
 
-    cdef int64_t i
-    for i in range(p):
-        col = np.ascontiguousarray(x[:, i], dtype=np.float64)
-        with nogil:
-            sdsge_ess_1d(&col[0], n, &arena[0], &out[i])
-    return out_arr.tolist()
+    out = np.empty(n_par, dtype=np.float64)
+    rhat = np.empty(n_par, dtype=np.float64)
+    status = np.empty(n_par, dtype=np.intc)
 
+    outv = out
+    statusv = status
+    rhatv = rhat
 
-def ess1d_kernel_probe(x):
-    cdef int64_t n = x.shape[0]
-    cdef double[::1] xv = np.ascontiguousarray(x, dtype=np.float64)
-    cdef int64_t asz = sdsge_ess_1d_arena_size(n).n_float
-    cdef double[::1] arena = np.empty(asz, dtype=np.float64)
-    cdef double out = 0.0
-    cdef int rc
-
+    cdef int64_t n_workers = resolve_n_workers(min(n_par, os.cpu_count() or 1))
+    cdef double[:, :, ::1] xv = np.ascontiguousarray(x, dtype=np.float64)
     with nogil:
-        rc = sdsge_ess_1d(&xv[0], n, &arena[0], &out)
-    return int(rc), float(out)
+        sdsge_ess_rhat(
+            &xv[0, 0, 0], N, n_par, n_chains, n_workers,
+            &arena[0], &outv[0], &rhatv[0], &statusv[0],
+        )
+    return out, rhat, status.astype(np.int64)
+
+
+def resolve_n_workers(object n_jobs=None):
+    """Resolve joblib-style ``n_jobs`` to a positive native worker count."""
+    cdef int64_t n_jobs_value
+    cdef int64_t cpu_count
+
+    cpu_count = (
+        os.process_cpu_count()
+        if hasattr(os, "process_cpu_count")
+        else os.cpu_count()
+    )
+    if cpu_count is None:
+        cpu_count = 1
+
+    if n_jobs is None:
+        return 1
+    if isinstance(n_jobs, bool) or not isinstance(n_jobs, int):
+        raise TypeError("n_jobs must be an integer or None.")
+    n_jobs_value = n_jobs
+
+    if n_jobs_value == 0:
+        raise ValueError("n_jobs must not be zero.")
+    if n_jobs_value > 0:
+        return n_jobs_value
+
+    return max(1, cpu_count + 1 + n_jobs_value)
