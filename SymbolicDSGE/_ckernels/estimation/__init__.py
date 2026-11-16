@@ -16,7 +16,7 @@ from ._estimation import (
     logpost,
 )
 
-from ._ess import ess, ess1d
+from ._ess import ess_rhat
 
 __all__ = [
     "run_mcmc",
@@ -26,6 +26,5 @@ __all__ = [
     "logpost",
     "cov_from_unconstrained",
     "unconstrained_from_corr_chol",
-    "ess",
-    "ess1d",
+    "ess_rhat",
 ]
