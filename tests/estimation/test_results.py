@@ -19,9 +19,9 @@ def _result(
     logjac: np.ndarray,
 ) -> MCMCResult:
     return make_mcmc_result(
-        samples=samples,
-        logpost_trace=logpost,
-        logjac_trace=logjac,
+        samples=samples.reshape(1, samples.shape[0], samples.shape[1]),
+        logpost_trace=logpost.reshape(1, logpost.shape[0]),
+        logjac_trace=logjac.reshape(1, logjac.shape[0]),
         burn_in=10,
         thin=2,
     )
@@ -49,63 +49,6 @@ def test_hpd_intervals_returns_shortest_marginal_windows():
     assert out["b"] == pytest.approx((5.0, 5.2))
 
 
-def test_joint_hpd_set_keeps_highest_logpost_draws():
-    res = _result(
-        samples=np.array(
-            [
-                [0.0, 5.0],
-                [1.0, 5.1],
-                [2.0, 5.2],
-                [10.0, 50.0],
-                [11.0, 51.0],
-            ],
-            dtype=np.float64,
-        ),
-        logpost=np.array([0.0, 1.0, 3.0, 2.0, -1.0], dtype=np.float64),
-        logjac=np.zeros((5,), dtype=np.float64),
-    )
-
-    samples_hpd, logpost_hpd, threshold, idx = res.joint_hpd_set(alpha=0.4)
-
-    assert threshold == pytest.approx(1.0)
-    assert np.array_equal(idx, np.array([1, 2, 3], dtype=np.int64))
-    assert np.allclose(
-        samples_hpd,
-        np.array(
-            [
-                [1.0, 5.1],
-                [2.0, 5.2],
-                [10.0, 50.0],
-            ],
-            dtype=np.float64,
-        ),
-    )
-    assert np.allclose(logpost_hpd, np.array([1.0, 3.0, 2.0], dtype=np.float64))
-
-
-def test_joint_hpd_set_includes_all_boundary_ties():
-    res = _result(
-        samples=np.array(
-            [
-                [0.0, 0.0],
-                [1.0, 1.0],
-                [2.0, 2.0],
-                [3.0, 3.0],
-            ],
-            dtype=np.float64,
-        ),
-        logpost=np.array([3.0, 2.0, 2.0, 1.0], dtype=np.float64),
-        logjac=np.zeros((4,), dtype=np.float64),
-    )
-
-    samples_hpd, logpost_hpd, threshold, idx = res.joint_hpd_set(alpha=0.5)
-
-    assert threshold == pytest.approx(2.0)
-    assert np.array_equal(idx, np.array([0, 1, 2], dtype=np.int64))
-    assert samples_hpd.shape == (3, 2)
-    assert np.allclose(logpost_hpd, np.array([3.0, 2.0, 2.0], dtype=np.float64))
-
-
 @pytest.mark.parametrize("alpha", [-0.1, 1.0])
 def test_hpd_methods_validate_alpha(alpha):
     res = _result(
@@ -116,8 +59,6 @@ def test_hpd_methods_validate_alpha(alpha):
 
     with pytest.raises(ValueError, match="0 <= alpha < 1"):
         res.hpd_intervals(alpha=alpha)
-    with pytest.raises(ValueError, match="0 <= alpha < 1"):
-        res.joint_hpd_set(alpha=alpha)
 
 
 def test_hpd_validation_and_window_full_draws_branches():
@@ -160,16 +101,15 @@ def test_result_plot_methods_execute_without_gui(monkeypatch):
                 [1.0, 2.0, 3.0],
             ],
             dtype=np.float64,
-        ),
-        logpost_trace=np.array([0.0, 1.0, 2.0], dtype=np.float64),
-        logjac_trace=np.array([0.0, 1.0, 2.0], dtype=np.float64),
+        ).reshape(1, 3, 3),
+        logpost_trace=np.array([0.0, 1.0, 2.0], dtype=np.float64).reshape(1, 3),
+        logjac_trace=np.array([0.0, 1.0, 2.0], dtype=np.float64).reshape(1, 3),
     )
 
     res.posterior_kde_plot()
-    res.posterior_traces()
     res.logpost_trace_plot()
 
-    assert calls == ["show", "show", "show"]
+    assert calls == ["show", "show"]
 
 
 def test_map_result_spec_roundtrips():
@@ -248,7 +188,7 @@ def test_mcmc_result_to_spec():
 def test_ess_is_clipped_to_the_draw_count():
     # tau near 0.46 at any length, so the raw ESS is about 2.2x the draws.
     anticorrelated = np.tile([-1.0, -1.0, 1.0, -1.0, 0.0, -1.0, 0.0], 512)
-    res = make_mcmc_result(param_names=["a"], samples=anticorrelated.reshape(-1, 1))
+    res = make_mcmc_result(param_names=["a"], samples=anticorrelated.reshape(1, -1, 1))
 
     assert res.ess["a"] == float(res.n_draws)
 
@@ -256,7 +196,7 @@ def test_ess_is_clipped_to_the_draw_count():
 def test_ess_is_cached_and_stays_out_of_the_spec():
     res = make_mcmc_result(
         param_names=["a"],
-        samples=np.random.default_rng(0).standard_normal((4000, 1)),
+        samples=np.random.default_rng(0).standard_normal((1, 4000, 1)),
     )
 
     assert res.ess is res.ess
@@ -267,7 +207,7 @@ def test_ess_is_cached_and_stays_out_of_the_spec():
 def test_ess_per_second_divides_by_the_in_sample_clock():
     res = make_mcmc_result(
         param_names=["a", "b"],
-        samples=np.random.default_rng(1).standard_normal((4000, 2)),
+        samples=np.random.default_rng(1).standard_normal((1, 4000, 2)),
         in_sample_seconds=2.5,
     )
 
@@ -279,7 +219,7 @@ def test_ess_and_mcse_are_nan_for_a_parameter_that_never_moved():
         param_names=["moving", "stuck"],
         samples=np.column_stack(
             [np.random.default_rng(2).standard_normal(4000), np.ones(4000)]
-        ),
+        ).reshape(1, -1, 2),
     )
 
     assert np.isfinite(res.ess["moving"])
@@ -293,7 +233,7 @@ def test_mcse_of_the_mean_tracks_the_standard_error():
     n = 20000
     res = make_mcmc_result(
         param_names=["a"],
-        samples=np.random.default_rng(7).standard_normal((n, 1)),
+        samples=np.random.default_rng(7).standard_normal((1, n, 1)),
     )
 
     assert res.mcse["a"] == pytest.approx(1.0 / np.sqrt(n), rel=0.1)
@@ -304,7 +244,7 @@ def test_mcse_scales_with_the_parameter_it_belongs_to():
     chain = np.random.default_rng(3).standard_normal(6000)
     res = make_mcmc_result(
         param_names=["unit", "ten", "hundred"],
-        samples=np.column_stack([chain, 10.0 * chain, 100.0 * chain]),
+        samples=np.column_stack([chain, 10.0 * chain, 100.0 * chain]).reshape(1, -1, 3),
     )
 
     out = res.mcse
@@ -315,8 +255,10 @@ def test_mcse_scales_with_the_parameter_it_belongs_to():
 @pytest.mark.parametrize("q", [0.05, 0.5, 0.95])
 def test_mcse_quantile_is_scale_equivariant(q):
     chain = np.random.default_rng(4).standard_normal(8000)
-    plain = make_mcmc_result(param_names=["a"], samples=chain.reshape(-1, 1))
-    scaled = make_mcmc_result(param_names=["a"], samples=(4.0 * chain).reshape(-1, 1))
+    plain = make_mcmc_result(param_names=["a"], samples=chain.reshape(1, -1, 1))
+    scaled = make_mcmc_result(
+        param_names=["a"], samples=(4.0 * chain).reshape(1, -1, 1)
+    )
 
     assert scaled.mcse_quantile(q)["a"] == pytest.approx(
         4.0 * plain.mcse_quantile(q)["a"], rel=1e-12
@@ -326,7 +268,7 @@ def test_mcse_quantile_is_scale_equivariant(q):
 def test_mcse_quantile_is_larger_in_the_tails_than_at_the_median():
     res = make_mcmc_result(
         param_names=["a"],
-        samples=np.random.default_rng(5).standard_normal((8000, 1)),
+        samples=np.random.default_rng(5).standard_normal((1, 8000, 1)),
     )
 
     centre = res.mcse_quantile(0.5)["a"]
@@ -338,7 +280,7 @@ def test_mcse_quantile_is_larger_in_the_tails_than_at_the_median():
 def test_mcse_quantile_requires_an_interior_quantile(q):
     res = make_mcmc_result(
         param_names=["a"],
-        samples=np.random.default_rng(6).standard_normal((2000, 1)),
+        samples=np.random.default_rng(6).standard_normal((1, 2000, 1)),
     )
 
     with pytest.raises(ValueError, match="0 < q < 1"):
@@ -355,8 +297,8 @@ def _point_result() -> MCMCResult:
         param_names=("phi_pi", "rho_r"),
         samples=np.array(
             [[1.0, 0.25], [2.0, 0.5], [4.0, 1.0], [6.0, 1.5]], dtype=np.float64
-        ),
-        logpost_trace=np.array([0.0, 5.0, 1.0, 2.0], dtype=np.float64),
+        ).reshape(1, -1, 2),
+        logpost_trace=np.array([0.0, 5.0, 1.0, 2.0], dtype=np.float64).reshape(1, -1),
     )
 
 

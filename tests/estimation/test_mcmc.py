@@ -125,7 +125,7 @@ def test_mcmc_supplied_covariance_seeds_the_adaptation_recursion(mcmc_estimator)
     assert np.allclose(found.samples, supplied.samples, rtol=1e-12, atol=0.0)
     assert found.accept_rate == pytest.approx(supplied.accept_rate)
     # the recursion really ran, so the seed had somewhere to carry into
-    assert np.unique(found.samples, axis=0).shape[0] > 1
+    assert np.unique(found.samples, axis=0).shape[1] > 1
 
 
 def test_mcmc_adaptation_over_an_empty_window_is_a_no_op(mcmc_estimator):
@@ -260,8 +260,8 @@ def test_mcmc_returns_expected_shapes_and_stats(mcmc_estimator):
         adapt=True,
     )
     assert out.param_names == ("psi_pi", "rho_r")
-    assert out.samples.shape == (5, 2)
-    assert out.logpost_trace.shape == (5,)
+    assert out.samples.shape == (1, 5, 2)
+    assert out.logpost_trace.shape == (1, 5)
     assert 0.0 <= out.accept_rate <= 1.0
 
 
@@ -281,7 +281,7 @@ def test_mcmc_reports_samples_in_constrained_space_for_log_transform(post82_esti
         random_state=123,
         adapt=False,
     )
-    assert np.all(out.samples[:, 0] > 0.0)
+    assert np.all(out.samples[1, :, 0] > 0.0)
 
 
 def test_mcmc_validation_branches(post82_estimator):

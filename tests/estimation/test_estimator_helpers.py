@@ -29,7 +29,7 @@ def _opt_result(**cfg) -> MLEResult:
 def _mcmc_result() -> MCMCResult:
     return make_mcmc_result(
         param_names=["a"],
-        samples=np.zeros((2, 1), dtype=float64),
+        samples=np.zeros((1, 2, 1), dtype=float64),
         sampler_config={"adapt": True},
     )
 

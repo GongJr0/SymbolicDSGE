@@ -102,9 +102,9 @@ def test_builder_writes_observed_with_semantic_headers(parsed_test) -> None:
 def test_builder_writes_posterior_and_mc_traces_as_csv(parsed_test) -> None:
     result = make_mcmc_result(
         param_names=["beta", "sigma"],
-        samples=np.array([[1.0, 2.0], [3.0, 4.0]]),
-        logpost_trace=np.array([-1.0, -2.0]),
-        logjac_trace=np.array([0.0, 0.0]),
+        samples=np.array([[1.0, 2.0], [3.0, 4.0]]).reshape((1, -1, 2)),
+        logpost_trace=np.array([-1.0, -2.0]).reshape((1, -1)),
+        logjac_trace=np.array([0.0, 0.0]).reshape((1, -1)),
         burn_in=0,
     )
     builder = (
@@ -140,9 +140,9 @@ def test_csv_mode_round_trips_through_builder_and_loader(
     rng = np.random.default_rng(1)
     observed = rng.standard_normal((10, 2))
     posterior = {
-        "samples": rng.standard_normal((20, 2)),
-        "logpost": rng.standard_normal(20),
-        "logjac": rng.standard_normal(20),
+        "samples": rng.standard_normal((1, 20, 2)),
+        "logpost": rng.standard_normal((1, 20)),
+        "logjac": rng.standard_normal((1, 20)),
     }
     result = make_mcmc_result(
         param_names=["beta", "sigma"],

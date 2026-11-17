@@ -272,7 +272,7 @@ def test_matrix_prior_on_R_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
     )
 
     assert out.param_names == ("meas_rho_gi", "meas_rho_gr", "meas_rho_ir")
-    assert out.samples.shape == (8, 3)
+    assert out.samples.shape == (1, 8, 3)
     _assert_valid_corr_draws(out.samples)
 
 
@@ -348,5 +348,5 @@ def test_matrix_prior_on_Q_runs_full_mcmc_with_real_likelihood(dense_lkj_bundle)
     )
 
     assert out.param_names == ("rho_gz", "rho_gr_shock", "rho_zr_shock")
-    assert out.samples.shape == (8, 3)
+    assert out.samples.shape == (1, 8, 3)
     _assert_valid_corr_draws(out.samples)
