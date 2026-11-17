@@ -150,8 +150,8 @@ def test_add_estimation_accepts_live_mcmc_result(parsed_test) -> None:
     posterior = collapse_columns(
         from_parquet_columns(files["estimation/posterior.parquet"])
     )
-    np.testing.assert_allclose(posterior["samples"], mcmc.samples)
-    np.testing.assert_allclose(posterior["logpost"], mcmc.logpost_trace)
+    np.testing.assert_allclose(posterior["samples"], mcmc.samples.reshape(5, 2))
+    np.testing.assert_allclose(posterior["logpost"], mcmc.logpost_trace.reshape(5))
 
 
 def test_raw_data_member_round_trips(tmp_path: Path) -> None:

@@ -69,7 +69,7 @@ def dense_lkj_bundle(dense_lkj_test_model_path):
 
 
 def _assert_valid_corr_draws(samples: np.ndarray) -> None:
-    for draw in samples:
+    for draw in samples[0]:
         corr = np.eye(3, dtype=np.float64)
         corr[1, 0] = corr[0, 1] = draw[0]
         corr[2, 0] = corr[0, 2] = draw[1]

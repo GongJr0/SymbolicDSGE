@@ -11,9 +11,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE._ckernels.estimation import ess, ess1d
 from SymbolicDSGE._ckernels.estimation._ess import (
-    ess1d_kernel_probe,
+    ess_rhat,
     SDSGE_ESS_EBADSHAPE,
     SDSGE_ESS_EUDEFVARIANCE,
     SDSGE_ESS_ENODECAY,
@@ -49,7 +48,7 @@ def _ar1(n: int, phi: float, seed: int) -> np.ndarray:
 @pytest.mark.parametrize("phi", [0.0, 0.5, 0.9, 0.98])
 def test_ess1d_recovers_the_ar1_autocorrelation_time(phi):
     n = 20000
-    tau = n / ess1d(_ar1(n, phi, seed=int(phi * 100)))
+    tau = n / ess_rhat(_ar1(n, phi, seed=int(phi * 100)))[0][0]
     assert tau == pytest.approx((1.0 + phi) / (1.0 - phi), rel=0.15)
 
 
@@ -64,9 +63,9 @@ def test_ess1d_recovers_the_ar1_autocorrelation_time(phi):
     ids=["single_draw", "constant", "undecayed", "nonpositive_tau"],
 )
 def test_kernel_pairs_a_code_with_nan_for_degenerate_chains(chain, code):
-    rc, value = ess1d_kernel_probe(chain)
-    assert rc == code
-    assert np.isnan(value)
+    val, _, rc = ess_rhat(chain)
+    assert rc[0] == code
+    assert np.isnan(val[0])
 
 
 @pytest.mark.parametrize(
@@ -75,15 +74,7 @@ def test_kernel_pairs_a_code_with_nan_for_degenerate_chains(chain, code):
     ids=["constant", "undecayed", "nonpositive_tau"],
 )
 def test_wrappers_forward_nan_instead_of_raising(chain):
-    assert np.isnan(ess1d(chain))
-    assert np.isnan(ess(chain.reshape(-1, 1))[0])
-
-
-def test_a_single_draw_is_rejected_by_both_wrappers():
-    with pytest.raises(ValueError, match="at least two"):
-        ess1d(np.array([1.0]))
-    with pytest.raises(ValueError, match="at least two"):
-        ess(np.array([[1.0]]))
+    assert np.isnan(ess_rhat(chain)[0][0])
 
 
 def test_ess_reuses_one_arena_across_columns():

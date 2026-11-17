@@ -34,7 +34,7 @@ def test_load_bundle_fixture_end_to_end():
     assert isinstance(loaded.estimation.result, MCMCResult)
     y = np.asarray(loaded.estimation.estimator.y)
     assert y.ndim == 2
-    assert loaded.estimation.result.samples.ndim == 2
+    assert loaded.estimation.result.samples.ndim == 3
     # monte carlo: runnable pipeline + document + traces
     assert isinstance(loaded.mc, LoadedMC)
     assert loaded.mc.pipeline is not None
@@ -79,8 +79,11 @@ _MCMC_META = {
     "param_names": ["a"],
     "accepted_burn_in": 1,
     "accepted_in_sample": 3,
+    "wall_seconds": 2.0,
+    "init_seconds": 0.25,
     "burn_in_seconds": 0.25,
     "in_sample_seconds": 1.5,
+    "n_chains": 1,
     "n_draws": 3,
     "burn_in": 1,
     "thin": 1,
@@ -105,9 +108,9 @@ def test_rebuild_mcmc_result_requires_traces():
 
 def test_rebuild_mcmc_result_ok():
     posterior = {
-        "samples": np.zeros((3, 1), dtype=np.float64),
-        "logpost": np.zeros(3, dtype=np.float64),
-        "logjac": np.zeros(3, dtype=np.float64),
+        "samples": np.zeros((1, 3, 1), dtype=np.float64),
+        "logpost": np.zeros((1, 3), dtype=np.float64),
+        "logjac": np.zeros((1, 3), dtype=np.float64),
     }
     res = L._rebuild_mcmc_result(_MCMC_META, posterior)
     assert isinstance(res, MCMCResult)

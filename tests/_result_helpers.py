@@ -30,7 +30,7 @@ def make_mcmc_result(**overrides: Any) -> MCMCResult:
     samples = overrides.pop(
         "samples", np.zeros((_N_DRAWS, len(param_names)), dtype=np.float64)
     )
-    n_rows = int(samples.shape[0])
+    n_rows = int(samples.shape[1])
 
     fields: dict[str, Any] = {
         "param_names": param_names,

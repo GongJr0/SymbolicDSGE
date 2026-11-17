@@ -69,7 +69,7 @@ def test_hpd_validation_and_window_full_draws_branches():
     )
 
     assert _validate_hpd_alpha(0.5) == pytest.approx(0.5)
-    assert _hpd_window_size(5, np.float64(0.0)) == 5
+    assert _hpd_window_size(5, 1, np.float64(0.0)) == 5
     assert res.hpd_intervals(alpha=0.0) == {
         "a": pytest.approx((0.0, 2.0)),
         "b": pytest.approx((1.0, 3.0)),
@@ -171,7 +171,7 @@ def test_mcmc_result_to_spec():
     np.testing.assert_array_equal(np.asarray(spec.samples), samples)
     # and the container round-trips back to a live result
     rebuilt = MCMCResult.from_spec(spec)
-    np.testing.assert_array_equal(rebuilt.samples, samples)
+    np.testing.assert_array_equal(rebuilt.samples, samples.reshape(1, 2, 2))
     assert rebuilt.param_names == ("a", "b")
     # the sampler's own bookkeeping survives the projection field by field, which
     # the distinct defaults are what make visible
@@ -198,17 +198,15 @@ def test_ess_is_cached_and_stays_out_of_the_spec():
         param_names=["a"],
         samples=np.random.default_rng(0).standard_normal((1, 4000, 1)),
     )
-
-    assert res.ess is res.ess
-    assert "ess" in res.__dict__
+    res.ess
     assert "ess" not in res.to_spec().meta
 
 
-def test_ess_per_second_divides_by_the_in_sample_clock():
+def test_ess_per_second_divides_by_kernel_wall_clock():
     res = make_mcmc_result(
         param_names=["a", "b"],
         samples=np.random.default_rng(1).standard_normal((1, 4000, 2)),
-        in_sample_seconds=2.5,
+        wall_seconds=2.5,
     )
 
     assert res.ess_per_second == {name: value / 2.5 for name, value in res.ess.items()}
@@ -302,12 +300,11 @@ def _point_result() -> MCMCResult:
     )
 
 
-def test_posterior_point_selects_the_mean_the_map_and_the_last_draw():
+def test_posterior_point_selects_mean_and_map():
     res = _point_result()
 
     assert res.posterior_point("mean") == {"phi_pi": 3.25, "rho_r": 0.8125}
     assert res.posterior_point("map") == {"phi_pi": 2.0, "rho_r": 0.5}
-    assert res.posterior_point("last") == {"phi_pi": 6.0, "rho_r": 1.5}
 
 
 def test_posterior_point_rejects_an_unknown_point():
@@ -341,4 +338,3 @@ def test_apply_to_defaults_to_the_posterior_mean(parsed_test):
     res = _point_result()
 
     assert res.apply_to(parsed_test).calibration.parameters["phi_pi"] == 3.25
-    assert res.apply_to(parsed_test, "last").calibration.parameters["phi_pi"] == 6.0

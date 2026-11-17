@@ -725,6 +725,7 @@ class Estimator:
             usr_opts["bounds"] = r.serialize_bounds(usr_opts["bounds"])
 
         sampler_config = {
+            "n_chains": int(n_chains),
             "n_draws": int(n_draws),
             "burn_in": int(burn_in),
             "thin": int(thin),
@@ -733,8 +734,9 @@ class Estimator:
             "adapt_start": int(adapt_start),
             "adapt_end": int(adapt_end),
             "adapt_interval": int(adapt_interval),
-            "proposal_scale": float(proposal_scale),
             "adapt_epsilon": float(adapt_epsilon),
+            "init_scale": float(init_scale),
+            "proposal_scale": float(proposal_scale),
             "compute_map": bool(compute_map),
             "map_options": usr_opts,
             "proposal_cov": (
@@ -743,11 +745,8 @@ class Estimator:
             "cov_fd_step_scale": float(cov_fd_step_scale),
             "cov_fd_absolute_floor": float(cov_fd_absolute_floor),
             "random_state": int(seed),
+            "n_jobs": int(n_jobs) if n_jobs is not None else None,
         }
-
-        if n_chains > 1:
-            sampler_config["n_chains"] = int(n_chains)
-            sampler_config["init_scale"] = float(init_scale)
 
         return out, sampler_config
 
@@ -898,6 +897,7 @@ class Estimator:
             usr_opts["bounds"] = r.serialize_bounds(usr_opts["bounds"])
 
         sampler_config = {
+            "n_chains": int(n_chains),
             "n_draws": int(n_draws),
             "burn_in": int(burn_in),
             "thin": int(thin),

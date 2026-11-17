@@ -22,6 +22,7 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
     assert cfg["random_state"] == 7
     assert cfg["proposal_scale"] == 0.2
     assert set(cfg) == {
+        "n_chains",
         "n_draws",
         "burn_in",
         "thin",
@@ -30,14 +31,16 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
         "adapt_start",
         "adapt_end",
         "adapt_interval",
-        "proposal_scale",
         "adapt_epsilon",
+        "init_scale",
+        "proposal_scale",
         "compute_map",
         "map_options",
         "proposal_cov",
         "cov_fd_step_scale",
         "cov_fd_absolute_floor",
         "random_state",
+        "n_jobs",
     }
     assert cfg["compute_map"] is True
     # the sampler built its own, so there is no user matrix to record
@@ -55,6 +58,8 @@ def test_mcmc_records_sampler_config(mcmc_estimator):
 
 
 def test_mcmc_rejects_invalid_arguments(mcmc_estimator):
+    with pytest.raises(ValueError, match="n_chains must be positive"):
+        mcmc_estimator.mcmc(n_chains=0, n_draws=1)
     with pytest.raises(ValueError, match="n_draws must be positive"):
         mcmc_estimator.mcmc(n_draws=0)
     with pytest.raises(ValueError, match="burn_in must be non-negative"):
@@ -167,7 +172,7 @@ def test_mcmc_proposal_covariance_sets_the_proposal_width(mcmc_estimator):
     )
 
     assert narrow.accept_rate > base.accept_rate
-    assert narrow.samples.std(axis=0).max() < base.samples.std(axis=0).max()
+    assert narrow.samples[0].std(axis=0).max() < base.samples[0].std(axis=0).max()
 
 
 @pytest.mark.parametrize(
@@ -262,7 +267,7 @@ def test_mcmc_returns_expected_shapes_and_stats(mcmc_estimator):
     assert out.param_names == ("psi_pi", "rho_r")
     assert out.samples.shape == (1, 5, 2)
     assert out.logpost_trace.shape == (1, 5)
-    assert 0.0 <= out.accept_rate <= 1.0
+    assert 0.0 <= out.accept_rate[0] <= 1.0
 
 
 def test_mcmc_reports_samples_in_constrained_space_for_log_transform(post82_estimator):
@@ -281,7 +286,7 @@ def test_mcmc_reports_samples_in_constrained_space_for_log_transform(post82_esti
         random_state=123,
         adapt=False,
     )
-    assert np.all(out.samples[1, :, 0] > 0.0)
+    assert np.all(out.samples[0, :, 0] > 0.0)
 
 
 def test_mcmc_validation_branches(post82_estimator):
