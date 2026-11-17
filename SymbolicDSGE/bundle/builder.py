@@ -206,7 +206,7 @@ class BundleBuilder:
         return self
 
     # Estimation
-
+    # TODO: Make MCMC result resialization aware of the chain dimension.
     def add_estimation(
         self,
         source: Estimator,
