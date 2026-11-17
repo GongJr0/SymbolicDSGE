@@ -95,9 +95,9 @@ def test_facade_flattens_mcmc_run_with_posterior(estimator, parsed_test) -> None
     rng = np.random.default_rng(0)
     mcmc = make_mcmc_result(
         param_names=[PARAM],
-        samples=rng.standard_normal((10, 1)),
-        logpost_trace=rng.standard_normal(10),
-        logjac_trace=rng.standard_normal(10),
+        samples=rng.standard_normal((1, 10, 1)),
+        logpost_trace=rng.standard_normal(1, 10),
+        logjac_trace=rng.standard_normal(1, 10),
         sampler_config={"adapt": True, "proposal_scale": 0.2, "random_state": 7},
     )
 

@@ -44,9 +44,9 @@ def test_full_bundle_round_trip(tmp_path: Path, parsed_test, compiled_test) -> N
     rng = np.random.default_rng(0)
     observed = rng.standard_normal((20, 2))
     posterior = {
-        "samples": rng.standard_normal((50, 2)),
-        "logpost": rng.standard_normal(50),
-        "logjac": rng.standard_normal(50),
+        "samples": rng.standard_normal((1, 50, 2)),
+        "logpost": rng.standard_normal((1, 50)),
+        "logjac": rng.standard_normal((1, 50)),
     }
     result = make_mcmc_result(
         param_names=["beta", "sigma"],
@@ -127,9 +127,9 @@ def test_add_estimation_accepts_live_mcmc_result(parsed_test) -> None:
     rng = np.random.default_rng(1)
     mcmc = make_mcmc_result(
         param_names=["a", "b"],
-        samples=rng.standard_normal((5, 2)),
-        logpost_trace=rng.standard_normal(5),
-        logjac_trace=rng.standard_normal(5),
+        samples=rng.standard_normal((1, 5, 2)),
+        logpost_trace=rng.standard_normal((1, 5)),
+        logjac_trace=rng.standard_normal((1, 5)),
         burn_in=0,
     )
     spec = _estimation_spec(rng.standard_normal((4, 2)), names=("a", "b"))
