@@ -102,12 +102,12 @@ class MCMCResult:
         """Project to the scalar text metadata carried in a ``.sdsge`` bundle."""
         meta = MCMCResultMeta(
             param_names=list(self.param_names),
-            accepted_burn_in=list(self.accepted_burn_in),
-            accepted_in_sample=list(self.accepted_in_sample),
+            accepted_burn_in=self.accepted_burn_in.tolist(),
+            accepted_in_sample=self.accepted_in_sample.tolist(),
             wall_seconds=float(self.wall_seconds),
             init_seconds=float(self.init_seconds),
-            burn_in_seconds=list(self.burn_in_seconds),
-            in_sample_seconds=list(self.in_sample_seconds),
+            burn_in_seconds=self.burn_in_seconds.tolist(),
+            in_sample_seconds=self.in_sample_seconds.tolist(),
             n_chains=int(self.n_chains),
             n_draws=int(self.n_draws),
             burn_in=int(self.burn_in),
@@ -116,9 +116,12 @@ class MCMCResult:
         )
 
         return MCMCResultSpec(
-            samples=self.samples.tolist(),
-            logpost_trace=self.logpost_trace.tolist(),
-            logjac_trace=self.logjac_trace.tolist(),
+            # samples are (n_chains, n_draws, n_params), lp and lj are (n_chains, n_draws).
+            # Reshape versus ravel matches the convention of each and produces a n_chains * n_draws
+            # major axis.
+            samples=self.samples.reshape(self.n_chains * self.n_draws, -1).tolist(),
+            logpost_trace=self.logpost_trace.ravel().tolist(),
+            logjac_trace=self.logjac_trace.ravel().tolist(),
             meta=meta,
         )
 
@@ -138,11 +141,19 @@ class MCMCResult:
 
         """
         meta = data.meta
+        n_chains = int(meta["n_chains"])
+        n_draws = int(meta["n_draws"])
         return cls(
             param_names=tuple(meta["param_names"]),
-            samples=np.asarray(data.samples, dtype=float64),
-            logpost_trace=np.asarray(data.logpost_trace, dtype=float64),
-            logjac_trace=np.asarray(data.logjac_trace, dtype=float64),
+            samples=np.asarray(data.samples, dtype=float64).reshape(
+                n_chains, n_draws, -1
+            ),
+            logpost_trace=np.asarray(data.logpost_trace, dtype=float64).reshape(
+                n_chains, n_draws
+            ),
+            logjac_trace=np.asarray(data.logjac_trace, dtype=float64).reshape(
+                n_chains, n_draws
+            ),
             accepted_burn_in=np.asarray(meta["accepted_burn_in"], dtype=np.int64),
             accepted_in_sample=np.asarray(meta["accepted_in_sample"], dtype=np.int64),
             wall_seconds=float(meta["wall_seconds"]),

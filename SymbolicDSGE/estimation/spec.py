@@ -240,7 +240,7 @@ class MCMCResultSpec:
 
     """
 
-    samples: Sequence[Sequence[Sequence[float]]]
-    logpost_trace: Sequence[Sequence[float]]
-    logjac_trace: Sequence[Sequence[float]]
+    samples: Sequence[Sequence[float]]
+    logpost_trace: Sequence[float]
+    logjac_trace: Sequence[float]
     meta: MCMCResultMeta
