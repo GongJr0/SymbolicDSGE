@@ -62,7 +62,7 @@ def ess_rhat(x):
     statusv = status
     rhatv = rhat
 
-    cdef int64_t n_workers = resolve_n_workers(min(n_par, os.cpu_count() or 1))
+    cdef int64_t n_workers = worker_count(n_par)
     cdef double[:, :, ::1] xv = np.ascontiguousarray(x, dtype=np.float64)
     with nogil:
         sdsge_ess_rhat(
@@ -72,28 +72,12 @@ def ess_rhat(x):
     return out, rhat, status.astype(np.int64)
 
 
-def resolve_n_workers(object n_jobs=None):
-    """Resolve joblib-style ``n_jobs`` to a positive native worker count."""
-    cdef int64_t n_jobs_value
-    cdef int64_t cpu_count
-
+def worker_count(object n_items):
     cpu_count = (
         os.process_cpu_count()
         if hasattr(os, "process_cpu_count")
-        else os.cpu_count()
+        else os.cpu_count() or 1
     )
-    if cpu_count is None:
-        cpu_count = 1
-
-    if n_jobs is None:
-        return 1
-    if isinstance(n_jobs, bool) or not isinstance(n_jobs, int):
-        raise TypeError("n_jobs must be an integer or None.")
-    n_jobs_value = n_jobs
-
-    if n_jobs_value == 0:
-        raise ValueError("n_jobs must not be zero.")
-    if n_jobs_value > 0:
-        return n_jobs_value
-
-    return max(1, cpu_count + 1 + n_jobs_value)
+    if n_items is None:
+        return cpu_count
+    return min(n_items, cpu_count)
