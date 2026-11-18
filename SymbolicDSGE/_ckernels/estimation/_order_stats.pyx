@@ -14,7 +14,7 @@ def hpd_intervals(samples, double alpha):
     if samples.ndim != 3:
         raise ValueError("Input must be a 3D array")
     if not (0 <= alpha < 1):
-        raise ValueError("`alpha` must be in the interval (0, 1].")
+        raise ValueError("`alpha` must be in the interval [0, 1).")
 
     cdef int64_t n_par = samples.shape[2]
     cdef int64_t S = samples.shape[0] * samples.shape[1]
