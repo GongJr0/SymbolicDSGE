@@ -19,6 +19,7 @@ from ..spec import (
 )
 
 from ..._ckernels.estimation import ess_rhat
+from ..._ckernels.estimation._order_stats import hpd_intervals
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
@@ -314,25 +315,11 @@ class MCMCResult:
         The returned interval for each parameter is the shortest empirical interval
         containing approximately ``1 - alpha`` of the retained posterior draws.
         """
-        alpha64 = _validate_hpd_alpha(alpha)
-        n_chains, n_draws, n_par = self.samples.shape
-        window = _hpd_window_size(n_draws, n_chains, alpha64)
-
-        samples = self.samples.reshape(-1, n_par)
-
-        out: dict[str, tuple[float, float]] = {}
-        for i, name in enumerate(self.param_names):
-            col = np.sort(np.asarray(samples[:, i], dtype=float64))
-            if window == n_chains * n_draws:
-                low = float(col[0])
-                high = float(col[-1])
-            else:
-                widths = col[window - 1 :] - col[: n_chains * n_draws - window + 1]
-                start = int(np.argmin(widths))
-                low = float(col[start])
-                high = float(col[start + window - 1])
-            out[name] = (_nanrnd(low, digits), _nanrnd(high, digits))
-        return out
+        lo, hi = hpd_intervals(self.samples, alpha)
+        return {
+            name: (_nanrnd(float(lo[i]), digits), _nanrnd(float(hi[i]), digits))
+            for i, name in enumerate(self.param_names)
+        }
 
     def posterior_kde_plot(self, grid_points: int = 1000) -> None:
         """Produce a grid-based Kernel Density Estimate (KDE) plot for each parameter's marginal posterior.
@@ -485,18 +472,6 @@ class MCMCResult:
         if digits is not None:
             summary_df = summary_df.round(digits)
         return summary_df
-
-
-def _validate_hpd_alpha(alpha: float) -> float64:
-    alpha64 = float64(alpha)
-    if not (0.0 <= alpha64 < 1.0):
-        raise ValueError("alpha must satisfy 0 <= alpha < 1.")
-    return alpha64
-
-
-def _hpd_window_size(n_draws: int, n_chains: int, alpha: float64) -> int:
-    mass = np.clip(1.0 - alpha, 0.0, 1.0)
-    return int(np.ceil(mass * n_draws * n_chains))
 
 
 def _constant_subchains(indicator: NDF, n_half: int) -> NDB:
