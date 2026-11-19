@@ -128,38 +128,43 @@ Enabling this will also compute the standard errors of the estimated parameters,
 Estimator.mcmc(
     *,
     n_draws: int, # (1)!
-    burn_in: int = 1000, # (2)!
-    thin: int = 1, # (3)!
-    theta0: Mapping[str, float] | None = None, # (4)!
+    n_chains: int = 1,  # (2)!
+    burn_in: int = 1000, # (3)!
+    thin: int = 1, # (4)!
+    theta0: Mapping[str, float] | None = None, # (5)!
     random_state: int | None = None,
     adapt: bool = True,
-    adapt_start: int | None = None,  #(5)!
-    adapt_end: int | Literal["burn_in"] | None = "burn_in",  # (6)!
-    adapt_interval: int = 1, # (7)!
-    adapt_epsilon: float = 1e-8,  # (8)!
-    proposal_scale: float = 1,  # (9)!
+    adapt_start: int | None = None,  # (6)!
+    adapt_end: int | Literal["burn_in"] | None = "burn_in",  # (7)!
+    adapt_interval: int = 1, # (8)!
+    adapt_epsilon: float = 1e-8,  # (9)!
+    init_scale: float = 1, # (10)!
+    proposal_scale: float = 1,  # (11)!
     compute_map: bool = True,
-    map_options: dict[str, Any] | None = None,  # (10)!
-    proposal_cov: np.ndarray | None = None,  # (11)!
+    map_options: dict[str, Any] | None = None,  # (12)!
+    proposal_cov: np.ndarray | None = None,  # (14)!
     cov_fd_step_scale: float = 1.0,
     cov_fd_absolute_floor: float = 0.1,
+    n_jobs: int | None = None,
 ) -> MCMCResult
 ```
 
 1. Number of retained posterior draws.
-2. Number of initial iterations discarded.
-3. Retain every `thin`-th iteration after burn-in.
-4. `None` uses calibration defaults. When `compute_map=True`, the MAP estimate is computed first and used as the starting point for the chain.
+2. Number of independent chains to run.
+3. Number of initial iterations discarded.
+4. Retain every `thin`-th iteration after burn-in.
+5. `None` uses calibration defaults. When `compute_map=True`, the MAP estimate is computed first and used as the starting point for the chain.
 The proposal covariance will use the MAP point to compute the Hessian if `compute_map=True`.
-5. `None` defaults to half-way between `0` and `adapt_end` and cannot exceed `1000`.
+6. `None` defaults to half-way between `0` and `adapt_end` and cannot exceed `1000`.
 Integer iteration indices must be greater than `0`, the adaptation algorithm requires at least one sample to be collected.
-6. `None` continues adaptation until the end of the chain, `"burn_in"` stops adaptation
+7. `None` continues adaptation until the end of the chain, `"burn_in"` stops adaptation
 after the burn-in phase, and integer values are the iteration at which adaptation stops.
-7. Number of iterations between adaptation steps. Must be at least 1.
-8. Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
-9. Scaling factor for proposal **standard deviation**: `2.38/sqrt(d) * proposal_scale`. The default of 1 corresponds to the standard "optimal" point for a Gaussian random-walk MH.
-10. Passed to `map(...)` if `compute_map=True`. If `None`, defaults are used. Refer to [Estimator.map](#map) for the available options.
-11. Proposal covariance for the sampler. It's mutually exclusive with `compute_map=True` since the MAP estimate is used as the differentiation point for the proposal covariance and the `theta0` a chain starts at.
+8. Number of iterations between adaptation steps. Must be at least 1.
+9. Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
+10. Scaling factor for the proposal **standard deviation** used to sample initial theta points for multiple chains. The first chain starts at `theta0` or the MAP estimate, subsequent chains are a gaussian random sample around that point with `init_scale * proposal_std`.
+11. Scaling factor for proposal **standard deviation**: `2.38/sqrt(d) * proposal_scale`. The default of 1 corresponds to the standard "optimal" point for a Gaussian random-walk MH.
+12. Passed to `map(...)` if `compute_map=True`. If `None`, defaults are used. Refer to [Estimator.map](#map) for the available options.
+13. Proposal covariance for the sampler. It's mutually exclusive with `compute_map=True` since the MAP estimate is used as the differentiation point for the proposal covariance and the `theta0` a chain starts at.
 
 ???+ note "Thinning Semantics"
     Thinning is applied after burn-in using `(t - burn_in) % thin == 0`.
@@ -240,32 +245,35 @@ Identical to [`MLEResult.apply_to`](#mleresult).
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| param_names | `tuple[str, ...]` | Parameter order for samples |
-| samples | `np.ndarray` | Retained posterior samples |
-| logpost_trace | `np.ndarray` | Posterior trace for retained samples, as a density over the parameters |
-| logjac_trace | `np.ndarray` | Log-jacobian of the prior transforms at each retained draw; add it to `logpost_trace` for the unconstrained density the sampler walked |
-| accepted_burn_in | `int` | Proposals accepted during burn-in |
-| accepted_in_sample | `int` | Proposals accepted after burn-in |
-| burn_in_seconds | `float` | Seconds spent on burn-in |
-| in_sample_seconds | `float` | Seconds spent on the retained phase |
-| n_draws | `int` | Retained draw count |
-| burn_in | `int` | Burn-in iterations |
-| thin | `int` | Thinning interval |
-| sampler_config | `dict[str, Any]` | The sampler configuration used to produce the result |
+| param_names | `tuple[str, ...]` | Parameter order for samples. |
+| samples | `np.ndarray` | Retained posterior samples as `(n_chains, n_draws, n_params)`. |
+| logpost_trace | `np.ndarray` | Posterior trace for retained samples, as a density over the parameters. Shaped `(n_chains, n_draws)`. |
+| logjac_trace | `np.ndarray` | Log-jacobian of the prior transforms at each retained draw; add it to `logpost_trace` for the unconstrained density the sampler walked. Shaped `(n_chains, n_draws)`. |
+| accepted_burn_in | `np.ndarray` | Proposals accepted during burn-in per chain. |
+| accepted_in_sample | `np.ndarray` | Proposals accepted after burn-in per chain. |
+| wall_seconds | `float` | Wall-clock of the sampler. Excludes initialization. |
+| init_seconds | `float` | Time spent on initialization, including the MAP and inverse Hessian computations if applicable. |
+| burn_in_seconds | `np.ndarray` | Seconds spent on burn-in per chain. |
+| in_sample_seconds | `np.ndarray` | Seconds spent on the retained phase per chain. |
+| n_chains | `int` | Number of chains. |
+| n_draws | `int` | Retained draw count per chain. |
+| burn_in | `int` | Burn-in iterations per chain. |
+| thin | `int` | Thinning interval. |
+| sampler_config | `dict[str, Any]` | The sampler configuration used to produce the result. |
 
 __Properties:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| accept_rate | `float` | Accepted proposals over every step the sampler took, burn-in included |
-| accept_rate_burn_in | `float` | Acceptance rate over burn-in alone, or NaN when `burn_in` is `0` |
-| accept_rate_in_sample | `float` | Acceptance rate over the retained phase alone |
-| ess | `dict[str, float]` | Effective sample size of each parameter's posterior mean, keyed by parameter name |
-| ess_per_second | `dict[str, float]` | `ess` divided by `in_sample_seconds` |
-| mcse | `dict[str, float]` | Monte Carlo standard error of each parameter's posterior mean, $\mathrm{sd}/\sqrt{\mathrm{ESS}}$ |
+| accept_rate | `list[float]` | Accepted proposals per chain over every step the sampler took, burn-in included. |
+| accept_rate_burn_in | `list[float]` | Acceptance rate per chain over burn-in alone, or NaN when `burn_in` is `0`. |
+| accept_rate_in_sample | `list[float]` | Acceptance rate per chain over the retained phase alone. |
+| ess | `dict[str, float]` | Effective sample size of each parameter's posterior mean, keyed by parameter name. |
+| ess_per_second | `dict[str, float]` | `ess` divided by `wall_seconds`. |
+| mcse | `dict[str, float]` | Monte Carlo standard error of each parameter's posterior mean, $\mathrm{sd}/\sqrt{\mathrm{ESS}}$. |
 
 ???+ note "Effective Sample Size"
-    ESS is computed with the integrated autocorrelation time under Geyer's initial monotone sequence. Reported values are capped at `n_draws`. A parameter whose chain never moved, or whose autocorrelation has not decayed within the retained draws, reports NaN rather than raising, and that NaN carries through `ess_per_second`, `mcse`, and `mcse_quantile`.
+    ESS is computed with the integrated autocorrelation time under Geyer's initial monotone sequence. Reported values are capped at `n_chains * n_draws`. A parameter whose chain never moved, or whose autocorrelation has not decayed within the retained draws, reports NaN rather than raising, and that NaN carries through `ess_per_second`, `mcse`, and `mcse_quantile`.
 
 __Methods:__
 
@@ -278,7 +286,7 @@ MCMCResult.summary(
 
 1. Significance level for the highest-posterior-density (HPD) intervals.
 
-Return a summary table reporting posterior means, standard deviations, ESS, ESS/s, MCSE for the mean, and HPD intervals for each parameter.
+Return a summary table reporting posterior means, standard deviations, split R-hat, ESS, ESS/s, MCSE for the mean, and HPD intervals for each parameter.
 
 __Inputs:__
 
@@ -320,34 +328,6 @@ __Returns:__
 &nbsp;
 
 ```python
-MCMCResult.joint_hpd_set(
-    alpha: float = 0.05, # (1)!
-    digits: int | None = 3,
-) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]
-```
-
-1. Significance level. Must satisfy `0 <= alpha < 1`; the returned set covers at least `1 - alpha` of the retained joint draws.
-
-Compute an empirical joint HPD set for the full parameter vector.
-
-???+ note "Finite-Sample Joint HPD Approximation"
-    Retained draws are ranked by `logpost_trace` and all draws at or above the cutoff are included in the set. If multiple draws are tied at the boundary log-posterior, they are all retained, so the realized coverage can be slightly larger than `1 - alpha`.
-
-__Inputs:__
-
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| alpha | Significance level used to determine the empirical HPD coverage. |
-| digits | Number of decimal places to round the retained draws to. `None` does not apply rounding. |
-__Returns:__
-
-| __Type__ | __Description__ |
-|:---------|----------------:|
-| `tuple[np.ndarray, np.ndarray, float, np.ndarray]` | Tuple `(samples, logpost, threshold, indices)` where `samples` are the retained parameter vectors in the joint HPD set, `logpost` are their posterior values, `threshold` is the cutoff log-posterior, and `indices` are positions of the retained draws in the original stored chain. |
-
-&nbsp;
-
-```python
 MCMCResult.mcse_quantile(
     q: float, # (1)!
     digits: int | None = 3,
@@ -378,12 +358,12 @@ __Returns:__
 
 ```python
 MCMCResult.posterior_point(
-    point: Literal["mean", "map", "last"] = "mean", # (1)!
+    point: Literal["mean", "map"] = "mean", # (1)!
     digits: int | None = 3,
 ) -> dict[str, float]
 ```
 
-1. `"mean"` averages the retained draws, `"map"` takes the draw maximizing `logpost_trace`, and `"last"` takes the final retained draw.
+1. `"mean"` averages the retained draws, and `"map"` takes the draw maximizing `logpost_trace`.
 
 Reduce the retained posterior draws to a single parameter vector.
 
@@ -405,7 +385,7 @@ __Returns:__
 ```python
 MCMCResult.apply_to(
     config: ModelConfig,
-    point: Literal["mean", "map", "last"] = "mean",
+    point: Literal["mean", "map"] = "mean",
 ) -> ModelConfig
 ```
 
@@ -445,28 +425,6 @@ __Returns:__
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `None` | Displays a Matplotlib figure of marginal KDE curves and returns nothing. |
-
-&nbsp;
-
-```python
-MCMCResult.posterior_traces() -> None
-```
-
-Plot retained posterior draws for each parameter as trace diagnostics.
-
-Trace plots are useful for checking whether the retained chain appears to mix well, whether it still shows drift, and whether particular parameters exhibit unusually persistent autocorrelation or regime changes. A separate subplot is produced for each parameter and displayed immediately with `matplotlib.pyplot.show()`.
-
-__Inputs:__
-
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| None | This method uses the retained samples already stored on the result object. |
-
-__Returns:__
-
-| __Type__ | __Description__ |
-|:---------|----------------:|
-| `None` | Displays a Matplotlib figure of per-parameter trace plots and returns nothing. |
 
 &nbsp;
 
