@@ -18,8 +18,7 @@ from ..spec import (
     MCMCResultSpec,
 )
 
-from ..._ckernels.estimation import ess_rhat
-from ..._ckernels.estimation._order_stats import hpd_intervals
+from ..._ckernels.estimation import ess_rhat, hpd_intervals
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]

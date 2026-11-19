@@ -17,6 +17,7 @@ from ._estimation import (
 )
 
 from ._ess import ess_rhat
+from ._order_stats import hpd_intervals
 
 __all__ = [
     "run_mcmc",
@@ -27,4 +28,5 @@ __all__ = [
     "cov_from_unconstrained",
     "unconstrained_from_corr_chol",
     "ess_rhat",
+    "hpd_intervals",
 ]
