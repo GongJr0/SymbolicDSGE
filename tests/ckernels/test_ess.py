@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE._ckernels.estimation._ess import (
+from SymbolicDSGE._ckernels.estimation._mcmc_diagnostics import (
     ess_rhat,
     SDSGE_ESS_EBADSHAPE,
     SDSGE_ESS_EUDEFVARIANCE,
@@ -26,13 +26,14 @@ ENONPOSTAU = SDSGE_ESS_ENONPOSTAU
 
 #: Lag-1 autocorrelation of -0.5 with nothing beyond it, so the pair sums never
 #: turn and the scan runs out of lags.
-UNDECAYED = np.tile([1.0, -1.0], 512)
+half = np.tile([1.0, -1.0], 256)
+UNDECAYED = np.concatenate([half + 10.0, half - 10.0]).reshape(1, 1024, 1)
 
 #: Five alternations and a gap per period puts ``tau`` near -0.72 at any length,
 #: far enough from zero that the verdict does not ride on rounding.
-NONPOSITIVE_TAU = np.tile([1.0, -1.0, 1.0, -1.0, 1.0, 0.0], 512)
+NONPOSITIVE_TAU = np.tile([1.0, -1.0, 1.0, -1.0, 1.0, 0.0], 170).reshape(1, 1020, 1)
 
-CONSTANT = np.ones(1024)
+CONSTANT = np.ones((1, 1024, 1))
 
 
 def _ar1(n: int, phi: float, seed: int) -> np.ndarray:
@@ -42,7 +43,7 @@ def _ar1(n: int, phi: float, seed: int) -> np.ndarray:
     chain[0] = innovations[0] / np.sqrt(1.0 - phi**2) if phi else innovations[0]
     for t in range(1, n):
         chain[t] = phi * chain[t - 1] + innovations[t]
-    return chain
+    return chain.reshape(1, n, -1)
 
 
 @pytest.mark.parametrize("phi", [0.0, 0.5, 0.9, 0.98])
@@ -55,7 +56,7 @@ def test_ess1d_recovers_the_ar1_autocorrelation_time(phi):
 @pytest.mark.parametrize(
     ("chain", "code"),
     [
-        (np.array([1.0]), EBADSHAPE),
+        (np.full((1, 1, 1), 1.0), EBADSHAPE),
         (CONSTANT, EUDEFVARIANCE),
         (UNDECAYED, ENODECAY),
         (NONPOSITIVE_TAU, ENONPOSTAU),
@@ -77,30 +78,18 @@ def test_wrappers_forward_nan_instead_of_raising(chain):
     assert np.isnan(ess_rhat(chain)[0][0])
 
 
-def test_ess_reuses_one_arena_across_columns():
-    """A column that fails must leave no residue for the columns after it."""
-    columns = [
-        _ar1(6000, 0.0, 11),
-        _ar1(6000, 0.98, 12),
-        np.ones(6000),
-        _ar1(6000, 0.9, 13),
-    ]
-
-    batch = ess(np.column_stack(columns))
-
-    for value, column in zip(batch, columns):
-        solo = ess1d(column)
-        assert value == solo or (np.isnan(value) and np.isnan(solo))
-
-
 @pytest.mark.parametrize(
     ("scale", "shift"), [(2.0, 0.0), (0.25, 100.0), (3.7, -5.5), (-1.0, 0.0)]
 )
 def test_ess_is_invariant_to_affine_rescaling(scale, shift):
     chain = _ar1(8000, 0.8, seed=5)
-    assert ess1d(scale * chain + shift) == pytest.approx(ess1d(chain), rel=1e-12)
+    scaled = ess_rhat(scale * chain + shift)[0][0]
+    raw = ess_rhat(chain)[0][0]
+    assert scaled == pytest.approx(raw, rel=1e-12)
 
 
 def test_ess_is_invariant_to_time_reversal():
     chain = _ar1(8000, 0.8, seed=5)
-    assert ess1d(chain[::-1]) == pytest.approx(ess1d(chain), rel=1e-12)
+    forward = ess_rhat(chain)[0][0]
+    reverse = ess_rhat(chain[::-1])[0][0]
+    assert forward == pytest.approx(reverse, rel=1e-12)

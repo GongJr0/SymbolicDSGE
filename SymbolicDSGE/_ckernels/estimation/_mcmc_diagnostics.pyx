@@ -63,22 +63,16 @@ def flat_parmajor(object x):
 
 
 def ess_rhat(x):
+    # Shape checks come as status!=0 from the kernel
+    # dims<3 is a raise before the kernel, give it a proper message.
     if x.ndim != 3:
         raise ValueError("Input must be a 3D array")
 
     cdef int64_t n_chains = x.shape[0]
     cdef int64_t N = x.shape[1]
     cdef int64_t n_par = x.shape[2]
-
-    if n_chains < 1:
-        raise ValueError("Input must have at least one chain.")
-
-    if N < 4 or n_par == 0:
-        raise ValueError(
-            "Input samples must have at least four elements per "
-            "column and at least one parameter being sampled."
-        )
     cdef int64_t n_workers = worker_count(n_par)
+
     cdef int64_t asz = sdsge_ess_rhat_arena_size(N, n_chains, n_workers).n_float
     cdef double[::1] arena = np.empty(asz, dtype=np.float64)
 

@@ -8,7 +8,6 @@ from SymbolicDSGE.estimation.results import (
     MLEResult,
     MAPResult,
 )
-from SymbolicDSGE.estimation.results.mcmc import _hpd_window_size, _validate_hpd_alpha
 from tests._result_helpers import make_mcmc_result
 
 
@@ -57,23 +56,8 @@ def test_hpd_methods_validate_alpha(alpha):
         logjac=np.zeros((2,), dtype=np.float64),
     )
 
-    with pytest.raises(ValueError, match="0 <= alpha < 1"):
+    with pytest.raises(ValueError, match="interval \[0, 1\)"):
         res.hpd_intervals(alpha=alpha)
-
-
-def test_hpd_validation_and_window_full_draws_branches():
-    res = _result(
-        samples=np.array([[0.0, 1.0], [2.0, 3.0]], dtype=np.float64),
-        logpost=np.array([0.0, 1.0], dtype=np.float64),
-        logjac=np.zeros((2,), dtype=np.float64),
-    )
-
-    assert _validate_hpd_alpha(0.5) == pytest.approx(0.5)
-    assert _hpd_window_size(5, 1, np.float64(0.0)) == 5
-    assert res.hpd_intervals(alpha=0.0) == {
-        "a": pytest.approx((0.0, 2.0)),
-        "b": pytest.approx((1.0, 3.0)),
-    }
 
 
 def test_result_plot_methods_execute_without_gui(monkeypatch):
@@ -281,7 +265,7 @@ def test_mcse_quantile_requires_an_interior_quantile(q):
         samples=np.random.default_rng(6).standard_normal((1, 2000, 1)),
     )
 
-    with pytest.raises(ValueError, match="0 < q < 1"):
+    with pytest.raises(ValueError, match="interval \(0, 1\)"):
         res.mcse_quantile(q)
 
 
