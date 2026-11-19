@@ -54,7 +54,8 @@ static i64 hoare_partition(f64 *SDSGE_RESTRICT a, const i64 lo, const i64 hi) {
 
 /* Places the k-th smallest of a[lo..hi] at a[k], leaving a[lo..k-1] <= a[k] and
  * a[k] <= a[k+1..hi]. */
-static void select_kth(f64 *SDSGE_RESTRICT a, i64 lo, i64 hi, const i64 k) {
+static inline void select_kth(f64 *SDSGE_RESTRICT a, i64 lo, i64 hi,
+                              const i64 k) {
   while (lo < hi) {
     const i64 j = hoare_partition(a, lo, hi);
     if (k <= j) {
@@ -65,8 +66,8 @@ static void select_kth(f64 *SDSGE_RESTRICT a, i64 lo, i64 hi, const i64 k) {
   }
 }
 
-static f64 min_in_range(const f64 *SDSGE_RESTRICT a, const i64 lo,
-                        const i64 hi) {
+static inline f64 min_in_range(const f64 *SDSGE_RESTRICT a, const i64 lo,
+                               const i64 hi) {
   f64 m = a[lo];
   for (i64 i = lo + 1; i <= hi; ++i) {
     if (a[i] < m) {
@@ -74,6 +75,96 @@ static f64 min_in_range(const f64 *SDSGE_RESTRICT a, const i64 lo,
     }
   }
   return m;
+}
+
+static inline f64 max_in_range(const f64 *SDSGE_RESTRICT a, const i64 lo,
+                               const i64 hi) {
+  f64 m = a[lo];
+  for (i64 i = lo + 1; i <= hi; ++i) {
+    if (a[i] > m) {
+      m = a[i];
+    }
+  }
+  return m;
+}
+
+/* --- quantiles ---
+ *
+ * sdsge_quantile1d: Single empirical quantile of buf at level q, returned by
+ * value.
+ *
+ * sdsge_quantiles1d: Empirical quantiles of buf at the ascending levels
+ * q[0..n_q-1]. returned into *out. */
+static f64 sdsge_quantile1d(f64 *SDSGE_RESTRICT buf, const i64 S, const f64 q) {
+  f64 lo, hi;
+  const f64 h = (f64)(S - 1) * q;
+  const i64 k = (i64)floor(h);
+  const f64 g = h - (f64)k;
+
+  if (g <= 0.0 || k + 1 >= S) {
+    select_kth(buf, 0, S - 1, k);
+    return buf[k];
+  }
+
+  if (k + 1 < S - k - 1) {
+    select_kth(buf, 0, S - 1, k + 1);
+    hi = buf[k + 1];
+    lo = max_in_range(buf, 0, k);
+  } else {
+    select_kth(buf, 0, S - 1, k);
+    lo = buf[k];
+    hi = min_in_range(buf, k + 1, S - 1);
+  }
+  return lo + g * (hi - lo);
+}
+
+static void sdsge_quantiles1d(f64 *SDSGE_RESTRICT buf, const i64 S,
+                              const f64 *SDSGE_RESTRICT q, const i64 n_q,
+                              f64 *SDSGE_RESTRICT out) {
+  i64 base = 0;
+  i64 last_k = -1;
+  f64 last_lo = 0.0;
+  f64 last_hi = 0.0;
+
+  for (i64 t = 0; t < n_q; ++t) {
+    const f64 h = (f64)(S - 1) * q[t];
+    const i64 k = (i64)floor(h);
+    const f64 g = h - (f64)k;
+
+    /* Close levels share a k. `base` may already sit at k + 1, and selecting a
+     * rank below base walks a range that no longer holds it. */
+    if (k == last_k) {
+      out[t] = (g > 0.0) ? last_lo + g * (last_hi - last_lo) : last_lo;
+      continue;
+    }
+
+    if (g <= 0.0 || k + 1 >= S) {
+      select_kth(buf, base, S - 1, k);
+      out[t] = buf[k];
+      base = k;
+      continue;
+    }
+
+    f64 lo, hi;
+    /* Both neighbors come off one selection plus a scan of the side that was
+     * left unordered. */
+    if (k - base + 1 < S - k - 1) {
+      select_kth(buf, base, S - 1, k + 1);
+      hi = buf[k + 1];
+      lo = max_in_range(buf, base, k);
+      base = k + 1;
+    } else {
+      select_kth(buf, base, S - 1, k);
+      lo = buf[k];
+      hi = min_in_range(buf, k + 1, S - 1);
+      base = k;
+    }
+
+    out[t] = lo + g * (hi - lo);
+    last_k = k;
+    last_lo = lo;
+    last_hi = hi;
+  }
 }
 
 /*--- sort ---*/
@@ -169,9 +260,8 @@ static void sort_range(f64 *SDSGE_RESTRICT a, const i64 lo, const i64 hi) {
 static inline i64 sdsge_hpd_window(const i64 S, const f64 alpha) {
   return (i64)ceil((1.0 - alpha) * S);
 }
-static void sdsge_hpd_column(f64 *SDSGE_RESTRICT buf, const i64 S,
-                             const i64 window, f64 *SDSGE_RESTRICT lo,
-                             f64 *SDSGE_RESTRICT hi) {
+static void sdsge_hpd1d(f64 *SDSGE_RESTRICT buf, const i64 S, const i64 window,
+                        f64 *SDSGE_RESTRICT lo, f64 *SDSGE_RESTRICT hi) {
   const i64 k = S - window + 1;
 
   if (window >= S) {
@@ -217,6 +307,6 @@ void sdsge_hpd_intervals(f64 *SDSGE_RESTRICT pooled, const f64 alpha,
 
 #pragma omp parallel for num_threads(n_workers) if (n_par > 1) schedule(static)
   for (i64 j = 0; j < n_par; ++j) {
-    sdsge_hpd_column(&pooled[j * S], S, window, &lo[j], &hi[j]);
+    sdsge_hpd1d(&pooled[j * S], S, window, &lo[j], &hi[j]);
   }
 }
