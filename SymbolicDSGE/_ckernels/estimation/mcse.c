@@ -3,6 +3,7 @@
 #include "ess.h"
 #include "order_stats.h"
 #include <math.h>
+#include <omp.h>
 #include <string.h>
 
 static arena_size sdsge_mcse_quantile1d_arena_size(const i64 N,
@@ -28,13 +29,13 @@ static f64 sdsge_mcse_quantile1d(f64 *SDSGE_RESTRICT x, const i64 N,
   const f64 x_q = sdsge_quantile1d(q_scratch, S, q);
 
   for (i64 c = 0; c < n_chains; ++c) {
-    f64 *row = x + c * N;
+    f64 *chain = x + c * N;
     i64 s0 = 0, s1 = 0;
     for (i64 i = 0; i < per_sub; ++i) {
-      const i64 v0 = (row[i] <= x_q);
-      const i64 v1 = (row[i + per_sub] <= x_q);
-      row[i] = v0;
-      row[i + per_sub] = v1;
+      const i64 v0 = (chain[i] <= x_q);
+      const i64 v1 = (chain[i + per_sub] <= x_q);
+      chain[i] = v0;
+      chain[i + per_sub] = v1;
       s0 += v0;
       s1 += v1;
     }
@@ -64,4 +65,24 @@ static f64 sdsge_mcse_quantile1d(f64 *SDSGE_RESTRICT x, const i64 N,
   sdsge_select_kth(q_scratch, i_lo, S - 1, i_hi);
   const f64 x_hi = q_scratch[i_hi];
   return (x_hi - x_lo) / 2.0;
+}
+
+arena_size sdsge_mcse_quantile_arena_size(const i64 N, const i64 n_chains,
+                                          const i64 n_workers) {
+  const i64 asz = sdsge_mcse_quantile1d_arena_size(N, n_chains).n_float;
+  return make_sizer(n_workers * asz, 0);
+}
+
+void sdsge_mcse_quantile(f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_par,
+                         const i64 n_chains, const i64 n_workers, const f64 q,
+                         f64 *SDSGE_RESTRICT mcse, f64 *SDSGE_RESTRICT arena) {
+  const i64 per_par = sdsge_mcse_quantile1d_arena_size(N, n_chains).n_float;
+
+#pragma omp parallel for num_threads((int)n_workers) if (n_par > 1)            \
+    schedule(static)
+  for (i64 p = 0; p < n_par; ++p) {
+    i64 wid = omp_get_thread_num();
+    mcse[p] = sdsge_mcse_quantile1d(&x[p * N * n_chains], N, n_chains, q,
+                                    &arena[wid * per_par]);
+  }
 }

@@ -18,11 +18,10 @@ from ..spec import (
     MCMCResultSpec,
 )
 
-from ..._ckernels.estimation import ess_rhat, hpd_intervals
+from ..._ckernels.estimation import ess_rhat, hpd_intervals, mcse_quantile
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
-NDB = NDArray[np.bool_]
 
 
 @dataclass(frozen=True)
@@ -267,43 +266,11 @@ class MCMCResult:
             MCSE of the specified quantile for each parameter keyed by name.
 
         """
-        from scipy.stats import beta
-
-        # norm.cdf(-1) and norm.cdf(1)
-        SIGMA_MASS = (0.15865525393145707, 0.8413447460685429)
-
-        if not (0.0 < q < 1.0):
-            raise ValueError("q must satisfy 0 < q < 1.")
-
-        n_chains, n_draws, n_par = self.samples.shape
-        n_half = n_draws // 2
-        pooled = self.samples.reshape(-1, n_par)
-        n_pooled = pooled.shape[0]
-
-        x_q = np.quantile(pooled, q, axis=0, method="linear")
-        # ``self.samples`` rather than the sorted draws: the indicator's ESS
-        # measures autocorrelation, which only exists in draw order.
-        indicator = (self.samples <= x_q).astype(float64)
-        ess_q = np.clip(ess_rhat(indicator)[0], 0.0, float(2 * n_chains * n_half))
-
-        constant = _constant_subchains(indicator, n_half)
-        ess_q[constant] = np.nan
-
-        out: dict[str, float] = {}
-        for i, name in enumerate(self.param_names):
-            ess_i = float(ess_q[i])
-            if not np.isfinite(ess_i):
-                out[name] = float(np.nan)
-                continue
-            lo, hi = np.asarray(
-                beta.ppf(SIGMA_MASS, ess_i * q + 1.0, ess_i * (1.0 - q) + 1.0)
-            )
-            i_lo = int(np.clip(np.floor(lo * n_pooled - 1.0), 0, n_pooled - 1))
-            i_hi = int(np.clip(np.ceil(hi * n_pooled - 1.0), 0, n_pooled - 1))
-            kth = np.unique((i_lo, i_hi))
-            col = np.partition(np.asarray(pooled[:, i], dtype=float64), kth)
-            out[name] = _nanrnd(float((col[i_hi] - col[i_lo]) / 2.0), digits)
-        return out
+        mcse = mcse_quantile(self.samples, q)
+        return {
+            name: _nanrnd(float(mcse[i]), digits)
+            for i, name in enumerate(self.param_names)
+        }
 
     def hpd_intervals(
         self, alpha: float = 0.05, digits: int | None = None
@@ -471,18 +438,6 @@ class MCMCResult:
         if digits is not None:
             summary_df = summary_df.round(digits)
         return summary_df
-
-
-def _constant_subchains(indicator: NDF, n_half: int) -> NDB:
-    """Flag parameters whose 0/1 indicator never changes across a split half.
-
-    A constant half contributes no within-subchain variance, which understates
-    ``W`` without reaching the kernel's all-zero guard on the pooled sum.
-    """
-    first = indicator[:, :n_half, :].sum(axis=1)
-    second = indicator[:, n_half : 2 * n_half, :].sum(axis=1)
-    stuck = (first == 0) | (first == n_half) | (second == 0) | (second == n_half)
-    return np.asarray(stuck.sum(axis=0), dtype=np.bool_)
 
 
 def _nanrnd(val: float, digits: int | None) -> float:

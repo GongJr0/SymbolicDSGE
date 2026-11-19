@@ -16,8 +16,7 @@ from ._estimation import (
     logpost,
 )
 
-from ._ess import ess_rhat
-from ._order_stats import hpd_intervals
+from ._mcmc_diagnostics import ess_rhat, hpd_intervals, mcse_quantile
 
 __all__ = [
     "run_mcmc",
@@ -29,4 +28,5 @@ __all__ = [
     "unconstrained_from_corr_chol",
     "ess_rhat",
     "hpd_intervals",
+    "mcse_quantile",
 ]

@@ -94,7 +94,7 @@ static inline f64 max_in_range(const f64 *SDSGE_RESTRICT a, const i64 lo,
  *
  * sdsge_quantiles1d: Empirical quantiles of buf at the ascending levels
  * q[0..n_q-1]. returned into *out. */
-static f64 sdsge_quantile1d(f64 *SDSGE_RESTRICT buf, const i64 S, const f64 q) {
+f64 sdsge_quantile1d(f64 *SDSGE_RESTRICT buf, const i64 S, const f64 q) {
   f64 lo, hi;
   const f64 h = (f64)(S - 1) * q;
   const i64 k = (i64)floor(h);
