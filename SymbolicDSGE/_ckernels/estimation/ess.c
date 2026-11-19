@@ -2,6 +2,7 @@
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_complex.h"
 #include <math.h>
+#include <omp.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -63,18 +64,15 @@ static inline i64 next_pow2(i64 n) {
   }
   return p;
 }
-arena_size sdsge_split_acov_arena_size(const i64 N) {
+static arena_size sdsge_split_acov_arena_size(const i64 N) {
   const i64 n = N / 2;
   return make_sizer(2 * next_pow2(2 * n - 1), 0);
 }
 
-int sdsge_split_acov(const f64 *SDSGE_RESTRICT x, const i64 N, const i64 stride,
-                     f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT accum,
-                     f64 *SDSGE_RESTRICT mu_out) {
-  if (!x || !accum || !mu_out || N < 4 || stride < 1 ||
-      N > (INT64_MAX >> 2) + 1) {
-    return SDSGE_ESS_EBADSHAPE;
-  }
+static void sdsge_split_acov(const f64 *SDSGE_RESTRICT x, const i64 N,
+                             f64 *SDSGE_RESTRICT arena,
+                             f64 *SDSGE_RESTRICT accum,
+                             f64 *SDSGE_RESTRICT mu_out) {
   i64 n = N / 2;
   i64 m = next_pow2(2 * n - 1);
 
@@ -84,14 +82,14 @@ int sdsge_split_acov(const f64 *SDSGE_RESTRICT x, const i64 N, const i64 stride,
   f64 mu_a = 0.0;
   f64 mu_b = 0.0;
   for (i64 i = 0; i < n; ++i) {
-    mu_a += x[i * stride];
-    mu_b += x[(n + i) * stride];
+    mu_a += x[i];
+    mu_b += x[i + n];
   }
   mu_a /= (f64)n;
   mu_b /= (f64)n;
 
   for (i64 i = 0; i < n; ++i) {
-    a[i] = c128_make(x[i * stride] - mu_a, x[(n + i) * stride] - mu_b);
+    a[i] = c128_make(x[i] - mu_a, x[i + n] - mu_b);
   }
   fft(a, m, 0);
 
@@ -126,21 +124,9 @@ int sdsge_split_acov(const f64 *SDSGE_RESTRICT x, const i64 N, const i64 stride,
   }
   mu_out[0] = mu_a;
   mu_out[1] = mu_b;
-  return SDSGE_ESS_OK;
 }
 
 /*--- ESS ---*/
-
-static arena_size ess_rhat_per_param_arena_size(const i64 N,
-                                                const i64 n_chains) {
-  return make_sizer(
-      sdsge_split_acov_arena_size(N).n_float + N / 2 + 2 * n_chains, 0);
-}
-arena_size sdsge_ess_rhat_arena_size(const i64 N, const i64 n_par,
-                                     const i64 n_chains) {
-  return make_sizer(n_par * ess_rhat_per_param_arena_size(N, n_chains).n_float,
-                    0);
-}
 
 /* Geyer's initial positive sequence with the monotone clamp applied as a
  * running minimum. `rho` is read in pairs, so it carries normalized
@@ -173,92 +159,108 @@ static int geyer_tau(const f64 *SDSGE_RESTRICT rho, const i64 n,
   return SDSGE_ESS_OK;
 }
 
+arena_size sdsge_ess_rhat1d_arena_size(const i64 N, const i64 n_chains) {
+  i64 asz = sdsge_split_acov_arena_size(N).n_float + N / 2 + 2 * n_chains;
+  asz += (8 - asz % 8) % 8; /* round up to multiple of 8 for alignment */
+  return make_sizer(asz, 0);
+}
+
+int sdsge_ess_rhat1d(const f64 *SDSGE_RESTRICT x, const i64 N,
+                     const i64 n_chains, f64 *SDSGE_RESTRICT arena,
+                     f64 *SDSGE_RESTRICT ess, f64 *SDSGE_RESTRICT rhat) {
+  if (N < 4 || N > (INT64_MAX >> 2) + 1 || n_chains < 1) {
+    *ess = NAN;
+    if (rhat) {
+      *rhat = NAN;
+    }
+    return SDSGE_ESS_EBADSHAPE;
+  }
+  const i64 n = N / 2;
+  const i64 m = next_pow2(2 * n - 1);
+  const i64 n_sub = 2 * n_chains;
+  const i64 acova = sdsge_split_acov_arena_size(N).n_float;
+
+  const f64 acov_scale = 1.0 / ((f64)n_sub * (f64)m * (f64)n);
+  const f64 w_scale = 1.0 / ((f64)n_sub * (f64)m * (f64)(n - 1));
+
+  f64 *a = arena;
+  f64 *accum = a + acova;
+  f64 *mus = accum + n;
+  memset(accum, 0, (size_t)n * sizeof(f64));
+
+  *ess = NAN;
+  if (rhat) {
+    *rhat = NAN;
+  }
+
+  for (i64 c = 0; c < n_chains; ++c) {
+    sdsge_split_acov(&x[c * N], N, a, accum, mus + 2 * c);
+  }
+  if (!isfinite(accum[0]) || accum[0] <= 0.0) {
+    return SDSGE_ESS_EUDEFVARIANCE;
+  }
+  f64 mubar = 0.0;
+  for (i64 i = 0; i < n_sub; ++i) {
+    mubar += mus[i];
+  }
+  mubar /= (f64)n_sub;
+
+  f64 b = 0.0;
+  for (i64 i = 0; i < n_sub; ++i) {
+    const f64 d = mus[i] - mubar;
+    b += d * d;
+  }
+  b /= (f64)(n_sub - 1);
+
+  const f64 w = accum[0] * w_scale;
+  const f64 var_plus = accum[0] * acov_scale + b;
+
+  if (rhat) {
+    *rhat = sqrt(var_plus / w);
+  }
+
+  for (i64 l = 1; l < n; ++l) {
+    accum[l] = 1.0 - (w - accum[l] * acov_scale) / var_plus;
+  }
+  accum[0] = 1.0;
+
+  f64 tau = 0.0;
+  int rc = geyer_tau(accum, n, &tau);
+  if (rc != SDSGE_ESS_OK) {
+    return rc;
+  }
+  *ess = (f64)(n_sub * n) / tau;
+
+  return SDSGE_ESS_OK;
+}
+
+arena_size sdsge_ess_rhat_arena_size(const i64 N, const i64 n_chains,
+                                     const i64 n_workers) {
+  return make_sizer(
+      n_workers * sdsge_ess_rhat1d_arena_size(N, n_chains).n_float, 0);
+}
+
 void sdsge_ess_rhat(const f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_par,
                     const i64 n_chains, const i64 n_workers,
                     f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT ess,
                     f64 *SDSGE_RESTRICT rhat, int *SDSGE_RESTRICT status) {
-  if (N < 4 || n_par < 1 || n_chains < 1) {
+  if (N < 4 || N > (INT64_MAX >> 2) + 1 || n_par < 1 || n_chains < 1) {
     for (i64 p = 0; p < n_par; ++p) {
       ess[p] = NAN;
-      rhat[p] = NAN;
+      if (rhat) {
+        rhat[p] = NAN;
+      }
       status[p] = SDSGE_ESS_EBADSHAPE;
     }
     return;
   }
-
-  const i64 n = N / 2;
-  const i64 m = next_pow2(2 * n - 1);
-  const i64 n_sub = 2 * n_chains;
-  const i64 per_par = ess_rhat_per_param_arena_size(N, n_chains).n_float;
-  const i64 acova = sdsge_split_acov_arena_size(N).n_float;
-
-  /* convert accum (`m * sum_s SS_s[l]`) acov_s[l] and within-subchain
-   * variance W. */
-  const f64 acov_scale = 1.0 / ((f64)n_sub * (f64)m * (f64)n);
-  const f64 w_scale = 1.0 / ((f64)n_sub * (f64)m * (f64)(n - 1));
+  i64 per_par = sdsge_ess_rhat1d_arena_size(N, n_chains).n_float;
 #pragma omp parallel for num_threads((int)n_workers) if (n_par > 1)            \
     schedule(static)
   for (i64 p = 0; p < n_par; ++p) {
-    f64 *pa = arena + p * per_par;
-    f64 *accum = pa + acova;
-    f64 *mus = accum + n;
-
-    ess[p] = NAN;
-    rhat[p] = NAN;
-    memset(accum, 0, (size_t)n * sizeof(f64));
-
-    int rc = SDSGE_ESS_OK;
-    status[p] = SDSGE_ESS_OK;
-
-    for (i64 c = 0; c < n_chains; ++c) {
-      rc = sdsge_split_acov(x + c * N * n_par + p, N, n_par, pa, accum,
-                            mus + 2 * c);
-      if (rc != SDSGE_ESS_OK) {
-        status[p] = rc;
-        break;
-      }
-    }
-
-    if (rc != SDSGE_ESS_OK) {
-      continue;
-    }
-
-    if (!isfinite(accum[0]) || accum[0] <= 0.0) {
-      if (rc == SDSGE_ESS_OK) {
-        status[p] = SDSGE_ESS_EUDEFVARIANCE;
-      }
-      continue;
-    }
-
-    f64 mubar = 0.0;
-    for (i64 i = 0; i < n_sub; ++i) {
-      mubar += mus[i];
-    }
-    mubar /= (f64)n_sub;
-
-    f64 b = 0.0;
-    for (i64 i = 0; i < n_sub; ++i) {
-      const f64 d = mus[i] - mubar;
-      b += d * d;
-    }
-    b /= (f64)(n_sub - 1);
-
-    const f64 w = accum[0] * w_scale;
-    const f64 var_plus = accum[0] * acov_scale + b;
-    rhat[p] = sqrt(var_plus / w);
-
-    /* rho_hat in place; accum is dead to everything downstream of here. */
-    for (i64 l = 1; l < n; ++l) {
-      accum[l] = 1.0 - (w - accum[l] * acov_scale) / var_plus;
-    }
-    accum[0] = 1.0;
-
-    f64 tau = 0.0;
-    rc = geyer_tau(accum, n, &tau);
-    if (rc != SDSGE_ESS_OK) {
-      status[p] = rc;
-      continue;
-    }
-    ess[p] = (f64)(n_sub * n) / tau;
+    const i64 wid = omp_get_thread_num();
+    f64 *pa = arena + wid * per_par;
+    status[p] = sdsge_ess_rhat1d(&x[p * n_chains * N], N, n_chains, pa, &ess[p],
+                                 rhat ? &rhat[p] : NULL);
   }
 }

@@ -16,8 +16,8 @@ cdef extern from "ess.h":
     int c_SDSGE_ESS_ENONPOSTAU "SDSGE_ESS_ENONPOSTAU"
 
     arena_size sdsge_ess_rhat_arena_size(const int64_t N,
-                                         const int64_t n_par,
-                                         const int64_t n_chains) nogil
+                                         const int64_t n_chains,
+                                         const int64_t n_workers) nogil
     void sdsge_ess_rhat(const double *x, const int64_t N,
                         const int64_t n_par, const int64_t n_chains,
                         const int64_t n_workers, double *arena, double *ess,
@@ -47,8 +47,8 @@ def ess_rhat(x):
             "Input samples must have at least four elements per "
             "column and at least one parameter being sampled."
         )
-
-    cdef int64_t asz = sdsge_ess_rhat_arena_size(N, n_par, n_chains).n_float
+    cdef int64_t n_workers = worker_count(n_par)
+    cdef int64_t asz = sdsge_ess_rhat_arena_size(N, n_chains, n_workers).n_float
     cdef double[::1] arena = np.empty(asz, dtype=np.float64)
 
     cdef double[::1] outv, rhatv
@@ -62,12 +62,15 @@ def ess_rhat(x):
     statusv = status
     rhatv = rhat
 
-    cdef int64_t n_workers = worker_count(n_par)
-    cdef double[:, :, ::1] xv = np.ascontiguousarray(x, dtype=np.float64)
+    # parameter-major pooled view, discarded after computation.
+    cdef double[::1] xv = np.ascontiguousarray(
+        x.transpose(2, 0, 1), dtype=np.float64
+    ).reshape(-1)
+
     with nogil:
         sdsge_ess_rhat(
-            &xv[0, 0, 0], N, n_par, n_chains, n_workers,
-            &arena[0], &outv[0], &rhatv[0], &statusv[0],
+            &xv[0], N, n_par, n_chains, n_workers, &arena[0],
+            &outv[0], &rhatv[0], &statusv[0],
         )
     return out, rhat, status.astype(np.int64)
 
