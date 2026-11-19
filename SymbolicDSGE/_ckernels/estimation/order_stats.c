@@ -54,8 +54,7 @@ static i64 hoare_partition(f64 *SDSGE_RESTRICT a, const i64 lo, const i64 hi) {
 
 /* Places the k-th smallest of a[lo..hi] at a[k], leaving a[lo..k-1] <= a[k] and
  * a[k] <= a[k+1..hi]. */
-static inline void select_kth(f64 *SDSGE_RESTRICT a, i64 lo, i64 hi,
-                              const i64 k) {
+void sdsge_select_kth(f64 *SDSGE_RESTRICT a, i64 lo, i64 hi, const i64 k) {
   while (lo < hi) {
     const i64 j = hoare_partition(a, lo, hi);
     if (k <= j) {
@@ -102,25 +101,25 @@ static f64 sdsge_quantile1d(f64 *SDSGE_RESTRICT buf, const i64 S, const f64 q) {
   const f64 g = h - (f64)k;
 
   if (g <= 0.0 || k + 1 >= S) {
-    select_kth(buf, 0, S - 1, k);
+    sdsge_select_kth(buf, 0, S - 1, k);
     return buf[k];
   }
 
   if (k + 1 < S - k - 1) {
-    select_kth(buf, 0, S - 1, k + 1);
+    sdsge_select_kth(buf, 0, S - 1, k + 1);
     hi = buf[k + 1];
     lo = max_in_range(buf, 0, k);
   } else {
-    select_kth(buf, 0, S - 1, k);
+    sdsge_select_kth(buf, 0, S - 1, k);
     lo = buf[k];
     hi = min_in_range(buf, k + 1, S - 1);
   }
   return lo + g * (hi - lo);
 }
 
-static void sdsge_quantiles1d(f64 *SDSGE_RESTRICT buf, const i64 S,
-                              const f64 *SDSGE_RESTRICT q, const i64 n_q,
-                              f64 *SDSGE_RESTRICT out) {
+void sdsge_quantiles1d(f64 *SDSGE_RESTRICT buf, const i64 S,
+                       const f64 *SDSGE_RESTRICT q, const i64 n_q,
+                       f64 *SDSGE_RESTRICT out) {
   i64 base = 0;
   i64 last_k = -1;
   f64 last_lo = 0.0;
@@ -139,7 +138,7 @@ static void sdsge_quantiles1d(f64 *SDSGE_RESTRICT buf, const i64 S,
     }
 
     if (g <= 0.0 || k + 1 >= S) {
-      select_kth(buf, base, S - 1, k);
+      sdsge_select_kth(buf, base, S - 1, k);
       out[t] = buf[k];
       base = k;
       continue;
@@ -149,12 +148,12 @@ static void sdsge_quantiles1d(f64 *SDSGE_RESTRICT buf, const i64 S,
     /* Both neighbors come off one selection plus a scan of the side that was
      * left unordered. */
     if (k - base + 1 < S - k - 1) {
-      select_kth(buf, base, S - 1, k + 1);
+      sdsge_select_kth(buf, base, S - 1, k + 1);
       hi = buf[k + 1];
       lo = max_in_range(buf, base, k);
       base = k + 1;
     } else {
-      select_kth(buf, base, S - 1, k);
+      sdsge_select_kth(buf, base, S - 1, k);
       lo = buf[k];
       hi = min_in_range(buf, k + 1, S - 1);
       base = k;
@@ -282,9 +281,9 @@ static void sdsge_hpd1d(f64 *SDSGE_RESTRICT buf, const i64 S, const i64 window,
 
   /* The upper cut has to come first. Selecting it afterwards would repartition
    * the lower region and scatter the k smallest out of buf[0..k-1]. */
-  select_kth(buf, 0, S - 1, window - 1);
+  sdsge_select_kth(buf, 0, S - 1, window - 1);
   sort_range(buf, window - 1, S - 1);
-  select_kth(buf, 0, window - 2, k - 1);
+  sdsge_select_kth(buf, 0, window - 2, k - 1);
   sort_range(buf, 0, k - 1);
 
   i64 best = 0;
