@@ -1,9 +1,10 @@
 """Build the native Cython/C extensions for SymbolicDSGE.
 
 Project metadata lives in ``pyproject.toml`` (PEP 621); this file only declares
-the compiled extensions. One extension per ``_ckernels`` subsystem that ships a
-``_<name>.pyx`` shim; each links its sibling ``*.c`` plus the shared
-``_common/*.c`` sources.
+the compiled extensions. One extension per ``_<name>.pyx`` shim in a
+``_ckernels`` subsystem. Each subsystem's hand-written C, ``_common`` included,
+compiles once into a static library; an extension links the libraries of its
+own subsystem and its dependency closure.
 """
 
 from __future__ import annotations
@@ -11,17 +12,23 @@ from __future__ import annotations
 import glob
 import os
 import shutil
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import cast
 
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
+from setuptools.modified import newer_group
 
 _CKERNELS = os.path.join("SymbolicDSGE", "_ckernels")
 _COMMON = os.path.join(_CKERNELS, "_common")
+_COMMON_NAME = "_common"
+_LIB_DIR = "sdsge_libs"
 
 # Extra intra-_ckernels subsystem deps: an extension that calls another
-# subsystem's leaf C must link its hand-written sources (Windows .pyds cannot
-# share symbols). Keyed by extension subdir name. `_common` is linked into every
+# subsystem's leaf C must link its static library (Windows .pyds cannot share
+# symbols). Keyed by extension subdir name. `_common` is linked into every
 # extension already; this is for the higher-level subsystems (core, kalman, ...).
 _EXTRA_DEPS = {
     "core": ["rng"],
@@ -65,11 +72,35 @@ def _dependency_closure(subname: str) -> list[str]:
     return dependencies
 
 
+def _link_order(subname: str) -> list[str]:
+    """``subname`` and its closure, each placed before every subsystem it calls.
+
+    Single-pass linkers resolve archives left to right.
+    """
+    order: list[str] = []
+    seen: set[str] = set()
+
+    def visit(name: str) -> None:
+        if name in seen:
+            return
+        seen.add(name)
+        for dependency in _EXTRA_DEPS.get(name, []):
+            visit(dependency)
+        order.append(name)
+
+    visit(subname)
+    return order[::-1]
+
+
 def _needs_openmp(subname: str) -> bool:
     """Whether ``subname`` compiles OpenMP pragmas, its own or a dependency's."""
     return subname in _OPENMP_OWNERS or any(
         dep in _OPENMP_OWNERS for dep in _dependency_closure(subname)
     )
+
+
+def _needs_numpy_random(subname: str) -> bool:
+    return subname == "rng" or "rng" in _dependency_closure(subname)
 
 
 def _hand_c(subdir: str) -> list[str]:
@@ -81,6 +112,33 @@ def _hand_c(subdir: str) -> list[str]:
         for c in sorted(glob.glob(os.path.join(subdir, "*.c")))
         if not os.path.basename(c).startswith("_")
     ]
+
+
+def _lib_name(subname: str) -> str:
+    return "sdsge_" + subname.lstrip("_")
+
+
+def _include_dirs(subname: str) -> list[str]:
+    subsystems = [subname, *_dependency_closure(subname)]
+    dirs = [os.path.join(_CKERNELS, s) for s in subsystems]
+    if subname != _COMMON_NAME:
+        dirs.append(_COMMON)
+    if _needs_numpy_random(subname):
+        import numpy as np
+
+        dirs.append(np.get_include())
+    return dirs
+
+
+def _static_libraries() -> list[tuple[str, list[str], list[str]]]:
+    """``(name, sources, include_dirs)`` for every subsystem carrying hand-written C."""
+    libraries: list[tuple[str, list[str], list[str]]] = []
+    for subdir in sorted(glob.glob(os.path.join(_CKERNELS, "*"))):
+        sources = _hand_c(subdir)
+        if sources:
+            subname = os.path.basename(subdir)
+            libraries.append((_lib_name(subname), sources, _include_dirs(subname)))
+    return libraries
 
 
 def _compile_args() -> list[str]:
@@ -106,11 +164,6 @@ def _compile_args() -> list[str]:
             flags.append("-flto=thin")
         return ["/clang:" + flag for flag in flags]
     return flags
-
-
-def _link_args() -> list[str]:
-    """Link the OpenMP runtime on compilers that do not do so implicitly."""
-    return [] if os.name == "nt" else ["-fopenmp"]
 
 
 def _clang_cl_lib_dir() -> str | None:
@@ -141,8 +194,64 @@ def _clang_cl_runtime_dll() -> str | None:
     return libomp_dll
 
 
-class ClangCLBuildExt(build_ext):
-    """Opt into clang-cl while retaining setuptools' MSVC ABI backend."""
+def _unix_lto_toolchain(cc: str) -> tuple[list[str], str]:
+    """LTO flags and the LTO-aware archiver matching the unix compiler ``cc``.
+
+    The archiver and linker must read the compiler's own LTO object format, so
+    each is taken from the compiler's installation rather than from ``PATH``.
+    """
+    path = shutil.which(cc)
+    if path is None:
+        raise RuntimeError(f"C compiler {cc!r} not found on PATH.")
+    version = subprocess.run(
+        [path, "--version"], capture_output=True, text=True, check=True
+    ).stdout
+
+    if "clang" in version:
+        bindir = os.path.dirname(os.path.realpath(path))
+        archiver = os.path.join(bindir, "llvm-ar")
+        flags = ["-flto=thin"]
+        if sys.platform != "darwin":
+            # GNU ld reads bitcode only through the LLVMgold plugin.
+            if not os.path.isfile(os.path.join(bindir, "ld.lld")):
+                raise RuntimeError(f"ld.lld not found beside {path!r}.")
+            flags.append("-fuse-ld=lld")
+    elif "Free Software Foundation" in version:
+        base = os.path.basename(path)
+        candidates = [shutil.which("gcc-ar")]
+        if "gcc" in base:
+            sibling = base.replace("gcc", "gcc-ar")
+            candidates.insert(0, os.path.join(os.path.dirname(path), sibling))
+        archiver = next((c for c in candidates if c and os.path.isfile(c)), "")
+        flags = ["-flto=auto"]
+    else:
+        raise RuntimeError(f"Unrecognized C compiler {path!r}; expected GCC or clang.")
+
+    if not os.path.isfile(archiver):
+        raise RuntimeError(f"LTO archiver for {path!r} not found.")
+    return flags + ["-fvisibility=hidden"], archiver
+
+
+class SDSGEBuildExt(build_ext):
+    """Build the static subsystem libraries, then the extensions linking them.
+
+    The libraries compile with this command's own compiler, so toolchain swaps
+    and LTO flags reach them exactly as they reach the extensions.
+    """
+
+    # True is "one worker per CPU" to the base class's parallel builder.
+    parallel: int | bool | None
+
+    def finalize_options(self) -> None:
+        super().finalize_options()
+        # None is "not given"; an explicit -j, 0 included, is kept as given.
+        if self.parallel is None:
+            self.parallel = True
+
+    def _workers(self) -> int:
+        if self.parallel is True:
+            return os.cpu_count() or 1
+        return int(self.parallel or 0)
 
     def run(self) -> None:
         super().run()
@@ -163,11 +272,73 @@ class ClangCLBuildExt(build_ext):
 
     def build_extensions(self) -> None:
         toolchain = os.environ.get("SDSGE_TOOLCHAIN", "").lower()
+        lib_args = _compile_args()
 
-        if not toolchain:
-            super().build_extensions()
+        if self.compiler.compiler_type == "msvc" and not getattr(
+            self.compiler, "initialized", True
+        ):
+            # Once, up front: initialize() would undo the clang-cl swap, and
+            # compile() would otherwise run it lazily from racing threads.
+            self.compiler.initialize()
+
+        if toolchain:
+            self._use_clang_cl(toolchain)
+        elif self.compiler.compiler_type == "unix":
+            lto_flags, archiver = _unix_lto_toolchain(self.compiler.compiler_so[0])
+            self.compiler.set_executables(archiver=[archiver, "-crs"], ranlib=None)
+            lib_args = lib_args + lto_flags
+            for ext in self.extensions:
+                ext.extra_compile_args = list(ext.extra_compile_args) + lto_flags
+                # GCC regenerates code at link time; it must see every codegen
+                # flag, except -fopenmp, which at link only pulls in the runtime.
+                uses_openmp = _needs_openmp(ext.name.split(".")[-2])
+                ext.extra_link_args = [
+                    flag for flag in lib_args if uses_openmp or flag != "-fopenmp"
+                ]
+
+        lib_dir = os.path.join(self.build_temp, _LIB_DIR)
+        self._build_static_libraries(lib_dir, lib_args)
+        for ext in self.extensions:
+            ext.library_dirs = [lib_dir, *ext.library_dirs]
+
+        # Workers take extensions in list order; the largest links start first
+        # so none is left running alone at the end.
+        self.extensions.sort(
+            key=lambda ext: sum(os.path.getsize(s) for s in ext.sources), reverse=True
+        )
+        super().build_extensions()
+
+    def _build_static_libraries(self, lib_dir: str, args: list[str]) -> None:
+        def build(name: str, sources: list[str], include_dirs: list[str]) -> None:
+            target = self.compiler.library_filename(name, output_dir=lib_dir)
+            if not (self.force or newer_group(sources, target, "newer")):
+                return
+            objects = self.compiler.compile(
+                sources,
+                output_dir=lib_dir,
+                include_dirs=include_dirs,
+                extra_postargs=args,
+                debug=self.debug,
+            )
+            # `ar -r` keeps members it is not handed, including deleted sources'.
+            if os.path.exists(target):
+                os.remove(target)
+            self.compiler.create_static_lib(
+                objects, name, output_dir=lib_dir, debug=self.debug
+            )
+
+        libraries = _static_libraries()
+        workers = self._workers()
+        if workers <= 1:
+            for library in libraries:
+                build(*library)
             return
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            for future in [executor.submit(build, *lib) for lib in libraries]:
+                future.result()
 
+    def _use_clang_cl(self, toolchain: str) -> None:
+        """Opt into clang-cl while retaining setuptools' MSVC ABI backend."""
         if toolchain != "clang-cl":
             raise RuntimeError(
                 "SDSGE_TOOLCHAIN must be 'clang-cl' when set, " f"got {toolchain!r}."
@@ -179,28 +350,20 @@ class ClangCLBuildExt(build_ext):
                 f"got {self.compiler.compiler_type!r}."
             )
 
-        clang_cl = shutil.which("clang-cl.exe")
-        lld_link = shutil.which("lld-link.exe")
-        if clang_cl is None or lld_link is None:
-            missing = [
-                name
-                for name, path in (
-                    ("clang-cl.exe", clang_cl),
-                    ("lld-link.exe", lld_link),
-                )
-                if path is None
-            ]
+        tools = {
+            name: shutil.which(name)
+            for name in ("clang-cl.exe", "lld-link.exe", "llvm-lib.exe")
+        }
+        missing = [name for name, path in tools.items() if path is None]
+        if missing:
             raise RuntimeError(
                 "SDSGE_TOOLCHAIN=clang-cl requires " + ", ".join(missing) + " on PATH."
             )
 
-        # Force the MSVC backend to discover its include/library environment
-        # before replacing cl.exe and link.exe.
-        if not getattr(self.compiler, "initialized", True):
-            self.compiler.initialize()
-
-        self.compiler.cc = clang_cl
-        self.compiler.linker = lld_link
+        self.compiler.cc = tools["clang-cl.exe"]
+        self.compiler.linker = tools["lld-link.exe"]
+        # lib.exe cannot index LLVM bitcode members.
+        self.compiler.lib = tools["llvm-lib.exe"]
 
         compile_options = getattr(self.compiler, "compile_options", None)
         if compile_options is not None:
@@ -213,8 +376,6 @@ class ClangCLBuildExt(build_ext):
             for flags in ldflags.values():
                 flags[:] = [flag for flag in flags if flag != "/LTCG"]
 
-        super().build_extensions()
-
 
 def _extensions() -> list[Extension]:
     try:
@@ -222,7 +383,7 @@ def _extensions() -> list[Extension]:
     except ImportError:
         return []
 
-    common_sources = sorted(glob.glob(os.path.join(_COMMON, "*.c")))
+    common_sources = _hand_c(_COMMON)
     extra_args = _compile_args()
     clang_cl_lib_dir = _clang_cl_lib_dir()
 
@@ -230,23 +391,16 @@ def _extensions() -> list[Extension]:
     for pyx in sorted(glob.glob(os.path.join(_CKERNELS, "*", "_*.pyx"))):
         subdir = os.path.dirname(pyx)
         module = os.path.relpath(pyx, ".").replace(os.sep, ".")[: -len(".pyx")]
-        hand_c = _hand_c(subdir)
-
         subname = os.path.basename(subdir)
-        dependencies = _dependency_closure(subname)
-        dep_dirs = [os.path.join(_CKERNELS, dep) for dep in dependencies]
-        dep_c = [c for d in dep_dirs for c in _hand_c(d)]
+        linked = [
+            s for s in _link_order(subname) if _hand_c(os.path.join(_CKERNELS, s))
+        ]
 
-        sources = [pyx] + hand_c + dep_c + common_sources
-
-        include_dirs = [subdir, *dep_dirs, _COMMON]
         library_dirs: list[str] = []
-        libraries: list[str] = []
-        ext_kwargs: dict[str, object] = {}
-        if subname == "rng" or "rng" in dependencies:
+        libraries = [_lib_name(s) for s in linked] + [_lib_name(_COMMON_NAME)]
+        if _needs_numpy_random(subname):
             import numpy as np
 
-            include_dirs.append(np.get_include())
             library_dirs.append(
                 os.path.join(os.path.dirname(np.__file__), "random", "lib")
             )
@@ -254,19 +408,18 @@ def _extensions() -> list[Extension]:
         if clang_cl_lib_dir is not None and _needs_openmp(subname):
             library_dirs.append(clang_cl_lib_dir)
             libraries.append("libomp")
-        if library_dirs:
-            ext_kwargs["library_dirs"] = library_dirs
-        if libraries:
-            ext_kwargs["libraries"] = libraries
 
         extensions.append(
             Extension(
                 module,
-                sources=sources,
-                include_dirs=include_dirs,
+                sources=[pyx],
+                # The libraries' sources: relinks the extension when they change.
+                depends=[c for s in linked for c in _hand_c(os.path.join(_CKERNELS, s))]
+                + common_sources,
+                include_dirs=_include_dirs(subname),
+                library_dirs=library_dirs,
+                libraries=libraries,
                 extra_compile_args=extra_args,
-                extra_link_args=_link_args(),
-                **ext_kwargs,
             )
         )
 
@@ -274,6 +427,7 @@ def _extensions() -> list[Extension]:
     # warn_return_any without loosening the public return type.
     cythonized = cythonize(
         extensions,
+        nthreads=os.cpu_count() or 0,
         compiler_directives={
             "language_level": "3",
             "boundscheck": False,
@@ -284,4 +438,7 @@ def _extensions() -> list[Extension]:
     return cast("list[Extension]", cythonized)
 
 
-setup(ext_modules=_extensions(), cmdclass={"build_ext": ClangCLBuildExt})
+# cythonize's process workers re-import the main module under spawn
+# (Windows, macOS); the guard keeps them from re-entering setup().
+if __name__ == "__main__":
+    setup(ext_modules=_extensions(), cmdclass={"build_ext": SDSGEBuildExt})
