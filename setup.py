@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import cast
 
 from setuptools import Extension, setup
@@ -238,6 +239,20 @@ class SDSGEBuildExt(build_ext):
     and LTO flags reach them exactly as they reach the extensions.
     """
 
+    # True is "one worker per CPU" to the base class's parallel builder.
+    parallel: int | bool | None
+
+    def finalize_options(self) -> None:
+        super().finalize_options()
+        # None is "not given"; an explicit -j, 0 included, is kept as given.
+        if self.parallel is None:
+            self.parallel = True
+
+    def _workers(self) -> int:
+        if self.parallel is True:
+            return os.cpu_count() or 1
+        return int(self.parallel or 0)
+
     def run(self) -> None:
         super().run()
 
@@ -259,6 +274,13 @@ class SDSGEBuildExt(build_ext):
         toolchain = os.environ.get("SDSGE_TOOLCHAIN", "").lower()
         lib_args = _compile_args()
 
+        if self.compiler.compiler_type == "msvc" and not getattr(
+            self.compiler, "initialized", True
+        ):
+            # Once, up front: initialize() would undo the clang-cl swap, and
+            # compile() would otherwise run it lazily from racing threads.
+            self.compiler.initialize()
+
         if toolchain:
             self._use_clang_cl(toolchain)
         elif self.compiler.compiler_type == "unix":
@@ -267,21 +289,30 @@ class SDSGEBuildExt(build_ext):
             lib_args = lib_args + lto_flags
             for ext in self.extensions:
                 ext.extra_compile_args = list(ext.extra_compile_args) + lto_flags
-                # GCC regenerates code at link time; it must see every codegen flag.
-                ext.extra_link_args = list(lib_args)
+                # GCC regenerates code at link time; it must see every codegen
+                # flag, except -fopenmp, which at link only pulls in the runtime.
+                uses_openmp = _needs_openmp(ext.name.split(".")[-2])
+                ext.extra_link_args = [
+                    flag for flag in lib_args if uses_openmp or flag != "-fopenmp"
+                ]
 
         lib_dir = os.path.join(self.build_temp, _LIB_DIR)
         self._build_static_libraries(lib_dir, lib_args)
         for ext in self.extensions:
             ext.library_dirs = [lib_dir, *ext.library_dirs]
 
+        # Workers take extensions in list order; the largest links start first
+        # so none is left running alone at the end.
+        self.extensions.sort(
+            key=lambda ext: sum(os.path.getsize(s) for s in ext.sources), reverse=True
+        )
         super().build_extensions()
 
     def _build_static_libraries(self, lib_dir: str, args: list[str]) -> None:
-        for name, sources, include_dirs in _static_libraries():
+        def build(name: str, sources: list[str], include_dirs: list[str]) -> None:
             target = self.compiler.library_filename(name, output_dir=lib_dir)
             if not (self.force or newer_group(sources, target, "newer")):
-                continue
+                return
             objects = self.compiler.compile(
                 sources,
                 output_dir=lib_dir,
@@ -295,6 +326,16 @@ class SDSGEBuildExt(build_ext):
             self.compiler.create_static_lib(
                 objects, name, output_dir=lib_dir, debug=self.debug
             )
+
+        libraries = _static_libraries()
+        workers = self._workers()
+        if workers <= 1:
+            for library in libraries:
+                build(*library)
+            return
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            for future in [executor.submit(build, *lib) for lib in libraries]:
+                future.result()
 
     def _use_clang_cl(self, toolchain: str) -> None:
         """Opt into clang-cl while retaining setuptools' MSVC ABI backend."""
@@ -318,11 +359,6 @@ class SDSGEBuildExt(build_ext):
             raise RuntimeError(
                 "SDSGE_TOOLCHAIN=clang-cl requires " + ", ".join(missing) + " on PATH."
             )
-
-        # Force the MSVC backend to discover its include/library environment
-        # before replacing cl.exe, link.exe, and lib.exe.
-        if not getattr(self.compiler, "initialized", True):
-            self.compiler.initialize()
 
         self.compiler.cc = tools["clang-cl.exe"]
         self.compiler.linker = tools["lld-link.exe"]
@@ -391,6 +427,7 @@ def _extensions() -> list[Extension]:
     # warn_return_any without loosening the public return type.
     cythonized = cythonize(
         extensions,
+        nthreads=os.cpu_count() or 0,
         compiler_directives={
             "language_level": "3",
             "boundscheck": False,
@@ -401,4 +438,7 @@ def _extensions() -> list[Extension]:
     return cast("list[Extension]", cythonized)
 
 
-setup(ext_modules=_extensions(), cmdclass={"build_ext": SDSGEBuildExt})
+# cythonize's process workers re-import the main module under spawn
+# (Windows, macOS); the guard keeps them from re-entering setup().
+if __name__ == "__main__":
+    setup(ext_modules=_extensions(), cmdclass={"build_ext": SDSGEBuildExt})
