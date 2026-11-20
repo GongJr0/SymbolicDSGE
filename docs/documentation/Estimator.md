@@ -408,10 +408,10 @@ __Returns:__
 &nbsp;
 
 ```python
-MCMCResult.posterior_kde_plot() -> None
+MCMCResult.posterior_kde_plot(grid_points: int = 1000) -> None
 ```
 
-Plot marginal posterior kernel-density estimates for each retained parameter column.
+Plot marginal posterior kernel-density estimates for each retained parameter column. Warns and skips parameters with zero or undefined variance.
 
 This is a quick visual diagnostic for posterior shape. It is useful for checking skewness, heavy tails, and obvious multimodality in the retained draws. A separate subplot is produced for each parameter and displayed immediately with `matplotlib.pyplot.show()`.
 
@@ -419,7 +419,7 @@ __Inputs:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| None | This method uses the retained samples already stored on the result object. |
+| grid_point | Number of even-spaced points spanning each parameter's range, at least 2. The resulting grid is equivalent to a `np.linspace` call. |
 
 __Returns:__
 
