@@ -120,7 +120,7 @@ Enabling this will also compute the standard errors of the estimated parameters,
     For one-off point estimation, `jacobian=False` correctly finds the mode of the posterior in constrained space (the parameters as specified), the transforms only serve to move where that search occurs.
 
 ???+ note "Native optimizer set"
-    `mle` and `map` run entirely in the native backend, which ships a curated set of optimizers with no scipy fallback. Only `#!python "L-BFGS-B"` (default; quasi-Newton with a finite-difference gradient) and `#!python "Nelder-Mead"` (gradient-free) are supported; any other `method` raises. Each optimizer's tuning parameters are passed as explicit keyword arguments: the L-BFGS-B group (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`) and the Nelder-Mead group (`xatol`, `fatol`).
+    `mle` and `map` run entirely in the native backend, which ships a curated set of optimizers with no scipy fallback. Only `"L-BFGS-B"` (default; quasi-Newton with a finite-difference gradient) and `"Nelder-Mead"` (gradient-free) are supported; any other `method` raises. Each optimizer's tuning parameters are passed as explicit keyword arguments: the L-BFGS-B group (`m`, `maxiter`, `maxfun`, `maxls`, `factr`, `pgtol`, `fd_step`) and the Nelder-Mead group (`xatol`, `fatol`).
 
 ## MCMC
 
@@ -128,38 +128,43 @@ Enabling this will also compute the standard errors of the estimated parameters,
 Estimator.mcmc(
     *,
     n_draws: int, # (1)!
-    burn_in: int = 1000, # (2)!
-    thin: int = 1, # (3)!
-    theta0: Mapping[str, float] | None = None, # (4)!
+    n_chains: int = 1,  # (2)!
+    burn_in: int = 1000, # (3)!
+    thin: int = 1, # (4)!
+    theta0: Mapping[str, float] | None = None, # (5)!
     random_state: int | None = None,
     adapt: bool = True,
-    adapt_start: int | None = None,  #(5)!
-    adapt_end: int | Literal["burn_in"] | None = "burn_in",  # (6)!
-    adapt_interval: int = 1, # (7)!
-    adapt_epsilon: float = 1e-8,  # (8)!
-    proposal_scale: float = 1,  # (9)!
+    adapt_start: int | None = None,  # (6)!
+    adapt_end: int | Literal["burn_in"] | None = "burn_in",  # (7)!
+    adapt_interval: int = 1, # (8)!
+    adapt_epsilon: float = 1e-8,  # (9)!
+    init_scale: float = 1, # (10)!
+    proposal_scale: float = 1,  # (11)!
     compute_map: bool = True,
-    map_options: dict[str, Any] | None = None,  # (10)!
-    proposal_cov: np.ndarray | None = None,  # (11)!
+    map_options: dict[str, Any] | None = None,  # (12)!
+    proposal_cov: np.ndarray | None = None,  # (13)!
     cov_fd_step_scale: float = 1.0,
     cov_fd_absolute_floor: float = 0.1,
+    n_jobs: int | None = None,
 ) -> MCMCResult
 ```
 
 1. Number of retained posterior draws.
-2. Number of initial iterations discarded.
-3. Retain every `thin`-th iteration after burn-in.
-4. `None` uses calibration defaults. When `compute_map=True`, the MAP estimate is computed first and used as the starting point for the chain.
+2. Number of independent chains to run.
+3. Number of initial iterations discarded.
+4. Retain every `thin`-th iteration after burn-in.
+5. `None` uses calibration defaults. When `compute_map=True`, the MAP estimate is computed first and used as the starting point for the chain.
 The proposal covariance will use the MAP point to compute the Hessian if `compute_map=True`.
-5. `None` defaults to half-way between `0` and `adapt_end` and cannot exceed `1000`.
+6. `None` defaults to half-way between `0` and `adapt_end` and cannot exceed `1000`.
 Integer iteration indices must be greater than `0`, the adaptation algorithm requires at least one sample to be collected.
-6. `None` continues adaptation until the end of the chain, `"burn_in"` stops adaptation
+7. `None` continues adaptation until the end of the chain, `"burn_in"` stops adaptation
 after the burn-in phase, and integer values are the iteration at which adaptation stops.
-7. Number of iterations between adaptation steps. Must be at least 1.
-8. Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
-9. Scaling factor for proposal **standard deviation**: `2.38/sqrt(d) * proposal_scale`. The default of 1 corresponds to the standard "optimal" point for a Gaussian random-walk MH.
-10. Passed to `map(...)` if `compute_map=True`. If `None`, defaults are used. Refer to [Estimator.map](#map) for the available options.
-11. Proposal covariance for the sampler. It's mutually exclusive with `compute_map=True` since the MAP estimate is used as the differentiation point for the proposal covariance and the `theta0` a chain starts at.
+8. Number of iterations between adaptation steps. Must be at least 1.
+9. Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
+10. Scaling factor for the proposal **standard deviation** used to sample initial theta points for multiple chains. The first chain starts at `theta0` or the MAP estimate; subsequent chains are a Gaussian random sample around that point with `init_scale * proposal_std`.
+11. Scaling factor for proposal **standard deviation**: `2.38/sqrt(d) * proposal_scale`. The default of 1 corresponds to the standard "optimal" point for a Gaussian random-walk MH.
+12. Passed to `map(...)` if `compute_map=True`. If `None`, defaults are used. Refer to [Estimator.map](#map) for the available options.
+13. Proposal covariance for the sampler. It's mutually exclusive with `compute_map=True` since the MAP estimate is used as the differentiation point for the proposal covariance and the `theta0` a chain starts at.
 
 ???+ note "Thinning Semantics"
     Thinning is applied after burn-in using `(t - burn_in) % thin == 0`.
@@ -173,18 +178,18 @@ after the burn-in phase, and integer values are the iteration at which adaptatio
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| x | `#!python np.ndarray` | Optimized unconstrained vector |
-| theta | `#!python dict[str, float]` | The estimated parameters at the optimum, in constrained space, keyed by `estimated_params`. Parameters that were not estimated are not included: they stay at the model's calibration. |
-| success | `#!python bool` | Optimizer convergence flag |
-| message | `#!python str` | Optimizer status message |
-| fun | `#!python float` | Objective value at optimum |
-| loglik | `#!python float` | Log-likelihood at optimum |
-| vcov | `#!python np.ndarray | None` | Covariance of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
-| se | `#!python dict[str, float] | None` | Standard errors of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
-| nfev | `#!python int` | Objective evaluations |
-| nit | `#!python int | None` | Iterations |
-| optimizer_config | `#!python dict[str, Any]` | Optimizer method, bounds, and options the run was called with |
-| cov_status | `#!python int` | `#!python 0` when the covariance was produced, otherwise why it was not |
+| x | `np.ndarray` | Optimized unconstrained vector |
+| theta | `dict[str, float]` | The estimated parameters at the optimum, in constrained space, keyed by `estimated_params`. Parameters that were not estimated are not included: they stay at the model's calibration. |
+| success | `bool` | Optimizer convergence flag |
+| message | `str` | Optimizer status message |
+| fun | `float` | Objective value at optimum |
+| loglik | `float` | Log-likelihood at optimum |
+| vcov | `np.ndarray | None` | Covariance of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
+| se | `dict[str, float] | None` | Standard errors of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
+| nfev | `int` | Objective evaluations |
+| nit | `int | None` | Iterations |
+| optimizer_config | `dict[str, Any]` | Optimizer method, bounds, and options the run was called with |
+| cov_status | `int` | `0` when the covariance was produced, otherwise why it was not |
 
 __Methods:__
 
@@ -206,25 +211,25 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python ModelConfig` | Copy of `config` carrying `theta`. Parameters that were not estimated keep their calibration values. |
+| `ModelConfig` | Copy of `config` carrying `theta`. Parameters that were not estimated keep their calibration values. |
 
 ### MAPResult
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| x | `#!python np.ndarray` | Optimized unconstrained vector |
-| theta | `#!python dict[str, float]` | The estimated parameters at the optimum, in constrained space, keyed by `estimated_params`. Parameters that were not estimated are not included: they stay at the model's calibration. |
-| success | `#!python bool` | Optimizer convergence flag |
-| message | `#!python str` | Optimizer status message |
-| fun | `#!python float` | Objective value at optimum |
-| logprior | `#!python float` | Log-prior at optimum |
-| logpost | `#!python float` | Log-posterior at optimum |
-| vcov | `#!python np.ndarray | None` | Covariance of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
-| se | `#!python dict[str, float] | None` | Standard errors of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
-| nfev | `#!python int` | Objective evaluations |
-| nit | `#!python int | None` | Iterations |
-| optimizer_config | `#!python dict[str, Any]` | Optimizer method, bounds, and options the run was called with |
-| cov_status | `#!python int` | `#!python 0` when the covariance was produced, otherwise why it was not |
+| x | `np.ndarray` | Optimized unconstrained vector |
+| theta | `dict[str, float]` | The estimated parameters at the optimum, in constrained space, keyed by `estimated_params`. Parameters that were not estimated are not included: they stay at the model's calibration. |
+| success | `bool` | Optimizer convergence flag |
+| message | `str` | Optimizer status message |
+| fun | `float` | Objective value at optimum |
+| logprior | `float` | Log-prior at optimum |
+| logpost | `float` | Log-posterior at optimum |
+| vcov | `np.ndarray | None` | Covariance of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
+| se | `dict[str, float] | None` | Standard errors of the estimated parameters at the optimum, or `None` if `cov=False` was passed to the estimator. |
+| nfev | `int` | Objective evaluations |
+| nit | `int | None` | Iterations |
+| optimizer_config | `dict[str, Any]` | Optimizer method, bounds, and options the run was called with |
+| cov_status | `int` | `0` when the covariance was produced, otherwise why it was not |
 
 __Methods:__
 
@@ -240,45 +245,49 @@ Identical to [`MLEResult.apply_to`](#mleresult).
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| param_names | `#!python tuple[str, ...]` | Parameter order for samples |
-| samples | `#!python np.ndarray` | Retained posterior samples |
-| logpost_trace | `#!python np.ndarray` | Posterior trace for retained samples, as a density over the parameters |
-| logjac_trace | `#!python np.ndarray` | Log-jacobian of the prior transforms at each retained draw; add it to `logpost_trace` for the unconstrained density the sampler walked |
-| accepted_burn_in | `#!python int` | Proposals accepted during burn-in |
-| accepted_in_sample | `#!python int` | Proposals accepted after burn-in |
-| burn_in_seconds | `#!python float` | Seconds spent on burn-in |
-| in_sample_seconds | `#!python float` | Seconds spent on the retained phase |
-| n_draws | `#!python int` | Retained draw count |
-| burn_in | `#!python int` | Burn-in iterations |
-| thin | `#!python int` | Thinning interval |
-| sampler_config | `#!python dict[str, Any]` | The sampler configuration used to produce the result |
+| param_names | `tuple[str, ...]` | Parameter order for samples. |
+| samples | `np.ndarray` | Retained posterior samples as `(n_chains, n_draws, n_params)`. |
+| logpost_trace | `np.ndarray` | Posterior trace for retained samples, as a density over the parameters. Shaped `(n_chains, n_draws)`. |
+| logjac_trace | `np.ndarray` | Log-jacobian of the prior transforms at each retained draw; add it to `logpost_trace` for the unconstrained density the sampler walked. Shaped `(n_chains, n_draws)`. |
+| accepted_burn_in | `np.ndarray` | Proposals accepted during burn-in per chain. |
+| accepted_in_sample | `np.ndarray` | Proposals accepted after burn-in per chain. |
+| wall_seconds | `float` | Wall-clock of the sampler. Excludes initialization. |
+| init_seconds | `float` | Time spent on initialization, including the MAP and inverse Hessian computations if applicable. |
+| burn_in_seconds | `np.ndarray` | Seconds spent on burn-in per chain. |
+| in_sample_seconds | `np.ndarray` | Seconds spent on the retained phase per chain. |
+| n_chains | `int` | Number of chains. |
+| n_draws | `int` | Retained draw count per chain. |
+| burn_in | `int` | Burn-in iterations per chain. |
+| thin | `int` | Thinning interval. |
+| sampler_config | `dict[str, Any]` | The sampler configuration used to produce the result. |
 
 __Properties:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| accept_rate | `#!python float` | Accepted proposals over every step the sampler took, burn-in included |
-| accept_rate_burn_in | `#!python float` | Acceptance rate over burn-in alone, or NaN when `burn_in` is `#!python 0` |
-| accept_rate_in_sample | `#!python float` | Acceptance rate over the retained phase alone |
-| ess | `#!python dict[str, float]` | Effective sample size of each parameter's posterior mean, keyed by parameter name |
-| ess_per_second | `#!python dict[str, float]` | `ess` divided by `in_sample_seconds` |
-| mcse | `#!python dict[str, float]` | Monte Carlo standard error of each parameter's posterior mean, $\mathrm{sd}/\sqrt{\mathrm{ESS}}$ |
+| accept_rate | `list[float]` | Accepted proposals per chain over every step the sampler took, burn-in included. |
+| accept_rate_burn_in | `list[float]` | Acceptance rate per chain over burn-in alone, or NaN when `burn_in` is `0`. |
+| accept_rate_in_sample | `list[float]` | Acceptance rate per chain over the retained phase alone. |
+| ess | `dict[str, float]` | Effective sample size of each parameter's posterior mean, keyed by parameter name. |
+| ess_per_second | `dict[str, float]` | `ess` divided by `wall_seconds`. |
+| mcse | `dict[str, float]` | Monte Carlo standard error of each parameter's posterior mean, $\mathrm{sd}/\sqrt{\mathrm{ESS}}$. |
+| split_rhat | `dict[str, float]` | Split R-hat convergence diagnostic for each parameter, keyed by parameter name. |
 
 ???+ note "Effective Sample Size"
-    ESS is computed with the integrated autocorrelation time under Geyer's initial monotone sequence. Reported values are capped at `n_draws`. A parameter whose chain never moved, or whose autocorrelation has not decayed within the retained draws, reports NaN rather than raising, and that NaN carries through `ess_per_second`, `mcse`, and `mcse_quantile`.
+    ESS is computed with the integrated autocorrelation time under Geyer's initial monotone sequence. Reported values are capped at `n_chains * n_draws`. A parameter whose chain never moved, or whose autocorrelation has not decayed within the retained draws, reports NaN rather than raising, and that NaN carries through `ess_per_second`, `mcse`, and `mcse_quantile`.
 
 __Methods:__
 
 ```python
 MCMCResult.summary(
     alpha: float = 0.05, # (1)!
-    digits: int | None = 3,
+    digits: int | None = None,
 ) -> pd.DataFrame
 ```
 
 1. Significance level for the highest-posterior-density (HPD) intervals.
 
-Return a summary table reporting posterior means, standard deviations, ESS, ESS/s, MCSE for the mean, and HPD intervals for each parameter.
+Return a summary table reporting posterior means, standard deviations, split R-hat, ESS, ESS/s, MCSE for the mean, and HPD intervals for each parameter.
 
 __Inputs:__
 
@@ -291,16 +300,16 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `pd.DataFrame` | Summary table with one row per parameter and columns for posterior mean, standard deviation, ESS, ESS/s, MCSE for the mean, and HPD intervals. |
+| `pd.DataFrame` | Summary table with one row per parameter and columns for posterior mean, standard deviation, split R-hat, ESS, ESS/s, MCSE for the mean, and HPD intervals. |
 
 ```python
 MCMCResult.hpd_intervals(
     alpha: float = 0.05, # (1)!
-    digits: int | None = 3,
+    digits: int | None = None,
 ) -> dict[str, tuple[float, float]]
 ```
 
-1. Significance level. Must satisfy `#!python 0 <= alpha < 1`; each interval covers approximately `#!python 1 - alpha` of the retained marginal draws.
+1. Significance level. Must satisfy `0 <= alpha < 1`; each interval covers approximately `1 - alpha` of the retained marginal draws.
 
 Compute marginal highest-posterior-density (HPD) intervals for each parameter column.
 
@@ -315,46 +324,18 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python dict[str, tuple[float, float]]` | Mapping from parameter name to the shortest empirical marginal interval containing approximately `#!python 1 - alpha` of the retained posterior draws. |
-
-&nbsp;
-
-```python
-MCMCResult.joint_hpd_set(
-    alpha: float = 0.05, # (1)!
-    digits: int | None = 3,
-) -> tuple[np.ndarray, np.ndarray, float, np.ndarray]
-```
-
-1. Significance level. Must satisfy `#!python 0 <= alpha < 1`; the returned set covers at least `#!python 1 - alpha` of the retained joint draws.
-
-Compute an empirical joint HPD set for the full parameter vector.
-
-???+ note "Finite-Sample Joint HPD Approximation"
-    Retained draws are ranked by `#!python logpost_trace` and all draws at or above the cutoff are included in the set. If multiple draws are tied at the boundary log-posterior, they are all retained, so the realized coverage can be slightly larger than `#!python 1 - alpha`.
-
-__Inputs:__
-
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| alpha | Significance level used to determine the empirical HPD coverage. |
-| digits | Number of decimal places to round the retained draws to. `None` does not apply rounding. |
-__Returns:__
-
-| __Type__ | __Description__ |
-|:---------|----------------:|
-| `#!python tuple[np.ndarray, np.ndarray, float, np.ndarray]` | Tuple `#!python (samples, logpost, threshold, indices)` where `samples` are the retained parameter vectors in the joint HPD set, `logpost` are their posterior values, `threshold` is the cutoff log-posterior, and `indices` are positions of the retained draws in the original stored chain. |
+| `dict[str, tuple[float, float]]` | Mapping from parameter name to the shortest empirical marginal interval containing approximately `1 - alpha` of the retained posterior draws. |
 
 &nbsp;
 
 ```python
 MCMCResult.mcse_quantile(
     q: float, # (1)!
-    digits: int | None = 3,
+    digits: int | None = None,
 ) -> dict[str, float]
 ```
 
-1. Quantile whose error is reported. Must satisfy `#!python 0 < q < 1`.
+1. Quantile whose error is reported. Must satisfy `0 < q < 1`.
 
 Compute the Monte Carlo standard error of the `q` quantile for each parameter column.
 
@@ -372,18 +353,18 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python dict[str, float]` | Mapping from parameter name to the Monte Carlo standard error of that parameter's `q` quantile, or NaN where the indicator chain has no usable effective sample size. |
+| `dict[str, float]` | Mapping from parameter name to the Monte Carlo standard error of that parameter's `q` quantile, or NaN where the indicator chain has no usable effective sample size. |
 
 &nbsp;
 
 ```python
 MCMCResult.posterior_point(
-    point: Literal["mean", "map", "last"] = "mean", # (1)!
-    digits: int | None = 3,
+    point: Literal["mean", "map"] = "mean", # (1)!
+    digits: int | None = None,
 ) -> dict[str, float]
 ```
 
-1. `#!python "mean"` averages the retained draws, `#!python "map"` takes the draw maximizing `logpost_trace`, and `#!python "last"` takes the final retained draw.
+1. `"mean"` averages the retained draws, and `"map"` takes the draw maximizing `logpost_trace`.
 
 Reduce the retained posterior draws to a single parameter vector.
 
@@ -398,14 +379,14 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python dict[str, float]` | Parameter values at the selected point, keyed by parameter name. |
+| `dict[str, float]` | Parameter values at the selected point, keyed by parameter name. |
 
 &nbsp;
 
 ```python
 MCMCResult.apply_to(
     config: ModelConfig,
-    point: Literal["mean", "map", "last"] = "mean",
+    point: Literal["mean", "map"] = "mean",
 ) -> ModelConfig
 ```
 
@@ -422,7 +403,7 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python ModelConfig` | Copy of `config` carrying the selected point. Parameters that were not estimated keep their calibration values. |
+| `ModelConfig` | Copy of `config` carrying the selected point. Parameters that were not estimated keep their calibration values. |
 
 &nbsp;
 
@@ -432,7 +413,7 @@ MCMCResult.posterior_kde_plot() -> None
 
 Plot marginal posterior kernel-density estimates for each retained parameter column.
 
-This is a quick visual diagnostic for posterior shape. It is useful for checking skewness, heavy tails, and obvious multimodality in the retained draws. A separate subplot is produced for each parameter and displayed immediately with `#!python matplotlib.pyplot.show()`.
+This is a quick visual diagnostic for posterior shape. It is useful for checking skewness, heavy tails, and obvious multimodality in the retained draws. A separate subplot is produced for each parameter and displayed immediately with `matplotlib.pyplot.show()`.
 
 __Inputs:__
 
@@ -444,29 +425,7 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python None` | Displays a Matplotlib figure of marginal KDE curves and returns nothing. |
-
-&nbsp;
-
-```python
-MCMCResult.posterior_traces() -> None
-```
-
-Plot retained posterior draws for each parameter as trace diagnostics.
-
-Trace plots are useful for checking whether the retained chain appears to mix well, whether it still shows drift, and whether particular parameters exhibit unusually persistent autocorrelation or regime changes. A separate subplot is produced for each parameter and displayed immediately with `#!python matplotlib.pyplot.show()`.
-
-__Inputs:__
-
-| __Name__ | __Description__ |
-|:---------|----------------:|
-| None | This method uses the retained samples already stored on the result object. |
-
-__Returns:__
-
-| __Type__ | __Description__ |
-|:---------|----------------:|
-| `#!python None` | Displays a Matplotlib figure of per-parameter trace plots and returns nothing. |
+| `None` | Displays a Matplotlib figure of marginal KDE curves and returns nothing. |
 
 &nbsp;
 
@@ -476,7 +435,7 @@ MCMCResult.logpost_trace_plot() -> None
 
 Plot the retained log-posterior sequence across MCMC iterations.
 
-This diagnostic helps identify abrupt changes in posterior fit, long stretches of poor exploration, or chains that remain unstable even after burn-in and thinning have been applied. The plot is generated from `#!python MCMCResult.logpost_trace`, which stores one log-posterior value per retained draw, and is displayed immediately with `#!python matplotlib.pyplot.show()`.
+This diagnostic helps identify abrupt changes in posterior fit, long stretches of poor exploration, or chains that remain unstable even after burn-in and thinning have been applied. The plot is generated from `MCMCResult.logpost_trace`, which stores one log-posterior value per retained draw, and is displayed immediately with `matplotlib.pyplot.show()`.
 
 __Inputs:__
 
@@ -488,4 +447,4 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python None` | Displays a Matplotlib figure of the retained log-posterior trace and returns nothing. |
+| `None` | Displays a Matplotlib figure of the retained log-posterior trace and returns nothing. |

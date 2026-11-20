@@ -30,17 +30,20 @@ def make_mcmc_result(**overrides: Any) -> MCMCResult:
     samples = overrides.pop(
         "samples", np.zeros((_N_DRAWS, len(param_names)), dtype=np.float64)
     )
-    n_rows = int(samples.shape[0])
+    n_rows = int(samples.shape[1])
 
     fields: dict[str, Any] = {
         "param_names": param_names,
         "samples": samples,
-        "logpost_trace": np.zeros(n_rows, dtype=np.float64),
-        "logjac_trace": np.zeros(n_rows, dtype=np.float64),
-        "accepted_burn_in": 1,
-        "accepted_in_sample": 3,
-        "burn_in_seconds": 0.25,
-        "in_sample_seconds": 1.5,
+        "logpost_trace": np.zeros((1, n_rows), dtype=np.float64),
+        "logjac_trace": np.zeros((1, n_rows), dtype=np.float64),
+        "accepted_burn_in": np.asarray([1], dtype=np.int64),
+        "accepted_in_sample": np.asarray([3], dtype=np.int64),
+        "wall_seconds": 2.0,
+        "init_seconds": 0.25,
+        "burn_in_seconds": np.asarray([0.25], dtype=np.float64),
+        "in_sample_seconds": np.asarray([1.5], dtype=np.float64),
+        "n_chains": 1,
         "n_draws": n_rows,
         "burn_in": 2,
         "thin": 1,

@@ -9,14 +9,30 @@
 #define SDSGE_ESS_EUDEFVARIANCE -702
 #define SDSGE_ESS_ENODECAY -703
 #define SDSGE_ESS_ENONPOSTAU -704
-/* FFT-based autocorrelation. `arena` is 2 * next_pow2(2*n-1) floats
- * and out is n floats. Returns all acorrs as a length-n vector. */
-arena_size sdsge_acorr_fft_arena_size(const i64 n);
-int sdsge_acorr_fft(const f64 *SDSGE_RESTRICT x, const i64 n,
-                    f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT out);
 
-arena_size sdsge_ess_1d_arena_size(const i64 n);
-int sdsge_ess_1d(const f64 *SDSGE_RESTRICT x, const i64 n,
-                 f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT out);
+/* Pooled split-chain ESS and split R-hat per parameter. `x` is param-major and
+ * pooled (n_par, n_chains * N). Diagnostics come off pooled 2 * n_chains
+ * subchains, each one length N/2.
+ *
+ * ess_rhat1d: single parameter, single worker. Returns the status and writes
+ * into {`ess`, `rhat`}. Passing `rhat=NULL` skips the R-hat calculation.
+ *
+ * ess_rhat: multiple parameters, multiple workers. Writes `status` per
+ * parameter and results into {`ess`, `rhat`}. Passing `rhat=NULL` skips the
+ * R-hat calculation.
+ *
+ * Both functions can produce a valid R-hat and fail on ESS, a nonzero status
+ * doesn't automatically invalidate every output. */
+arena_size sdsge_ess_rhat1d_arena_size(const i64 N, const i64 n_chains);
+int sdsge_ess_rhat1d(const f64 *SDSGE_RESTRICT x, const i64 N,
+                     const i64 n_chains, f64 *SDSGE_RESTRICT arena,
+                     f64 *SDSGE_RESTRICT ess, f64 *SDSGE_RESTRICT rhat);
+
+arena_size sdsge_ess_rhat_arena_size(const i64 N, const i64 n_chains,
+                                     const i64 n_workers);
+void sdsge_ess_rhat(const f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_par,
+                    const i64 n_chains, const i64 n_workers,
+                    f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT ess,
+                    f64 *SDSGE_RESTRICT rhat, int *SDSGE_RESTRICT status);
 
 #endif // !SDSGE_ESS_H

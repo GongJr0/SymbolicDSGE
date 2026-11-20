@@ -396,7 +396,7 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, sdsge_obj_ctx *obj_ctx,
 
   /* Get perturbed theta0 per each non-first chain. */
   if (n_chains > 1) {
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for schedule(static) num_threads((int)opt->n_workers)
     for (i64 c = 1; c < n_chains; ++c) {
       sdsge_philox_state st;
       // (seed, modcode, chain, <0:sampler, 1:init_point>)
@@ -426,7 +426,8 @@ i64 sdsge_mcmc_run(sdsge_objective_fn logpost, sdsge_obj_ctx *obj_ctx,
   f64 init_cp = sdsge_monotime_sec();
 
   /* Kernel entry */
-#pragma omp parallel for if (n_chains > 1) schedule(static)
+#pragma omp parallel for if (n_chains > 1) schedule(static)                    \
+    num_threads((int)opt->n_workers)
   for (i64 c = 0; c < n_chains; ++c) {
     sdsge_philox_state st;
     sdsge_philox_seed(&st, opt->seed, SDSGE_MCMC_MODCODE, c, 0);

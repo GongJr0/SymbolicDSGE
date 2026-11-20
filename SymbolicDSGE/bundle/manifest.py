@@ -19,26 +19,25 @@ from numpy import ndarray
 from ..core.shock.generators import ShockParameters, ShockPathParameters
 
 # --- LAST BREAK ---
-# V16: Breakage from changes to the filter API. (#618, #619, #620, #621)
-# The old flat-form filter specification arguments became instance based
-# via Filter() and its subclasses. Estimation and MC pipelines carried
-# complete filter settings in their arguments and the API change breaks
-# those signatures. The reader itself is unaffected; however the kwargs
-# produced by older library versions are no longer legible, and the new
-# bundles no longer conform to the old signature on estimation and MC.
+# V17: Breakage from multi-chain support for MCMC results. (#624)
+# Multi-chain MCMC results do not break the bulk trace serialization
+# layout, a 1-chain run today serializes as a 1-chain run in V16.
+# However, the result container changed incompatibly, and library instances
+# that predate the change cannot read the new result spec.
 #
-# The break includes both forward and backward compatibility.
+# The break goes both ways. Making the V17 reader tolerant to V16 MCMC results
+# was ruled out in anticipation of future breaks in the `dev` release cycle.
 # ------
 
 #: Bundle format version. Bump on every manifest or member change.
-SDSGE_FORMAT_VERSION = 16
+SDSGE_FORMAT_VERSION = 17
 
 #: Oldest bundle format this reader can reconstruct.
-SDSGE_MIN_READABLE_VERSION = 16
+SDSGE_MIN_READABLE_VERSION = 17
 
 #: Most recent format change requiring a newer reader. Written into the
 #: manifest so older readers reject bundles they cannot interpret.
-SDSGE_LAST_BREAKING_VERSION = 16
+SDSGE_LAST_BREAKING_VERSION = 17
 
 MemberKind = Literal[
     "model_config",

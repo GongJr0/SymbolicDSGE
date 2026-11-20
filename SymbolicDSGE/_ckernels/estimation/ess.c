@@ -2,6 +2,7 @@
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_complex.h"
 #include <math.h>
+#include <omp.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -63,82 +64,80 @@ static inline i64 next_pow2(i64 n) {
   }
   return p;
 }
-arena_size sdsge_acorr_fft_arena_size(const i64 n) {
+static arena_size sdsge_split_acov_arena_size(const i64 N) {
+  const i64 n = N / 2;
   return make_sizer(2 * next_pow2(2 * n - 1), 0);
 }
 
-int sdsge_acorr_fft(const f64 *SDSGE_RESTRICT x, const i64 n,
-                    f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT out) {
-  if (!x || !out || n <= 0 || n > (INT64_MAX >> 2) + 1) {
-    return SDSGE_ESS_EBADSHAPE;
-  }
-
-  i64 N = 2 * n - 1;
-  i64 m = next_pow2(N);
+static void sdsge_split_acov(const f64 *SDSGE_RESTRICT x, const i64 N,
+                             f64 *SDSGE_RESTRICT arena,
+                             f64 *SDSGE_RESTRICT accum,
+                             f64 *SDSGE_RESTRICT mu_out) {
+  i64 n = N / 2;
+  i64 m = next_pow2(2 * n - 1);
 
   c128 *a = (c128 *)arena;
   memset(a + n, 0, (size_t)(m - n) * sizeof(c128));
 
-  f64 mu = 0.0;
+  f64 mu_a = 0.0;
+  f64 mu_b = 0.0;
   for (i64 i = 0; i < n; ++i) {
-    mu += x[i];
+    mu_a += x[i];
+    mu_b += x[i + n];
   }
-  mu /= (f64)n;
+  mu_a /= (f64)n;
+  mu_b /= (f64)n;
 
   for (i64 i = 0; i < n; ++i) {
-    a[i] = c128_make(x[i] - mu, 0.0);
+    a[i] = c128_make(x[i] - mu_a, x[i + n] - mu_b);
   }
   fft(a, m, 0);
 
-  for (i64 i = 0; i < m; ++i) {
-    a[i].re = c128_abs2(a[i]);
-    a[i].im = 0.0;
+  { /* k = 0 and k = m/2 are self-paired: A = Re(Z), B = Im(Z) */
+    const f64 p = a[0].re, q = a[0].im;
+    a[0].re = p * p;
+    a[0].im = q * q;
+
+    const i64 h = m / 2;
+    const f64 ph = a[h].re, qh = a[h].im;
+    a[h].re = ph * ph;
+    a[h].im = qh * qh;
+  }
+  for (i64 k = 1; k < m / 2; ++k) {
+    const i64 j = m - k;
+    const c128 zk = a[k], zj = a[j];
+    /* conj(Z[j]) = (zj.re, -zj.im) */
+    const f64 sr = zk.re + zj.re, si = zk.im - zj.im;
+    const f64 dr = zk.re - zj.re, di = zk.im + zj.im;
+    const f64 pa = 0.25 * (sr * sr + si * si);
+    const f64 pb = 0.25 * (dr * dr + di * di);
+    a[k].re = pa;
+    a[k].im = pb;
+    a[j].re = pa;
+    a[j].im = pb;
   }
 
   fft(a, m, 1);
 
-  if (a[0].re <= 0.0 || !isfinite(a[0].re)) {
-    for (i64 l = 0; l < n; ++l) {
-      out[l] = NAN;
-    }
-    return SDSGE_ESS_EUDEFVARIANCE;
+  for (i64 l = 0; l < n; ++l) {
+    accum[l] += a[l].re + a[l].im;
   }
-
-  f64 norm = 1 / a[0].re;
-
-  out[0] = 1.0; // x * (1/x) != 1.0 in fp
-  for (i64 i = 1; i < n; ++i) {
-    out[i] = a[i].re * norm;
-  }
-  return SDSGE_ESS_OK;
+  mu_out[0] = mu_a;
+  mu_out[1] = mu_b;
 }
 
-/*--- ESS 1D and ND ---*/
+/*--- ESS ---*/
 
-arena_size sdsge_ess_1d_arena_size(const i64 n) {
-  return add_arena(sdsge_acorr_fft_arena_size(n), make_sizer(n, 0));
-}
-
-int sdsge_ess_1d(const f64 *SDSGE_RESTRICT x, const i64 n,
-                 f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT out) {
-  if (n < 2) {
-    out[0] = NAN;
-    return SDSGE_ESS_EBADSHAPE;
-  }
-  f64 *acorr_a = arena;
-  f64 *rho = arena + sdsge_acorr_fft_arena_size(n).n_float;
-  int acorr_status = sdsge_acorr_fft(x, n, acorr_a, rho);
-  if (acorr_status != SDSGE_ESS_OK) {
-    out[0] = NAN;
-    return acorr_status;
-  }
-
+/* Geyer's initial positive sequence with the monotone clamp applied as a
+ * running minimum. `rho` is read in pairs, so it carries normalized
+ * autocorrelations whatever arity produced them. */
+static int geyer_tau(const f64 *SDSGE_RESTRICT rho, const i64 n,
+                     f64 *SDSGE_RESTRICT tau_out) {
   f64 total = 0.0;
   f64 prev = INFINITY;
-  f64 pair, tau;
   int decayed = 0;
-  for (i64 m = 0; 2 * m + 1 < n; ++m) {
-    pair = rho[2 * m] + rho[2 * m + 1];
+  for (i64 k = 0; 2 * k + 1 < n; ++k) {
+    f64 pair = rho[2 * k] + rho[2 * k + 1];
     if (pair <= 0.0) {
       decayed = 1;
       break;
@@ -150,15 +149,118 @@ int sdsge_ess_1d(const f64 *SDSGE_RESTRICT x, const i64 n,
     prev = pair;
   }
   if (!decayed) {
-    out[0] = NAN;
     return SDSGE_ESS_ENODECAY;
   }
-
-  tau = -1.0 + 2.0 * total;
+  const f64 tau = -1.0 + 2.0 * total;
   if (tau <= 0.0) {
-    out[0] = NAN;
     return SDSGE_ESS_ENONPOSTAU;
   }
-  out[0] = (f64)n / tau;
+  *tau_out = tau;
   return SDSGE_ESS_OK;
+}
+
+arena_size sdsge_ess_rhat1d_arena_size(const i64 N, const i64 n_chains) {
+  i64 asz = sdsge_split_acov_arena_size(N).n_float + N / 2 + 2 * n_chains;
+  asz += (8 - asz % 8) % 8; /* round up to multiple of 8 for alignment */
+  return make_sizer(asz, 0);
+}
+
+int sdsge_ess_rhat1d(const f64 *SDSGE_RESTRICT x, const i64 N,
+                     const i64 n_chains, f64 *SDSGE_RESTRICT arena,
+                     f64 *SDSGE_RESTRICT ess, f64 *SDSGE_RESTRICT rhat) {
+  if (N < 4 || N > (INT64_MAX >> 2) + 1 || n_chains < 1) {
+    *ess = NAN;
+    if (rhat) {
+      *rhat = NAN;
+    }
+    return SDSGE_ESS_EBADSHAPE;
+  }
+  const i64 n = N / 2;
+  const i64 m = next_pow2(2 * n - 1);
+  const i64 n_sub = 2 * n_chains;
+  const i64 acova = sdsge_split_acov_arena_size(N).n_float;
+
+  const f64 acov_scale = 1.0 / ((f64)n_sub * (f64)m * (f64)n);
+  const f64 w_scale = 1.0 / ((f64)n_sub * (f64)m * (f64)(n - 1));
+
+  f64 *a = arena;
+  f64 *accum = a + acova;
+  f64 *mus = accum + n;
+  memset(accum, 0, (size_t)n * sizeof(f64));
+
+  *ess = NAN;
+  if (rhat) {
+    *rhat = NAN;
+  }
+
+  for (i64 c = 0; c < n_chains; ++c) {
+    sdsge_split_acov(&x[c * N], N, a, accum, mus + 2 * c);
+  }
+  if (!isfinite(accum[0]) || accum[0] <= 0.0) {
+    return SDSGE_ESS_EUDEFVARIANCE;
+  }
+  f64 mubar = 0.0;
+  for (i64 i = 0; i < n_sub; ++i) {
+    mubar += mus[i];
+  }
+  mubar /= (f64)n_sub;
+
+  f64 b = 0.0;
+  for (i64 i = 0; i < n_sub; ++i) {
+    const f64 d = mus[i] - mubar;
+    b += d * d;
+  }
+  b /= (f64)(n_sub - 1);
+
+  const f64 w = accum[0] * w_scale;
+  const f64 var_plus = accum[0] * acov_scale + b;
+
+  if (rhat) {
+    *rhat = sqrt(var_plus / w);
+  }
+
+  for (i64 l = 1; l < n; ++l) {
+    accum[l] = 1.0 - (w - accum[l] * acov_scale) / var_plus;
+  }
+  accum[0] = 1.0;
+
+  f64 tau = 0.0;
+  int rc = geyer_tau(accum, n, &tau);
+  if (rc != SDSGE_ESS_OK) {
+    return rc;
+  }
+  *ess = (f64)(n_sub * n) / tau;
+
+  return SDSGE_ESS_OK;
+}
+
+arena_size sdsge_ess_rhat_arena_size(const i64 N, const i64 n_chains,
+                                     const i64 n_workers) {
+  return make_sizer(
+      n_workers * sdsge_ess_rhat1d_arena_size(N, n_chains).n_float, 0);
+}
+
+void sdsge_ess_rhat(const f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_par,
+                    const i64 n_chains, const i64 n_workers,
+                    f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT ess,
+                    f64 *SDSGE_RESTRICT rhat, int *SDSGE_RESTRICT status) {
+  if (N < 4 || N > (INT64_MAX >> 2) + 1 || n_par < 1 || n_chains < 1) {
+    for (i64 p = 0; p < n_par; ++p) {
+      ess[p] = NAN;
+      if (rhat) {
+        rhat[p] = NAN;
+      }
+      status[p] = SDSGE_ESS_EBADSHAPE;
+    }
+    return;
+  }
+  i64 per_par = sdsge_ess_rhat1d_arena_size(N, n_chains).n_float;
+#pragma omp parallel for num_threads((int)n_workers) if (n_par > 1)            \
+    schedule(static)
+  for (i64 p = 0; p < n_par; ++p) {
+    const i64 wid = omp_get_thread_num();
+    f64 *pa = arena + wid * per_par;
+    status[p] = sdsge_ess_rhat1d(&x[p * n_chains * N], N, n_chains, pa, &ess[p],
+                                 rhat ? &rhat[p] : NULL);
+  }
 }

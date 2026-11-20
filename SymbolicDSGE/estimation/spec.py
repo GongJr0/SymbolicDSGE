@@ -210,10 +210,13 @@ class MCMCResultMeta(TypedDict):
     """
 
     param_names: Sequence[str]
-    accepted_burn_in: int
-    accepted_in_sample: int
-    burn_in_seconds: float
-    in_sample_seconds: float
+    accepted_burn_in: list[int]
+    accepted_in_sample: list[int]
+    wall_seconds: float
+    init_seconds: float
+    burn_in_seconds: list[float]
+    in_sample_seconds: list[float]
+    n_chains: int
     n_draws: int
     burn_in: int
     thin: int
@@ -228,7 +231,7 @@ class MCMCResultSpec:
     ----------
     samples : Sequence[Sequence[float]]
         Posterior samples in bundle-ready ND array form.
-    logpost_trace : Sequence[float]
+    logpost_trace : [Sequence[float]
         Log-posterior trace for the samples.
     logjac_trace : Sequence[float]
         Log-Jacobian trace for the samples.

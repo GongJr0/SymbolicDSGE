@@ -641,6 +641,7 @@ class Estimator:
         self,
         *,
         n_draws: int,
+        n_chains: int = 1,
         burn_in: int = 1000,
         thin: int = 1,
         theta0: Mapping[str, float] | None = None,
@@ -650,12 +651,14 @@ class Estimator:
         adapt_end: int | Literal["burn_in"] | None = "burn_in",
         adapt_interval: int = 1,
         adapt_epsilon: float = 1e-8,
+        init_scale: float = 1.0,
         proposal_scale: float = 1,
         compute_map: bool = True,
         map_options: dict[str, Any] | None = None,
         proposal_cov: NDF | None = None,
         cov_fd_step_scale: float = 1.0,
         cov_fd_absolute_floor: float = 0.1,
+        n_jobs: int | None = None,
     ) -> MCMCResult:
         """Markov Chain Monte Carlo sampling of the posterior distribution over the estimated parameters.
 
@@ -663,6 +666,8 @@ class Estimator:
         ----------
         n_draws : int
             Number of MCMC draws to generate (after burn-in and thinning).
+        n_chains : int
+            Number of independent MCMC chains to run in parallel. Each chain will have its own burn-in and thinning applied.
         burn_in : int
             Number of initial draws to discard as burn-in.
         thin : int
@@ -683,6 +688,8 @@ class Estimator:
             Number of iterations between adaptation steps. Must be at least 1.
         adapt_epsilon : float
             Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
+        init_scale : float
+            Scaling factor for the standard deviation of the initial points in each chain. Points are drawn from a Gaussian centered at the first-chain theta0 and proposal cov. ``compute_map=True`` starts the first chain at the MAP point and the associated proposal covariance is shared across all chains.
         proposal_scale : float
             Scaling factor for proposal **standard deviation**: `2.38/sqrt(d) * proposal_scale`.
             The default of 1 corresponds to the standard "optimal" point for a Gaussian random-walk MH.
@@ -697,6 +704,8 @@ class Estimator:
             Scale of the finite difference approximation step used to compute the Hessian for the proposal covariance. Used when solving for the proposal covariance from the MAP estimate. Ignored if ``proposal_cov`` is provided.
         cov_fd_absolute_floor : float
             Absolute floor for the finite difference approximation step used to compute the Hessian for the proposal covariance. Used when solving for the proposal covariance from the MAP estimate. Ignored if ``proposal_cov`` is provided.
+        n_jobs : int | None
+            Number of parallel jobs to run.
 
         Returns
         -------
@@ -712,7 +721,7 @@ class Estimator:
         if self.priors is None:
             raise ValueError("MCMC requires priors to define a posterior.")
 
-        total_draws = n_draws * thin + burn_in
+        total_draws = n_chains * (n_draws * thin + burn_in)
         if adapt_end == "burn_in":
             adapt_end = max(1, burn_in)
         elif adapt_end is None:
@@ -743,7 +752,7 @@ class Estimator:
             ctx_dto=ctx,
             theta0=theta,
             seed=seed,
-            n_chains=1,
+            n_chains=n_chains,
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
@@ -752,59 +761,66 @@ class Estimator:
             adapt_end=adapt_end,
             adapt_interval=adapt_interval,
             adapt_epsilon=adapt_epsilon,
-            init_scale=1.0,
+            init_scale=init_scale,
             proposal_scale=proposal_scale,
             proposal_cov=proposal_cov,
             cov_fd_step_scale=cov_fd_step_scale,
             cov_fd_absolute_floor=cov_fd_absolute_floor,
             compute_map=compute_map,
             map_options=native_map_options,
+            n_jobs=n_jobs,
         )
         elapsed = max(perf_counter() - t0, np.finfo(float).eps)
 
-        total_steps = int(out["total_steps"][0])
-        kept = out["samples"][0]
+        total_steps = int(sum(out["total_steps"]))
 
         print(
             f"MCMC sampling concluded in {elapsed:.2f} seconds with {float(total_steps / elapsed):.2f} iterations per second."
         )
+        self._report_search_warning_count("mcmc", out["bk_violations"])
 
         usr_opts = dict(map_options) if map_options is not None else None
         if usr_opts and "bounds" in usr_opts:
             usr_opts["bounds"] = r.serialize_bounds(usr_opts["bounds"])
 
-        result = MCMCResult(
+        sampler_config = {
+            "n_chains": int(n_chains),
+            "n_draws": int(n_draws),
+            "burn_in": int(burn_in),
+            "thin": int(thin),
+            "theta0": dict(theta0) if theta0 is not None else None,
+            "adapt": bool(adapt),
+            "adapt_start": int(adapt_start),
+            "adapt_end": int(adapt_end),
+            "adapt_interval": int(adapt_interval),
+            "init_scale": float(init_scale),
+            "proposal_scale": float(proposal_scale),
+            "adapt_epsilon": float(adapt_epsilon),
+            "compute_map": bool(compute_map),
+            "map_options": usr_opts,
+            "proposal_cov": (
+                proposal_cov.tolist() if proposal_cov is not None else None
+            ),
+            "cov_fd_step_scale": float(cov_fd_step_scale),
+            "cov_fd_absolute_floor": float(cov_fd_absolute_floor),
+            "n_jobs": int(n_jobs) if n_jobs is not None else None,
+            "random_state": int(seed),
+        }
+
+        return MCMCResult(
             param_names=tuple(self.param_names),
-            samples=kept,
-            logpost_trace=out["logpost_trace"][0],
-            logjac_trace=out["logjac_trace"][0],
-            accepted_burn_in=out["accepted_burn_in"][0],
-            accepted_in_sample=out["accepted_in_sample"][0],
-            burn_in_seconds=out["burn_in_t"][0],
-            in_sample_seconds=out["in_sample_t"][0],
+            samples=out["samples"],
+            logpost_trace=out["logpost_trace"],
+            logjac_trace=out["logjac_trace"],
+            accepted_burn_in=out["accepted_burn_in"],
+            accepted_in_sample=out["accepted_in_sample"],
+            wall_seconds=out["wall_t"],
+            init_seconds=out["init_t"],
+            burn_in_seconds=out["burn_in_t"],
+            in_sample_seconds=out["in_sample_t"],
+            n_chains=n_chains,
             n_draws=n_draws,
             burn_in=burn_in,
             thin=thin,
-            sampler_config={
-                "n_draws": int(n_draws),
-                "burn_in": int(burn_in),
-                "thin": int(thin),
-                "theta0": dict(theta0) if theta0 is not None else None,
-                "adapt": bool(adapt),
-                "adapt_start": int(adapt_start),
-                "adapt_end": int(adapt_end),
-                "adapt_interval": int(adapt_interval),
-                "proposal_scale": float(proposal_scale),
-                "adapt_epsilon": float(adapt_epsilon),
-                "compute_map": bool(compute_map),
-                "map_options": usr_opts,
-                "proposal_cov": (
-                    proposal_cov.tolist() if proposal_cov is not None else None
-                ),
-                "cov_fd_step_scale": float(cov_fd_step_scale),
-                "cov_fd_absolute_floor": float(cov_fd_absolute_floor),
-                "random_state": int(seed),
-            },
+            sampler_config=sampler_config,
         )
-        self._report_search_warning_count("mcmc", out["bk_violations"])
-        return result

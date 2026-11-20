@@ -206,7 +206,6 @@ class BundleBuilder:
         return self
 
     # Estimation
-
     def add_estimation(
         self,
         source: Estimator,
@@ -234,7 +233,6 @@ class BundleBuilder:
         encoding = _encoding(as_parquet)
         dpath = _ESTIMATION_DATA.format(ext=encoding.ext)
         ppath = _ESTIMATION_POSTERIOR.format(ext=encoding.ext)
-        posterior_bytes = encoding.encode
 
         def observed_bytes(y: Any) -> bytes:
             if as_parquet:
@@ -262,7 +260,7 @@ class BundleBuilder:
 
                     self._add(
                         Member(path=ppath, kind="estimation_trace"),
-                        posterior_bytes(
+                        encoding.encode(
                             {
                                 "samples": mcmc_spec.samples,
                                 "logpost": mcmc_spec.logpost_trace,
