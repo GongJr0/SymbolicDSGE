@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
+import warnings
 
 import numpy as np
 from numpy import float64
@@ -18,7 +19,7 @@ from ..spec import (
     MCMCResultSpec,
 )
 
-from ..._ckernels.estimation import ess_rhat, hpd_intervals, mcse_quantile
+from ..._ckernels.estimation import ess_rhat, hpd_intervals, mcse_quantile, marginal_kde
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
@@ -298,10 +299,9 @@ class MCMCResult:
         grid_points : int
             Number of points in the grid for evaluating the KDE.
         """
-        from scipy.stats import gaussian_kde
         import matplotlib.pyplot as plt
 
-        samples = self.samples.reshape(-1, len(self.param_names))
+        kdes = marginal_kde(self.samples, grid_points=grid_points)
 
         fig_sq = np.ceil(np.sqrt(len(self.param_names)))
         fig, axes = plt.subplots(
@@ -313,12 +313,16 @@ class MCMCResult:
             ax = ax[:-1]
 
         for i, name in enumerate(self.param_names):
-            col = np.asarray(samples[:, i], dtype=float64)
-            kde = gaussian_kde(col)
-            x_min, x_max = col.min(), col.max()
-            x_grid = np.linspace(x_min, x_max, grid_points)
-            ax[i].plot(x_grid, kde(x_grid))
+            x_grid, kde = kdes[i]
+
             ax[i].set_title(name)
+            if np.isnan(kde).all():
+                warnings.warn(
+                    f"Parameter {name!r} has undefined or zero variance, cannot compute KDE.",
+                    UserWarning,
+                )
+                continue
+            ax[i].plot(x_grid, kde)
         plt.tight_layout()
         plt.show()
 

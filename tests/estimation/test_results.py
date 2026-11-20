@@ -77,16 +77,9 @@ def test_result_plot_methods_execute_without_gui(monkeypatch):
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    import scipy.stats
 
-    calls: list[str] = []
-
-    class _FakeKDE:
-        def __call__(self, x):
-            return np.ones_like(x, dtype=np.float64)
-
-    monkeypatch.setattr(plt, "show", lambda: calls.append("show"))
-    monkeypatch.setattr(scipy.stats, "gaussian_kde", lambda col: _FakeKDE())
+    calls: list[int] = []
+    monkeypatch.setattr(plt, "show", lambda: calls.append(1))
 
     res = make_mcmc_result(
         param_names=["a", "b", "c"],
@@ -105,7 +98,36 @@ def test_result_plot_methods_execute_without_gui(monkeypatch):
     res.posterior_kde_plot()
     res.logpost_trace_plot()
 
-    assert calls == ["show", "show"]
+    assert sum(calls) == 2
+
+
+def test_posterior_kde_plot_warns_and_skips_a_constant_parameter(monkeypatch):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    calls: list[str] = []
+    monkeypatch.setattr(plt, "show", lambda: calls.append("show"))
+
+    res = make_mcmc_result(
+        param_names=["a", "b", "c"],
+        samples=np.array(
+            [
+                [0.0, 4.0, 2.0],
+                [0.5, 4.0, 2.5],
+                [1.0, 4.0, 3.0],
+            ],
+            dtype=np.float64,
+        ).reshape(1, 3, 3),
+    )
+
+    with pytest.warns(UserWarning, match="'b'") as record:
+        res.posterior_kde_plot(grid_points=50)
+
+    assert len(record) == 1
+    assert calls == ["show"]
+    assert [len(ax.lines) for ax in plt.gcf().axes] == [1, 0, 1]
 
 
 def test_map_result_spec_roundtrips():

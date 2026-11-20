@@ -1,5 +1,6 @@
 #include "transforms.h"
 #include "../_common/as241.h"
+#include "../_common/sdsge_common.h"
 #include <math.h>
 
 /* LOG TRANSFORM */
@@ -147,9 +148,6 @@ void sdsge_logit_grad_ldet_abs_jac_inv_arr(const f64 *SDSGE_RESTRICT y,
 }
 
 /* PROBIT TRANSFORM */
-
-/* 1/sqrt(2*pi), for the standard-normal pdf. */
-#define SDSGE_INV_SQRT_2PI 0.3989422804014327
 
 /* Standard-normal pdf and CDF. The forward map's inverse-CDF (ndtri) is
    Wichura AS 241 from _common; these two mirror the scipy norm.pdf / norm.cdf

@@ -25,6 +25,7 @@ typedef double f64;
 #define TWO_PI 6.283185307179586
 #define PI 3.141592653589793
 #define SQRT2 1.4142135623730951
+#define SDSGE_INV_SQRT_2PI 0.3989422804014327
 
 /* Status conventions, shared by every kernel in the tree.
  *

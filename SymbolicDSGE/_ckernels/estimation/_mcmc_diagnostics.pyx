@@ -1,5 +1,6 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
 
+from libc.math cimport isfinite
 from libc.stdint cimport int64_t
 import numpy as np
 import os
@@ -36,6 +37,11 @@ cdef extern from "mcse.h":
     void sdsge_mcse_quantile(double *x, const int64_t N, const int64_t n_par,
                              const int64_t n_chains, const int64_t n_workers,
                              const double q, double *mcse, double *arena) nogil
+
+cdef extern from "kde.h":
+    void sdsge_marginal_kde(const double *x, const int64_t N, const int64_t n_par,
+                            int64_t n_chains, const int64_t m, const int64_t n_workers,
+                            const double factor, double *grid, double *density) nogil
 
 SDSGE_ESS_OK = c_SDSGE_ESS_OK
 SDSGE_ESS_EBADSHAPE = c_SDSGE_ESS_EBADSHAPE
@@ -156,3 +162,52 @@ def mcse_quantile(x, double q):
             &xv[0], N, n_par, n_chains, n_workers, q, &mcsev[0], &arena[0]
         )
     return mcse
+
+
+cdef double _kde_factor(object bandwidth, int64_t n) except? -1.0:
+    cdef double factor
+    if isinstance(bandwidth, str):
+        if bandwidth == "scott":
+            return (<double>n) ** -0.2
+        if bandwidth == "silverman":
+            return (0.75 * n) ** -0.2
+        raise ValueError(
+            f"Unknown bandwidth rule {bandwidth!r}; expected 'scott', "
+            "'silverman', or a positive factor."
+        )
+    factor = bandwidth
+    if not (factor > 0.0 and isfinite(factor)):
+        raise ValueError(f"Bandwidth factor must be positive and finite, got {factor}.")
+    return factor
+
+
+def marginal_kde(x, int64_t grid_points, object bandwidth="scott"):
+    if x.ndim != 3:
+        raise ValueError("Input must be a 3D array")
+    cdef int64_t n_chains = x.shape[0]
+    cdef int64_t N = x.shape[1]
+    cdef int64_t n_par = x.shape[2]
+    S = n_chains * N
+    if S < 2:
+        raise ValueError("Input must have at least two samples.")
+    if n_par < 1:
+        raise ValueError("Input must have at least one parameter.")
+    if grid_points < 2:
+        raise ValueError("`grid_points` must be at least 2.")
+
+    cdef double factor = _kde_factor(bandwidth, S)
+    cdef int64_t n_workers = worker_count(n_par)
+
+    cdef double[::1] xv = flat_parmajor(x)
+    cdef double[:, ::1] gridv, densityv
+    grid = np.empty((n_par, grid_points), dtype=np.float64)
+    density = np.empty((n_par, grid_points), dtype=np.float64)
+    gridv = grid
+    densityv = density
+
+    with nogil:
+        sdsge_marginal_kde(
+            &xv[0], N, n_par, n_chains, grid_points, n_workers, factor,
+            &gridv[0, 0], &densityv[0, 0],
+        )
+    return tuple(zip(grid, density))
