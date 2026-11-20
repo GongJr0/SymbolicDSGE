@@ -24,16 +24,10 @@ EUDEFVARIANCE = SDSGE_ESS_EUDEFVARIANCE
 ENODECAY = SDSGE_ESS_ENODECAY
 ENONPOSTAU = SDSGE_ESS_ENONPOSTAU
 
-#: Lag-1 autocorrelation of -0.5 with nothing beyond it, so the pair sums never
-#: turn and the scan runs out of lags.
+NONPOSITIVE_TAU = np.tile([1.0, -1.0, 1.0, -1.0, 1.0, 0.0], 170).reshape(1, 1020, 1)
+CONSTANT = np.ones((1, 1024, 1))
 half = np.tile([1.0, -1.0], 256)
 UNDECAYED = np.concatenate([half + 10.0, half - 10.0]).reshape(1, 1024, 1)
-
-#: Five alternations and a gap per period puts ``tau`` near -0.72 at any length,
-#: far enough from zero that the verdict does not ride on rounding.
-NONPOSITIVE_TAU = np.tile([1.0, -1.0, 1.0, -1.0, 1.0, 0.0], 170).reshape(1, 1020, 1)
-
-CONSTANT = np.ones((1, 1024, 1))
 
 
 def _ar1(n: int, phi: float, seed: int) -> np.ndarray:
@@ -47,7 +41,7 @@ def _ar1(n: int, phi: float, seed: int) -> np.ndarray:
 
 
 @pytest.mark.parametrize("phi", [0.0, 0.5, 0.9, 0.98])
-def test_ess1d_recovers_the_ar1_autocorrelation_time(phi):
+def test_ess_recovers_the_ar1_autocorrelation_time(phi):
     n = 20000
     tau = n / ess_rhat(_ar1(n, phi, seed=int(phi * 100)))[0][0]
     assert tau == pytest.approx((1.0 + phi) / (1.0 - phi), rel=0.15)

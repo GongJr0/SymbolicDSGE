@@ -142,7 +142,7 @@ Estimator.mcmc(
     proposal_scale: float = 1,  # (11)!
     compute_map: bool = True,
     map_options: dict[str, Any] | None = None,  # (12)!
-    proposal_cov: np.ndarray | None = None,  # (14)!
+    proposal_cov: np.ndarray | None = None,  # (13)!
     cov_fd_step_scale: float = 1.0,
     cov_fd_absolute_floor: float = 0.1,
     n_jobs: int | None = None,
@@ -161,7 +161,7 @@ Integer iteration indices must be greater than `0`, the adaptation algorithm req
 after the burn-in phase, and integer values are the iteration at which adaptation stops.
 8. Number of iterations between adaptation steps. Must be at least 1.
 9. Small constant added to the diagonal of the proposal covariance during adaptation to ensure positive definiteness.
-10. Scaling factor for the proposal **standard deviation** used to sample initial theta points for multiple chains. The first chain starts at `theta0` or the MAP estimate, subsequent chains are a gaussian random sample around that point with `init_scale * proposal_std`.
+10. Scaling factor for the proposal **standard deviation** used to sample initial theta points for multiple chains. The first chain starts at `theta0` or the MAP estimate; subsequent chains are a Gaussian random sample around that point with `init_scale * proposal_std`.
 11. Scaling factor for proposal **standard deviation**: `2.38/sqrt(d) * proposal_scale`. The default of 1 corresponds to the standard "optimal" point for a Gaussian random-walk MH.
 12. Passed to `map(...)` if `compute_map=True`. If `None`, defaults are used. Refer to [Estimator.map](#map) for the available options.
 13. Proposal covariance for the sampler. It's mutually exclusive with `compute_map=True` since the MAP estimate is used as the differentiation point for the proposal covariance and the `theta0` a chain starts at.
@@ -271,6 +271,7 @@ __Properties:__
 | ess | `dict[str, float]` | Effective sample size of each parameter's posterior mean, keyed by parameter name. |
 | ess_per_second | `dict[str, float]` | `ess` divided by `wall_seconds`. |
 | mcse | `dict[str, float]` | Monte Carlo standard error of each parameter's posterior mean, $\mathrm{sd}/\sqrt{\mathrm{ESS}}$. |
+| split_rhat | `dict[str, float]` | Split R-hat convergence diagnostic for each parameter, keyed by parameter name. |
 
 ???+ note "Effective Sample Size"
     ESS is computed with the integrated autocorrelation time under Geyer's initial monotone sequence. Reported values are capped at `n_chains * n_draws`. A parameter whose chain never moved, or whose autocorrelation has not decayed within the retained draws, reports NaN rather than raising, and that NaN carries through `ess_per_second`, `mcse`, and `mcse_quantile`.
@@ -280,7 +281,7 @@ __Methods:__
 ```python
 MCMCResult.summary(
     alpha: float = 0.05, # (1)!
-    digits: int | None = 3,
+    digits: int | None = None,
 ) -> pd.DataFrame
 ```
 
@@ -299,12 +300,12 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `pd.DataFrame` | Summary table with one row per parameter and columns for posterior mean, standard deviation, ESS, ESS/s, MCSE for the mean, and HPD intervals. |
+| `pd.DataFrame` | Summary table with one row per parameter and columns for posterior mean, standard deviation, split R-hat, ESS, ESS/s, MCSE for the mean, and HPD intervals. |
 
 ```python
 MCMCResult.hpd_intervals(
     alpha: float = 0.05, # (1)!
-    digits: int | None = 3,
+    digits: int | None = None,
 ) -> dict[str, tuple[float, float]]
 ```
 
@@ -330,7 +331,7 @@ __Returns:__
 ```python
 MCMCResult.mcse_quantile(
     q: float, # (1)!
-    digits: int | None = 3,
+    digits: int | None = None,
 ) -> dict[str, float]
 ```
 
@@ -359,7 +360,7 @@ __Returns:__
 ```python
 MCMCResult.posterior_point(
     point: Literal["mean", "map"] = "mean", # (1)!
-    digits: int | None = 3,
+    digits: int | None = None,
 ) -> dict[str, float]
 ```
 
