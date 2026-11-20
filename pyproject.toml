@@ -25,6 +25,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "scipy>=1.16.3",
     "sympy>=1.14.0",
+    "threadpoolctl>=3.8.0",
 ]
 
 [project.urls]
@@ -70,7 +71,6 @@ dev = [
     "pytest-xdist>=3.8.0",
     "mkdocs-charts-plugin>=0.0.13",
     "ruff>=0.17.3",
-    "threadpoolctl>=3.8.0",
 ]
 
 jupyter = [

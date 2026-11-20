@@ -4364,6 +4364,7 @@ dependencies = [
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "sympy" },
+    { name = "threadpoolctl" },
 ]
 
 [package.optional-dependencies]
@@ -4400,7 +4401,6 @@ dev = [
     { name = "scipy-stubs", version = "1.18.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "setuptools" },
     { name = "tabulate" },
-    { name = "threadpoolctl" },
     { name = "types-pyyaml" },
 ]
 jupyter = [
@@ -4426,6 +4426,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "scipy", specifier = ">=1.16.3" },
     { name = "sympy", specifier = ">=1.14.0" },
+    { name = "threadpoolctl", specifier = ">=3.8.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'ui'", specifier = ">=0.54.0" },
 ]
 provides-extras = ["fred", "ui"]
@@ -4453,7 +4454,6 @@ dev = [
     { name = "scipy-stubs", specifier = ">=1.16.3.2" },
     { name = "setuptools", specifier = ">=84.2.1" },
     { name = "tabulate", specifier = ">=0.9.0" },
-    { name = "threadpoolctl", specifier = ">=3.8.0" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20261103" },
 ]
 jupyter = [
