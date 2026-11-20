@@ -1,5 +1,6 @@
 #include "transforms.h"
 #include "../_common/as241.h"
+#include "../_common/sdsge_common.h"
 #include <math.h>
 
 /* LOG TRANSFORM */
