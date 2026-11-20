@@ -64,3 +64,26 @@ def mcse_quantile(x: _F64, q: float) -> _F64:
 
     """
     ...
+
+def marginal_kde(
+    x: _F64, grid_points: int, bandwidth: str | float = "scott"
+) -> tuple[tuple[_F64, _F64], ...]:
+    """Compute the 1D Gaussian KDE of each parameter over its pooled chains.
+
+    Parameters
+    ----------
+    x : _F64
+        A 3D array of shape (n_chains, n_samples, n_parameters) containing the samples.
+    grid_points : int
+        Number of evenly spaced points spanning each parameter's sample range,
+        at least 2. The resulting grid is equivalent to a ``np.linspace`` call.
+    bandwidth : str | float
+        ``"scott"``, ``"silverman"``, or a positive factor on the sample standard
+        deviation.
+
+    Returns
+    -------
+    tuple[tuple[_F64, _F64], ...]
+        A tuple of (grid, density) per parameter, both shaped (grid_points,).
+    """
+    ...

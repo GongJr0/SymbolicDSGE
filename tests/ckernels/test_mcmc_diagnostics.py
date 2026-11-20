@@ -1,18 +1,21 @@
-"""Tests for the ESS kernel in ``_ckernels/estimation``.
+"""Tests for the MCMC diagnostics kernels in ``_ckernels/estimation``.
 
 An AR(1) has ``tau = (1 + phi) / (1 - phi)`` in closed form, which is the oracle
 for the estimator; the tolerance is wide because ``tau`` is itself estimated off
 a finite chain. The four status codes need chains a sampler cannot produce, so
-each has a deterministic generator rather than a seeded draw.
+each has a deterministic generator rather than a seeded draw. The marginal KDE's
+oracle is ``scipy.stats.gaussian_kde`` evaluated on the kernel's own grid.
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy.stats import gaussian_kde
 
 from SymbolicDSGE._ckernels.estimation._mcmc_diagnostics import (
     ess_rhat,
+    marginal_kde,
     SDSGE_ESS_EBADSHAPE,
     SDSGE_ESS_EUDEFVARIANCE,
     SDSGE_ESS_ENODECAY,
@@ -87,3 +90,28 @@ def test_ess_is_invariant_to_time_reversal():
     forward = ess_rhat(chain)[0][0]
     reverse = ess_rhat(chain[::-1])[0][0]
     assert forward == pytest.approx(reverse, rel=1e-12)
+
+
+@pytest.mark.parametrize("bandwidth", ["scott", "silverman", 0.4])
+def test_marginal_kde_matches_scipy_gaussian_kde(bandwidth):
+    rng = np.random.default_rng(7)
+    x = np.stack(
+        [
+            rng.standard_normal((3, 4000)),
+            rng.gamma(2.0, size=(3, 4000)),
+            3.0 + 0.1 * rng.standard_t(4, size=(3, 4000)),
+        ],
+        axis=-1,
+    )
+
+    for p, (grid, density) in enumerate(marginal_kde(x, 500, bandwidth)):
+        column = x[:, :, p].reshape(-1)
+        linspace = np.linspace(column.min(), column.max(), 500)
+        grid_atol = 4 * np.finfo(float).eps * np.abs(linspace).max()
+        np.testing.assert_allclose(grid, linspace, rtol=0.0, atol=grid_atol)
+        reference = gaussian_kde(column, bw_method=bandwidth)(grid)
+
+        # Terms under 2**-60 of a sample's peak are not accumulated.
+        np.testing.assert_allclose(
+            density, reference, rtol=0.0, atol=1e-12 * reference.max()
+        )
