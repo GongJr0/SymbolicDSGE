@@ -281,7 +281,7 @@ int sdsge_ess_quantile1d(f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_chains,
   }
   const i64 S = N * n_chains;
   const i64 per_sub = N / 2;
-  const f64 trunc = S * log10((f64)S);
+  const f64 cap = S * log10((f64)S);
 
   f64 *aess = arena;
   f64 *q_scratch = aess + sdsge_ess_rhat1d_arena_size(N, n_chains).n_float;
@@ -310,7 +310,7 @@ int sdsge_ess_quantile1d(f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_chains,
     *ess = NAN;
     return rc;
   }
-  *ess = *ess < 0.0 ? 0.0 : *ess > trunc ? trunc : *ess;
+  *ess = *ess < 0.0 ? 0.0 : *ess > cap ? cap : *ess;
   return SDSGE_ESS_OK;
 }
 
