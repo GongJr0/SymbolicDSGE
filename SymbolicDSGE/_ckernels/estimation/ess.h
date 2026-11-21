@@ -35,4 +35,16 @@ void sdsge_ess_rhat(const f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_par,
                     f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT ess,
                     f64 *SDSGE_RESTRICT rhat, int *SDSGE_RESTRICT status);
 
+arena_size sdsge_ess_quantile1d_arena_size(const i64 N, const i64 n_chains);
+int sdsge_ess_quantile1d(f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_chains,
+                         const f64 q, f64 *SDSGE_RESTRICT arena,
+                         f64 *SDSGE_RESTRICT ess);
+
+arena_size sdsge_ess_quantile_arena_size(const i64 N, const i64 n_chains,
+                                         const i64 n_workers);
+void sdsge_ess_quantile(f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_par,
+                        const i64 n_chains, const i64 n_workers, const f64 q,
+                        f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT ess,
+                        int *SDSGE_RESTRICT status);
+
 #endif // !SDSGE_ESS_H

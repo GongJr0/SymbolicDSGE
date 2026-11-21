@@ -25,6 +25,13 @@ cdef extern from "ess.h":
                         const int64_t n_workers, double *arena, double *ess,
                         double *rhat, int *status) nogil
 
+    arena_size sdsge_ess_quantile_arena_size(const int64_t N, const int64_t n_chains,
+                                             const int64_t n_workers) nogil
+    void sdsge_ess_quantile(double *x, const int64_t N, const int64_t n_par,
+                            const int64_t n_chains, const int64_t n_workers,
+                            const double q, double *arena, double *ess,
+                            int *status) nogil
+
 cdef extern from "order_stats.h":
     void sdsge_hpd_intervals(double *pooled, const double alpha, const int64_t S,
                              const int64_t n_par, const int64_t n_workers,
@@ -82,14 +89,14 @@ def ess_rhat(x):
     cdef int64_t asz = sdsge_ess_rhat_arena_size(N, n_chains, n_workers).n_float
     cdef double[::1] arena = np.empty(asz, dtype=np.float64)
 
-    cdef double[::1] outv, rhatv
+    cdef double[::1] essv, rhatv
     cdef int[::1] statusv
 
-    out = np.empty(n_par, dtype=np.float64)
+    ess = np.empty(n_par, dtype=np.float64)
     rhat = np.empty(n_par, dtype=np.float64)
     status = np.empty(n_par, dtype=np.intc)
 
-    outv = out
+    essv = ess
     statusv = status
     rhatv = rhat
 
@@ -97,9 +104,39 @@ def ess_rhat(x):
     with nogil:
         sdsge_ess_rhat(
             &xv[0], N, n_par, n_chains, n_workers, &arena[0],
-            &outv[0], &rhatv[0], &statusv[0],
+            &essv[0], &rhatv[0], &statusv[0],
         )
-    return out, rhat, status.astype(np.int64)
+    return ess, rhat, status.astype(np.int64)
+
+
+def ess_quantile(x, double q):
+    if x.ndim != 3:
+        raise ValueError("Input must be a 3D array")
+    if not (0 < q < 1):
+        raise ValueError("`q` must be in the interval (0, 1).")
+
+    cdef int64_t n_chains = x.shape[0]
+    cdef int64_t N = x.shape[1]
+    cdef int64_t n_par = x.shape[2]
+    cdef int64_t n_workers = worker_count(n_par)
+
+    cdef int64_t asz = sdsge_ess_quantile_arena_size(N, n_chains, n_workers).n_float
+    cdef double[::1] arena = np.empty(asz, dtype=np.float64)
+
+    cdef double[::1] essv
+    # status discarded here, ess is nan on error
+    cdef int[::1] statusv = np.empty(n_par, dtype=np.intc)
+
+    ess = np.empty(n_par, dtype=np.float64)
+    essv = ess
+
+    cdef double[::1] xv = flat_parmajor(x)
+    with nogil:
+        sdsge_ess_quantile(
+            &xv[0], N, n_par, n_chains, n_workers, q,
+            &arena[0], &essv[0], &statusv[0]
+        )
+    return ess
 
 
 def hpd_intervals(x, double alpha):

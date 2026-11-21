@@ -19,7 +19,13 @@ from ..spec import (
     MCMCResultSpec,
 )
 
-from ..._ckernels.estimation import ess_rhat, hpd_intervals, mcse_quantile, marginal_kde
+from ..._ckernels.estimation import (
+    ess_rhat,
+    ess_quantile,
+    hpd_intervals,
+    mcse_quantile,
+    marginal_kde,
+)
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
@@ -76,6 +82,7 @@ class MCMCResult:
     accept_rate_burn_in
     accept_rate_in_sample
     ess
+    ess_tail
     ess_per_second
     mcse
     split_rhat
@@ -170,6 +177,12 @@ class MCMCResult:
     def __ess_rhat(self) -> tuple[NDF, NDF, NDI]:
         return ess_rhat(self.samples)
 
+    @cached_property
+    def __ess_tail(self) -> tuple[NDF, NDF]:
+        lo = ess_quantile(self.samples, 0.05)
+        hi = ess_quantile(self.samples, 0.95)
+        return (lo, hi)
+
     @property
     def accept_rate(self) -> list[float]:
         total = self.burn_in + self.n_draws * self.thin
@@ -239,12 +252,48 @@ class MCMCResult:
         return {name: v / self.wall_seconds for name, v in self.ess.items()}
 
     @property
+    def ess_tail(self) -> dict[str, float]:
+        """Compute the tail effective sample size (ESS) for each parameter.
+
+        Tail ESS is defined as the minimum of the ESS at q5 and q95 quantiles.
+
+        Returns
+        -------
+        dict[str, float]
+            Tail effective sample size for each parameter, keyed by parameter name.
+        """
+        lo, hi = self.__ess_tail
+        ess_tail = np.minimum(lo, hi)
+        return dict(zip(self.param_names, ess_tail.tolist()))
+
+    @property
     def mcse(self) -> dict[str, float]:
         """Compute the Monte Carlo Standard Error (MCSE) of the mean for each parameter."""
         ess = self.ess
         sd = np.std(self.samples.reshape(-1, len(self.param_names)), axis=0, ddof=1)
         return {
             name: float(sd[i] / np.sqrt(ess[name]))
+            for i, name in enumerate(self.param_names)
+        }
+
+    def ess_quantile(self, q: float, digits: int | None = None) -> dict[str, float]:
+        """Compute the effective sample size (ESS) of the specified quantile for each parameter.
+
+        Parameters
+        ----------
+        q : float
+            Quantile to compute the ESS for, strictly between 0 and 1.
+        digits : int | None
+            Number of decimals for rounding, `None` does not apply rounding.
+
+        Returns
+        -------
+        dict[str, float]
+            Effective sample size of the specified quantile for each parameter keyed by name.
+        """
+        ess = ess_quantile(self.samples, q)
+        return {
+            name: _nanrnd(float(ess[i]), digits)
             for i, name in enumerate(self.param_names)
         }
 
@@ -418,8 +467,8 @@ class MCMCResult:
         Returns
         -------
         pd.DataFrame
-            Summary table containing mean, standard deviation, split R-hat, ESS, MCSE,
-            and HPD intervals for each parameter.
+            Summary table containing mean, standard deviation, split R-hat, ESS, tail ESS,
+            MCSE, and HPD intervals for each parameter.
         """
         summary_df = pd.DataFrame(
             {
@@ -436,6 +485,7 @@ class MCMCResult:
                 ),
                 "split-R\u0302": self.split_rhat,
                 "ess": self.ess,
+                "tail ess": self.ess_tail,
                 "ess/s": self.ess_per_second,
                 "mcse": self.mcse,
                 f"hpd (\u03b1={alpha:.3f})": self.hpd_intervals(
