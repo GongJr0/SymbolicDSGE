@@ -10,6 +10,12 @@ The rank-normalized R-hat oracle follows Vehtari et al. (2021): pooled average
 ranks through ``scipy.stats.rankdata``, ``ndtri((r - 3/8) / (S + 1/4))``, and the
 classic split R-hat on the result, with the fold taken as ``|x - median(x)|``.
 The split drops each chain's last draw at odd N, as the kernels do.
+
+Quantile ESS follows ``posterior::ess_quantile``: the ESS of the split indicator
+``x <= quantile(x, q)`` (type 7, numpy's ``linear``), with ``tau`` bounded below
+by ``1 / log10(S)``. Independently of any estimator, a Gaussian AR(1) gives the
+indicator's lag-k autocorrelation in closed form through the bivariate normal
+orthant probability, ``(Phi2(z_q, z_q; phi**k) - q**2) / (q (1 - q))``.
 """
 
 from __future__ import annotations
@@ -17,10 +23,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from scipy.special import ndtri
-from scipy.stats import gaussian_kde, rankdata
+from scipy.stats import gaussian_kde, multivariate_normal, norm, rankdata
 
 from SymbolicDSGE._ckernels.estimation._mcmc_diagnostics import (
     bulk_ess_rn_rhat,
+    ess_quantile,
     ess_rhat,
     marginal_kde,
     SDSGE_ESS_EBADSHAPE,
@@ -221,6 +228,97 @@ def test_rank_normalized_rhat_per_parameter_matches_single_calls():
         np.testing.assert_array_equal(
             out[:, p], np.concatenate(bulk_ess_rn_rhat(x[:, :, p : p + 1]))
         )
+
+
+def _quantile_ess_oracle(x: np.ndarray, q: float) -> float:
+    indicator = (x <= np.quantile(x, q)).astype(np.float64)
+    S = x.size
+    return min(float(ess_rhat(indicator[:, :, None])[0][0]), S * np.log10(S))
+
+
+def _ar1_indicator_tau(phi: float, q: float) -> float:
+    z = norm.ppf(q)
+    tau = 1.0
+    k = 1
+    while abs(phi**k) > 1e-10:
+        r = phi**k
+        orthant = multivariate_normal(cov=[[1.0, r], [r, 1.0]]).cdf([z, z])
+        tau += 2.0 * (orthant - q * q) / (q * (1.0 - q))
+        k += 1
+    return tau
+
+
+QUANTILES = [0.05, 0.5, 0.9]
+
+
+@pytest.mark.parametrize("q", QUANTILES)
+@pytest.mark.parametrize("phi", [0.5, 0.9, -0.5, -0.8])
+def test_ess_quantile_matches_the_reference(phi, q):
+    x = _ar1_chains(4, 1000, phi, seed=110)
+    assert ess_quantile(x[:, :, None], q)[0] == pytest.approx(
+        _quantile_ess_oracle(x, q), rel=1e-12
+    )
+
+
+@pytest.mark.parametrize("q", [0.25, 0.5])
+@pytest.mark.parametrize("phi", [0.5, -0.5])
+def test_ess_quantile_recovers_the_ar1_indicator_autocorrelation_time(phi, q):
+    x = _ar1_chains(4, 2500, phi, seed=120)
+    tau = x.size / ess_quantile(x[:, :, None], q)[0]
+    assert tau == pytest.approx(_ar1_indicator_tau(phi, q), rel=0.15)
+
+
+@pytest.mark.parametrize("q", QUANTILES)
+def test_ess_quantile_is_invariant_to_monotone_transforms(q):
+    x = _ar1_chains(4, 1000, 0.7, seed=130)[:, :, None]
+    assert ess_quantile(np.exp(x), q)[0] == ess_quantile(x, q)[0]
+
+
+@pytest.mark.parametrize("q", QUANTILES)
+def test_ess_quantile_is_symmetric_under_reflection(q):
+    x = _ar1_chains(4, 1000, 0.7, seed=140)[:, :, None]
+    assert ess_quantile(-x, 1.0 - q)[0] == pytest.approx(
+        ess_quantile(x, q)[0], rel=1e-12
+    )
+
+
+def test_ess_quantile_is_nan_for_a_constant_parameter():
+    x = _ar1_chains(4, 500, 0.5, seed=150)[:, :, None].repeat(2, axis=2)
+    x[:, :, 1] = 3.0
+    out = ess_quantile(x, 0.5)
+    assert np.isfinite(out[0])
+    assert np.isnan(out[1])
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(0, 10, 2), (2, 0, 2), (2, 3, 1)],
+    ids=["no_chains", "no_draws", "three_draws"],
+)
+def test_ess_quantile_is_nan_for_short_chains(shape):
+    out = ess_quantile(np.ones(shape), 0.5)
+    assert out.shape == (shape[2],)
+    assert np.isnan(out).all()
+
+
+@pytest.mark.parametrize("q", [0.0, 1.0, -0.1, 1.5])
+def test_ess_quantile_requires_an_interior_quantile(q):
+    with pytest.raises(ValueError, match=r"interval \(0, 1\)"):
+        ess_quantile(np.ones((2, 10, 1)), q)
+
+
+def test_ess_quantile_leaves_the_input_untouched():
+    x = _ar1_chains(4, 500, 0.5, seed=160)[:, :, None].repeat(3, axis=2)
+    before = x.copy()
+    ess_quantile(x, 0.3)
+    np.testing.assert_array_equal(x, before)
+
+
+def test_ess_quantile_per_parameter_matches_single_calls():
+    x = np.random.default_rng(170).standard_normal((4, 500, 37))
+    out = ess_quantile(x, 0.2)
+    for p in range(x.shape[2]):
+        assert out[p] == ess_quantile(x[:, :, p : p + 1], 0.2)[0]
 
 
 @pytest.mark.parametrize("bandwidth", ["scott", "silverman", 0.4])

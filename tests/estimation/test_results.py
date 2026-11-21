@@ -295,6 +295,52 @@ def test_rhat_and_ess_bulk_are_nan_for_a_parameter_that_never_moved():
     assert np.isnan(res.ess_bulk["stuck"])
 
 
+def test_ess_tail_is_the_smaller_of_the_two_tail_quantile_ess():
+    res = make_mcmc_result(
+        param_names=["a", "b"],
+        samples=np.random.default_rng(12).standard_normal((2, 2000, 2)),
+        n_chains=2,
+    )
+    lo = res.ess_quantile(0.05)
+    hi = res.ess_quantile(0.95)
+
+    assert res.ess_tail == {name: min(lo[name], hi[name]) for name in res.param_names}
+
+
+def test_ess_tail_and_ess_quantile_are_nan_for_a_parameter_that_never_moved():
+    res = make_mcmc_result(
+        param_names=["moving", "stuck"],
+        samples=np.column_stack(
+            [np.random.default_rng(13).standard_normal(4000), np.ones(4000)]
+        ).reshape(1, -1, 2),
+    )
+
+    assert np.isfinite(res.ess_tail["moving"])
+    assert np.isfinite(res.ess_quantile(0.5)["moving"])
+    assert np.isnan(res.ess_tail["stuck"])
+    assert np.isnan(res.ess_quantile(0.5)["stuck"])
+
+
+def test_ess_quantile_rounds_to_the_requested_digits():
+    res = make_mcmc_result(
+        param_names=["a"],
+        samples=np.random.default_rng(14).standard_normal((1, 4000, 1)),
+    )
+
+    assert res.ess_quantile(0.3, digits=1)["a"] == round(res.ess_quantile(0.3)["a"], 1)
+
+
+@pytest.mark.parametrize("q", [0.0, 1.0, -0.1, 1.5])
+def test_ess_quantile_requires_an_interior_quantile(q):
+    res = make_mcmc_result(
+        param_names=["a"],
+        samples=np.random.default_rng(15).standard_normal((1, 2000, 1)),
+    )
+
+    with pytest.raises(ValueError, match=r"interval \(0, 1\)"):
+        res.ess_quantile(q)
+
+
 def test_mcse_of_the_mean_tracks_the_standard_error():
     n = 20000
     res = make_mcmc_result(
