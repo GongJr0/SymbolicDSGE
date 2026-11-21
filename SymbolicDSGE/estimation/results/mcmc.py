@@ -468,7 +468,7 @@ class MCMCResult:
         -------
         pd.DataFrame
             Summary table containing mean, standard deviation, split R-hat, ESS, tail ESS,
-            MCSE, and HPD intervals for each parameter.
+            ESS/s, MCSE, and HPD intervals for each parameter.
         """
         summary_df = pd.DataFrame(
             {
