@@ -1,6 +1,7 @@
 #include "ess.h"
 #include "../_common/sdsge_common.h"
 #include "../_common/sdsge_complex.h"
+#include "order_stats.h"
 #include <math.h>
 #include <omp.h>
 #include <stdint.h>
@@ -262,5 +263,80 @@ void sdsge_ess_rhat(const f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_par,
     f64 *pa = arena + wid * per_par;
     status[p] = sdsge_ess_rhat1d(&x[p * n_chains * N], N, n_chains, pa, &ess[p],
                                  rhat ? &rhat[p] : NULL);
+  }
+}
+
+arena_size sdsge_ess_quantile1d_arena_size(const i64 N, const i64 n_chains) {
+  i64 asz = sdsge_ess_rhat1d_arena_size(N, n_chains).n_float + n_chains * N;
+  asz += (8 - asz % 8) % 8; /* round up to multiple of 8 for alignment */
+  return make_sizer(asz, 0);
+}
+
+int sdsge_ess_quantile1d(f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_chains,
+                         const f64 q, f64 *SDSGE_RESTRICT arena,
+                         f64 *SDSGE_RESTRICT ess) {
+  if (N < 4 || N > (INT64_MAX >> 2) + 1 || n_chains < 1) {
+    *ess = NAN;
+    return SDSGE_ESS_EBADSHAPE;
+  }
+  const i64 S = N * n_chains;
+  const i64 per_sub = N / 2;
+  const f64 cap = S * log10((f64)S);
+
+  f64 *aess = arena;
+  f64 *q_scratch = aess + sdsge_ess_rhat1d_arena_size(N, n_chains).n_float;
+  memcpy(q_scratch, x, S * sizeof(f64));
+
+  const f64 x_q = sdsge_quantile1d(q_scratch, S, q);
+
+  for (i64 c = 0; c < n_chains; ++c) {
+    f64 *chain = x + c * N;
+    i64 s0 = 0, s1 = 0;
+    for (i64 i = 0; i < per_sub; ++i) {
+      const i64 v0 = (chain[i] <= x_q);
+      const i64 v1 = (chain[i + per_sub] <= x_q);
+      chain[i] = v0;
+      chain[i + per_sub] = v1;
+      s0 += v0;
+      s1 += v1;
+    }
+    if (s0 == 0 || s0 == per_sub || s1 == 0 || s1 == per_sub) {
+      *ess = NAN;
+      return SDSGE_ESS_EUDEFVARIANCE;
+    }
+  }
+  int rc = sdsge_ess_rhat1d(x, N, n_chains, aess, ess, NULL);
+  if (rc != SDSGE_ESS_OK) {
+    *ess = NAN;
+    return rc;
+  }
+  *ess = *ess < 0.0 ? 0.0 : *ess > cap ? cap : *ess;
+  return SDSGE_ESS_OK;
+}
+
+arena_size sdsge_ess_quantile_arena_size(const i64 N, const i64 n_chains,
+                                         const i64 n_workers) {
+  const i64 asz = sdsge_ess_quantile1d_arena_size(N, n_chains).n_float;
+  return make_sizer(n_workers * asz, 0);
+}
+void sdsge_ess_quantile(f64 *SDSGE_RESTRICT x, const i64 N, const i64 n_par,
+                        const i64 n_chains, const i64 n_workers, const f64 q,
+                        f64 *SDSGE_RESTRICT arena, f64 *SDSGE_RESTRICT ess,
+                        int *SDSGE_RESTRICT status) {
+  if (N < 4 || N > (INT64_MAX >> 2) + 1 || n_par < 1 || n_chains < 1) {
+    for (i64 p = 0; p < n_par; ++p) {
+      ess[p] = NAN;
+      status[p] = SDSGE_ESS_EBADSHAPE;
+    }
+    return;
+  }
+  i64 per_par = sdsge_ess_quantile1d_arena_size(N, n_chains).n_float;
+#pragma omp parallel for num_threads((int)n_workers) if (n_par > 1)            \
+    schedule(static)
+  for (i64 p = 0; p < n_par; ++p) {
+    const i64 wid = omp_get_thread_num();
+    f64 *pa = arena + wid * per_par;
+    status[p] =
+        sdsge_ess_quantile1d(&x[p * n_chains * N], N, n_chains, q, pa, &ess[p]);
   }
 }

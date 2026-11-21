@@ -19,7 +19,14 @@ from ..spec import (
     MCMCResultSpec,
 )
 
-from ..._ckernels.estimation import ess_rhat, hpd_intervals, mcse_quantile, marginal_kde
+from ..._ckernels.estimation import (
+    ess_rhat,
+    bulk_ess_rn_rhat,
+    ess_quantile,
+    hpd_intervals,
+    mcse_quantile,
+    marginal_kde,
+)
 
 NDF = NDArray[np.float64]
 NDI = NDArray[np.int64]
@@ -75,10 +82,13 @@ class MCMCResult:
     accept_rate
     accept_rate_burn_in
     accept_rate_in_sample
+    split_rhat
+    rhat
     ess
     ess_per_second
+    ess_tail
+    ess_bulk
     mcse
-    split_rhat
     """
 
     param_names: tuple[str, ...]
@@ -170,6 +180,16 @@ class MCMCResult:
     def __ess_rhat(self) -> tuple[NDF, NDF, NDI]:
         return ess_rhat(self.samples)
 
+    @cached_property
+    def __bulk_ess_rn_rhat(self) -> tuple[NDF, NDF, NDF]:
+        return bulk_ess_rn_rhat(self.samples)
+
+    @cached_property
+    def __ess_tail(self) -> tuple[NDF, NDF]:
+        lo = ess_quantile(self.samples, 0.05)
+        hi = ess_quantile(self.samples, 0.95)
+        return (lo, hi)
+
     @property
     def accept_rate(self) -> list[float]:
         total = self.burn_in + self.n_draws * self.thin
@@ -195,15 +215,16 @@ class MCMCResult:
 
     @property
     def split_rhat(self) -> dict[str, float]:
-        """Compute the split-R-hat convergence diagnostic for each parameter.
-
-        Returns
-        -------
-        dict[str, float]
-            Split-R-hat values for each parameter, keyed by parameter name.
-        """
+        """Compute the split-R-hat convergence diagnostic for each parameter."""
         _, rhat, _ = self.__ess_rhat
         return dict(zip(self.param_names, rhat.tolist()))
+
+    @property
+    def rhat(self) -> dict[str, float]:
+        """Maximum of the rank-normalized bulk and folded R-hat for each parameter."""
+        folded_rhat, bulk_rhat, _ = self.__bulk_ess_rn_rhat
+        max_rhat = np.maximum(folded_rhat, bulk_rhat)
+        return dict(zip(self.param_names, max_rhat.tolist()))
 
     @property
     def ess(self) -> dict[str, float]:
@@ -216,11 +237,11 @@ class MCMCResult:
         """
         ess, _, status = self.__ess_rhat
         ess = np.where(status == 0, ess, np.nan)
-
+        S = self.n_chains * self.n_draws
         return dict(
             zip(
                 self.param_names,
-                np.clip(ess, 0.0, self.n_chains * self.n_draws).tolist(),
+                np.clip(ess, 0.0, S * np.log10(S)).tolist(),
             )
         )
 
@@ -231,12 +252,31 @@ class MCMCResult:
         The returned values are retained ess per sampling second of the MCMC run,
         i.e. ``ess / wall_seconds``.
 
-        Returns
-        -------
-        dict[str, float]
-            Effective sample size per second for each parameter, keyed by parameter name.
         """
         return {name: v / self.wall_seconds for name, v in self.ess.items()}
+
+    @property
+    def ess_tail(self) -> dict[str, float]:
+        """Compute the tail effective sample size (ESS) for each parameter.
+
+        Tail ESS is defined as the minimum of the ESS at q5 and q95 quantiles.
+
+        """
+        lo, hi = self.__ess_tail
+        ess_tail = np.minimum(lo, hi)
+        return dict(zip(self.param_names, ess_tail.tolist()))
+
+    @property
+    def ess_bulk(self) -> dict[str, float]:
+        """Compute the bulk effective sample size (ESS) for each parameter."""
+        _, _, bulk_ess = self.__bulk_ess_rn_rhat
+        S = self.n_chains * self.n_draws
+        return dict(
+            zip(
+                self.param_names,
+                np.clip(bulk_ess, 0.0, S * np.log10(S)).tolist(),
+            )
+        )
 
     @property
     def mcse(self) -> dict[str, float]:
@@ -245,6 +285,27 @@ class MCMCResult:
         sd = np.std(self.samples.reshape(-1, len(self.param_names)), axis=0, ddof=1)
         return {
             name: float(sd[i] / np.sqrt(ess[name]))
+            for i, name in enumerate(self.param_names)
+        }
+
+    def ess_quantile(self, q: float, digits: int | None = None) -> dict[str, float]:
+        """Compute the effective sample size (ESS) of the specified quantile for each parameter.
+
+        Parameters
+        ----------
+        q : float
+            Quantile to compute the ESS for, strictly between 0 and 1.
+        digits : int | None
+            Number of decimals for rounding, `None` does not apply rounding.
+
+        Returns
+        -------
+        dict[str, float]
+            Effective sample size of the specified quantile for each parameter keyed by name.
+        """
+        ess = ess_quantile(self.samples, q)
+        return {
+            name: _nanrnd(float(ess[i]), digits)
             for i, name in enumerate(self.param_names)
         }
 
@@ -418,8 +479,8 @@ class MCMCResult:
         Returns
         -------
         pd.DataFrame
-            Summary table containing mean, standard deviation, split R-hat, ESS, MCSE,
-            and HPD intervals for each parameter.
+            Summary table containing mean, standard deviation, R-hat, bulk/tail ESS,
+            ESS/s, MCSE, and HPD intervals for each parameter.
         """
         summary_df = pd.DataFrame(
             {
@@ -434,9 +495,10 @@ class MCMCResult:
                         ),
                     )
                 ),
-                "split-R\u0302": self.split_rhat,
-                "ess": self.ess,
-                "ess/s": self.ess_per_second,
+                "R\u0302": self.rhat,
+                "bulk ess": self.ess_bulk,
+                "tail ess": self.ess_tail,
+                "ESS/s": self.ess_per_second,
                 "mcse": self.mcse,
                 f"hpd (\u03b1={alpha:.3f})": self.hpd_intervals(
                     alpha=alpha, digits=digits

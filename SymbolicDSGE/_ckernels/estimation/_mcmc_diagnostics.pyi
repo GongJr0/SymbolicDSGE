@@ -29,6 +29,41 @@ def ess_rhat(x: _F64) -> tuple[_F64, _F64, _I64]:
     """
     ...
 
+def bulk_ess_rn_rhat(x: _F64) -> tuple[_F64, _F64, _F64]:
+    """Compute the bulk and folded rank-normalized R-hat and the bulk ESS per column
+    for a 3D sample of (n_chains, n_draws, n_params).
+
+    Parameters
+    ----------
+    x : _F64
+        Sample values to compute the bulk and folded rank-normalized R-hat and the bulk ESS for.
+
+    Returns
+    -------
+    tuple[_F64, _F64, _F64]
+        3-tuple of float arrays: folded R-hat, bulk R-hat, and bulk ESS in parameter order.
+    """
+    ...
+
+def ess_quantile(x: _F64, q: float) -> _F64:
+    """Compute the ESS of a given quantile per column for a 3D sample of (n_chains, n_draws, n_params).
+
+    Writes NaNs to outputs affected by an error.
+
+    Parameters
+    ----------
+    x : _F64
+        Sample values to compute the ESS for.
+    q : float
+        Quantile to compute the ESS for, must be in the open interval (0, 1).
+
+    Returns
+    -------
+    _F64
+        ESS values in parameter order.
+    """
+    ...
+
 def hpd_intervals(x: _F64, alpha: float) -> tuple[_F64, _F64]:
     """
     Compute the highest posterior density (HPD) intervals for a given set of samples.

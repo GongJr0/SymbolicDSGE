@@ -268,13 +268,16 @@ __Properties:__
 | accept_rate | `list[float]` | Accepted proposals per chain over every step the sampler took, burn-in included. |
 | accept_rate_burn_in | `list[float]` | Acceptance rate per chain over burn-in alone, or NaN when `burn_in` is `0`. |
 | accept_rate_in_sample | `list[float]` | Acceptance rate per chain over the retained phase alone. |
+| split_rhat | `dict[str, float]` | Split R-hat convergence diagnostic for each parameter, keyed by parameter name. |
+| rhat | `dict[str, float]` | Maximum of bulk and folded rank-normalized R-hat convergence diagnostic for each parameter, keyed by parameter name. NaN if either is NaN. |
 | ess | `dict[str, float]` | Effective sample size of each parameter's posterior mean, keyed by parameter name. |
 | ess_per_second | `dict[str, float]` | `ess` divided by `wall_seconds`. |
+| ess_tail | `dict[str, float]` | Tail effective sample size, the minimum of `ess_quantile(0.05)` and `ess_quantile(0.95)`, keyed by parameter name. NaN if either is NaN. |
+| ess_bulk | `dict[str, float]` | Bulk effective sample size of each parameter, keyed by parameter name. |
 | mcse | `dict[str, float]` | Monte Carlo standard error of each parameter's posterior mean, $\mathrm{sd}/\sqrt{\mathrm{ESS}}$. |
-| split_rhat | `dict[str, float]` | Split R-hat convergence diagnostic for each parameter, keyed by parameter name. |
 
 ???+ note "Effective Sample Size"
-    ESS is computed with the integrated autocorrelation time under Geyer's initial monotone sequence. Reported values are capped at `n_chains * n_draws`. A parameter whose chain never moved, or whose autocorrelation has not decayed within the retained draws, reports NaN rather than raising, and that NaN carries through `ess_per_second`, `mcse`, and `mcse_quantile`.
+    ESS is computed with the integrated autocorrelation time under Geyer's initial monotone sequence. Reported values are capped at `S * log10(S)` where `S` is `n_chains * n_draws`. A parameter whose chain never moved, or whose autocorrelation has not decayed within the retained draws, reports NaN rather than raising, and that NaN carries through `ess_per_second`, `mcse`, and `mcse_quantile`.
 
 __Methods:__
 
@@ -287,7 +290,13 @@ MCMCResult.summary(
 
 1. Significance level for the highest-posterior-density (HPD) intervals.
 
-Return a summary table reporting posterior means, standard deviations, split R-hat, ESS, ESS/s, MCSE for the mean, and HPD intervals for each parameter.
+Return a summary table reporting:
+
+- posterior means and standard deviations
+- R-hat (maximum of bulk and folded rank-normalized R-hat)
+- bulk/tail ESS and ESS/s
+- MCSE for the mean
+- HPD intervals for each parameter.
 
 __Inputs:__
 
@@ -300,7 +309,7 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `pd.DataFrame` | Summary table with one row per parameter and columns for posterior mean, standard deviation, split R-hat, ESS, ESS/s, MCSE for the mean, and HPD intervals. |
+| `pd.DataFrame` | Summary table with one row per parameter and columns per sample diagnostic/descriptor. |
 
 ```python
 MCMCResult.hpd_intervals(
@@ -324,7 +333,34 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `dict[str, tuple[float, float]]` | Mapping from parameter name to the shortest empirical marginal interval containing approximately `1 - alpha` of the retained posterior draws. |
+| `dict[str, tuple[float, float]]` | Shortest empirical marginal interval containing approximately `1 - alpha` of the retained posterior draws per parameter. |
+
+&nbsp;
+
+```python
+MCMCResult.ess_quantile(
+    q: float, # (1)!
+    digits: int | None = None,
+) -> dict[str, float]
+```
+
+1. Quantile whose effective sample size is reported. Must satisfy `0 < q < 1`.
+
+Compute the effective sample size of the `q` quantile for each parameter column, taken as the ESS of the indicator chain $\mathbf{1}\{x_t \le \hat{x}_q\}$.
+Errors are reported as NaN where a split half of the indicator chain is constant.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| q | Quantile whose effective sample size is reported. |
+| digits | Number of decimal places to round the ESS to. `None` does not apply rounding. |
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `dict[str, float]` | Effective sample size of each parameter's `q` quantile, keyed by parameter name. |
 
 &nbsp;
 
@@ -338,6 +374,7 @@ MCMCResult.mcse_quantile(
 1. Quantile whose error is reported. Must satisfy `0 < q < 1`.
 
 Compute the Monte Carlo standard error of the `q` quantile for each parameter column.
+Errors arising at ESS computations report as NaN per parameter.
 
 ???+ note "Indicator-Chain Estimator"
     The error is taken on the probability scale from the effective sample size of the indicator chain $\mathbf{1}\{x_t \le \hat{x}_q\}$, then carried back to the parameter scale through the empirical quantile function, which needs no density estimate at $\hat{x}_q$. Reading discrete order statistics leaves the result mildly conservative.
@@ -353,7 +390,7 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `dict[str, float]` | Mapping from parameter name to the Monte Carlo standard error of that parameter's `q` quantile, or NaN where the indicator chain has no usable effective sample size. |
+| `dict[str, float]` | Monte Carlo standard error of each parameter's `q` quantile. |
 
 &nbsp;
 
