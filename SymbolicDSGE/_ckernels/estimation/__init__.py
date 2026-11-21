@@ -18,6 +18,7 @@ from ._estimation import (
 
 from ._mcmc_diagnostics import (
     ess_rhat,
+    bulk_ess_rn_rhat,
     ess_quantile,
     hpd_intervals,
     mcse_quantile,
@@ -33,6 +34,7 @@ __all__ = [
     "cov_from_unconstrained",
     "unconstrained_from_corr_chol",
     "ess_rhat",
+    "bulk_ess_rn_rhat",
     "ess_quantile",
     "hpd_intervals",
     "mcse_quantile",

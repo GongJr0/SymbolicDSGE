@@ -255,6 +255,133 @@ static void sort_range(f64 *SDSGE_RESTRICT a, const i64 lo, const i64 hi) {
   introsort_range(a, lo, hi, 2 * lg);
 }
 
+/*--- pair sort ---*/
+
+static i64 hoare_partition_pairs(f64 *SDSGE_RESTRICT v, i64 *SDSGE_RESTRICT idx,
+                                 const i64 lo, const i64 hi) {
+  const f64 p = v[med3_index(v, lo, hi)];
+  i64 i = lo - 1;
+  i64 j = hi + 1;
+
+  while (1) {
+    do {
+      ++i;
+    } while (v[i] < p);
+
+    do {
+      --j;
+    } while (v[j] > p);
+
+    if (i >= j) {
+      return j;
+    }
+
+    const f64 t = v[i];
+    v[i] = v[j];
+    v[j] = t;
+    const i64 ti = idx[i];
+    idx[i] = idx[j];
+    idx[j] = ti;
+  }
+}
+
+static void insertion_sort_pairs(f64 *SDSGE_RESTRICT v, i64 *SDSGE_RESTRICT idx,
+                                 const i64 lo, const i64 hi) {
+  for (i64 i = lo + 1; i <= hi; ++i) {
+    const f64 x = v[i];
+    const i64 xi = idx[i];
+    i64 j = i - 1;
+    while (j >= lo && v[j] > x) {
+      v[j + 1] = v[j];
+      idx[j + 1] = idx[j];
+      --j;
+    }
+    v[j + 1] = x;
+    idx[j + 1] = xi;
+  }
+}
+
+static void sift_down_pairs(f64 *SDSGE_RESTRICT b, i64 *SDSGE_RESTRICT bi,
+                            const i64 start, const i64 n) {
+  const f64 x = b[start];
+  const i64 xi = bi[start];
+  i64 root = start;
+
+  while (1) {
+    i64 child = 2 * root + 1;
+    if (child >= n) {
+      break;
+    }
+    if (child + 1 < n && b[child] < b[child + 1]) {
+      ++child;
+    }
+    if (b[child] <= x) {
+      break;
+    }
+    b[root] = b[child];
+    bi[root] = bi[child];
+    root = child;
+  }
+  b[root] = x;
+  bi[root] = xi;
+}
+
+static void heap_sort_pairs(f64 *SDSGE_RESTRICT v, i64 *SDSGE_RESTRICT idx,
+                            const i64 lo, const i64 hi) {
+  f64 *b = v + lo;
+  i64 *bi = idx + lo;
+  const i64 n = hi - lo + 1;
+
+  for (i64 i = n / 2 - 1; i >= 0; --i) {
+    sift_down_pairs(b, bi, i, n);
+  }
+  for (i64 end = n - 1; end > 0; --end) {
+    const f64 t = b[0];
+    b[0] = b[end];
+    b[end] = t;
+    const i64 ti = bi[0];
+    bi[0] = bi[end];
+    bi[end] = ti;
+    sift_down_pairs(b, bi, 0, end);
+  }
+}
+
+static void introsort_pairs(f64 *SDSGE_RESTRICT v, i64 *SDSGE_RESTRICT idx,
+                            i64 lo, i64 hi, i64 depth) {
+  const i64 CUTOFF = 24;
+
+  while (hi - lo + 1 > CUTOFF) {
+    if (depth == 0) {
+      heap_sort_pairs(v, idx, lo, hi);
+      return;
+    }
+    --depth;
+
+    const i64 j = hoare_partition_pairs(v, idx, lo, hi);
+    if (j - lo < hi - j - 1) {
+      introsort_pairs(v, idx, lo, j, depth);
+      lo = j + 1;
+    } else {
+      introsort_pairs(v, idx, j + 1, hi, depth);
+      hi = j;
+    }
+  }
+  insertion_sort_pairs(v, idx, lo, hi);
+}
+
+void sdsge_sort_pairs(f64 *SDSGE_RESTRICT val, i64 *SDSGE_RESTRICT idx,
+                      const i64 n) {
+  if (n < 2) {
+    return;
+  }
+
+  i64 lg = 0;
+  for (i64 t = n; t > 1; t >>= 1) {
+    ++lg;
+  }
+  introsort_pairs(val, idx, 0, n - 1, 2 * lg);
+}
+
 /*--- hpd ---*/
 static inline i64 sdsge_hpd_window(const i64 S, const f64 alpha) {
   return (i64)ceil((1.0 - alpha) * S);

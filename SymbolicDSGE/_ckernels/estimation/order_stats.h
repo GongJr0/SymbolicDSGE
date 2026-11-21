@@ -14,4 +14,8 @@ void sdsge_hpd_intervals(f64 *SDSGE_RESTRICT pooled, const f64 alpha,
 void sdsge_select_kth(f64 *SDSGE_RESTRICT a, i64 lo, i64 hi, const i64 k);
 f64 sdsge_quantile1d(f64 *SDSGE_RESTRICT buf, const i64 S, const f64 q);
 
+/* helper at {...} */
+void sdsge_sort_pairs(f64 *SDSGE_RESTRICT val, i64 *SDSGE_RESTRICT idx,
+                      const i64 n);
+
 #endif // !SDSGE_ORDER_STATS_H

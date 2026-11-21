@@ -268,11 +268,13 @@ __Properties:__
 | accept_rate | `list[float]` | Accepted proposals per chain over every step the sampler took, burn-in included. |
 | accept_rate_burn_in | `list[float]` | Acceptance rate per chain over burn-in alone, or NaN when `burn_in` is `0`. |
 | accept_rate_in_sample | `list[float]` | Acceptance rate per chain over the retained phase alone. |
+| split_rhat | `dict[str, float]` | Split R-hat convergence diagnostic for each parameter, keyed by parameter name. |
+| rhat | `dict[str, float]` | Maximum of bulk and folded rank-normalized R-hat convergence diagnostic for each parameter, keyed by parameter name. NaN if either is NaN. |
 | ess | `dict[str, float]` | Effective sample size of each parameter's posterior mean, keyed by parameter name. |
 | ess_per_second | `dict[str, float]` | `ess` divided by `wall_seconds`. |
 | ess_tail | `dict[str, float]` | Tail effective sample size, the minimum of `ess_quantile(0.05)` and `ess_quantile(0.95)`, keyed by parameter name. NaN if either is NaN. |
+| ess_bulk | `dict[str, float]` | Bulk effective sample size of each parameter, keyed by parameter name. |
 | mcse | `dict[str, float]` | Monte Carlo standard error of each parameter's posterior mean, $\mathrm{sd}/\sqrt{\mathrm{ESS}}$. |
-| split_rhat | `dict[str, float]` | Split R-hat convergence diagnostic for each parameter, keyed by parameter name. |
 
 ???+ note "Effective Sample Size"
     ESS is computed with the integrated autocorrelation time under Geyer's initial monotone sequence. Reported values are capped at `n_chains * n_draws`. A parameter whose chain never moved, or whose autocorrelation has not decayed within the retained draws, reports NaN rather than raising, and that NaN carries through `ess_per_second`, `mcse`, and `mcse_quantile`.
@@ -291,8 +293,8 @@ MCMCResult.summary(
 Return a summary table reporting:
 
 - posterior means and standard deviations
-- split R-hat
-- ESS, tail ESS and ESS/s
+- R-hat (maximum of bulk and folded rank-normalized R-hat)
+- bulk/tail ESS and ESS/s
 - MCSE for the mean
 - HPD intervals for each parameter.
 

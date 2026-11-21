@@ -37,6 +37,15 @@ cdef extern from "order_stats.h":
                              const int64_t n_par, const int64_t n_workers,
                              double *lo, double *hi) nogil
 
+cdef extern from "rhat.h":
+    arena_size sdsge_rank_normalized_rhat_arena_size(const int64_t N,
+                                                     const int64_t n_chains,
+                                                     const int64_t n_workers) nogil
+    void sdsge_rank_normalized_rhat(double *x, const int64_t N, const int64_t n_par,
+                                    const int64_t n_chains, const int64_t n_workers,
+                                    double *arena, int64_t *iarena, double *folded_rhat,
+                                    double *bulk_rhat, double *bulk_ess) nogil
+
 cdef extern from "mcse.h":
     arena_size sdsge_mcse_quantile_arena_size(const int64_t N,
                                               const int64_t n_chains,
@@ -107,6 +116,38 @@ def ess_rhat(x):
             &essv[0], &rhatv[0], &statusv[0],
         )
     return ess, rhat, status.astype(np.int64)
+
+
+def bulk_ess_rn_rhat(x):
+    if x.ndim != 3:
+        raise ValueError("Input must be a 3D array")
+
+    cdef int64_t n_chains = x.shape[0]
+    cdef int64_t N = x.shape[1]
+    cdef int64_t n_par = x.shape[2]
+    cdef int64_t n_workers = worker_count(n_par)
+
+    cdef arena_size asz = sdsge_rank_normalized_rhat_arena_size(N, n_chains, n_workers)
+    cdef double[::1] arena = np.empty(asz.n_float, dtype=np.float64)
+    cdef int64_t[::1] iarena = np.empty(asz.n_int, dtype=np.int64)
+
+    cdef double[::1] folded_rhatv, bulk_rhatv, bulk_essv
+    cdef double[::1] xv = flat_parmajor(x)
+
+    folded_rhat = np.empty(n_par, dtype=np.float64)
+    bulk_rhat = np.empty(n_par, dtype=np.float64)
+    bulk_ess = np.empty(n_par, dtype=np.float64)
+
+    folded_rhatv = folded_rhat
+    bulk_rhatv = bulk_rhat
+    bulk_essv = bulk_ess
+    with nogil:
+        sdsge_rank_normalized_rhat(
+            &xv[0], N, n_par, n_chains, n_workers,
+            &arena[0], &iarena[0],
+            &folded_rhatv[0], &bulk_rhatv[0], &bulk_essv[0]
+        )
+    return folded_rhat, bulk_rhat, bulk_ess
 
 
 def ess_quantile(x, double q):
