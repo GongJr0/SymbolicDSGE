@@ -237,11 +237,11 @@ class MCMCResult:
         """
         ess, _, status = self.__ess_rhat
         ess = np.where(status == 0, ess, np.nan)
-
+        S = self.n_chains * self.n_draws
         return dict(
             zip(
                 self.param_names,
-                np.clip(ess, 0.0, self.n_chains * self.n_draws).tolist(),
+                np.clip(ess, 0.0, S * np.log10(S)).tolist(),
             )
         )
 
@@ -270,10 +270,11 @@ class MCMCResult:
     def ess_bulk(self) -> dict[str, float]:
         """Compute the bulk effective sample size (ESS) for each parameter."""
         _, _, bulk_ess = self.__bulk_ess_rn_rhat
+        S = self.n_chains * self.n_draws
         return dict(
             zip(
                 self.param_names,
-                np.clip(bulk_ess, 0.0, self.n_chains * self.n_draws).tolist(),
+                np.clip(bulk_ess, 0.0, S * np.log10(S)).tolist(),
             )
         )
 

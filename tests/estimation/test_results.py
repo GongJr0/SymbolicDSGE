@@ -203,18 +203,26 @@ def test_mcmc_result_to_spec():
     )
 
 
-def test_ess_is_clipped_to_the_draw_count():
-    # tau near 0.46 at any length, so the raw ESS is about 2.2x the draws.
-    anticorrelated = np.tile([-1.0, -1.0, 1.0, -1.0, 0.0, -1.0, 0.0], 512)
-    res = make_mcmc_result(param_names=["a"], samples=anticorrelated.reshape(1, -1, 1))
+def test_ess_is_clipped_at_s_log10_s():
+    # AR(1) at phi = -0.8 has tau = 1/9, so the raw ESS is about 9x the draws.
+    innovations = np.random.default_rng(0).standard_normal(1000)
+    chain = np.empty_like(innovations)
+    chain[0] = innovations[0]
+    for t in range(1, chain.size):
+        chain[t] = -0.8 * chain[t - 1] + innovations[t]
+    res = make_mcmc_result(param_names=["a"], samples=chain.reshape(1, -1, 1))
 
-    assert res.ess["a"] == float(res.n_draws)
+    S = res.n_chains * res.n_draws
+    cap = S * np.log10(S)
+
+    assert res.ess["a"] == cap
+    assert res.ess_bulk["a"] == cap
 
 
 def test_ess_is_cached_and_stays_out_of_the_spec():
     res = make_mcmc_result(
         param_names=["a"],
-        samples=np.random.default_rng(0).standard_normal((1, 4000, 1)),
+        samples=np.random.default_rng(0).standard_normal((1, 100, 1)),
     )
     res.ess
     assert "ess" not in res.to_spec().meta
@@ -223,7 +231,7 @@ def test_ess_is_cached_and_stays_out_of_the_spec():
 def test_ess_per_second_divides_by_kernel_wall_clock():
     res = make_mcmc_result(
         param_names=["a", "b"],
-        samples=np.random.default_rng(1).standard_normal((1, 4000, 2)),
+        samples=np.random.default_rng(1).standard_normal((1, 100, 2)),
         wall_seconds=2.5,
     )
 
@@ -234,7 +242,7 @@ def test_ess_and_mcse_are_nan_for_a_parameter_that_never_moved():
     res = make_mcmc_result(
         param_names=["moving", "stuck"],
         samples=np.column_stack(
-            [np.random.default_rng(2).standard_normal(4000), np.ones(4000)]
+            [np.random.default_rng(2).standard_normal(100), np.ones(100)]
         ).reshape(1, -1, 2),
     )
 
@@ -243,6 +251,48 @@ def test_ess_and_mcse_are_nan_for_a_parameter_that_never_moved():
     assert np.isnan(res.ess["stuck"])
     assert np.isnan(res.mcse["stuck"])
     assert np.isnan(res.mcse_quantile(0.5)["stuck"])
+
+
+def _chains(spread: list[float], offset: list[float], seed: int) -> MCMCResult:
+    draws = np.random.default_rng(seed).standard_normal((len(spread), 100, 1))
+    draws = draws * np.asarray(spread)[:, None, None]
+    draws = draws + np.asarray(offset)[:, None, None]
+    return make_mcmc_result(param_names=["a"], samples=draws, n_chains=len(spread))
+
+
+def test_split_rhat_flags_a_chain_stuck_elsewhere():
+    mixed = _chains([1.0] * 4, [0.0] * 4, seed=8)
+    shifted = _chains([1.0] * 4, [0.0, 0.0, 0.0, 1.0], seed=8)
+
+    assert mixed.split_rhat["a"] == pytest.approx(1.0, abs=0.01)
+    assert shifted.split_rhat["a"] > 1.05
+
+
+def test_rhat_catches_a_scale_mismatch_split_rhat_misses():
+    res = _chains([1.0, 1.0, 1.0, 3.0], [0.0] * 4, seed=9)
+
+    assert res.split_rhat["a"] == pytest.approx(1.0, abs=0.01)
+    assert res.rhat["a"] > 1.05
+
+
+def test_rhat_flags_a_location_shift():
+    res = _chains([1.0] * 4, [0.0, 0.0, 0.0, 1.0], seed=10)
+
+    assert res.rhat["a"] > 1.05
+
+
+def test_rhat_and_ess_bulk_are_nan_for_a_parameter_that_never_moved():
+    res = make_mcmc_result(
+        param_names=["moving", "stuck"],
+        samples=np.column_stack(
+            [np.random.default_rng(11).standard_normal(100), np.ones(100)]
+        ).reshape(1, -1, 2),
+    )
+
+    assert np.isfinite(res.rhat["moving"])
+    assert np.isfinite(res.ess_bulk["moving"])
+    assert np.isnan(res.rhat["stuck"])
+    assert np.isnan(res.ess_bulk["stuck"])
 
 
 def test_mcse_of_the_mean_tracks_the_standard_error():
@@ -270,7 +320,7 @@ def test_mcse_scales_with_the_parameter_it_belongs_to():
 
 @pytest.mark.parametrize("q", [0.05, 0.5, 0.95])
 def test_mcse_quantile_is_scale_equivariant(q):
-    chain = np.random.default_rng(4).standard_normal(8000)
+    chain = np.random.default_rng(4).standard_normal(6000)
     plain = make_mcmc_result(param_names=["a"], samples=chain.reshape(1, -1, 1))
     scaled = make_mcmc_result(
         param_names=["a"], samples=(4.0 * chain).reshape(1, -1, 1)
@@ -284,7 +334,7 @@ def test_mcse_quantile_is_scale_equivariant(q):
 def test_mcse_quantile_is_larger_in_the_tails_than_at_the_median():
     res = make_mcmc_result(
         param_names=["a"],
-        samples=np.random.default_rng(5).standard_normal((1, 8000, 1)),
+        samples=np.random.default_rng(5).standard_normal((1, 6000, 1)),
     )
 
     centre = res.mcse_quantile(0.5)["a"]
@@ -296,7 +346,7 @@ def test_mcse_quantile_is_larger_in_the_tails_than_at_the_median():
 def test_mcse_quantile_requires_an_interior_quantile(q):
     res = make_mcmc_result(
         param_names=["a"],
-        samples=np.random.default_rng(6).standard_normal((1, 2000, 1)),
+        samples=np.random.default_rng(6).standard_normal((1, 100, 1)),
     )
 
     with pytest.raises(ValueError, match=r"interval \(0, 1\)"):

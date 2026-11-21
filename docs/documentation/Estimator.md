@@ -277,7 +277,7 @@ __Properties:__
 | mcse | `dict[str, float]` | Monte Carlo standard error of each parameter's posterior mean, $\mathrm{sd}/\sqrt{\mathrm{ESS}}$. |
 
 ???+ note "Effective Sample Size"
-    ESS is computed with the integrated autocorrelation time under Geyer's initial monotone sequence. Reported values are capped at `n_chains * n_draws`. A parameter whose chain never moved, or whose autocorrelation has not decayed within the retained draws, reports NaN rather than raising, and that NaN carries through `ess_per_second`, `mcse`, and `mcse_quantile`.
+    ESS is computed with the integrated autocorrelation time under Geyer's initial monotone sequence. Reported values are capped at `S * log10(S)` where `S` is `n_chains * n_draws`. A parameter whose chain never moved, or whose autocorrelation has not decayed within the retained draws, reports NaN rather than raising, and that NaN carries through `ess_per_second`, `mcse`, and `mcse_quantile`.
 
 __Methods:__
 
