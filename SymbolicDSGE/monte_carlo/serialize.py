@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any, Mapping, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -24,24 +23,6 @@ from .spec import (
 )
 
 NDF = NDArray[np.float64]
-
-
-def _serialize_artifact(artifact: Artifact) -> dict[str, Any]:
-    """One step's two slots, each serialized on its own terms.
-
-    ``raw`` is bulk, so it records its shape and the value is stripped to a
-    parquet member by :func:`result_document`. ``summary`` is inline whatever it
-    holds. Either slot may be absent.
-    """
-    raw = artifact["raw"]
-    summary = artifact["summary"]
-    out: dict[str, Any] = {"raw": None, "summary": None}
-    if raw is not None:
-        arr = np.asarray(raw.value)
-        out["raw"] = {"shape": list(arr.shape), "value": json_safe(arr)}
-    if summary is not None:
-        out["summary"] = {"value": _summary_value(summary.value)}
-    return out
 
 
 def _summary_value(value: Any) -> Any:
@@ -231,81 +212,6 @@ def serialize_postproc_results(
             traces["value"] = value
         out[name] = (meta, traces)
     return out
-
-
-def _serialize_regression_summary(summary: Any) -> dict[str, Any]:
-    coefficient_summaries = [
-        {
-            "variable": variable,
-            **_trace_summary(summary.coef_trace[:, index]),
-        }
-        for index, variable in enumerate(summary.variables)
-    ]
-    metrics = {
-        "r2": _trace_summary(summary.r2_trace),
-        "adjusted_r2": _trace_summary(summary.r2_adj_trace),
-        "rmse": _trace_summary(summary.rmse_trace),
-        "mse": _trace_summary(summary.mse_trace),
-        "ssr": _trace_summary(summary.ssr_trace),
-    }
-    out = {
-        "variables": summary.variables,
-        "n_rep": summary.n_rep,
-        "n_retained": summary.n_retained,
-        "retained_reps": json_safe(summary.retained_reps),
-        "n": summary.n,
-        "k": summary.k,
-        "coef_trace": json_safe(summary.coef_trace),
-        "r2_trace": json_safe(summary.r2_trace),
-        "status_trace": [int(status) for status in summary.status_trace],
-        "status_counts": _status_counts(summary.status_trace),
-        "coefficient_summaries": coefficient_summaries,
-        "metrics": metrics,
-        "ols": None,
-    }
-    if summary.kind == "ols":
-        out["ols"] = {
-            "mean_standard_errors": json_safe(np.mean(summary.se_trace, axis=0)),
-            "mean_t_statistics": json_safe(np.mean(summary.t_stat_trace, axis=0)),
-            "mean_pvalues": json_safe(np.mean(summary.pval_trace, axis=0)),
-            "mean_partial_r2": json_safe(np.mean(summary.partial_r2_trace, axis=0)),
-            "f_statistic": _trace_summary(summary.F_stat_trace),
-            "f_pvalue": _trace_summary(summary.F_pval_trace),
-        }
-    return out
-
-
-def _status_counts(status_trace: Sequence[Any]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for status in status_trace:
-        counts[status.name] = counts.get(status.name, 0) + 1
-    return counts
-
-
-def _trace_summary(values: Any) -> dict[str, Any]:
-    arr = np.asarray(values, dtype=np.float64).reshape(-1)
-    finite = arr[np.isfinite(arr)]
-    if finite.size == 0:
-        return {
-            "n": int(arr.size),
-            "n_finite": 0,
-            "mean": None,
-            "std": None,
-            "min": None,
-            "max": None,
-            "q025": None,
-            "q975": None,
-        }
-    return {
-        "n": int(arr.size),
-        "n_finite": int(finite.size),
-        "mean": _json_float(finite.mean()),
-        "std": _json_float(finite.std()),
-        "min": _json_float(finite.min()),
-        "max": _json_float(finite.max()),
-        "q025": _json_float(np.quantile(finite, 0.025)),
-        "q975": _json_float(np.quantile(finite, 0.975)),
-    }
 
 
 def _json_float(value: Any) -> float | None:
