@@ -1,10 +1,10 @@
 """``.sdsge`` manifest schema (the bundle index).
 
-Stdlib dataclasses only; the bundle layer lives in the core library, with no
-``[ui]`` extra. The manifest is stored as ``manifest.json`` at
-the archive root and enumerates every member with its ``kind`` and ``format`` so a
-reader can dispatch each one (format-agnostic: a hand-zipped CSV bundle and a
-CLI-built Parquet bundle both validate).
+Stdlib dataclasses only; the bundle layer lives in the core library. The
+manifest is stored as ``manifest.json`` at the archive root and enumerates
+every member with its ``kind`` and ``format`` so a reader can dispatch each
+one (format-agnostic: a hand-zipped CSV bundle and a CLI-built Parquet bundle
+both validate).
 """
 
 from __future__ import annotations

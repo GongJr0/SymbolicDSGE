@@ -1,15 +1,4 @@
-"""Serialization for Monte Carlo pipeline results.
-
-Lifted out of ``SymbolicDSGE.ui.mc`` so the result wire format is reusable by the
-``.sdsge`` bundle without depending on the HTTP layer. Two shapes live here:
-
-- ``serialize_pipeline_result`` -> the single flat JSON document the UI consumes,
-- ``serialize_run_meta`` plus one ``serialize_*_results`` per step kind -> the
-  bundle's split, each returning a typed meta beside the trace arrays themselves.
-
-Only the meta half is ever JSON, through :func:`json_safe`, and the writer is
-what calls it. Traces are handed over as the run's own ndarrays, never copied.
-"""
+"""Serialization for Monte Carlo pipeline results."""
 
 from __future__ import annotations
 
@@ -35,68 +24,6 @@ from .spec import (
 )
 
 NDF = NDArray[np.float64]
-
-
-def serialize_pipeline_result(result: MCPipelineResult) -> dict[str, Any]:
-    return {
-        "kind": "mc",
-        "n_rep": result.n_rep,
-        "n_retained_by_step": dict(result.meta.n_retained_by_step),
-        "n_successful": result.n_successful,
-        "succeeded": result.succeeded,
-        "elapsed_s": result.meta.elapsed_s,
-        "it_s": result.meta.it_s,
-        "step_elapsed_s": dict(result.meta.step_elapsed_s),
-        "step_it_s": dict(result.meta.step_it_s),
-        "step_worker_it_s": dict(result.meta.step_worker_it_s),
-        "step_wall_it_s": dict(result.meta.step_wall_it_s),
-        "step_counts": dict(result.meta.step_counts),
-        "step_failures": dict(result.meta.step_failures),
-        "postproc_elapsed_s": dict(result.meta.postproc_elapsed_s),
-        "failures": [
-            {
-                "rep_idx": failure.rep_idx,
-                "failures": dict(failure.failures),
-            }
-            for failure in result.failures
-        ],
-        "test_summaries": {
-            name: {
-                "test_name": summary.test_name,
-                "n_rep": summary.n_rep,
-                "n_retained": summary.n_retained,
-                "retained_reps": json_safe(summary.retained_reps),
-                "alpha": float(summary.alpha),
-                "distribution": summary.dist.value,
-                "df": json_safe(summary.df),
-                "pval_method": summary.pval_method.value,
-                "mean_statistic": float(summary.mean_statistic),
-                "mean_pval": float(summary.mean_pval),
-                "rejection_rate": float(summary.rejection_rate),
-                "statistic_se": _json_float(summary.statistic_se),
-                "pval_se": _json_float(summary.pval_se),
-                "rejection_rate_se": _json_float(summary.rejection_rate_se),
-                "statistic_ci": json_safe(summary.statistic_confidence_interval()),
-                "pval_ci": json_safe(summary.pval_confidence_interval()),
-                "rejection_ci": json_safe(summary.rejection_rate_confidence_interval()),
-                "statistic_trace": json_safe(summary.statistic_trace),
-                "pval_trace": json_safe(summary.pval_trace),
-                "status_trace": [int(status) for status in summary.status_trace],
-                "status_counts": _status_counts(summary.status_trace),
-                "statistic_summary": _trace_summary(summary.statistic_trace),
-                "pval_summary": _trace_summary(summary.pval_trace),
-            }
-            for name, summary in result.test_summaries.items()
-        },
-        "regression_summaries": {
-            name: _serialize_regression_summary(summary)
-            for name, summary in result.regression_summaries.items()
-        },
-        "postproc": {
-            name: _serialize_artifact(artifact)
-            for name, artifact in result.postproc.items()
-        },
-    }
 
 
 def _serialize_artifact(artifact: Artifact) -> dict[str, Any]:
