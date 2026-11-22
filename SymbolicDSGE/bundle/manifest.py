@@ -19,25 +19,21 @@ from numpy import ndarray
 from ..core.shock.generators import ShockParameters, ShockPathParameters
 
 # --- LAST BREAK ---
-# V17: Breakage from multi-chain support for MCMC results. (#624)
-# Multi-chain MCMC results do not break the bulk trace serialization
-# layout, a 1-chain run today serializes as a 1-chain run in V16.
-# However, the result container changed incompatibly, and library instances
-# that predate the change cannot read the new result spec.
-#
-# The break goes both ways. Making the V17 reader tolerant to V16 MCMC results
-# was ruled out in anticipation of future breaks in the `dev` release cycle.
+# V18: Breakage from POSTPROC steps being removed from MCPipeline. (#654)
+# POSTPROC steps are no longer a part of MC pipelines, the V18 reader refuses
+# to load older bundles containing them instead of ignoring the steps. Member
+# kinds referring to POSTPROCs are also removed from the manifest schema.
 # ------
 
 #: Bundle format version. Bump on every manifest or member change.
-SDSGE_FORMAT_VERSION = 17
+SDSGE_FORMAT_VERSION = 18
 
 #: Oldest bundle format this reader can reconstruct.
-SDSGE_MIN_READABLE_VERSION = 17
+SDSGE_MIN_READABLE_VERSION = 18
 
 #: Most recent format change requiring a newer reader. Written into the
 #: manifest so older readers reject bundles they cannot interpret.
-SDSGE_LAST_BREAKING_VERSION = 17
+SDSGE_LAST_BREAKING_VERSION = 18
 
 MemberKind = Literal[
     "model_config",
