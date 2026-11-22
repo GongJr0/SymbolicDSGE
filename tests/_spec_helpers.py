@@ -102,22 +102,6 @@ def _leg_key(key: str) -> tuple[str, str] | None:
     return None
 
 
-def as_posted(pipeline: dict[str, Any]) -> dict[str, Any]:
-    """Resolve a flatly-authored pipeline the way the GUI resolves one.
-
-    The client names each step's op kind, lifts its source legs out of the form
-    fields, and splits a custom op's source off its kwargs before posting. A test
-    that writes the flat form shape runs it through here so it exercises the same
-    payload the browser sends.
-
-    Steps are authored under ``nodes``/``postprocs``; ``edges`` are ignored, since
-    the posted pipeline carries no graph of its own.
-    """
-    replication = [_posted_step(raw) for raw in pipeline.get("nodes") or []]
-    postproc = [_posted_step(raw) for raw in pipeline.get("postprocs") or []]
-    return {"replication_steps": replication, "postproc_steps": postproc}
-
-
 def _posted_step(raw: dict[str, Any]) -> dict[str, Any]:
     step_type = raw["step_type"]
     params = dict(raw.get("params") or {})
