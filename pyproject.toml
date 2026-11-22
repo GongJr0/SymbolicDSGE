@@ -122,10 +122,6 @@ pythonpath = ["tests"]
 python_files = ["test_*.py"]
 addopts = "--import-mode=importlib"
 
-# UI Module Migration (#637)
-# `tests/ui` is ignored while `ui` moves to its own package.
-norecursedirs = ["tests/ui"]
-
 [tool.coverage.run]
 source = ["SymbolicDSGE"]
 
