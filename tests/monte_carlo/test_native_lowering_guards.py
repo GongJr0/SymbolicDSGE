@@ -356,7 +356,7 @@ def test_missing_producer_field_is_rejected_during_planning(
         ValueError, match="Step 'filter' does not produce source field 'x_smooth'"
     ):
         resolve_output_specs(
-            pipeline.replication_steps,
+            pipeline.steps,
             pipeline._source_indices,
             {"reference": solved_post82},
         )

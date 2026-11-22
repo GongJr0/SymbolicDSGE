@@ -88,7 +88,7 @@ class MCPipeline:
         n_jobs: int | None = None,
         check_memory_availability: bool = True,
     ) -> MCPipelineResult:
-        """Run a Monte carlo pipeine with the specified per-replication and post-loop steps.
+        """Run a Monte carlo pipeine with the specified per-replication steps.
 
         Parameters
         ----------
@@ -129,7 +129,6 @@ class MCPipeline:
             - :attr:`MCPipelineResult.transform_outputs`
             - :attr:`MCPipelineResult.test_summaries`
             - :attr:`MCPipelineResult.regression_summaries`
-            - :attr:`MCPipelineResult.postproc`
 
         """
         if n_rep <= 0:
@@ -355,12 +354,12 @@ def _validate_steps(steps: Sequence[MCStep]) -> None:
 
 
 def _resolve_source_indices(
-    replication_steps: tuple[MCStep, ...],
+    steps: tuple[MCStep, ...],
 ) -> tuple[tuple[int, ...], ...]:
-    index_by_name = {step.name: index for index, step in enumerate(replication_steps)}
+    index_by_name = {step.name: index for index, step in enumerate(steps)}
 
     resolved: list[tuple[int, ...]] = []
-    for step_index, step in enumerate(replication_steps):
+    for step_index, step in enumerate(steps):
         step_indices: list[int] = []
         for selector in step.source_args:
             source_name = selector.source_step
@@ -369,7 +368,7 @@ def _resolve_source_indices(
                 raise ValueError(
                     f"Step {step.name!r} depends on unknown producer {source_name!r}."
                 )
-            producer_step = replication_steps[source_idx]
+            producer_step = steps[source_idx]
             if source_idx >= step_index:
                 raise ValueError(
                     f"Step {step.name!r} depends on {producer_step.name!r}, which does not "

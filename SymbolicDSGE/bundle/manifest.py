@@ -68,8 +68,6 @@ MemberKind = Literal[
     "mc_regression_traces",
     "mc_transform_steps",
     "mc_transform_trace",
-    "mc_postproc_steps",
-    "mc_postproc_raw",
 ]
 MEMBER_KINDS: frozenset[str] = frozenset(get_args(MemberKind))
 

@@ -775,13 +775,10 @@ def test_pipeline_result_reports_overall_and_step_performance(
 
     lines.clear()
     out.report_step_performance(print_func=lines.append)
-    # Overall header, then an indented worker and wall it/s line per step. The
-    # post-processing section is suppressed because this pipeline has no
-    # postproc steps.
+    # Overall header, then an indented worker and wall it/s line per step.
     assert lines[0].startswith("MC run concluded successfully in ")
     assert any("datagen" in line and "wall it/s." in line for line in lines)
     assert any("state_mean" in line and "wall it/s." in line for line in lines)
-    assert not any("Post-processing Report" in line for line in lines)
 
     lines.clear()
     report_mc_step_performance(out.meta, print_func=lines.append)
@@ -856,7 +853,7 @@ def test_output_shape_resolution_tracks_selected_transform_payloads(
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -906,7 +903,7 @@ def test_output_specs_for_non_ols_regressions(solved_test, kind: str) -> None:
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -954,7 +951,7 @@ def test_output_shape_resolution_includes_linear_filter_fields(
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -994,7 +991,7 @@ def test_output_shape_resolution_includes_scalar_test_channels(
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -1018,7 +1015,7 @@ def test_output_shape_resolution_normalizes_payload_values_to_source_shapes(
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -1035,7 +1032,7 @@ def test_output_plan_carries_step_retention_count(solved_test) -> None:
     pipeline = MCPipeline([datagen])
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -1069,7 +1066,7 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps, pipeline._source_indices, {"reference": reference}
+        pipeline.steps, pipeline._source_indices, {"reference": reference}
     )
     n_state = reference.compiled.n_state
     n_z = 2 * n_state
@@ -1377,5 +1374,5 @@ def test_pipeline_orders_steps_declared_before_their_sources() -> None:
             standardize_step("tf0", source="datagen", field="observables"),
         ]
     )
-    ordered = [step.name for step in pipeline.replication_steps]
+    ordered = [step.name for step in pipeline.steps]
     assert ordered.index("tf0") < ordered.index("tf1") < ordered.index("tf2")

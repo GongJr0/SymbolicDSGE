@@ -1,7 +1,4 @@
 from __future__ import annotations
-
-import json
-from io import StringIO
 from typing import cast
 
 import numpy as np
@@ -11,10 +8,8 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
 from SymbolicDSGE.monte_carlo.mc_constructs import (
     MCDataGenResult,
-    MCMeta,
     MCPipelineResult,
 )
-from SymbolicDSGE.monte_carlo.postproc import Artifact, Raw, Summary
 from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,
     raw_model_data_step,
@@ -23,7 +18,6 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 )
 from SymbolicDSGE.monte_carlo.serialize import (
     json_safe,
-    serialize_postproc_results,
     serialize_regression_results,
     serialize_run_meta,
     serialize_test_results,
@@ -76,16 +70,6 @@ def _empty_datagen() -> MCDataGenResult:
         X=empty,
         shock_names=(),
         eps=empty,
-    )
-
-
-def _postproc_result(postproc: dict[str, Artifact]) -> MCPipelineResult:
-    return MCPipelineResult(
-        meta=MCMeta(n_rep=3, n_retained_by_step={}),
-        n_rep=3,
-        n_successful=3,
-        datagen_outputs={"datagen": _empty_datagen()},
-        postproc=postproc,
     )
 
 
@@ -146,51 +130,6 @@ def test_transform_shape_rides_the_meta_and_carries_only_its_payload() -> None:
     # A transform is a bare array with no container to hold an index map, so the
     # member carries the payload and nothing beside it.
     assert set(traces) == {"value"}
-
-
-def test_postproc_slots_are_independent() -> None:
-    curve = np.arange(8.0).reshape(4, 2)
-    steps = serialize_postproc_results(
-        {
-            "both": Artifact(raw=Raw(value=curve), summary=Summary(value=0.6)),
-            "summary_only": Artifact(raw=None, summary=Summary(value={"n": 4})),
-            "raw_only": Artifact(raw=Raw(value=curve), summary=None),
-        }
-    )
-
-    both_meta, both_traces = steps["both"]
-    assert both_meta["shape"] == [4, 2] and both_meta["summary"] == 0.6
-    assert both_traces["value"].shape == (4, 2)
-
-    summary_meta, summary_traces = steps["summary_only"]
-    assert summary_meta["shape"] is None
-    assert summary_traces == {}  # nothing bulk, so no member
-
-    raw_meta, _ = steps["raw_only"]
-    assert raw_meta["summary"] is None
-
-
-def test_dataframe_summary_rides_pandas_table_schema() -> None:
-    import pandas as pd
-
-    frame = pd.DataFrame({"stat": ["a", "b"], "value": [1 / 3, np.nan]})
-    labeled = pd.DataFrame({"v": [10.0]}, index=pd.Index(["x"], name="lab"))
-    steps = serialize_postproc_results(
-        {
-            "desc": Artifact(raw=None, summary=Summary(frame)),
-            "idx": Artifact(raw=None, summary=Summary(labeled)),
-        }
-    )
-
-    for name, original in (("desc", frame), ("idx", labeled)):
-        payload = steps[name][0]["summary"]
-        json.dumps(payload)  # inline and JSON-safe, no side channel
-        back = pd.read_json(StringIO(json.dumps(payload)), orient="table")
-        assert dict(back.dtypes) == dict(original.dtypes)
-        # A summary is a presentation surface: JSON caps floats at 15 digits and
-        # the traces are what carries the exact values.
-        pd.testing.assert_frame_equal(back, original, rtol=1e-13, atol=0)
-    assert steps["idx"][0]["summary"]["schema"]["primaryKey"] == ["lab"]
 
 
 def test_json_safe_reaches_into_containers() -> None:

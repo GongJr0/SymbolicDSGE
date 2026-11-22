@@ -37,9 +37,7 @@ CompiledColumnSelector = Sequence[int] | slice | None
 class OpType(StrEnum):
     """Operation role a pipeline step fills.
 
-    Determines when a step runs and what contract it is held to: ``DATAGEN``,
-    ``TRANSFORM``, ``FILTER``, ``TEST`` and ``REGRESSION`` run per replication,
-    ``POSTPROC`` runs once after the loop.
+    Determines when a step runs and what contract it is held to.
     """
 
     DATAGEN = "datagen"
@@ -311,7 +309,7 @@ class MCFailure:
     Attributes
     ----------
     rep_idx : int
-        Replication index that failed, or -1 for a post-loop step.
+        Replication index that failed.
     failures : dict[str, int]
         Mapping of step name to status code for each step that
         failed in the replication.
@@ -366,8 +364,7 @@ class MCMeta:
     n_retained_by_step : Mapping[str, int]
         Replications whose output was retained, by producer step.
     elapsed_s : float
-        Wall time for the replication loop alone, excluding post-loop aggregation
-        and postproc.
+        Wall time for the replication loop alone, excluding post-loop aggregation.
     step_elapsed_s : Mapping[str, float]
         Accumulated worker seconds by per-replication step. Populated only when the
         run is started at the highest verbosity.
@@ -384,9 +381,8 @@ class MCMeta:
     n_retained_by_step: Mapping[str, int]
 
     #: Wall-clock seconds of the replication loop alone; the basis for ``it_s``.
-    #: Post-loop aggregation and postproc are excluded (see ``postproc_elapsed_s``).
     elapsed_s: float = 0.0
-    #: Per-replication step timings (postproc excluded; see ``postproc_elapsed_s``).
+    #: Per-replication step timings
     step_elapsed_s: Mapping[str, float] = dcf(default_factory=dict)
     step_counts: Mapping[str, int] = dcf(default_factory=dict)
     step_failures: Mapping[str, int] = dcf(default_factory=dict)
@@ -729,7 +725,7 @@ class MCFilterResult:
 
 @dataclass(frozen=True)
 class MCPipelineResult:
-    """Result container for a Monte Carlo run, including all retained per-replication and post-loop outputs.
+    """Result container for a Monte Carlo run, including all retained per-replication outputs.
 
     Attributes
     ----------
@@ -754,10 +750,7 @@ class MCPipelineResult:
         MCRegressionResult per regression step, containing the retained
         replications' regression coefficients and statistics.
     failures : tuple[MCFailure, ...]
-        MCFailure instances for any failed replications or post-loop steps.
-    postproc : Mapping[str, Artifact]
-        Post-loop step artifacts, keyed by step name, containing raw and summary
-        outputs.
+        MCFailure instances for any failed replications.
     run_config : Mapping[str, Any]
         Configuration to reproduce this run, given deterministic steps and the same
         inputs in model/data sources.
@@ -783,7 +776,7 @@ class MCPipelineResult:
 
     @property
     def succeeded(self) -> bool:
-        """Whether the run succeeded (no per-replication or post-loop failures)."""
+        """Whether the run succeeded (no failures steps in any replication)."""
         return self.meta.steps_success
 
     def report_performance(
@@ -909,7 +902,6 @@ def failed_step_counts(fails: list[MCFailure]) -> dict[str, int]:
     """Count of failed per-replication steps (recorded with non-negative rep_idx)."""
     counts: dict[str, int] = {}
     for f in fails:
-        if f.rep_idx != -1:
-            for step_name in f.failures:
-                counts[step_name] = counts.get(step_name, 0) + 1
+        for step_name in f.failures:
+            counts[step_name] = counts.get(step_name, 0) + 1
     return counts

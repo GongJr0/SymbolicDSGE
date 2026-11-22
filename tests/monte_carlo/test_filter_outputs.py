@@ -521,7 +521,7 @@ def test_filter_reads_observations_from_payload(solved_post82: SolvedModel) -> N
             add_payload_step("observations", payload),
         ]
     )
-    assert [s.name for s in pipeline.replication_steps] == [
+    assert [s.name for s in pipeline.steps] == [
         "unrelated",
         "observations",
         "filt",

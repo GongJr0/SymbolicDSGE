@@ -515,8 +515,7 @@ class BundleBuilder:
 
         Wrapping enforces the author-side contract (top-level def, safe namespace)
         and snapshots the source + captured globals, so the receiver can audit the
-        op at load. Post-loop (POSTPROC) ops get the looser pandas namespace; every
-        other phase gets numpy/numba.
+        op at load.
         """
         import cloudpickle
         from ..monte_carlo.custom_op import NumbaCustomFunc
