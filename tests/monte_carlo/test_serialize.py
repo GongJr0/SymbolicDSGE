@@ -23,7 +23,6 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 )
 from SymbolicDSGE.monte_carlo.serialize import (
     json_safe,
-    serialize_pipeline_result,
     serialize_postproc_results,
     serialize_regression_results,
     serialize_run_meta,
@@ -206,33 +205,6 @@ def test_json_safe_reaches_into_containers() -> None:
         "nested": [0.5, [2]],
         "nan": None,  # JSON has no NaN; a null is what the readers expect
     }
-
-
-def test_ui_wire_stays_one_flat_json_document() -> None:
-    result = _run()
-    wire = serialize_pipeline_result(result)
-
-    assert wire["kind"] == "mc"
-    # Derived values the bundle refuses to store are present here, since this is
-    # the shape a client renders rather than the shape a run is rebuilt from.
-    assert wire["test_summaries"]["jb"]["pval_trace"]
-    assert wire["regression_summaries"]["ols"]["r2_trace"]
-    json.dumps(wire)
-
-
-def test_postproc_summary_mapping_inlines() -> None:
-    result = _postproc_result(
-        {
-            "m": Artifact(
-                raw=None, summary=Summary(value={"a": [1, 2], "b": np.float64(0.5)})
-            )
-        }
-    )
-
-    wire = serialize_pipeline_result(result)
-
-    assert wire["postproc"]["m"]["summary"]["value"] == {"a": [1, 2], "b": 0.5}
-    json.dumps(wire)
 
 
 @pytest.mark.parametrize("n_rep", [1, 3])

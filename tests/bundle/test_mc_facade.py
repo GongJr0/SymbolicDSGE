@@ -22,7 +22,6 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     raw_model_data_step,
     transform_step,
 )
-from SymbolicDSGE.monte_carlo.serialize import serialize_pipeline_result
 
 # Bundling a result that retained per-rep payloads/test-results/contexts warns
 # (those don't travel in a .sdsge). That's expected for every result-bundling
@@ -298,11 +297,6 @@ def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
         {s.name: s for s in rebuilt.postproc_steps}["sum"].func, PandasCustomFunc
     )
 
-    # The recovered artifacts serialize to what the live result does.
-    assert (
-        serialize_pipeline_result(loaded.mc.result)["postproc"]
-        == serialize_pipeline_result(result)["postproc"]
-    )
     assert [
         s.step_type for s in (*rebuilt.replication_steps, *rebuilt.postproc_steps)
     ] == [
