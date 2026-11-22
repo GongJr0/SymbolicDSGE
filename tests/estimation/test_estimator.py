@@ -29,7 +29,6 @@ from SymbolicDSGE.estimation.resolvers import (
     resolve_bounds,
     theta_from_params,
 )
-from SymbolicDSGE.ui.estimation import estimate_and_solve
 
 #: Bounds for ``post82_estimator``'s default ("psi_pi", "rho_r") pair. Bounds
 #: are keyed by name, so a positional pair no longer says which parameter it
@@ -821,30 +820,3 @@ def test_logpost_decomposes_into_loglik_and_logprior(post82_estimator, include_l
     assert est.logpost(at, include_logjac) == pytest.approx(
         est.loglik(at) + est.logprior(at, include_logjac), rel=1e-12
     )
-
-
-def test_estimate_and_solve_leaves_the_given_config_alone(
-    solved_post82, post82_estimator
-):
-    """The estimates reach the solve through a copy, not through the caller's
-    config."""
-    config = solved_post82.config
-
-    def calibration():
-        return {str(k): float(v) for k, v in config.calibration.parameters.items()}
-
-    before = calibration()
-
-    result, solved = estimate_and_solve(
-        est=post82_estimator(estimated_params=("psi_pi", "rho_r")),
-        ss_seed=solved_post82.policy.steady_state,
-        theta0=_POST82_START,
-        bounds=_POST82_BOUNDS,
-        maxiter=10,
-    )
-
-    assert calibration() == before
-    assert solved.config is not config
-    for name, value in result.theta.items():
-        assert solved.config.calibration.parameters[name] == value
-        assert before[name] != value

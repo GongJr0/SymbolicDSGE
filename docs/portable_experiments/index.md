@@ -5,7 +5,7 @@ tags:
 
 # Portable Experiments
 
-A `.sdsge` file packages everything needed to reopen a model in the GUI or recover its components in code. Model configurations, estimation spec + results, Monte Carlo pipeline + traces, observed data, and simulation prefills are packed into a single shareable archive. The file is a zip with a versioned manifest (`manifest.json`) and an aliased extension; nothing about reading or writing it requires a custom tool beyond the bundled CLIs.
+A `.sdsge` file packages everything needed to examine or re-execute a routine composed of `SymbolicDSGE` modules. Model configurations, estimation spec + results, Monte Carlo pipeline + traces, observed data, and simulation prefills are packed into a single shareable archive. The file is a zip with a versioned manifest (`manifest.json`) and an aliased extension; nothing about reading or writing it requires a custom tool beyond the bundled CLIs.
 
 The container exists so a non-coding collaborator can run an experiment by opening one file, and so a coding collaborator can reach every component the bundle carries without re-deriving them.
 
@@ -31,7 +31,6 @@ There are three ways to produce or consume a `.sdsge`:
 
 - **Command line:** [`sdsge-compile`](sdsge-compile.md) walks a directory layout and assembles a bundle; [`sdsge-decompile`](sdsge-decompile.md) extracts a bundle into a re-compilable directory.
 - **In-code:** [`SolvedModel.save_sdsge()`](../documentation/SolvedModel.md) and [`SymbolicDSGE.load_bundle()`](../documentation/bundle/index.md) handle the round-trip from Python; the [Authoring](../guides/bundle_authoring_guide.md) and [Loading](../guides/bundle_loading_guide.md) guides walk through both.
-- **GUI:** passing a `.sdsge` to [`sdsge-ui`](../gui_usage/index.md) launches the playground with every tab pre-populated.
 
 ???+ info "When to author from code vs from a directory"
     Author from code when the bundle is the output of a Python workflow (you already have a `SolvedModel`, an `MCPipelineResult`, etc.). Author from a directory when the bundle is composed by hand or by a non-Python tool: drop CSVs / YAMLs / JSONs into the conventional layout and call `sdsge-compile`.

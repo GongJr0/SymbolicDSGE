@@ -14,9 +14,6 @@ The bulk members are the numeric ones, and they are the reason the binary
 gateway exists: rendering a covariance path through JSON costs a Python pass per
 element and several times the data's size in transient text, while the Parquet
 it produces is byte for byte the same.
-
-This lives in the core library (not behind the ``[ui]`` extra) so a bundle can be
-produced without the UI dependencies.
 """
 
 from __future__ import annotations

@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 from numpy import float64
 
-from SymbolicDSGE.ui.estimation import _method_from_result
 from SymbolicDSGE.estimation.results import MCMCResult, MLEResult
 
 from tests._result_helpers import make_mcmc_result
@@ -32,11 +31,3 @@ def _mcmc_result() -> MCMCResult:
         samples=np.zeros((1, 2, 1), dtype=float64),
         sampler_config={"adapt": True},
     )
-
-
-def test_method_from_result_branches():
-    assert _method_from_result(None) is None
-    assert _method_from_result(_mcmc_result()) == "mcmc"
-    assert _method_from_result(_opt_result()) == "mle"
-    with pytest.raises(TypeError, match="Unsupported estimation result type"):
-        _method_from_result(object())  # type: ignore[arg-type]

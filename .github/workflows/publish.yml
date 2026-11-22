@@ -49,25 +49,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # UI assets ship in the wheel via package-data; they are identical across
-      # platforms and irrelevant to validating the native build, so only build
-      # them for real (tag/dispatch) wheels, not PR validation runs.
-      - name: Set up Python
-        if: github.event_name != 'pull_request'
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Set up Node
-        if: github.event_name != 'pull_request'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: sdsge-ui/frontend/package-lock.json
-      - name: Build frontend into package
-        if: github.event_name != 'pull_request'
-        run: python scripts/build_frontend.py
-
       # Cached by itself and skipped on a hit; the action says why the save
       # is an ordinary step rather than a post step.
       - name: Set up macOS OpenMP toolchain
@@ -101,14 +82,6 @@ jobs:
         with:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@v7
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: sdsge-ui/frontend/package-lock.json
-      - name: Build frontend into package
-        run: python scripts/build_frontend.py
       - name: Build sdist
         run: uv build --sdist
       - name: Upload sdist

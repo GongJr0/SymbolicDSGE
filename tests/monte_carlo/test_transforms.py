@@ -9,7 +9,6 @@ degenerate input be injected for the branches a well-behaved sample never
 enters. See ``conftest.py`` for that fixture.
 
 The failure cases build their own pipelines, since a rejection is the result.
-The last test carries the whole thing through a bundle.
 """
 
 from __future__ import annotations
@@ -17,7 +16,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from SymbolicDSGE import parse_config
 from SymbolicDSGE.monte_carlo import MCPipeline, OpType
 from SymbolicDSGE.monte_carlo.step_factories import (
     add_payload_step,
@@ -285,89 +283,3 @@ def test_transform_factories_produce_a_bound_transform_step(
     assert step.name == "step_a"
     assert dict(step.kwargs) == runner_kwargs
     assert len(step.source_args) == 1
-
-
-# ---- persistence -----------------------------------------------------------
-
-
-def test_transform_pipeline_round_trips_through_bundle(
-    tmp_path, test_model_path
-) -> None:
-    """Authoring a transform-containing pipeline and re-opening it from a
-    bundle preserves every node and its bound params."""
-    import pathlib
-
-    from SymbolicDSGE import BundleBuilder, load_bundle
-    from SymbolicDSGE.monte_carlo import MCPipeline
-    from SymbolicDSGE.ui.mc import build_pipeline as build_live_pipeline
-    from tests._spec_helpers import as_posted
-
-    # Authored the way the GUI posts it, then lowered through the UI boundary,
-    # which is what resolves op kinds, source legs and the wald target field.
-    pipeline = as_posted(
-        {
-            "nodes": [
-                {
-                    "id": "sim",
-                    "step_type": "simulation",
-                    "name": "datagen",
-                    "params": {"T": 50},
-                },
-                {
-                    "id": "std",
-                    "step_type": "standardize",
-                    "name": "standardize",
-                    "params": {"source": "datagen", "field": "observables"},
-                },
-                {
-                    "id": "rm",
-                    "step_type": "rolling_mean",
-                    "name": "rmean",
-                    "params": {
-                        "source": "standardize",
-                        "field": "payload",
-                        "window": 3,
-                    },
-                },
-                {
-                    "id": "wm",
-                    "step_type": "wald",
-                    "name": "wald_mean",
-                    "params": {
-                        "kind": "mean",
-                        "source": "rmean",
-                        "field": "payload",
-                        "target_vector": [0.0],
-                    },
-                },
-            ],
-            "edges": [],
-            "postprocs": [],
-        }
-    )
-
-    target = (
-        BundleBuilder(created_by="tx-test")
-        .add_model("reference", parse_config(test_model_path), compile_kwargs={})
-        .add_mc(build_live_pipeline(pipeline))
-        .write(tmp_path / "tx.sdsge")
-    )
-
-    loaded = load_bundle(target)
-    assert loaded.mc is not None
-    restored = loaded.mc.pipeline
-    assert [step.step_type for step in restored.replication_steps] == [
-        "simulation",
-        "standardize",
-        "rolling_mean",
-        "wald",
-    ]
-    # The restored spec still rebuilds (no drift between the spec's Literal and
-    # the catalog at load time).
-    rebuilt = MCPipeline.from_spec(restored.to_spec())
-    assert [step.name for step in rebuilt.replication_steps] == [
-        "datagen",
-        "standardize",
-        "rmean",
-        "wald_mean",
-    ]

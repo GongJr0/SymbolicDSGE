@@ -162,13 +162,6 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Installation: installation.md
-  - GUI Usage:
-      - Overview: gui_usage/index.md
-      - Builder: gui_usage/builder.md
-      - Spec: gui_usage/spec.md
-      - Outputs: gui_usage/outputs.md
-      - Estimation: gui_usage/estimation.md
-      - MC Pipeline: gui_usage/monte_carlo.md
   - Portable Experiments:
       - Overview: portable_experiments/index.md
       - sdsge-compile: portable_experiments/sdsge-compile.md

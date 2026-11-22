@@ -33,7 +33,6 @@ Documentation = "https://gongjr0.github.io/SymbolicDSGE/"
 Repository = "https://github.com/GongJr0/SymbolicDSGE"
 
 [project.scripts]
-sdsge-ui = "SymbolicDSGE.ui.cli:main"
 sdsge-compile = "SymbolicDSGE.bundle.cli:main_compile"
 sdsge-decompile = "SymbolicDSGE.bundle.cli:main_decompile"
 
@@ -41,10 +40,6 @@ sdsge-decompile = "SymbolicDSGE.bundle.cli:main_decompile"
 fred = [
     "fredapi>=0.5.2",
     "python-dotenv>=1.2.3",
-]
-ui = [
-    "fastapi>=0.163.2",
-    "uvicorn[standard]>=0.54.0",
 ]
 
 [dependency-groups]
@@ -95,7 +90,6 @@ include = ["SymbolicDSGE*"]
 
 [tool.setuptools.package-data]
 "SymbolicDSGE" = ["py.typed"]
-"SymbolicDSGE.ui" = ["_static/**/*"]
 "SymbolicDSGE._ckernels" = ["**/*.pyx", "**/*.pxd", "**/*.pyi", "**/*.c", "**/*.h"]
 
 [tool.ruff]
@@ -127,10 +121,6 @@ testpaths = ["tests"]
 pythonpath = ["tests"]
 python_files = ["test_*.py"]
 addopts = "--import-mode=importlib"
-
-# UI Module Migration (#637)
-# `tests/ui` is ignored while `ui` moves to its own package.
-norecursedirs = ["tests/ui"]
 
 [tool.coverage.run]
 source = ["SymbolicDSGE"]

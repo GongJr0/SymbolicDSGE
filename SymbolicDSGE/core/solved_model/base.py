@@ -19,8 +19,7 @@ from numpy.typing import NDArray
 
 import matplotlib.pyplot as plt
 
-from . import export, measurement
-
+from . import measurement
 from ..shock.generators import Shock, ShockPath
 from ..shock.spec import ShockSpec
 from ..solver_backend import BaseSolution
@@ -314,29 +313,6 @@ class SolvedModel(ABC, Generic[Policy]):
         plt.tight_layout()
         plt.show()
 
-    def serve(
-        self,
-        *,
-        host: str = "127.0.0.1",
-        port: int | None = None,
-        open_browser: bool = True,
-    ) -> None:
-        """Launch the SymbolicDSGE web playground with this model preloaded.
-
-        Serves the bundled UI and opens a browser, with this model loaded as
-        the ``reference`` model. Requires the optional UI dependencies::
-
-            pip install 'SymbolicDSGE[ui]'
-
-        Parameters
-        ----------
-        host, port:
-            Bind address; ``port`` defaults to an available port.
-        open_browser:
-            Whether to open a browser window automatically.
-        """
-        export.serve(self, host=host, port=port, open_browser=open_browser)
-
     def to_bundle_builder(
         self,
         *,
@@ -351,12 +327,13 @@ class SolvedModel(ABC, Generic[Policy]):
 
             solved.to_bundle_builder().add_estimation(spec, ...).write("out.sdsge")
         """
-        return export.to_bundle_builder(
+        from ...bundle.builder import BundleBuilder
+
+        return BundleBuilder(created_by=created_by).add_model(
+            name,
             self,
-            name=name,
             compile_kwargs=compile_kwargs,
             solve_kwargs=solve_kwargs,
-            created_by=created_by,
         )
 
     def save_sdsge(
