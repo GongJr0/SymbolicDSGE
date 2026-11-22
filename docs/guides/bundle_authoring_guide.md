@@ -15,7 +15,7 @@ This guide walks through assembling a complete `.sdsge` bundle from code: model 
 We start from `MODELS/POST82.yaml` (also used in the [Quick Start](quickstart.md)). The full assembly fits in a single script you can copy and run.
 
 ???+ tip "Where the bundle ends up"
-    The example writes `experiment-1.sdsge` in the current directory. Open it later via [`load_bundle`](../documentation/bundle/load_bundle.md), inspect components with [`sdsge-decompile`](../portable_experiments/sdsge-decompile.md), or open it directly in the GUI with `sdsge-ui experiment-1.sdsge`.
+    The example writes `experiment-1.sdsge` in the current directory. Open it later via [`load_bundle`](../documentation/bundle/load_bundle.md), or inspect components with [`sdsge-decompile`](../portable_experiments/sdsge-decompile.md).
 
 ## Solve a reference model
 
