@@ -8,8 +8,6 @@ I/O attribute access (``np.load`` etc.).
 from __future__ import annotations
 
 import math
-from types import SimpleNamespace  # noqa: F401  (kept for parity with siblings)
-
 import pytest
 
 from SymbolicDSGE.monte_carlo.custom_op import (
