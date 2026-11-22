@@ -822,9 +822,8 @@ class CustomFunc:
         """Build a wrapper from source *text* rather than a live function.
 
         The constructor recovers source via ``inspect.getsource``, which needs a
-        real ``def`` in a module file or notebook cell — unavailable for code
-        typed into a web editor and ``exec``'d. This validates the supplied text
-        directly (same AST contract) and executes it in the safe namespace to
+        real ``def`` in a module file or notebook cell. This validates the supplied
+        text directly (same AST contract) and executes it in the safe namespace to
         obtain the callable, snapshotting the original text as :attr:`source` for
         receiver-side audit. A leading operation marker is accepted and treated as
         a no-op (the result is wrapped here).
@@ -838,7 +837,7 @@ class CustomFunc:
             tree = ast.parse(text)
         except SyntaxError as exc:
             raise CustomOpValidationError(
-                f"submitted source did not parse — {exc.msg} (line {exc.lineno})."
+                f"submitted source did not parse: {exc.msg} (line {exc.lineno})."
             ) from exc
         if len(tree.body) != 1 or not isinstance(tree.body[0], ast.FunctionDef):
             raise CustomOpValidationError(
