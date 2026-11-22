@@ -36,7 +36,6 @@
 ```bash
 pip install SymbolicDSGE
 pip install "SymbolicDSGE[fred]"  # FRED API utilities
-pip install "SymbolicDSGE[ui]"    # Web based GUI
 ```
 
 ### Useful Links
@@ -60,45 +59,6 @@ pip install "SymbolicDSGE[ui]"    # Web based GUI
   - Filtering
   - Data generation
 
-### Web-UI
-
-`SymbolicDSGE` ships a `[ui]` dependency with the goal of making basic DSGE experiments accessible to non-programmers.
-GUI users can:
-
-- Create a model config
-- Load and adjust existing configs
-- Estimate
-- Solve
-- Simulate
-- Create and run Monte Carlo experiments
-- Apply data transformations to outputs
-- Produce figures
-- Access raw output data
-
-There are two intended ways to access the GUI:
-
-```bash
-# Option 1: Serve the GUI from the command line
-#           This launches an empty GUI and the configuration should be done through the Builder tab.
-sdsge-ui
-```
-
-```python
-# Option 2: Serve the GUI with a pre-loaded SolvedModel object
-
-# Read a config and solve the model as usual
-from SymbolicDSGE import parse_config, solve_model
-
-model = parse_config(...)
-sol = solve_model(model)
-
-# Serve the GUI with the solved model pre-loaded in the reference slot
-sol.serve(open_browser=True)
-```
-
-The UI supports multiple tabs for model building, estimation, simulation, and Monte Carlo experiments.
-While most features are not supported in their entirety; the UI offers a low-code interface for basic DSGE experiments
-and crucially, displaying the results from a `.sdsge` experiment bundle.
 
 ### Read the Docs
 
