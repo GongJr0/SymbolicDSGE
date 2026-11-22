@@ -31,7 +31,6 @@ There are three ways to produce or consume a `.sdsge`:
 
 - **Command line:** [`sdsge-compile`](sdsge-compile.md) walks a directory layout and assembles a bundle; [`sdsge-decompile`](sdsge-decompile.md) extracts a bundle into a re-compilable directory.
 - **In-code:** [`SolvedModel.save_sdsge()`](../documentation/SolvedModel.md) and [`SymbolicDSGE.load_bundle()`](../documentation/bundle/index.md) handle the round-trip from Python; the [Authoring](../guides/bundle_authoring_guide.md) and [Loading](../guides/bundle_loading_guide.md) guides walk through both.
-- **GUI:** passing a `.sdsge` to [`sdsge-ui`](../gui_usage/index.md) launches the playground with every tab pre-populated.
 
 ???+ info "When to author from code vs from a directory"
     Author from code when the bundle is the output of a Python workflow (you already have a `SolvedModel`, an `MCPipelineResult`, etc.). Author from a directory when the bundle is composed by hand or by a non-Python tool: drop CSVs / YAMLs / JSONs into the conventional layout and call `sdsge-compile`.
