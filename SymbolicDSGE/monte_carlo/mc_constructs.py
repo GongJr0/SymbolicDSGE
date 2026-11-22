@@ -24,9 +24,7 @@ from ..filters.filter import FilterResult, UnscentedFilterResult
 from .._diag_tests.result import MCTestResult
 from .._diag_tests.status import TestStatus
 from ..regression.enums import RegressionStatus
-from .postproc import Artifact
 from ..regression.result import MCRegressionResult
-from .custom_op import PandasCustomFunc
 from .spec import MCFailureMeta, SourceSpec, StepMeta, StepSpec
 
 NDF = NDArray[float64]
@@ -49,7 +47,6 @@ class OpType(StrEnum):
     FILTER = "filter"
     TEST = "test"
     REGRESSION = "regression"
-    POSTPROC = "postproc"
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,27 +196,6 @@ class MCStep:
         if self.n_retain < -1:
             raise ValueError("MCStep n_retain must be -1 (retain all) or non-negative.")
 
-        if self.op_type is OpType.POSTPROC:
-            if not callable(self.func):
-                raise ValueError(
-                    "POSTPROC steps must carry a callable in the `func` attribute."
-                )
-            if self.n_retain != -1:
-                raise ValueError(
-                    "POSTPROC steps run in the post-loop retained traces. "
-                    "`n_retain` is not applicable and must be left at its default value of -1."
-                )
-
-        if (
-            isinstance(self.func, PandasCustomFunc)
-            and self.op_type is not OpType.POSTPROC
-        ):
-            raise ValueError(
-                f"MCStep {self.name!r}: a PandasCustomFunc is only allowed in a "
-                "post-loop (POSTPROC) step, not a "
-                f"{self.op_type.value!r} step."
-            )
-
     def to_spec(self) -> StepSpec:
         """Step as data, plus the two things data cannot hold.
 
@@ -227,11 +203,7 @@ class MCStep:
         op's callable rides :attr:`StepSpec.func`, so :attr:`StepSpec.meta` is
         JSON on its own and a bundle writes the other two as their own members.
         """
-        if (
-            self.func is not None
-            and self.op_type is not OpType.POSTPROC
-            and self.step_type != "transform:custom"
-        ):
+        if self.func is not None and self.step_type != "transform:custom":
             raise ValueError(
                 f"MCStep {self.name!r} carries a callable that no replication "
                 f"step kind can restore; only a custom transform ships one."
@@ -335,7 +307,6 @@ def _normalize_columns(value: ColumnSelector) -> CompiledColumnSelector:
 class MCFailure:
     """One collected replication failure from a run made with fail-fast disabled.
 
-    Post-loop failures are recorded with ``rep_idx`` of -1.
 
     Attributes
     ----------
@@ -404,12 +375,8 @@ class MCMeta:
         Attempted calls by per-replication step.
     step_failures : Mapping[str, int]
         Collected failures by per-replication step.
-    postproc_elapsed_s : Mapping[str, float]
-        Wall time by post-loop step.
     failed_steps : dict[str, int]
         Collected per-replication failures by step.
-    failed_postprocs : set[str]
-        Post-loop steps that failed.
     """
 
     n_rep: int
@@ -423,12 +390,7 @@ class MCMeta:
     step_elapsed_s: Mapping[str, float] = dcf(default_factory=dict)
     step_counts: Mapping[str, int] = dcf(default_factory=dict)
     step_failures: Mapping[str, int] = dcf(default_factory=dict)
-    #: Wall-clock seconds per post-loop (``OpType.POSTPROC``) step. Postproc runs
-    #: once, so it is reported as runtime only, never folded into the it/s rates.
-    postproc_elapsed_s: Mapping[str, float] = dcf(default_factory=dict)
-
     failed_steps: dict[str, int] = dcf(default_factory=dict)
-    failed_postprocs: set[str] = dcf(default_factory=set)
 
     @property
     def it_s(self) -> float:
@@ -463,19 +425,9 @@ class MCMeta:
         }
 
     @property
-    def postproc_total_s(self) -> float:
-        """Total wall-clock seconds spent in the post-loop phase."""
-        return sum(self.postproc_elapsed_s.values())
-
-    @property
     def steps_success(self) -> bool:
         """Whether all per-replication steps succeeded (no failures recorded)."""
         return self.failed_steps == {}
-
-    @property
-    def postproc_success(self) -> bool:
-        """Whether all post-loop steps succeeded (no failures recorded)."""
-        return self.failed_postprocs == set()
 
 
 @dataclass(frozen=True, eq=False, repr=False)
@@ -827,17 +779,12 @@ class MCPipelineResult:
     test_summaries: Mapping[str, MCTestResult] = dcf(default_factory=dict)
     regression_summaries: Mapping[str, MCRegressionResult] = dcf(default_factory=dict)
     failures: tuple[MCFailure, ...] = ()
-
-    #: Post-loop (``OpType.POSTPROC``) artifacts, keyed by step name. Each step
-    #: contributes one :class:`~SymbolicDSGE.monte_carlo.postproc.Artifact`,
-    #: holding its ``raw`` and ``summary`` slots (either may be ``None``).
-    postproc: Mapping[str, Artifact] = dcf(default_factory=dict)
     run_config: Mapping[str, Any] = dcf(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:
         """Whether the run succeeded (no per-replication or post-loop failures)."""
-        return self.meta.steps_success and self.meta.postproc_success
+        return self.meta.steps_success
 
     def report_performance(
         self,
@@ -936,11 +883,6 @@ def report_mc_performance(
     print_func(
         f"MC run concluded {_conclusion_word(meta.steps_success)} in {meta.elapsed_s:.2f}s with {meta.it_s:.2f} it/s."
     )
-    if meta.postproc_elapsed_s:
-        print_func(
-            "Post-processing concluded "
-            f"{_conclusion_word(meta.postproc_success)} in {meta.postproc_total_s:.4f}s."
-        )
 
 
 def report_mc_step_performance(
@@ -961,19 +903,6 @@ def report_mc_step_performance(
             f"({meta.step_elapsed_s[step_name]:.2f} worker-s), "
             f"{wall_rates[step_name]:.2f} wall it/s."
         )
-
-    if meta.postproc_elapsed_s:
-        print_func("\nPost-processing Report:\n")
-        for step_name, elapsed_s in meta.postproc_elapsed_s.items():
-            step_succeeded = (
-                "Succeeded" if step_name not in meta.failed_postprocs else "Failed"
-            )
-            print_func(f"\t{step_name}: {step_succeeded} in {elapsed_s:.4f}s.")
-
-
-def failed_postproc_names(fails: list[MCFailure]) -> set[str]:
-    """Names of post-loop steps that failed (recorded with the ``-1`` sentinel)."""
-    return {step for f in fails if f.rep_idx == -1 for step in f.failures}
 
 
 def failed_step_counts(fails: list[MCFailure]) -> dict[str, int]:

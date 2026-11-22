@@ -59,13 +59,11 @@ def lower_native_run(
     if n_rep <= 0:
         raise ValueError("n_rep must be positive.")
 
-    plan = resolve_output_specs(
-        pipeline.replication_steps, pipeline._source_indices, models
-    )
+    plan = resolve_output_specs(pipeline.steps, pipeline._source_indices, models)
     if check_memory_availability:
         MCMemoryProfiler(
             plan,
-            pipeline.replication_steps,
+            pipeline.steps,
             models=models,
             n_rep=n_rep,
             n_jobs=n_jobs,
@@ -75,11 +73,11 @@ def lower_native_run(
     bindings: list[tuple[FloatInputBinding, ...]] = []
     test_result_specs: dict[str, TestResultSpec] = {}
     regression_result_specs: dict[str, RegressionResultSpec] = {}
-    for step_idx, step in enumerate(pipeline.replication_steps):
+    for step_idx, step in enumerate(pipeline.steps):
         native_step, step_bindings = _lower_step(
             step_idx,
             step,
-            pipeline.replication_steps,
+            pipeline.steps,
             pipeline._source_indices[step_idx],
             plan,
             models,
@@ -105,7 +103,7 @@ def lower_native_run(
             regression_result_specs[step.name] = regression_result_spec(
                 step,
                 pipeline._source_indices[step_idx],
-                pipeline.replication_steps,
+                pipeline.steps,
                 plan,
             )
     return LoweredMCRun(

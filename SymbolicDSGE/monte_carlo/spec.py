@@ -69,14 +69,12 @@ def pipeline_meta(spec: "PipelineSpec") -> "PipelineMeta":
     own members, so only the metas travel here.
     """
     return PipelineMeta(
-        replication_steps=[step.meta for step in spec.replication_steps],
-        postproc_steps=[step.meta for step in spec.postproc_steps],
+        steps=[step.meta for step in spec.steps],
     )
 
 
 class PipelineMeta(TypedDict):
-    replication_steps: list[StepMeta]
-    postproc_steps: list[StepMeta]
+    steps: list[StepMeta]
 
 
 @dataclass(slots=True)
@@ -85,16 +83,12 @@ class PipelineSpec:
 
     Attributes
     ----------
-    replication_steps : list[StepSpec]
+    steps : list[StepSpec]
         The steps run once per replication, each with its own kwargs, source
         bindings, and whatever side channels its meta could not hold.
-    postproc_steps : list[StepSpec]
-        Post-loop ops, run once over the assembled traces. A separate terminal
-        phase, kept out of the per-replication steps.
     """
 
-    replication_steps: list[StepSpec]
-    postproc_steps: list[StepSpec]
+    steps: list[StepSpec]
 
 
 class MCDataGenResultMeta(TypedDict):
@@ -238,15 +232,9 @@ class MCRunMeta(TypedDict):
     step_elapsed_s: Mapping[str, float]
     step_counts: Mapping[str, int]
     step_failures: Mapping[str, int]
-    postproc_elapsed_s: Mapping[str, float]
     failures: list[MCFailureMeta]
     run_config: Mapping[str, Any]
 
 
 class MCTransformResultMeta(TypedDict):
     shape: list[int]
-
-
-class MCPostprocResultMeta(TypedDict):
-    shape: list[int] | None
-    summary: Any

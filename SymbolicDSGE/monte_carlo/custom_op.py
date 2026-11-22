@@ -42,7 +42,6 @@ import statistics
 import textwrap
 import warnings
 from collections.abc import Mapping
-from functools import lru_cache
 from typing import Any, Callable, cast
 
 import numpy as np
@@ -196,70 +195,6 @@ _NUMPY_NAMESPACE: dict[str, Any] = {
     "extra_globals": (),
     "namespace_kind": "numpy",
 }
-
-#: Pandas module-level footguns: I/O readers/writers and the eval surface. Same
-#: module-root reach as :data:`_NUMPY_DENIED` (catches ``pd.read_csv``, not a
-#: ``df.to_csv()`` method on a local — author hygiene, not a sandbox).
-_PANDAS_DENIED: frozenset[str] = frozenset(
-    {
-        "read_csv",
-        "read_table",
-        "read_fwf",
-        "read_excel",
-        "read_parquet",
-        "read_pickle",
-        "read_feather",
-        "read_hdf",
-        "read_orc",
-        "read_json",
-        "read_html",
-        "read_xml",
-        "read_sql",
-        "read_sql_query",
-        "read_sql_table",
-        "read_gbq",
-        "read_stata",
-        "read_spss",
-        "read_sas",
-        "read_clipboard",
-        "ExcelFile",
-        "HDFStore",
-        "eval",
-        "io",
-        "compat",
-        "test",
-        "testing",
-    }
-)
-
-
-@lru_cache(maxsize=1)
-def _pandas_namespace() -> dict[str, Any]:
-    """The pandas namespace config: the numpy lists extended with pandas.
-
-    Lazily imports pandas (cached) so merely importing this module — which is on
-    the core import path — never pulls in pandas; the cost is paid only when a
-    :class:`PandasCustomFunc` is actually constructed.
-    """
-    import pandas as pd
-
-    from .postproc import Raw, Summary
-
-    return {
-        "safe_modules": {**SAFE_MODULES, "pandas": pd, "pd": pd},
-        "denied_attributes": {
-            **DENIED_ATTRIBUTES,
-            "pandas": _PANDAS_DENIED,
-            "pd": _PANDAS_DENIED,
-        },
-        "extra_value_types": (*_NUMPY_VALUE_TYPES, pd.DataFrame, pd.Series, pd.Index),
-        # A post-loop op declares its slots, so it must be able to name them.
-        "extra_globals": (Raw, Summary),
-        "namespace_kind": "pandas",
-    }
-
-
-# Exception.
 
 
 class CustomOpValidationError(ValueError):
@@ -1153,41 +1088,6 @@ def _validate_numba_transform_signature(func: Callable[..., Any], name: str) -> 
         )
 
 
-class PandasCustomFunc(CustomFunc):
-    """Custom op whose namespace additionally exposes pandas (as ``pd``).
-
-    The looser post-loop (``OpType.POSTPROC``) contract — a summary op may build
-    a DataFrame. Pandas is referenced (``import`` stays banned, like ``np``); a
-    pandas-enabled op outside the post-loop phase is rejected by the pipeline.
-
-    Parameters
-    ----------
-    func : Callable[..., Any] | CustomFunc
-        Function to wrap and validate against the pandas-enabled namespace.
-    """
-
-    __slots__ = ()
-
-    def __init__(self, func: Callable[..., Any] | CustomFunc) -> None:
-        super().__init__(func, **_pandas_namespace())
-
-    @classmethod
-    def from_source(cls, source: str) -> "PandasCustomFunc":
-        """Build a pandas-enabled wrapper from source text.
-
-        Parameters
-        ----------
-        source : str
-            Source text of a single function definition.
-
-        Returns
-        -------
-        PandasCustomFunc
-            Wrapper validated against the pandas-enabled namespace.
-        """
-        return cast("PandasCustomFunc", cls._from_source(source, **_pandas_namespace()))
-
-
 def custom_transform(func: Callable[..., Any]) -> NumbaCustomFunc:
     """Decorator marking a numerical function as a shippable Numba custom transform.
 
@@ -1203,14 +1103,3 @@ def custom_transform(func: Callable[..., Any]) -> NumbaCustomFunc:
     handed straight to ``transform_step`` (or any custom-op factory).
     """
     return NumbaCustomFunc(func)
-
-
-def pandas_operation(func: Callable[..., Any]) -> PandasCustomFunc:
-    """Decorator marking a post-loop op as a shippable pandas custom op.
-
-    The pandas sibling of :func:`numpy_operation`: the body may reference ``pd``
-    in addition to the numpy namespace. Intended for ``OpType.POSTPROC`` summary
-    ops (e.g. one returning a DataFrame); using it on a per-replication step is
-    rejected when the pipeline is built.
-    """
-    return PandasCustomFunc(func)

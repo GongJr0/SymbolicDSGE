@@ -43,7 +43,7 @@ from ..core.config_emitter import emit_config_yaml
 
 from ..monte_carlo.core import MCPipeline
 from ..monte_carlo.spec import PipelineSpec, pipeline_meta
-from ..monte_carlo.mc_constructs import MCPipelineResult, OpType
+from ..monte_carlo.mc_constructs import MCPipelineResult
 from ..monte_carlo.serialize import (
     json_safe,
     serialize_run_meta,
@@ -52,7 +52,6 @@ from ..monte_carlo.serialize import (
     serialize_test_results,
     serialize_regression_results,
     serialize_transform_results,
-    serialize_postproc_results,
 )
 from .container import write_bundle
 from .manifest import Manifest, Member, MemberKind, SimSpec
@@ -108,9 +107,6 @@ _MC_REGRESSION = "montecarlo/result/regressions/regression_traces.{ext}"
 
 _MC_TRANSFORM_STEPS = "montecarlo/result/transforms/transform_steps.json"
 _MC_TRANSFORM = "montecarlo/result/transforms/{ref}_{field}.{ext}"
-
-_MC_POSTPROC_STEPS = "montecarlo/result/postproc/postproc_steps.json"
-_MC_POSTPROC = "montecarlo/result/postproc/{ref}_{field}.{ext}"
 
 #: Fill for the rows a shorter column contributes to a shared block. Negative so
 #: it can never be read as a rep index; no reader looks past ``n_retained``.
@@ -479,7 +475,7 @@ class BundleBuilder:
         """
         paths: dict[str, NDF] = {}
         tables: dict[str, NDF] = {}
-        for step in spec.replication_steps:
+        for step in spec.steps:
             if step.meta["step_type"] != "simulation":
                 continue
             shocks = step.meta["kwargs"].get("shocks")
@@ -504,7 +500,7 @@ class BundleBuilder:
 
     def _add_mc_pipeline_traces(self, spec: PipelineSpec, encoding: _Encoding) -> None:
         """Ship every step's lifted array kwargs, one member per step."""
-        for step in (*spec.replication_steps, *spec.postproc_steps):
+        for step in spec.steps:
             name = step.meta["name"]
             self._add_step_arrays(
                 _MC_DATA.format(ref=name, ext=encoding.ext),
@@ -523,34 +519,14 @@ class BundleBuilder:
         other phase gets numpy/numba.
         """
         import cloudpickle
-        from ..monte_carlo.postproc import is_builtin_postproc
-        from ..monte_carlo.custom_op import (
-            CustomFunc,
-            NumbaCustomFunc,
-            PandasCustomFunc,
-        )
+        from ..monte_carlo.custom_op import NumbaCustomFunc
 
-        for step in (*spec.replication_steps, *spec.postproc_steps):
+        for step in spec.steps:
             if step.func is None:
                 continue
 
             meta = step.meta
-            if is_builtin_postproc(step.func):
-                self._add(
-                    Member(
-                        path=_MC_FUNC.format(ref=meta["name"]),
-                        kind="mc_func",
-                        options={"name": meta["name"]},
-                    ),
-                    cloudpickle.dumps(step.func),
-                )
-                continue
-
-            fn: CustomFunc
-            if OpType(meta["op_type"]) == OpType.POSTPROC:
-                fn = PandasCustomFunc(step.func)
-            else:
-                fn = NumbaCustomFunc(step.func)
+            fn = NumbaCustomFunc(step.func)
 
             self._add(
                 Member(
@@ -573,14 +549,12 @@ class BundleBuilder:
         tests = serialize_test_results(result.test_summaries)
         regressions = serialize_regression_results(result.regression_summaries)
         transforms = serialize_transform_results(result.transform_outputs)
-        postprocs = serialize_postproc_results(result.postproc)
 
         self._add_step_metas(_MC_DATAGEN_STEPS, "mc_datagen_steps", datagen)
         self._add_step_metas(_MC_FILTER_STEPS, "mc_filter_steps", filters)
         self._add_step_metas(_MC_TEST_STEPS, "mc_test_steps", tests)
         self._add_step_metas(_MC_REGRESSION_STEPS, "mc_regression_steps", regressions)
         self._add_step_metas(_MC_TRANSFORM_STEPS, "mc_transform_steps", transforms)
-        self._add_step_metas(_MC_POSTPROC_STEPS, "mc_postproc_steps", postprocs)
 
         self._add_trace_arrays(_MC_DATAGEN, "mc_datagen_trace", datagen, encoding)
         self._add_trace_arrays(_MC_FILTER, "mc_filter_trace", filters, encoding)
@@ -596,7 +570,6 @@ class BundleBuilder:
         self._add_trace_arrays(
             _MC_TRANSFORM, "mc_transform_trace", transforms, encoding
         )
-        self._add_trace_arrays(_MC_POSTPROC, "mc_postproc_raw", postprocs, encoding)
 
     # Simulation prefill
 

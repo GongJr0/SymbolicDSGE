@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .mc_constructs import MCDataGenResult, MCFilterResult, MCPipelineResult
-from .postproc import Artifact
 from .._diag_tests.result import MCTestResult
 from ..regression.result import MCRegressionResult
 from .spec import (
     MCDataGenResultMeta,
     MCFilterResultMeta,
-    MCPostprocResultMeta,
     MCRegressionResultMeta,
     MCRunMeta,
     MCTestResultMeta,
@@ -23,22 +20,6 @@ from .spec import (
 )
 
 NDF = NDArray[np.float64]
-
-
-def _summary_value(value: Any) -> Any:
-    """A ``Summary``'s value as JSON.
-
-    A DataFrame rides pandas' own table schema, which carries its columns,
-    dtypes and index and reads back through ``read_json(orient="table")``.
-    """
-    import pandas as pd
-
-    if isinstance(value, pd.DataFrame):
-        return cast(
-            dict[str, Any],
-            json.loads(value.to_json(orient="table", double_precision=15)),
-        )
-    return json_safe(value)
 
 
 def serialize_run_meta(result: MCPipelineResult) -> MCRunMeta:
@@ -56,7 +37,6 @@ def serialize_run_meta(result: MCPipelineResult) -> MCRunMeta:
         step_elapsed_s=dict(meta.step_elapsed_s),
         step_counts=dict(meta.step_counts),
         step_failures=dict(meta.step_failures),
-        postproc_elapsed_s=dict(meta.postproc_elapsed_s),
         failures=[f.to_meta() for f in result.failures],
         run_config=dict(result.run_config),
     )
@@ -186,30 +166,6 @@ def serialize_transform_results(
         traces: dict[str, NDArray[Any]] = {
             "value": arr,
         }
-        out[name] = (meta, traces)
-    return out
-
-
-def serialize_postproc_results(
-    postprocs: Mapping[str, Artifact],
-) -> dict[str, tuple[MCPostprocResultMeta, dict[str, NDArray[Any]]]]:
-    """Each post-loop step's ``(meta, traces)`` halves.
-
-    The ``summary`` slot is aggregate, so it rides the meta inline. A
-    summary-only step contributes no traces at all.
-    """
-    out: dict[str, tuple[MCPostprocResultMeta, dict[str, NDArray[Any]]]] = {}
-    for name, artifact in postprocs.items():
-        raw = artifact["raw"]
-        summary = artifact["summary"]
-        value = np.asarray(raw.value) if raw is not None else None
-        meta = MCPostprocResultMeta(
-            shape=list(value.shape) if value is not None else None,
-            summary=_summary_value(summary.value) if summary is not None else None,
-        )
-        traces: dict[str, NDArray[Any]] = {}
-        if value is not None:
-            traces["value"] = value
         out[name] = (meta, traces)
     return out
 
