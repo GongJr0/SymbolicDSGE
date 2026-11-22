@@ -41,9 +41,12 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,
     ljung_box_test_step,
     log_diff_step,
+    log_step,
     raw_model_data_step,
     filter_step,
     regression_step,
+    simulation_step,
+    standardize_step,
     wald_test_step,
 )
 
@@ -1363,3 +1366,16 @@ def test_pipeline_validates_step_order_and_unique_names() -> None:
                 ),
             ]
         )
+
+
+def test_pipeline_orders_steps_declared_before_their_sources() -> None:
+    pipeline = MCPipeline(
+        [
+            simulation_step("datagen", target="reference", T=8),
+            log_step("tf2", source="tf1", field="payload"),
+            log_step("tf1", source="tf0", field="payload"),
+            standardize_step("tf0", source="datagen", field="observables"),
+        ]
+    )
+    ordered = [step.name for step in pipeline.replication_steps]
+    assert ordered.index("tf0") < ordered.index("tf1") < ordered.index("tf2")
