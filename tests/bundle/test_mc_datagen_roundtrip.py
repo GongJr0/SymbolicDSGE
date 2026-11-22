@@ -66,7 +66,7 @@ def test_datagen_counts_roundtrip(
                 n_retain=2 if i == 0 else -1,
             )
         )
-    pipeline = MCPipeline(steps)
+    pipeline = MCPipeline(*steps)
     result = pipeline.run(
         models={"reference": reference} if reference is not None else None,
         n_rep=3,

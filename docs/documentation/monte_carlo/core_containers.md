@@ -117,9 +117,7 @@ class MCMeta(
     step_elapsed_s: Mapping[str, float] = {},
     step_counts: Mapping[str, int] = {},
     step_failures: Mapping[str, int] = {},
-    postproc_elapsed_s: Mapping[str, float] = {},
     failed_steps: dict[str, int] = {},
-    failed_postprocs: set[str] = set(),
 )
 ```
 
@@ -135,16 +133,12 @@ __Fields and Properties:__
 | step_elapsed_s | `#!python Mapping[str, float]` | Accumulated worker seconds by per-replication step. Populated only when the run is started with `verbosity=2`. |
 | step_counts | `#!python Mapping[str, int]` | Attempted calls by per-replication step. |
 | step_failures | `#!python Mapping[str, int]` | Collected failures by per-replication step. |
-| postproc_elapsed_s | `#!python Mapping[str, float]` | Wall time by post-loop step. |
 | failed_steps | `#!python dict[str, int]` | Collected per-replication failures by step. |
-| failed_postprocs | `#!python set[str]` | Post-loop steps that failed. |
 | it_s | `#!python float` | Replications attempted per replication loop second. |
 | step_worker_it_s | `#!python Mapping[str, float]` | Exclusive per-step throughput against accumulated worker seconds. |
 | step_wall_it_s | `#!python Mapping[str, float]` | Per-step throughput against the replication loop's wall time. |
 | step_it_s | `#!python Mapping[str, float]` | Alias for `step_worker_it_s`. |
-| postproc_total_s | `#!python float` | Total post-loop wall time. |
 | steps_success | `#!python bool` | `True` when no per-replication failures were collected. |
-| postproc_success | `#!python bool` | `True` when no post-loop failures were collected. |
 
 &nbsp;
 
@@ -160,7 +154,6 @@ class MCPipelineResult(
     test_summaries: Mapping[str, MCTestResult] = {},
     regression_summaries: Mapping[str, MCRegressionResult] = {},
     failures: tuple[MCFailure, ...] = (),
-    postproc: Mapping[str, Artifact] = {},
     run_config: Mapping[str, Any] = {},
 )
 ```
@@ -180,7 +173,6 @@ __Fields and Properties:__
 | test_summaries | `#!python Mapping[str, MCTestResult]` | Per-test aggregate result containers. |
 | regression_summaries | `#!python Mapping[str, MCRegressionResult]` | Per-regression aggregate result containers. |
 | failures | `#!python tuple[MCFailure, ...]` | Failures collected when `fail_fast=False`. |
-| postproc | `#!python Mapping[str, Artifact]` | Post-loop artifacts keyed by step name. Values are `Artifact` instances holding optional `Raw` and `Summary` data. |
 | succeeded | `#!python bool` | `True` when no per-replication or post-loop failures were collected. |
 | statistic_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's statistic trace. |
 | pval_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's p-value trace. |

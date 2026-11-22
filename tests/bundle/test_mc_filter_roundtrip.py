@@ -47,14 +47,12 @@ def _pipeline(solved: SolvedModel, *filters: object) -> MCPipeline:
     rng = np.random.default_rng(20260909)
     y = rng.normal(scale=0.01, size=(N_REP, T, len(solved.compiled.observable_names)))
     return MCPipeline(
-        [
-            raw_model_data_step(
-                "data",
-                observables=y,
-                observable_names=tuple(solved.compiled.observable_names),
-            ),
-            *filters,  # type: ignore[list-item]
-        ]
+        raw_model_data_step(
+            "data",
+            observables=y,
+            observable_names=tuple(solved.compiled.observable_names),
+        ),
+        *filters,  # type: ignore[list-item]
     )
 
 

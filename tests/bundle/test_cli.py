@@ -41,12 +41,10 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 def _pipeline() -> MCPipeline:
     observables = np.random.default_rng(0).normal(size=(4, 20, 2))
     return MCPipeline(
-        [
-            raw_model_data_step(
-                "dat", observables=observables, observable_names=("y", "x")
-            ),
-            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
-        ]
+        raw_model_data_step(
+            "dat", observables=observables, observable_names=("y", "x")
+        ),
+        jarque_bera_test_step("jb", source="dat", field="observables", column=0),
     )
 
 

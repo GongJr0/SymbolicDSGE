@@ -32,14 +32,12 @@ def _raw_model_data_pipeline() -> MCPipeline:
     rng = np.random.default_rng(0)
     observables = rng.normal(size=(3, 20, 2))  # n_rep, T, k
     return MCPipeline(
-        [
-            raw_model_data_step(
-                "dat",
-                observables=observables,
-                observable_names=("y", "x"),
-            ),
-            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
-        ]
+        raw_model_data_step(
+            "dat",
+            observables=observables,
+            observable_names=("y", "x"),
+        ),
+        jarque_bera_test_step("jb", source="dat", field="observables", column=0),
     )
 
 
@@ -68,15 +66,13 @@ def test_add_mc_ships_raw_model_data_member_and_loader_rehydrates(tmp_path) -> N
 def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     observables = np.random.default_rng(1).normal(size=(2, 15, 2))
     pipe = MCPipeline(
-        [
-            raw_model_data_step(
-                "dat", observables=observables, observable_names=("y", "x")
-            ),
-            transform_step(
-                "z", zscore, source="dat", field="observables", output_shape=(15, 2)
-            ),
-            jarque_bera_test_step("jb", source="z", field="payload"),
-        ]
+        raw_model_data_step(
+            "dat", observables=observables, observable_names=("y", "x")
+        ),
+        transform_step(
+            "z", zscore, source="dat", field="observables", output_shape=(15, 2)
+        ),
+        jarque_bera_test_step("jb", source="z", field="payload"),
     )
 
     target = (
@@ -103,12 +99,10 @@ def test_add_mc_bundles_native_result_without_legacy_retention_flags(
     # contexts or Python result objects to warn about when bundling.
     observables = np.random.default_rng(0).normal(size=(4, 20, 2))
     pipe = MCPipeline(
-        [
-            raw_model_data_step(
-                "dat", observables=observables, observable_names=("y", "x")
-            ),
-            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
-        ],
+        raw_model_data_step(
+            "dat", observables=observables, observable_names=("y", "x")
+        ),
+        jarque_bera_test_step("jb", source="dat", field="observables", column=0),
     )
     result = pipe.run(
         models={"reference": cast(SolvedModel, object())}, n_rep=4, verbosity=0

@@ -57,7 +57,7 @@ class MCPipeline:
 
     Parameters
     ----------
-    steps : Sequence[MCStep]
+    *steps : MCStep
         Per-replication step specifications. Must contain exactly one DATAGEN step
         and may contain any number of FILTER, TRANSFORM, TEST, and REGRESSION steps.
 
@@ -69,7 +69,7 @@ class MCPipeline:
 
     def __init__(
         self,
-        steps: Sequence[MCStep],
+        *steps: MCStep,
     ) -> None:
         _validate_steps(steps)
         ordered = _order_steps(steps)
@@ -302,9 +302,7 @@ class MCPipeline:
 
     @classmethod
     def from_spec(cls, spec: PipelineSpec) -> "MCPipeline":
-        return cls(
-            steps=[MCStep.from_spec(s) for s in spec.steps],
-        )
+        return cls(*[MCStep.from_spec(s) for s in spec.steps])
 
 
 def _order_steps(

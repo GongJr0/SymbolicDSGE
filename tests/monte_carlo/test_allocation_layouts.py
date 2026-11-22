@@ -45,7 +45,7 @@ N_REP = 2
 
 def _plan(steps: list[MCStep], reference: object = None) -> Any:
     """Resolve output layouts without lowering or allocating."""
-    pipeline = MCPipeline(steps)
+    pipeline = MCPipeline(*steps)
     return resolve_output_specs(
         pipeline.steps,
         pipeline._source_indices,

@@ -55,7 +55,7 @@ def test_full_bundle_round_trip(tmp_path: Path, parsed_test, compiled_test) -> N
         logjac_trace=posterior["logjac"],
         burn_in=10,
     )
-    pipeline = MCPipeline([simulation_step("sim", target="reference", T=50)])
+    pipeline = MCPipeline(simulation_step("sim", target="reference", T=50))
 
     builder = (
         BundleBuilder(created_by="test-suite")

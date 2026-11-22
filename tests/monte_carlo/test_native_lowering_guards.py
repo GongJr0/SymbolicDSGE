@@ -37,7 +37,7 @@ def _two_column_data() -> np.ndarray:
 def _lower(steps: list[MCStep], reference: object = None) -> None:
     """Lower a pipeline far enough to reach the step compilers."""
     lower_native_run(
-        MCPipeline(steps),
+        MCPipeline(*steps),
         models={
             "reference": cast(
                 SolvedModel, reference if reference is not None else object()
@@ -243,12 +243,10 @@ def test_a_filter_on_dgp_simulated_data_needs_the_dgp(
 ) -> None:
     """Planning sizes the simulation first, so it is what misses the model."""
     pipeline = MCPipeline(
-        [
-            simulation_step("sim", target="dgp", T=T, observables=True),
-            filter_step(
-                "filter", target="reference", obs_source="sim", obs_field="observables"
-            ),
-        ]
+        simulation_step("sim", target="dgp", T=T, observables=True),
+        filter_step(
+            "filter", target="reference", obs_source="sim", obs_field="observables"
+        ),
     )
 
     with pytest.raises(
@@ -343,14 +341,13 @@ def test_filter_x0_must_cover_every_state(solved_post82: SolvedModel) -> None:
 def test_missing_producer_field_is_rejected_during_planning(
     solved_post82: SolvedModel,
 ) -> None:
-    steps = [
+    pipeline = MCPipeline(
         simulation_step("sim", target="reference", T=T, observables=True),
         filter_step(
             "filter", target="reference", obs_source="sim", obs_field="observables"
         ),
         passthrough_step("keep", source="filter", field="x_smooth", columns=None),
-    ]
-    pipeline = MCPipeline(steps)
+    )
 
     with pytest.raises(
         ValueError, match="Step 'filter' does not produce source field 'x_smooth'"

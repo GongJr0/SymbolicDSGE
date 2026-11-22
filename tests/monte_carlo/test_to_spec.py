@@ -27,28 +27,26 @@ def _copy_transform(sample: np.ndarray, output: np.ndarray) -> int:
 
 def _simulation_pipeline() -> MCPipeline:
     return MCPipeline(
-        [
-            simulation_step(
-                "dgp",
-                target="dgp",
-                T=8,
-                observables=True,
-                shocks={"u": Shock(dist="norm", seed=0, loc=0.0)},
-            ),
-            filter_step(
-                "filter", target="reference", obs_source="dgp", obs_field="observables"
-            ),
-            standardize_step("s", source="dgp", field="observables"),
-            jarque_bera_test_step("jb", source="s", field="payload"),
-            wald_test_step(
-                "w",
-                source="filter",
-                field="std_innov",
-                kind="mean",
-                target=np.array([0.0]),
-                bandwidth=4,
-            ),
-        ]
+        simulation_step(
+            "dgp",
+            target="dgp",
+            T=8,
+            observables=True,
+            shocks={"u": Shock(dist="norm", seed=0, loc=0.0)},
+        ),
+        filter_step(
+            "filter", target="reference", obs_source="dgp", obs_field="observables"
+        ),
+        standardize_step("s", source="dgp", field="observables"),
+        jarque_bera_test_step("jb", source="s", field="payload"),
+        wald_test_step(
+            "w",
+            source="filter",
+            field="std_innov",
+            kind="mean",
+            target=np.array([0.0]),
+            bandwidth=4,
+        ),
     )
 
 
@@ -93,15 +91,13 @@ def test_to_spec_lifts_bulk_arrays_out_of_the_meta() -> None:
     states = np.zeros((4, 6, 3))
     observables = np.zeros((4, 5, 3))
     pipe = MCPipeline(
-        [
-            raw_model_data_step(
-                "dat",
-                states=states,
-                observables=observables,
-                observable_names=("a", "b", "c"),
-            ),
-            jarque_bera_test_step("jb", source="dat", field="observables"),
-        ]
+        raw_model_data_step(
+            "dat",
+            states=states,
+            observables=observables,
+            observable_names=("a", "b", "c"),
+        ),
+        jarque_bera_test_step("jb", source="dat", field="observables"),
     )
     spec = pipe.to_spec()
 
@@ -133,16 +129,14 @@ def test_small_array_kwargs_stay_inline() -> None:
 
 def test_to_spec_carries_a_custom_transform_callable_beside_its_meta() -> None:
     pipe = MCPipeline(
-        [
-            raw_model_data_step("dat", observables=np.zeros((4, 5, 3))),
-            transform_step(
-                "tf",
-                _copy_transform,
-                source="dat",
-                field="observables",
-                output_shape=(5, 3),
-            ),
-        ]
+        raw_model_data_step("dat", observables=np.zeros((4, 5, 3))),
+        transform_step(
+            "tf",
+            _copy_transform,
+            source="dat",
+            field="observables",
+            output_shape=(5, 3),
+        ),
     )
     spec = pipe.to_spec()
 

@@ -38,16 +38,14 @@ def test_native_lowering_runs_custom_transform() -> None:
     n_rep, T = 3, 12
     observables = np.arange(n_rep * T * 2, dtype=np.float64).reshape(n_rep, T, 2)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step("data", observables=observables),
-            transform_step(
-                "difference",
-                _custom_first_difference,
-                source="data",
-                field="observables",
-                output_shape=(T - 1, 2),
-            ),
-        ]
+        raw_model_data_step("data", observables=observables),
+        transform_step(
+            "difference",
+            _custom_first_difference,
+            source="data",
+            field="observables",
+            output_shape=(T - 1, 2),
+        ),
     )
 
     lowered = lower_native_run(
@@ -73,33 +71,31 @@ def test_native_lowering_runs_raw_transform_ols_and_diagnostic_pipeline() -> Non
     rng = np.random.default_rng(20260730)
     observables = np.exp(np.cumsum(rng.normal(0.0, 0.02, size=(n_rep, T, 2)), axis=1))
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(
-                "datagen", observables=observables, observable_names=("y", "x")
-            ),
-            log_diff_step(
-                "growth",
-                source="datagen",
-                field="observables",
-                columns=(0, 1),
-            ),
-            regression_step(
-                "ols",
-                y_source="growth",
-                y_field="payload",
-                y_column=0,
-                X_source="growth",
-                X_field="payload",
-                X_columns=(1,),
-                variables=["x"],
-            ),
-            jarque_bera_test_step(
-                "jb_growth",
-                source="growth",
-                field="payload",
-                column=0,
-            ),
-        ]
+        raw_model_data_step(
+            "datagen", observables=observables, observable_names=("y", "x")
+        ),
+        log_diff_step(
+            "growth",
+            source="datagen",
+            field="observables",
+            columns=(0, 1),
+        ),
+        regression_step(
+            "ols",
+            y_source="growth",
+            y_field="payload",
+            y_column=0,
+            X_source="growth",
+            X_field="payload",
+            X_columns=(1,),
+            variables=["x"],
+        ),
+        jarque_bera_test_step(
+            "jb_growth",
+            source="growth",
+            field="payload",
+            column=0,
+        ),
     )
     reference = cast(SolvedModel, object())
 
@@ -190,21 +186,19 @@ def test_native_lowering_runs_all_regression_kinds() -> None:
         },
     }
     pipeline = MCPipeline(
-        [
-            raw_model_data_step("data", states=X, observables=y),
-            *[
-                regression_step(
-                    name,
-                    y_source="data",
-                    y_field="observables",
-                    X_source="data",
-                    X_field="states",
-                    kind=name,
-                    **kwargs,
-                )
-                for name, kwargs in kinds.items()
-            ],
-        ]
+        raw_model_data_step("data", states=X, observables=y),
+        *[
+            regression_step(
+                name,
+                y_source="data",
+                y_field="observables",
+                X_source="data",
+                X_field="states",
+                kind=name,
+                **kwargs,
+            )
+            for name, kwargs in kinds.items()
+        ],
     )
     reference = cast(SolvedModel, object())
 
@@ -241,76 +235,72 @@ def test_native_lowering_runs_all_diagnostic_kinds() -> None:
         + rng.normal(scale=0.1, size=(n_rep, n, 1))
     )
     pipeline = MCPipeline(
-        [
-            raw_model_data_step("data", states=X, observables=y),
-            wald_test_step(
-                "wald",
-                source="data",
-                field="states",
-                target=np.zeros(2, dtype=np.float64),
-                bandwidth="auto",
-            ),
-            wald_test_step(
-                "wald_covariance",
-                source="data",
-                field="states",
-                target=np.eye(2, dtype=np.float64),
-                kind="covariance",
-                kernel="parzen",
-                bandwidth=3,
-            ),
-            wald_test_step(
-                "wald_second_moment",
-                source="data",
-                field="states",
-                target=np.eye(2, dtype=np.float64),
-                kind="second_moment",
-                kernel="qs",
-                bandwidth="andrews",
-            ),
-            ljung_box_test_step(
-                "lb", source="data", field="observables", column=0, lags=4
-            ),
-            jarque_bera_test_step("jb", source="data", field="observables", column=0),
-            breusch_pagan_test_step(
-                "bp",
-                residuals_source="data",
-                residuals_field="observables",
-                X_source="data",
-                X_field="states",
-                robust=True,
-            ),
-            breusch_godfrey_test_step(
-                "bg",
-                residuals_source="data",
-                residuals_field="observables",
-                X_source="data",
-                X_field="states",
-                lags=2,
-            ),
-            cusum_test_step(
-                "cusum",
-                y_source="data",
-                y_field="observables",
-                X_source="data",
-                X_field="states",
-            ),
-            cusumsq_test_step(
-                "cusumsq",
-                y_source="data",
-                y_field="observables",
-                X_source="data",
-                X_field="states",
-            ),
-            chow_test_step(
-                "chow",
-                y_source="data",
-                y_field="observables",
-                X_source="data",
-                X_field="states",
-                t_break=32,
-            ),
-        ]
+        raw_model_data_step("data", states=X, observables=y),
+        wald_test_step(
+            "wald",
+            source="data",
+            field="states",
+            target=np.zeros(2, dtype=np.float64),
+            bandwidth="auto",
+        ),
+        wald_test_step(
+            "wald_covariance",
+            source="data",
+            field="states",
+            target=np.eye(2, dtype=np.float64),
+            kind="covariance",
+            kernel="parzen",
+            bandwidth=3,
+        ),
+        wald_test_step(
+            "wald_second_moment",
+            source="data",
+            field="states",
+            target=np.eye(2, dtype=np.float64),
+            kind="second_moment",
+            kernel="qs",
+            bandwidth="andrews",
+        ),
+        ljung_box_test_step("lb", source="data", field="observables", column=0, lags=4),
+        jarque_bera_test_step("jb", source="data", field="observables", column=0),
+        breusch_pagan_test_step(
+            "bp",
+            residuals_source="data",
+            residuals_field="observables",
+            X_source="data",
+            X_field="states",
+            robust=True,
+        ),
+        breusch_godfrey_test_step(
+            "bg",
+            residuals_source="data",
+            residuals_field="observables",
+            X_source="data",
+            X_field="states",
+            lags=2,
+        ),
+        cusum_test_step(
+            "cusum",
+            y_source="data",
+            y_field="observables",
+            X_source="data",
+            X_field="states",
+        ),
+        cusumsq_test_step(
+            "cusumsq",
+            y_source="data",
+            y_field="observables",
+            X_source="data",
+            X_field="states",
+        ),
+        chow_test_step(
+            "chow",
+            y_source="data",
+            y_field="observables",
+            X_source="data",
+            X_field="states",
+            t_break=32,
+        ),
     )
     reference = cast(SolvedModel, object())
 
@@ -383,15 +373,13 @@ def test_native_lowering_runs_first_order_simulation_with_observables(
     T = 7
     shocks = {name: np.linspace(0.01, 0.03, T) for name in solved.compiled.shock_names}
     pipeline = MCPipeline(
-        [
-            simulation_step(
-                "sim",
-                target="reference",
-                T=T,
-                shocks=shocks,
-                observables=True,
-            )
-        ]
+        simulation_step(
+            "sim",
+            target="reference",
+            T=T,
+            shocks=shocks,
+            observables=True,
+        )
     )
 
     lowered = lower_native_run(
@@ -429,7 +417,7 @@ def test_native_lowering_runs_first_order_simulation_with_observables(
 def test_native_lowering_runs_second_order_simulation(solved_rbc_so) -> None:
     solved = solved_rbc_so
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=False)]
+        simulation_step("sim", target="reference", T=6, observables=False)
     )
 
     lowered = lower_native_run(
@@ -469,16 +457,14 @@ def test_native_lowering_runs_linear_and_extended_filters(solved_post82) -> None
 
     for filter in (LinearKalman(), ExtendedKalman()):
         pipeline = MCPipeline(
-            [
-                simulation_step("sim", target="reference", T=T, observables=True),
-                filter_step(
-                    "filter",
-                    target="reference",
-                    obs_source="sim",
-                    obs_field="observables",
-                    filter=filter,
-                ),
-            ]
+            simulation_step("sim", target="reference", T=T, observables=True),
+            filter_step(
+                "filter",
+                target="reference",
+                obs_source="sim",
+                obs_field="observables",
+                filter=filter,
+            ),
         )
         lowered = lower_native_run(
             pipeline, models={"reference": solved}, n_rep=1, n_jobs=1
@@ -521,30 +507,27 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides(
     P0 = 0.2 * np.eye(n_var, dtype=np.float64)
     R = np.array([[0.1, 0.02], [0.02, 0.3]], dtype=np.float64)
     pipeline = MCPipeline(
-        [
-            simulation_step(
-                "sim",
-                target="reference",
-                T=T,
-                shocks=shocks,
-                observables=True,
-            ),
-            filter_step(
-                "filter",
-                target="reference",
-                obs_source="sim",
-                obs_field="observables",
-                filter=LinearKalman(return_shocks=True),
-                obs_columns=[
-                    list(solved.compiled.observable_names).index(name)
-                    for name in requested
-                ],
-                observables=requested,
-                x0=x0,
-                P0=P0,
-                R=R,
-            ),
-        ]
+        simulation_step(
+            "sim",
+            target="reference",
+            T=T,
+            shocks=shocks,
+            observables=True,
+        ),
+        filter_step(
+            "filter",
+            target="reference",
+            obs_source="sim",
+            obs_field="observables",
+            filter=LinearKalman(return_shocks=True),
+            obs_columns=[
+                list(solved.compiled.observable_names).index(name) for name in requested
+            ],
+            observables=requested,
+            x0=x0,
+            P0=P0,
+            R=R,
+        ),
     )
 
     lowered = lower_native_run(
@@ -589,20 +572,18 @@ def test_native_lowering_runs_unscented_filter_with_rbc_fixture(
     T = 5
     y = np.zeros((T, len(solved.compiled.observable_names)), dtype=np.float64)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(
-                "data",
-                observables=y,
-                observable_names=solved.compiled.observable_names,
-            ),
-            filter_step(
-                "filter",
-                target="reference",
-                obs_source="data",
-                obs_field="observables",
-                filter=UnscentedKalman(),
-            ),
-        ]
+        raw_model_data_step(
+            "data",
+            observables=y,
+            observable_names=solved.compiled.observable_names,
+        ),
+        filter_step(
+            "filter",
+            target="reference",
+            obs_source="data",
+            obs_field="observables",
+            filter=UnscentedKalman(),
+        ),
     )
 
     lowered = lower_native_run(

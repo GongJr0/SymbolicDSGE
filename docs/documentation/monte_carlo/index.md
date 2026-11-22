@@ -24,8 +24,6 @@ The replication loop is native. Building a pipeline resolves the step graph, low
 | `MCPipeline` | Runnable pipeline object. Loaded bundles reconstruct this directly at `LoadedMC.pipeline`. |
 | `MCStep` / `OpType` | The step container and its operation-role enum. Prefer the factories in `SymbolicDSGE.monte_carlo.step_factories` over hand-building steps. |
 | `custom_transform` / `NumbaCustomFunc` | Author a per-replication custom transform. The function is compiled by Numba and called from the native loop. |
-| `pandas_operation` / `PandasCustomFunc` | Author a post-loop custom op. Runs once in Python, may build a DataFrame. |
-| `Summary` / `Raw` | Return wrappers a post-loop op uses to tag an output as renderable or as bulk data. |
 | `replication_shocks` | Generate a shock sequence for a single replication of a simulation step. |
 
 ???+ tip "Bundle integration"

@@ -80,50 +80,5 @@ def demean(sample, output) -> int:
     return 0
 ```
 
-## `PandasCustomFunc`
-
-```python
-class PandasCustomFunc(CustomFunc)
-```
-
-```python
-PandasCustomFunc(func: Callable[..., Any] | CustomFunc) -> PandasCustomFunc
-
-@classmethod
-PandasCustomFunc.from_source(source: str) -> PandasCustomFunc
-```
-
-Identical validation and properties to the numpy contract, but the body may also reference `pandas` (as `pd`). Intended for `OpType.POSTPROC` summary ops, for example one returning a DataFrame. It runs in plain Python after the replication loop and is never compiled.
-
-## `pandas_operation`
-
-```python
-pandas_operation(func: Callable[..., Any]) -> PandasCustomFunc
-```
-
-Decorator form of `PandasCustomFunc`, for post-loop ops passed to `postproc_step(...)`. The body may reference `pd`; using it on a per-replication step is rejected when the pipeline is built.
-
-## `NumpyCustomFunc`
-
-```python
-class NumpyCustomFunc(CustomFunc)
-```
-
-The base contract `NumbaCustomFunc` extends: the same safe-namespace validation without the two-argument signature check and without native compilation. It is not exported from `SymbolicDSGE.monte_carlo`; reach it through `SymbolicDSGE.monte_carlo.custom_op` if you need the plain numpy wrapper directly.
-
-## Validation Contract
-
-| __Allowed__ | __Description__ |
-|:------------|----------------:|
-| One top-level `def` | Lambdas, nested functions, methods, partials, builtins, and C-extension callables are rejected. |
-| Numeric safe namespace | `numpy` as `np`, selected standard modules, selected builtins, and captured immutable/numpy globals. `pandas` as `pd` is added only under the pandas namespace. |
-| Explicit source | Source must be recoverable or supplied through `from_source(...)`. |
-
-| __Rejected__ | __Reason__ |
-|:-------------|-----------:|
-| Imports, `global`, `nonlocal`, async, yield, nested `def`, classes | These make the shipped function harder to audit and reproduce. |
-| Closure captures | Promote values to accepted globals or pass them as kwargs. |
-| Unsupported globals | The wrapper snapshots only accepted numeric/scalar/container helpers. |
-
 ???+ warning "Not a security sandbox"
-    These wrappers are a reproducibility and audit contract, not a sandbox. Loading a bundle with custom operations should be treated like running Python code from the bundle author.
+    The wrapper is a reproducibility and audit contract, not a sandbox. Loading a bundle with custom operations should be treated like running Python code from the bundle author.

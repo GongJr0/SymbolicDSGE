@@ -19,11 +19,9 @@ from SymbolicDSGE.monte_carlo.step_factories import (
 def test_model_free_pipeline_omits_reference() -> None:
     data = np.random.default_rng(42).normal(size=(100, 2))
     pipeline = MCPipeline(
-        [
-            jarque_bera_test_step("jb", source="scaled", field="payload", column=0),
-            standardize_step("scaled", source="raw", field="observables"),
-            raw_model_data_step("raw", observables=data),
-        ]
+        jarque_bera_test_step("jb", source="scaled", field="payload", column=0),
+        standardize_step("scaled", source="raw", field="observables"),
+        raw_model_data_step("raw", observables=data),
     )
 
     result = pipeline.run(n_rep=2, n_jobs=1, verbosity=0, fail_fast=True)
@@ -38,10 +36,8 @@ def test_dgp_only_simulation_and_filter_omit_reference(
     solved_post82: SolvedModel,
 ) -> None:
     pipeline = MCPipeline(
-        [
-            filter_step("kf", target="dgp", obs_source="sim", obs_field="observables"),
-            simulation_step("sim", target="dgp", T=20),
-        ]
+        filter_step("kf", target="dgp", obs_source="sim", obs_field="observables"),
+        simulation_step("sim", target="dgp", T=20),
     )
 
     result = pipeline.run(
@@ -60,16 +56,12 @@ def test_missing_target_model_raises_intentional_error(
     target: Literal["reference", "dgp"], kind: str
 ) -> None:
     if kind == "simulation":
-        pipeline = MCPipeline([simulation_step("sim", target=target, T=20)])
+        pipeline = MCPipeline(simulation_step("sim", target=target, T=20))
         name = "sim"
     else:
         pipeline = MCPipeline(
-            [
-                raw_model_data_step("raw", observables=np.zeros((20, 1))),
-                filter_step(
-                    "kf", target=target, obs_source="raw", obs_field="observables"
-                ),
-            ]
+            raw_model_data_step("raw", observables=np.zeros((20, 1))),
+            filter_step("kf", target=target, obs_source="raw", obs_field="observables"),
         )
         name = "kf"
 

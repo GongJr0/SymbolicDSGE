@@ -33,23 +33,19 @@ def _run(n_rep: int = 4) -> MCPipelineResult:
     x = rng.normal(size=T)
     observables = np.column_stack([2.0 * x + rng.normal(size=T), x])
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables, observable_names=("y", "x")),
-            jarque_bera_test_step(
-                "jb", source="datagen", field="observables", column=0
-            ),
-            regression_step(
-                "ols",
-                y_source="datagen",
-                y_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                y_column=0,
-                X_columns=[1],
-                variables=["x"],
-            ),
-            standardize_step("std", source="datagen", field="observables"),
-        ]
+        raw_model_data_step(observables=observables, observable_names=("y", "x")),
+        jarque_bera_test_step("jb", source="datagen", field="observables", column=0),
+        regression_step(
+            "ols",
+            y_source="datagen",
+            y_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            y_column=0,
+            X_columns=[1],
+            variables=["x"],
+        ),
+        standardize_step("std", source="datagen", field="observables"),
     )
     return pipeline.run(models={"reference": _REFERENCE}, n_rep=n_rep, verbosity=2)
 

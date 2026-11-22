@@ -169,7 +169,7 @@ def _datagen(observables: np.ndarray | None = None):
 def test_graph_faults_are_rejected_at_construction(steps, match) -> None:
     # No model and no run: these never reach the kernel.
     with pytest.raises(ValueError, match=match):
-        MCPipeline(steps())
+        MCPipeline(*steps())
 
 
 @pytest.mark.parametrize(
@@ -188,7 +188,7 @@ def test_invalid_step_parameters_fail_in_the_run(mc_run, solved_test, step) -> N
     # These build and lower without complaint; the kernel rejects them per
     # replication. The status code is carried in the message and deliberately not
     # asserted via catching the `fail_fast` raise.
-    pipeline = MCPipeline([_datagen(), step()])
+    pipeline = MCPipeline(_datagen(), step())
 
     with pytest.raises(RuntimeError, match="'bad'"):
         mc_run(pipeline, solved_test, n_rep=1, fail_fast=True)
@@ -199,12 +199,8 @@ def test_run_failures_are_collected_per_replication_when_not_failing_fast(
     solved_test,
 ) -> None:
     pipeline = MCPipeline(
-        [
-            _datagen(),
-            rolling_mean_step(
-                "bad", source="dat", field="observables", window=PERIODS + 5
-            ),
-        ]
+        _datagen(),
+        rolling_mean_step("bad", source="dat", field="observables", window=PERIODS + 5),
     )
 
     result = mc_run(pipeline, solved_test, n_rep=3, fail_fast=False)
@@ -220,11 +216,9 @@ def test_log_of_a_non_positive_sample_is_rejected(
     solved_test,
 ) -> None:
     result = MCPipeline(
-        [
-            _datagen(),
-            add_payload_step("nonpositive", -np.ones((PERIODS, COLUMNS))),
-            log_step("log_bad", source="nonpositive", field="payload"),
-        ]
+        _datagen(),
+        add_payload_step("nonpositive", -np.ones((PERIODS, COLUMNS))),
+        log_step("log_bad", source="nonpositive", field="payload"),
     ).run(
         {"reference": solved_test},
         n_rep=1,
@@ -238,10 +232,8 @@ def test_log_of_a_non_positive_sample_is_rejected(
 
 def test_diff_order_at_the_sample_length_fails(mc_run, solved_test) -> None:
     result = MCPipeline(
-        [
-            _datagen(),
-            diff_step("drained", source="dat", field="observables", order=PERIODS),
-        ]
+        _datagen(),
+        diff_step("drained", source="dat", field="observables", order=PERIODS),
     ).run(
         {"reference": solved_test},
         n_rep=1,

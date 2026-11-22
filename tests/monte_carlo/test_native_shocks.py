@@ -26,11 +26,9 @@ def _plan(solved_test, shocks, shock_scale=1.0):
 def _run_states(solved_test, shocks, n_rep, n_jobs):
     """Simulate ``n_rep`` replications and return their retained state paths."""
     pipeline = MCPipeline(
-        [
-            simulation_step(
-                "sim", target="reference", T=T, shocks=shocks, observables=False
-            )
-        ]
+        simulation_step(
+            "sim", target="reference", T=T, shocks=shocks, observables=False
+        )
     )
     lowered = lower_native_run(
         pipeline, models={"reference": solved_test}, n_rep=n_rep, n_jobs=n_jobs
