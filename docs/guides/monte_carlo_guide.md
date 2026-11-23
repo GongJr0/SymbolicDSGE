@@ -200,7 +200,7 @@ With a custom function defined, the step can be created using the generic `trans
 
 ```python
 custom_std = transform_step(
-    "custom_std",  # (1)!
+    "custom_std",
     custom_standardize,  # (2)!
     source="filter",  # (3)!
     field="innov",
@@ -215,7 +215,6 @@ builtin_std = standardize_step(
 
 ```
 
-1. Name of the step. It becomes the trace key `payload.custom_std`.
 2. The function to be executed. A bare function is wrapped in `NumbaCustomFunc` automatically.
 3. `source` and `field` select the upstream array. `columns` and `burn_in` narrow it further.
 4. Required. The output buffer is planned before the run starts, so the transform must declare the exact `(rows, columns)` it writes.
@@ -344,7 +343,7 @@ Regression results are accessed similarly via `MCPipelineResult.regression_summa
 ## Conclusion
 
 This guide demonstrates the usage of basic MC functionality through the pre-configured steps available in the library.
-Custom transforms are available through `transform_step(...)` and bundle-safe custom operations can be wrapped with `custom_transform` or `pandas_operation`. See the [Monte Carlo custom operation API reference](../documentation/monte_carlo/custom_ops.md) for the current contract.
+Custom transforms are available through `transform_step(...)` and bundle-safe custom operations can be wrapped with `custom_transform`. See the [Monte Carlo custom operation API reference](../documentation/monte_carlo/custom_ops.md) for the current contract.
 
 For future reference or a ready-made boilerplate, you can visit [this](../assets/monte_carlo.ipynb) link to access a notebook containing the process outlined in this guide.
 

@@ -642,8 +642,8 @@ def _validate_value_recursive(
 class CustomFunc:
     """Opt-in wrapper validating a function against a supplied safe namespace.
 
-    Holds *all* the wrap-time validation logic; the namespace allow/deny lists
-    (``safe_modules`` / ``denied_attributes`` / ``extra_value_types``)
+    Holds *all* the wrap-time validation logic and the namespace allow/deny lists
+    (``safe_modules`` / ``denied_attributes`` / ``extra_value_types``).
 
     Construction:
     - extracts ``inspect.getsource(func)`` (refuses if unavailable);

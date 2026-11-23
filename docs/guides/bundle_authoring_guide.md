@@ -123,22 +123,20 @@ gz_shock = Shock(seed=0, dist="norm").joint("e_g", "e_z")
 r_shock = Shock.from_ppf(laplace, seed=1, loc=1.0).joint("e_r")
 
 mc_pipeline = MCPipeline(
-    [
-        simulation_step(
-            "datagen",
-            n_retain=0,
-            target="dgp",
-            T=200,
-            shocks=[gz_shock, r_shock],
-        ),
-        jarque_bera_test_step(
-            "jb_test",
-            n_retain=100,
-            source="datagen",
-            field="observables",
-            column=0  # (2)!
-        ),
-    ]
+    simulation_step(
+        "datagen",
+        n_retain=0,
+        target="dgp",
+        T=200,
+        shocks=[gz_shock, r_shock],
+    ),
+    jarque_bera_test_step(
+        "jb_test",
+        n_retain=100,
+        source="datagen",
+        field="observables",
+        column=0  # (2)!
+    ),
 )
 mc_res = mc_pipeline.run(
     models={

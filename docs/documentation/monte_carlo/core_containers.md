@@ -23,12 +23,12 @@ __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| name | `#!python str` | Unique step name. Test steps use this as the key in `MCPipelineResult.test_summaries`, and every producer derives its across-replication trace keys from it. |
-| op_type | `#!python OpType` | Operation type: `DATAGEN`, `TRANSFORM`, `FILTER`, `TEST`, `REGRESSION`, or `POSTPROC`. |
+| name | `#!python str` | Unique step name. Test steps use this as the key in `MCPipelineResult.test_summaries`. |
+| op_type | `#!python OpType` | Operation type: `DATAGEN`, `TRANSFORM`, `FILTER`, `TEST`, `REGRESSION`. |
 | func | `#!python Callable | None` | Callable carried by the step. Built-in per-replication steps run as native kernels and leave this `None`; custom transforms carry a `NumbaCustomFunc`. |
 | kwargs | `#!python Mapping[str, Any]` | Keyword arguments stored with the step. Step context builders read them when the run is lowered. |
 | source_args | `#!python tuple[SourceArgs, ...]` | Compiled source selections resolved when the pipeline is built. |
-| step_type | `#!python str | None` | Serializable step kind stamped by the factory, for example `"wald"`, `"simulation"`, `"standardize"`, `"transform:custom"`, or `"postproc:custom"`. `None` is reserved for hand-built steps that cannot be projected to a `PipelineSpec`. |
+| step_type | `#!python str | None` | Serializable step kind stamped by the factory, for example `"wald"`, `"simulation"`, `"standardize"`, or `"transform:custom"`. `None` is reserved for hand-built steps that cannot be projected to a `PipelineSpec`. |
 | n_retain | `#!python int` | Number of replications whose output is retained for this step. `-1` retains all `n_rep` replications. A non-negative value sizes the step's arena to that many rows, filled from an evenly spaced subset of replication indices. It may not exceed `n_rep`. |
 
 __Methods:__

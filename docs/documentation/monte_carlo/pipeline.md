@@ -16,8 +16,7 @@ __Contract:__
 
 | __Rule__ | __Description__ |
 |:---------|----------------:|
-| One data-generation step | `replication_steps` must have exactly one step with `op_type=OpType.DATAGEN`. Later per-rep steps cannot generate data once `DATAGEN` is performed. |
-| Unique step names | Names are used as result and trace keys, unique across both lists. |
+| Unique step names | Names are used as result and trace keys. |
 | Reserved characters | Step names cannot contain the characters `.`, `:`, `\`, `/`. |
 
 ```python
@@ -53,4 +52,4 @@ __Returns:__
 
 ???+ warning "Serializable steps"
     Use the factories in `SymbolicDSGE.monte_carlo.step_factories` rather than hand-building `MCStep` objects when the pipeline needs to enter a `.sdsge` bundle.
-    Custom transforms `NumbaCustomFunc` and postprocs `PandasCustomFunc` are the only bundle-safe custom operations.
+    Custom transforms (`NumbaCustomFunc`, functions are auto-converted) are the only bundle-safe custom operations.

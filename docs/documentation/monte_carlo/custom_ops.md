@@ -37,7 +37,6 @@ __Properties:__
 | source | `#!python str` | Author-side source text for receiver audit. |
 | captured_globals | `#!python Mapping[str, Any]` | Snapshot of accepted globals referenced by the function. |
 | safe_namespace_version | `#!python int` | Version of the safe-namespace contract used at wrap time. |
-| namespace_kind | `#!python str` | Namespace validated against: `"numpy"` or `"pandas"`. |
 | address | `#!python int` | Address of the compiled native callback. Compiles on first access. |
 
 __Methods:__
