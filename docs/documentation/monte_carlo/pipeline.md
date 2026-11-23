@@ -5,14 +5,12 @@ tags:
 # MCPipeline
 
 ```python
-class MCPipeline(
-    steps: Sequence[MCStep],
-    )
+class MCPipeline(*steps: MCStep)
 ```
 
-`MCPipeline` holds two step lists: `replication_steps` (the dependency DAG executed inside every replication) and `postproc_steps` (post-loop ops run **once** after the loop, over the assembled across-rep traces). The two are separate because a postproc is a terminal reduction, not a graph node.
+`MCPipeline` receives `MCStep` objects as arguments and constructs an execution plan (the dependency DAG executed inside every replication). Each step is ordered such that it's sources are availbe as that step executes. The order of specification does not matter, and the constructor will raise when a dependency cycle or otherwise unsatisfiable specification is presented.
 
-Per-replication steps execute in a native `nogil` loop. Building the pipeline resolves each step's producers, and lowering resolves the whole run into buffer arenas and native step descriptors before any replication starts.
+The pipeline can be though of as a declarative configuration that feeds the native experiment runner, the Python-side only resolves the graph and constructd the context for the native execution engine to consume.
 
 __Contract:__
 
@@ -48,7 +46,7 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python MCPipelineResult` | Aggregate container with test summaries, regression summaries, post-loop artifacts, run metadata, and failures. |
+| `#!python MCPipelineResult` | Aggregate container with test summaries, regression summaries, run metadata, and failures. |
 
 ???+ note "Step timings need verbosity 2"
     `MCMeta.step_elapsed_s`, `step_counts`, and `step_failures` are populated only when the run is started with `verbosity=2`, since per-step profiling instruments the native loop. At lower verbosity they are empty mappings.

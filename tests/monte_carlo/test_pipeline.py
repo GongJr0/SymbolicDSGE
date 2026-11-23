@@ -772,7 +772,6 @@ def test_pipeline_run_verbosity_controls_performance_output(
     assert lines[0].startswith("MC run concluded successfully in ")
     assert any("datagen" in line and "wall it/s." in line for line in lines)
     assert any("state_mean" in line and "wall it/s." in line for line in lines)
-    assert not any("Post-processing Report" in line for line in lines)
 
     with pytest.raises(ValueError, match="verbosity"):
         mc_run(pipeline, reference, n_rep=2, verbosity=3)

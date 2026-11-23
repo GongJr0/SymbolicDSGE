@@ -5,12 +5,9 @@ tags:
 
 # Custom Operations
 
-Custom Monte Carlo operations are authored as plain top-level functions and wrapped so the function source and accepted globals can travel with the `.sdsge` archive. The wrapper you use depends on where the operation runs:
+Custom Monte Carlo operations are authored as plain top-level functions and wrapped so the function source and accepted globals can travel with the `.sdsge` archive. Custom transform callables become `NumbaCustomFunc` objects and are compiled for native execution. The `custom_transform` decorator can also be used to wrap them manually. See [custom transforms](operations/transforms/custom.md) for details on how to create a custom transform step.
 
-- **`NumbaCustomFunc`** / **`custom_transform`**: the per-replication contract. The function is compiled by Numba and called from the native replication loop, so it must match a fixed two-argument array signature. Use for [custom transforms](operations/transforms/custom.md).
-- **`PandasCustomFunc`** / **`pandas_operation`**: the post-loop (`OpType.POSTPROC`) contract. It stays plain Python, runs once after the loop, and its namespace additionally exposes `pandas` (as `pd`) so a summary op may build a DataFrame. Use for [custom post-processing](operations/postproc/custom.md).
-
-Both validate the function body against a safe namespace at wrap time: `numpy` (as `np`), `math`, `statistics`, `operator`, a selected set of builtins, and captured immutable or numpy globals.
+The wrapper validates function bodies against a safe namespace at wrap time: `numpy` (as `np`), `math`, `statistics`, `operator`, a selected set of builtins, and captured immutable or numpy globals.
 
 ## `NumbaCustomFunc`
 

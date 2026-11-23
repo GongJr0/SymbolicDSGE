@@ -364,7 +364,7 @@ class MCMeta:
     n_retained_by_step : Mapping[str, int]
         Replications whose output was retained, by producer step.
     elapsed_s : float
-        Wall time for the replication loop alone, excluding post-loop aggregation.
+        Wall time for the replication loop alone.
     step_elapsed_s : Mapping[str, float]
         Accumulated worker seconds by per-replication step. Populated only when the
         run is started at the highest verbosity.

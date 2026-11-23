@@ -109,7 +109,6 @@ mc = loaded.mc
 assert mc
 
 print("Runtime Steps:", [step.name for step in mc.pipeline.replication_steps])
-print("Post-Processing:", [step.name for step in mc.pipeline.postproc_steps])
 ```
 
 ### Run a Monte Carlo pipeline from a loaded bundle

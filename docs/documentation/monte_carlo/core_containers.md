@@ -25,8 +25,8 @@ __Fields:__
 |:---------|:--------:|----------------:|
 | name | `#!python str` | Unique step name. Test steps use this as the key in `MCPipelineResult.test_summaries`, and every producer derives its across-replication trace keys from it. |
 | op_type | `#!python OpType` | Operation type: `DATAGEN`, `TRANSFORM`, `FILTER`, `TEST`, `REGRESSION`, or `POSTPROC`. |
-| func | `#!python Callable | None` | Callable carried by the step. Built-in per-replication steps run as native kernels and leave this `None`; custom transforms carry a `NumbaCustomFunc` and post-loop ops carry a Python callable. |
-| kwargs | `#!python Mapping[str, Any]` | Keyword arguments stored with the step. Per-replication kernels read them when the run is lowered; post-loop ops receive them at call time. |
+| func | `#!python Callable | None` | Callable carried by the step. Built-in per-replication steps run as native kernels and leave this `None`; custom transforms carry a `NumbaCustomFunc`. |
+| kwargs | `#!python Mapping[str, Any]` | Keyword arguments stored with the step. Step context builders read them when the run is lowered. |
 | source_args | `#!python tuple[SourceArgs, ...]` | Compiled source selections resolved when the pipeline is built. |
 | step_type | `#!python str | None` | Serializable step kind stamped by the factory, for example `"wald"`, `"simulation"`, `"standardize"`, `"transform:custom"`, or `"postproc:custom"`. `None` is reserved for hand-built steps that cannot be projected to a `PipelineSpec`. |
 | n_retain | `#!python int` | Number of replications whose output is retained for this step. `-1` retains all `n_rep` replications. A non-negative value sizes the step's arena to that many rows, filled from an evenly spaced subset of replication indices. It may not exceed `n_rep`. |
@@ -39,10 +39,7 @@ __Methods:__
 | `#!python MCStep.from_spec(spec)` | `#!python MCStep` | Rebuild a step from the form `to_spec()` records. |
 
 ???+ note "Factory module"
-    All step factories live in `SymbolicDSGE.monte_carlo.step_factories`: data generation, filtering, transforms, tests, regressions, and post-processing.
-
-???+ warning "What `to_spec()` refuses"
-    A replication step carrying a `func` that is not a custom transform. Everything else projects, including a `None` `step_type`, which no pipeline can run. Post-loop steps are exempt from the `func` rule, since every post-loop kind either names its own callable or ships one.
+    All step factories live in `SymbolicDSGE.monte_carlo.step_factories`: data generation, filtering, transforms, tests, and regressions.
 
 &nbsp;
 
@@ -95,13 +92,13 @@ class MCFailure(
 )
 ```
 
-`MCFailure` records one collected replication failure when `MCPipeline.run(..., fail_fast=False)`. Post-loop failures are recorded with `rep_idx = -1`.
+`MCFailure` records one collected replication failure when `MCPipeline.run(..., fail_fast=False)`.
 
 __Fields:__
 
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
-| rep_idx | `#!python int` | Replication index that failed, or `-1` for a post-loop step. |
+| rep_idx | `#!python int` | Replication index that failed. |
 | step_name | `#!python str` | Step executing when the failure occurred. |
 | error_type | `#!python str` | Exception type name. |
 | message | `#!python str` | Exception message. |
@@ -129,7 +126,7 @@ __Fields and Properties:__
 |:---------|:--------:|----------------:|
 | n_rep | `#!python int` | Requested replication count. |
 | n_retained_by_step | `#!python Mapping[str, int]` | Replications whose output was retained, by producer step. |
-| elapsed_s | `#!python float` | Wall time for the replication loop alone, excluding post-loop aggregation and postproc. |
+| elapsed_s | `#!python float` | Wall time for the replication loop. |
 | step_elapsed_s | `#!python Mapping[str, float]` | Accumulated worker seconds by per-replication step. Populated only when the run is started with `verbosity=2`. |
 | step_counts | `#!python Mapping[str, int]` | Attempted calls by per-replication step. |
 | step_failures | `#!python Mapping[str, int]` | Collected failures by per-replication step. |
@@ -173,7 +170,7 @@ __Fields and Properties:__
 | test_summaries | `#!python Mapping[str, MCTestResult]` | Per-test aggregate result containers. |
 | regression_summaries | `#!python Mapping[str, MCRegressionResult]` | Per-regression aggregate result containers. |
 | failures | `#!python tuple[MCFailure, ...]` | Failures collected when `fail_fast=False`. |
-| succeeded | `#!python bool` | `True` when no per-replication or post-loop failures were collected. |
+| succeeded | `#!python bool` | `True` when no failures were collected. |
 | statistic_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's statistic trace. |
 | pval_traces | `#!python Mapping[str, ndarray]` | Shortcut for each test summary's p-value trace. |
 | test_status_traces | `#!python Mapping[str, tuple[TestStatus, ...]]` | Shortcut for each test summary's status trace. |

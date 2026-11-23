@@ -249,7 +249,7 @@ mc = pipeline.run(
 ```
 
 1. Number of worker threads. `None` runs single-threaded, a positive value is taken literally, and a negative value resolves to `max(1, cpu_count + 1 + n_jobs)` following the joblib convention.
-2. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints the run total and the post-processing total, and `2` additionally prints per-step throughput.
+2. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints the run total, and `2` additionally prints per-step throughput.
 
 ???+ warning "Per-step Timings Require `verbosity=2`"
     The native loop only collects per-step profiling when it is asked to. At any lower verbosity `meta.step_elapsed_s`, `meta.step_counts`, and `meta.step_failures` are empty dictionaries.
@@ -303,7 +303,7 @@ std_innov_mean           4.758      0.372           0.175    0.37    0.374
 
 ```
 
-Regression results are accessed similarly in `MCPipelineResult.regression_summaries`, and post-processing artifacts are accessed by key in `MCPipelineResult.postproc: dict[str, Any]`.
+Regression results are accessed similarly via `MCPipelineResult.regression_summaries`.
 
 ???+ tip "Retaining Fewer Replications"
     Large runs can routinely exceed hardware memory in size requirements. It is strongly recommended to set `n_retain=0` for intermediate steps that are not needed for later analysis. This will allow you to retain much more replications for steps you care about before running out of memory. `n_retain=0` will not make the data unavailable to downstream steps, all data makes it through the pipeline, but non-retained replications are discarded after used. `n_retain=-1` is the default and retains all replications.

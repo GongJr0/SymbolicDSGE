@@ -154,7 +154,7 @@ mc_res = mc_pipeline.run(
 bundle.add_mc(pipeline=mc_pipeline, result=mc_res)
 ```
 
-1. Every built-in step factory lives in `step_factories`: data generation, raw data consumption, Kalman filtering, transforms, statistical tests, regressions, and post-processing.
+1. Every built-in step factory lives in `step_factories`: data generation, raw data consumption, Kalman filtering, transforms, statistical tests, and regressions.
 2. `source` names the producer step, and `field` names the array on its output. Here the test reads the first observable column of the simulated sample.
 
 ## Specify a simulation prefill
