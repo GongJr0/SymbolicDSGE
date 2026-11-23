@@ -1515,8 +1515,6 @@ def run(
     cdef int64_t n_steps = len(steps)
     cdef int64_t step_idx
     cdef int status
-    cdef double wall_started_s = 0.0
-    cdef double wall_elapsed_s = 0.0
     cdef object step_names = tuple(allocation.plan)
     cdef object step_arenas
     cdef object step_binding_specs
@@ -1689,21 +1687,21 @@ def run(
             runner.step_elapsed_s_by_worker = &step_elapsed_s_by_worker[0, 0]
             runner.step_counts_by_worker = &step_counts_by_worker[0, 0]
             runner.step_failures_by_worker = &step_failures_by_worker[0, 0]
-            wall_started_s = perf_counter()
         else:
             runner.step_elapsed_s_by_worker = NULL
             runner.step_counts_by_worker = NULL
             runner.step_failures_by_worker = NULL
+
+        start_t = perf_counter()
         with nogil:
             status = sdsge_mc_run(&runner)
-        if profile_steps:
-            wall_elapsed_s = perf_counter() - wall_started_s
+        stop_t = perf_counter()
         return NativeRunResult(
             status,
             runner.halt_failure.rep_idx,
             runner.halt_failure.step_idx,
             runner.halt_failure.status,
-            wall_elapsed_s,
+            stop_t-start_t,
             np.asarray(step_elapsed_s_by_worker) if profile_steps else None,
             np.asarray(step_counts_by_worker) if profile_steps else None,
             np.asarray(step_failures_by_worker) if profile_steps else None,

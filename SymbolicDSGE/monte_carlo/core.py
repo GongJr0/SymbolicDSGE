@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from time import perf_counter
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -143,7 +142,6 @@ class MCPipeline:
             n_jobs=n_jobs,
             check_memory_availability=check_memory_availability,
         )
-        loop_started_s = perf_counter()
         native_res = run(
             prep.allocation,
             prep.steps,
@@ -151,11 +149,7 @@ class MCPipeline:
             fail_fast=fail_fast,
             profile_steps=verbosity == 2,
         )
-        elapsed_s = (
-            native_res.wall_elapsed_s
-            if verbosity == 2
-            else perf_counter() - loop_started_s
-        )
+        elapsed_s = native_res.wall_elapsed_s
         if fail_fast and is_failed(native_res):
             step_name = (
                 self.steps[native_res.halt_step_idx].name
