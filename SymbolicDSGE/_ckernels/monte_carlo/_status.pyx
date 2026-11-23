@@ -42,10 +42,9 @@ cdef extern from "../regression/regression.h":
 
 @unique
 class MCStatus(IntEnum):
-    """Codes produced by Monte Carlo steps, including post-loop failures."""
+    """Codes produced by Monte Carlo steps."""
 
     SUCCESS = c_SDSGE_OK
-    POSTPROC_FAILED = -1
 
     DIAG_BAD_SHAPE = c_DIAG_BAD_SHAPE
     DIAG_LINALG = c_DIAG_LINALG
@@ -80,9 +79,6 @@ class MCStatus(IntEnum):
 
 _MESSAGES = {
     MCStatus.SUCCESS: "The step completed successfully.",
-    MCStatus.POSTPROC_FAILED: (
-        "The post-processing callable or artifact normalization raised an exception."
-    ),
     MCStatus.DIAG_BAD_SHAPE: "The diagnostic inputs have invalid dimensions.",
     MCStatus.DIAG_LINALG: "A linear algebra operation in the diagnostic failed.",
     MCStatus.DIAG_UDEF_VARIANCE: "The diagnostic variance is undefined.",

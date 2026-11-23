@@ -43,7 +43,7 @@ The extractor writes each member at its compile-input authoring path, not at its
 | `model_config` | `model/{model_name}.yaml` | `{model_name}.yaml` |
 | `estimation_*` | `estimation/...` | `estimation/...` |
 | `mc_pipeline`, `mc_func`, `mc_data` | `montecarlo/...` | `montecarlo/...` |
-| `mc_result_meta`, `mc_*_steps`, `mc_*_traces`, `mc_transform_trace`, `mc_postproc_raw` | `montecarlo/result/...` | `montecarlo/result/...` |
+| `mc_result_meta`, `mc_*_steps`, `mc_*_traces`, `mc_transform_trace` | `montecarlo/result/...` | `montecarlo/result/...` |
 | `raw_data` | `data/...` | `data/...` |
 | `simulation` | `simulation.json` | `simulation.json` |
 | `shock_table` | `shock/table/...` | `shock/table/...` |
@@ -58,7 +58,7 @@ With `--csv`, every Parquet member is decoded to CSV. The extension and `manifes
 | `estimation_data` | Observable names from `Member.columns` (semantic headers, user-friendly). |
 | `estimation_trace` | Mechanical `{name}.{j}` expansion from `trace_to_csv`. |
 | `mc_test_traces`, `mc_regression_traces` | Step-qualified `{step}.{field}`, extended to `{step}.{field}.{idx}` for a 2-D column. |
-| `mc_transform_trace`, `mc_postproc_raw` | The same qualifier for the member's single array. |
+| `mc_transform_trace` | The same qualifier for the member's single array. |
 | `mc_data`, `raw_data` | Existing column names from the Parquet schema. |
 
 ???+ warning "Checksum field on decompile"

@@ -5,12 +5,9 @@ tags:
 
 # Custom Operations
 
-Custom Monte Carlo operations are authored as plain top-level functions and wrapped so the function source and accepted globals can travel with the `.sdsge` archive. The wrapper you use depends on where the operation runs:
+Custom Monte Carlo operations are authored as plain top-level functions and wrapped so the function source and accepted globals can travel with the `.sdsge` archive. Custom transform callables become `NumbaCustomFunc` objects and are compiled for native execution. The `custom_transform` decorator can also be used to wrap them manually. See [custom transforms](operations/transforms/custom.md) for details on how to create a custom transform step.
 
-- **`NumbaCustomFunc`** / **`custom_transform`**: the per-replication contract. The function is compiled by Numba and called from the native replication loop, so it must match a fixed two-argument array signature. Use for [custom transforms](operations/transforms/custom.md).
-- **`PandasCustomFunc`** / **`pandas_operation`**: the post-loop (`OpType.POSTPROC`) contract. It stays plain Python, runs once after the loop, and its namespace additionally exposes `pandas` (as `pd`) so a summary op may build a DataFrame. Use for [custom post-processing](operations/postproc/custom.md).
-
-Both validate the function body against a safe namespace at wrap time: `numpy` (as `np`), `math`, `statistics`, `operator`, a selected set of builtins, and captured immutable or numpy globals.
+The wrapper validates function bodies against a safe namespace at wrap time: `numpy` (as `np`), `math`, `statistics`, `operator`, a selected set of builtins, and captured immutable or numpy globals.
 
 ## `NumbaCustomFunc`
 
@@ -40,7 +37,6 @@ __Properties:__
 | source | `#!python str` | Author-side source text for receiver audit. |
 | captured_globals | `#!python Mapping[str, Any]` | Snapshot of accepted globals referenced by the function. |
 | safe_namespace_version | `#!python int` | Version of the safe-namespace contract used at wrap time. |
-| namespace_kind | `#!python str` | Namespace validated against: `"numpy"` or `"pandas"`. |
 | address | `#!python int` | Address of the compiled native callback. Compiles on first access. |
 
 __Methods:__
@@ -80,50 +76,5 @@ def demean(sample, output) -> int:
     return 0
 ```
 
-## `PandasCustomFunc`
-
-```python
-class PandasCustomFunc(CustomFunc)
-```
-
-```python
-PandasCustomFunc(func: Callable[..., Any] | CustomFunc) -> PandasCustomFunc
-
-@classmethod
-PandasCustomFunc.from_source(source: str) -> PandasCustomFunc
-```
-
-Identical validation and properties to the numpy contract, but the body may also reference `pandas` (as `pd`). Intended for `OpType.POSTPROC` summary ops, for example one returning a DataFrame. It runs in plain Python after the replication loop and is never compiled.
-
-## `pandas_operation`
-
-```python
-pandas_operation(func: Callable[..., Any]) -> PandasCustomFunc
-```
-
-Decorator form of `PandasCustomFunc`, for post-loop ops passed to `postproc_step(...)`. The body may reference `pd`; using it on a per-replication step is rejected when the pipeline is built.
-
-## `NumpyCustomFunc`
-
-```python
-class NumpyCustomFunc(CustomFunc)
-```
-
-The base contract `NumbaCustomFunc` extends: the same safe-namespace validation without the two-argument signature check and without native compilation. It is not exported from `SymbolicDSGE.monte_carlo`; reach it through `SymbolicDSGE.monte_carlo.custom_op` if you need the plain numpy wrapper directly.
-
-## Validation Contract
-
-| __Allowed__ | __Description__ |
-|:------------|----------------:|
-| One top-level `def` | Lambdas, nested functions, methods, partials, builtins, and C-extension callables are rejected. |
-| Numeric safe namespace | `numpy` as `np`, selected standard modules, selected builtins, and captured immutable/numpy globals. `pandas` as `pd` is added only under the pandas namespace. |
-| Explicit source | Source must be recoverable or supplied through `from_source(...)`. |
-
-| __Rejected__ | __Reason__ |
-|:-------------|-----------:|
-| Imports, `global`, `nonlocal`, async, yield, nested `def`, classes | These make the shipped function harder to audit and reproduce. |
-| Closure captures | Promote values to accepted globals or pass them as kwargs. |
-| Unsupported globals | The wrapper snapshots only accepted numeric/scalar/container helpers. |
-
 ???+ warning "Not a security sandbox"
-    These wrappers are a reproducibility and audit contract, not a sandbox. Loading a bundle with custom operations should be treated like running Python code from the bundle author.
+    The wrapper is a reproducibility and audit contract, not a sandbox. Loading a bundle with custom operations should be treated like running Python code from the bundle author.

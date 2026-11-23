@@ -42,7 +42,6 @@ import statistics
 import textwrap
 import warnings
 from collections.abc import Mapping
-from functools import lru_cache
 from typing import Any, Callable, cast
 
 import numpy as np
@@ -186,80 +185,11 @@ DENIED_ATTRIBUTES: dict[str, frozenset[str]] = {
 #: Captured-global value types accepted beyond scalars/immutable containers.
 _NUMPY_VALUE_TYPES: tuple[type, ...] = (np.ndarray, np.generic, np.dtype)
 
-#: The numpy namespace config consumed by :class:`CustomFunc` — the bundle of
-#: allow/deny lists a subclass supplies. :class:`PandasCustomFunc` builds its own
-#: by extending these (see :func:`_pandas_namespace`).
 _NUMPY_NAMESPACE: dict[str, Any] = {
     "safe_modules": SAFE_MODULES,
     "denied_attributes": DENIED_ATTRIBUTES,
     "extra_value_types": _NUMPY_VALUE_TYPES,
-    "extra_globals": (),
-    "namespace_kind": "numpy",
 }
-
-#: Pandas module-level footguns: I/O readers/writers and the eval surface. Same
-#: module-root reach as :data:`_NUMPY_DENIED` (catches ``pd.read_csv``, not a
-#: ``df.to_csv()`` method on a local — author hygiene, not a sandbox).
-_PANDAS_DENIED: frozenset[str] = frozenset(
-    {
-        "read_csv",
-        "read_table",
-        "read_fwf",
-        "read_excel",
-        "read_parquet",
-        "read_pickle",
-        "read_feather",
-        "read_hdf",
-        "read_orc",
-        "read_json",
-        "read_html",
-        "read_xml",
-        "read_sql",
-        "read_sql_query",
-        "read_sql_table",
-        "read_gbq",
-        "read_stata",
-        "read_spss",
-        "read_sas",
-        "read_clipboard",
-        "ExcelFile",
-        "HDFStore",
-        "eval",
-        "io",
-        "compat",
-        "test",
-        "testing",
-    }
-)
-
-
-@lru_cache(maxsize=1)
-def _pandas_namespace() -> dict[str, Any]:
-    """The pandas namespace config: the numpy lists extended with pandas.
-
-    Lazily imports pandas (cached) so merely importing this module — which is on
-    the core import path — never pulls in pandas; the cost is paid only when a
-    :class:`PandasCustomFunc` is actually constructed.
-    """
-    import pandas as pd
-
-    from .postproc import Raw, Summary
-
-    return {
-        "safe_modules": {**SAFE_MODULES, "pandas": pd, "pd": pd},
-        "denied_attributes": {
-            **DENIED_ATTRIBUTES,
-            "pandas": _PANDAS_DENIED,
-            "pd": _PANDAS_DENIED,
-        },
-        "extra_value_types": (*_NUMPY_VALUE_TYPES, pd.DataFrame, pd.Series, pd.Index),
-        # A post-loop op declares its slots, so it must be able to name them.
-        "extra_globals": (Raw, Summary),
-        "namespace_kind": "pandas",
-    }
-
-
-# Exception.
 
 
 class CustomOpValidationError(ValueError):
@@ -299,9 +229,7 @@ def _extract_source(func: Callable[..., Any]) -> str:
 # AST validation.
 
 
-_OPERATION_MARKERS: frozenset[str] = frozenset(
-    {"custom_transform", "numpy_operation", "pandas_operation"}
-)
+_OPERATION_MARKERS: frozenset[str] = frozenset({"custom_transform"})
 
 
 def _is_operation_decorator(node: ast.expr) -> bool:
@@ -371,8 +299,7 @@ class _Validator(ast.NodeVisitor):
             if not _is_operation_decorator(decorator):
                 self._fail(
                     "decorated functions cannot be wrapped (other than the "
-                    "@custom_transform, @numpy_operation, or @pandas_operation "
-                    "marker). Apply one as the only decorator, or remove decorators."
+                    "@custom_transform marker). Remove any other decorators."
                 )
         args = tree.args
         for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
@@ -589,7 +516,6 @@ def _capture_globals(
     safe_modules: Mapping[str, Any],
     denied_attributes: Mapping[str, frozenset[str]],
     extra_value_types: tuple[type, ...],
-    extra_globals: tuple[Any, ...] = (),
 ) -> dict[str, Any]:
     """Resolve referenced names against the function's globals + safe namespace.
 
@@ -632,7 +558,6 @@ def _capture_globals(
                 func_name,
                 safe_modules=safe_modules,
                 extra_value_types=extra_value_types,
-                extra_globals=extra_globals,
             )
             captured[name] = value
             continue
@@ -655,7 +580,6 @@ def _validate_captured_value(
     *,
     safe_modules: Mapping[str, Any],
     extra_value_types: tuple[type, ...],
-    extra_globals: tuple[Any, ...] = (),
 ) -> None:
     """Reject globals whose runtime type isn't in the safe-value set.
 
@@ -673,7 +597,7 @@ def _validate_captured_value(
         return
     if isinstance(value, CustomFunc):
         return
-    _validate_value_recursive(name, value, func_name, extra_value_types, extra_globals)
+    _validate_value_recursive(name, value, func_name, extra_value_types)
 
 
 def _validate_value_recursive(
@@ -681,7 +605,6 @@ def _validate_value_recursive(
     value: Any,
     func_name: str,
     extra_value_types: tuple[type, ...],
-    extra_globals: tuple[Any, ...] = (),
     _depth: int = 0,
 ) -> None:
     if _depth > 20:
@@ -689,8 +612,6 @@ def _validate_value_recursive(
             f"{func_name!r}: captured global `{name}` is too deeply nested "
             "(>20 levels)."
         )
-    if any(value is allowed for allowed in extra_globals):
-        return
     if isinstance(value, _SAFE_SCALAR_TYPES):
         return
     if isinstance(value, extra_value_types):
@@ -700,17 +621,13 @@ def _validate_value_recursive(
     if isinstance(value, (tuple, list, frozenset, set)):
         for item in value:
             _validate_value_recursive(
-                name, item, func_name, extra_value_types, extra_globals, _depth + 1
+                name, item, func_name, extra_value_types, _depth + 1
             )
         return
     if isinstance(value, Mapping):
         for k, v in value.items():
-            _validate_value_recursive(
-                name, k, func_name, extra_value_types, extra_globals, _depth + 1
-            )
-            _validate_value_recursive(
-                name, v, func_name, extra_value_types, extra_globals, _depth + 1
-            )
+            _validate_value_recursive(name, k, func_name, extra_value_types, _depth + 1)
+            _validate_value_recursive(name, v, func_name, extra_value_types, _depth + 1)
         return
     raise CustomOpValidationError(
         f"{func_name!r}: captured global `{name}` has unsupported type "
@@ -725,11 +642,10 @@ def _validate_value_recursive(
 class CustomFunc:
     """Opt-in wrapper validating a function against a supplied safe namespace.
 
-    Holds *all* the wrap-time validation logic; the namespace allow/deny lists
-    (``safe_modules`` / ``denied_attributes`` / ``extra_value_types``) are
-    supplied by a subclass — :class:`NumpyCustomFunc` and :class:`PandasCustomFunc`
-    are horizontal siblings that differ only in those lists. Construction:
+    Holds *all* the wrap-time validation logic and the namespace allow/deny lists
+    (``safe_modules`` / ``denied_attributes`` / ``extra_value_types``).
 
+    Construction:
     - extracts ``inspect.getsource(func)`` (refuses if unavailable);
     - parses + walks the AST against the safe namespace contract;
     - resolves every referenced global against ``func.__globals__`` and the
@@ -754,11 +670,6 @@ class CustomFunc:
         Attributes barred on each allowed module, keyed by the module's alias.
     extra_value_types : tuple[type, ...]
         Additional global value types accepted when snapshotting captured globals.
-    extra_globals : tuple[Any, ...]
-        Additional global values accepted verbatim when snapshotting.
-    namespace_kind : str
-        Label identifying the subclass namespace, recorded on the instance and
-        checked by the pipeline when it decides where an op may run.
     """
 
     __slots__ = (
@@ -767,7 +678,6 @@ class CustomFunc:
         "_captured_globals",
         "_name",
         "_safe_namespace_version",
-        "_namespace_kind",
     )
 
     # Typed mirrors of __slots__ so mypy can resolve attribute reads inside
@@ -777,7 +687,6 @@ class CustomFunc:
     _captured_globals: dict[str, Any]
     _name: str
     _safe_namespace_version: int
-    _namespace_kind: str
 
     def __init__(
         self,
@@ -786,8 +695,6 @@ class CustomFunc:
         safe_modules: Mapping[str, Any],
         denied_attributes: Mapping[str, frozenset[str]],
         extra_value_types: tuple[type, ...],
-        extra_globals: tuple[Any, ...] = (),
-        namespace_kind: str,
     ) -> None:
         if isinstance(func, CustomFunc):
             # Idempotent — copy the validated state across (its original kind).
@@ -796,7 +703,6 @@ class CustomFunc:
             self._captured_globals = func._captured_globals
             self._name = func._name
             self._safe_namespace_version = func._safe_namespace_version
-            self._namespace_kind = func._namespace_kind
             return
 
         cls_name = type(self).__name__
@@ -863,7 +769,6 @@ class CustomFunc:
             safe_modules=safe_modules,
             denied_attributes=denied_attributes,
             extra_value_types=extra_value_types,
-            extra_globals=extra_globals,
         )
 
         self._func = func
@@ -871,7 +776,6 @@ class CustomFunc:
         self._captured_globals = captured
         self._name = func_name
         self._safe_namespace_version = SAFE_NAMESPACE_VERSION
-        self._namespace_kind = namespace_kind
 
     # Read-only accessors.
 
@@ -895,11 +799,6 @@ class CustomFunc:
         """Version of the safe-namespace contract enforced at wrap time."""
         return self._safe_namespace_version
 
-    @property
-    def namespace_kind(self) -> str:
-        """Which namespace this op was validated under (``"numpy"``/``"pandas"``)."""
-        return self._namespace_kind
-
     # Alternate constructor.
 
     @classmethod
@@ -909,9 +808,7 @@ class CustomFunc:
         Overridden by the concrete siblings to supply their allow/deny lists;
         the base has no namespace of its own.
         """
-        raise NotImplementedError(
-            "Use NumpyCustomFunc.from_source / PandasCustomFunc.from_source."
-        )
+        raise NotImplementedError("Use NumbaCustomFunc.from_sourcec.from_source.")
 
     @classmethod
     def _from_source(
@@ -921,15 +818,12 @@ class CustomFunc:
         safe_modules: Mapping[str, Any],
         denied_attributes: Mapping[str, frozenset[str]],
         extra_value_types: tuple[type, ...],
-        extra_globals: tuple[Any, ...] = (),
-        namespace_kind: str,
     ) -> "CustomFunc":
         """Build a wrapper from source *text* rather than a live function.
 
         The constructor recovers source via ``inspect.getsource``, which needs a
-        real ``def`` in a module file or notebook cell — unavailable for code
-        typed into a web editor and ``exec``'d. This validates the supplied text
-        directly (same AST contract) and executes it in the safe namespace to
+        real ``def`` in a module file or notebook cell. This validates the supplied
+        text directly (same AST contract) and executes it in the safe namespace to
         obtain the callable, snapshotting the original text as :attr:`source` for
         receiver-side audit. A leading operation marker is accepted and treated as
         a no-op (the result is wrapped here).
@@ -943,7 +837,7 @@ class CustomFunc:
             tree = ast.parse(text)
         except SyntaxError as exc:
             raise CustomOpValidationError(
-                f"submitted source did not parse — {exc.msg} (line {exc.lineno})."
+                f"submitted source did not parse: {exc.msg} (line {exc.lineno})."
             ) from exc
         if len(tree.body) != 1 or not isinstance(tree.body[0], ast.FunctionDef):
             raise CustomOpValidationError(
@@ -961,8 +855,6 @@ class CustomFunc:
         namespace: dict[str, Any] = {
             **safe_modules,
             "custom_transform": lambda f: f,
-            "numpy_operation": lambda f: f,
-            "pandas_operation": lambda f: f,
         }
         try:
             exec(compile(tree, "<custom_op>", "exec"), namespace)  # noqa: S102
@@ -979,7 +871,6 @@ class CustomFunc:
             safe_modules=safe_modules,
             denied_attributes=denied_attributes,
             extra_value_types=extra_value_types,
-            extra_globals=extra_globals,
         )
 
         instance = object.__new__(cls)
@@ -988,7 +879,6 @@ class CustomFunc:
         instance._captured_globals = captured
         instance._name = func_name
         instance._safe_namespace_version = SAFE_NAMESPACE_VERSION
-        instance._namespace_kind = namespace_kind
         return instance
 
     # Runtime surface.
@@ -1153,41 +1043,6 @@ def _validate_numba_transform_signature(func: Callable[..., Any], name: str) -> 
         )
 
 
-class PandasCustomFunc(CustomFunc):
-    """Custom op whose namespace additionally exposes pandas (as ``pd``).
-
-    The looser post-loop (``OpType.POSTPROC``) contract — a summary op may build
-    a DataFrame. Pandas is referenced (``import`` stays banned, like ``np``); a
-    pandas-enabled op outside the post-loop phase is rejected by the pipeline.
-
-    Parameters
-    ----------
-    func : Callable[..., Any] | CustomFunc
-        Function to wrap and validate against the pandas-enabled namespace.
-    """
-
-    __slots__ = ()
-
-    def __init__(self, func: Callable[..., Any] | CustomFunc) -> None:
-        super().__init__(func, **_pandas_namespace())
-
-    @classmethod
-    def from_source(cls, source: str) -> "PandasCustomFunc":
-        """Build a pandas-enabled wrapper from source text.
-
-        Parameters
-        ----------
-        source : str
-            Source text of a single function definition.
-
-        Returns
-        -------
-        PandasCustomFunc
-            Wrapper validated against the pandas-enabled namespace.
-        """
-        return cast("PandasCustomFunc", cls._from_source(source, **_pandas_namespace()))
-
-
 def custom_transform(func: Callable[..., Any]) -> NumbaCustomFunc:
     """Decorator marking a numerical function as a shippable Numba custom transform.
 
@@ -1203,14 +1058,3 @@ def custom_transform(func: Callable[..., Any]) -> NumbaCustomFunc:
     handed straight to ``transform_step`` (or any custom-op factory).
     """
     return NumbaCustomFunc(func)
-
-
-def pandas_operation(func: Callable[..., Any]) -> PandasCustomFunc:
-    """Decorator marking a post-loop op as a shippable pandas custom op.
-
-    The pandas sibling of :func:`numpy_operation`: the body may reference ``pd``
-    in addition to the numpy namespace. Intended for ``OpType.POSTPROC`` summary
-    ops (e.g. one returning a DataFrame); using it on a per-replication step is
-    rejected when the pipeline is built.
-    """
-    return PandasCustomFunc(func)

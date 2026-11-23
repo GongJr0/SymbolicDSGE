@@ -28,13 +28,13 @@ func(sample, output) -> int
 
 `sample` is the C-contiguous 2D `float64` slice selected by `source`, `field`, `columns`, and the row options. `output` is the C-contiguous 2D `float64` buffer of shape `output_shape` the function fills. Return `0` for success; any other value marks the replication as failed at this step.
 
-The written buffer is the step's payload. Downstream steps read it with `source` set to the step name and `field="payload"`, and it is stacked across replications under the trace key `payload.<name>`.
+The written buffer is the step's payload. Downstream steps read it with `source` set to the step name and `field="payload"`.
 
 __Inputs:__
 
 | __Name__ | __Description__ |
 |:---------|----------------:|
-| name | Runtime step name, payload source name, and trace key suffix. |
+| name | Step name. |
 | n_retain | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |
 | func | The transform. A `NumbaCustomFunc`, or a plain function wrapped into one. |
 | source | Producer step name supplying the input array. |

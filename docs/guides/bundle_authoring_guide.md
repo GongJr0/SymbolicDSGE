@@ -123,22 +123,20 @@ gz_shock = Shock(seed=0, dist="norm").joint("e_g", "e_z")
 r_shock = Shock.from_ppf(laplace, seed=1, loc=1.0).joint("e_r")
 
 mc_pipeline = MCPipeline(
-    [
-        simulation_step(
-            "datagen",
-            n_retain=0,
-            target="dgp",
-            T=200,
-            shocks=[gz_shock, r_shock],
-        ),
-        jarque_bera_test_step(
-            "jb_test",
-            n_retain=100,
-            source="datagen",
-            field="observables",
-            column=0  # (2)!
-        ),
-    ]
+    simulation_step(
+        "datagen",
+        n_retain=0,
+        target="dgp",
+        T=200,
+        shocks=[gz_shock, r_shock],
+    ),
+    jarque_bera_test_step(
+        "jb_test",
+        n_retain=100,
+        source="datagen",
+        field="observables",
+        column=0  # (2)!
+    ),
 )
 mc_res = mc_pipeline.run(
     models={
@@ -154,7 +152,7 @@ mc_res = mc_pipeline.run(
 bundle.add_mc(pipeline=mc_pipeline, result=mc_res)
 ```
 
-1. Every built-in step factory lives in `step_factories`: data generation, raw data consumption, Kalman filtering, transforms, statistical tests, regressions, and post-processing.
+1. Every built-in step factory lives in `step_factories`: data generation, raw data consumption, Kalman filtering, transforms, statistical tests, and regressions.
 2. `source` names the producer step, and `field` names the array on its output. Here the test reads the first observable column of the simulated sample.
 
 ## Specify a simulation prefill

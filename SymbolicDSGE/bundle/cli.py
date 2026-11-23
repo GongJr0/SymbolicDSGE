@@ -24,16 +24,15 @@
             ├── meta.json                   # the run's own metadata + run_config
             ├── tests/{test_steps.json, test_traces.parquet|.csv}
             ├── regressions/{regression_steps.json, regression_traces.parquet|.csv}
-            ├── transforms/{transform_steps.json, {step}_{field}.parquet|.csv}
-            └── postproc/{postproc_steps.json, {step}_{field}.parquet|.csv}
+            └── transforms/{transform_steps.json, {step}_{field}.parquet|.csv}
 
 Each step kind's metas ride one JSON keyed by step name. Tests and regressions
 pack every step's columns into one block, qualified ``{step}.{field}`` and
-extended to ``{step}.{field}.{idx}`` where a column is 2-D. Transform payloads and
-postproc ``Raw`` arrays take a member each, since they share no shape with
-anything. Pass ``--csv`` to re-encode Parquet members as CSV, which is the only
-way to read one in a text editor; the loader takes either format, so a CSV bundle
-is as valid as a Parquet one.
+extended to ``{step}.{field}.{idx}`` where a column is 2-D. Transform payloads
+take a member each, since they share no shape with anything. Pass ``--csv`` to
+re-encode Parquet members as CSV, which is the only way to read one in a text
+editor; the loader takes either format, so a CSV bundle is as valid as a Parquet
+one.
 
 ``sdsge-compile <dir>`` packs such a directory back into a ``.sdsge``. It is the
 inverse of decompile and nothing more: member bytes are copied through unchanged,

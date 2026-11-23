@@ -93,23 +93,19 @@ def transform_run(solved_test, mc_run) -> TransformRun:
     zeros = np.zeros((periods, columns))
 
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(
-                "dat", observables=observables, observable_names=("y", "x")
-            ),
-            add_payload_step("pos", positive),
-            add_payload_step("zed", zeros),
-            standardize_step("std", source="dat", field="observables"),
-            standardize_step("std_zero_var", source="zed", field="payload"),
-            log_step("log", source="pos", field="payload"),
-            log_diff_step("log_diff", source="pos", field="payload"),
-            diff_step("diff", source="dat", field="observables", order=order),
-            rolling_mean_step(
-                "rmean", source="dat", field="observables", window=window
-            ),
-            rolling_std_step("rstd", source="dat", field="observables", window=window),
-            rolling_var_step("rvar", source="dat", field="observables", window=window),
-        ]
+        raw_model_data_step(
+            "dat", observables=observables, observable_names=("y", "x")
+        ),
+        add_payload_step("pos", positive),
+        add_payload_step("zed", zeros),
+        standardize_step("std", source="dat", field="observables"),
+        standardize_step("std_zero_var", source="zed", field="payload"),
+        log_step("log", source="pos", field="payload"),
+        log_diff_step("log_diff", source="pos", field="payload"),
+        diff_step("diff", source="dat", field="observables", order=order),
+        rolling_mean_step("rmean", source="dat", field="observables", window=window),
+        rolling_std_step("rstd", source="dat", field="observables", window=window),
+        rolling_var_step("rvar", source="dat", field="observables", window=window),
     )
 
     result = mc_run(pipeline, solved_test, n_rep=1)

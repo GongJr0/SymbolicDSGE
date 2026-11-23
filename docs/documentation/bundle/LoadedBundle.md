@@ -57,7 +57,7 @@ __Fields:__
 | result | `#!python MCPipelineResult | None` | The reconstructed result object, when available. |
 
 ???+ tip "Re-running a loaded pipeline"
-    A result is already complete with all traces and postproc artifacts the author retained.
+    A result is already complete with all outputs the author retained.
     Alternatively, the results can be reproduced by calling `pipeline.run(models=loaded.models, **result.run_config)` with the bundled reference and DGP models.
 
 ## Example

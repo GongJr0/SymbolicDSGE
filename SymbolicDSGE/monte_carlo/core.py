@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from time import perf_counter
-from typing import Any, Mapping, Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -26,13 +25,6 @@ from .defaults import DEFAULT_SIMULATION_OBSERVABLES
 from .memory import MCMemoryProfiler, MCMemoryReport
 from .native_lowering import LoweredMCRun, lower_native_run
 from .spec import PipelineSpec
-from .traces import (
-    is_trace_ref,
-    trace_keys_for_step,
-    trace_ref_error,
-    traces_from_summaries,
-)
-from .postproc import Artifact, normalize_artifacts
 from .mc_constructs import (
     MCDataGenResult,
     MCFilterResult,
@@ -41,7 +33,6 @@ from .mc_constructs import (
     MCMeta,
     MCStep,
     OpType,
-    failed_postproc_names,
     failed_step_counts,
     report_mc_performance,
     report_mc_step_performance,
@@ -65,37 +56,25 @@ class MCPipeline:
 
     Parameters
     ----------
-    replication_steps : Sequence[MCStep]
+    *steps : MCStep
         Per-replication step specifications. Must contain exactly one DATAGEN step
         and may contain any number of FILTER, TRANSFORM, TEST, and REGRESSION steps.
-    postproc_steps : Sequence[MCStep]
-        Post-loop step specifications. May contain any number of POSTPROC steps.
-        These steps are run once after the loop over the assembled
-        across-replication traces.
 
     Attributes
     ----------
-    replication_steps : tuple[MCStep, ...]
+    steps : tuple[MCStep, ...]
         The per-replication steps in resolved execution order.
-    postproc_steps : tuple[MCStep, ...]
-        The post-loop steps.
     """
 
     def __init__(
         self,
-        replication_steps: Sequence[MCStep],
-        postproc_steps: Sequence[MCStep] = (),
+        *steps: MCStep,
     ) -> None:
-        rep_tuple = tuple(replication_steps)
-        postproc_tuple = tuple(postproc_steps)
-        _validate_steps(rep_tuple, postproc_tuple)
-
-        ordered = _order_steps(rep_tuple)
+        _validate_steps(steps)
+        ordered = _order_steps(steps)
         source_indices = _resolve_source_indices(ordered)
-        _validate_postproc_traces(ordered, postproc_tuple)
 
-        self.replication_steps = ordered
-        self.postproc_steps = postproc_tuple
+        self.steps = ordered
         self._source_indices = source_indices
 
     def run(
@@ -108,7 +87,7 @@ class MCPipeline:
         n_jobs: int | None = None,
         check_memory_availability: bool = True,
     ) -> MCPipelineResult:
-        """Run a Monte carlo pipeine with the specified per-replication and post-loop steps.
+        """Run a Monte carlo pipeine with the specified per-replication steps.
 
         Parameters
         ----------
@@ -149,7 +128,6 @@ class MCPipeline:
             - :attr:`MCPipelineResult.transform_outputs`
             - :attr:`MCPipelineResult.test_summaries`
             - :attr:`MCPipelineResult.regression_summaries`
-            - :attr:`MCPipelineResult.postproc`
 
         """
         if n_rep <= 0:
@@ -164,7 +142,6 @@ class MCPipeline:
             n_jobs=n_jobs,
             check_memory_availability=check_memory_availability,
         )
-        loop_started_s = perf_counter()
         native_res = run(
             prep.allocation,
             prep.steps,
@@ -172,15 +149,11 @@ class MCPipeline:
             fail_fast=fail_fast,
             profile_steps=verbosity == 2,
         )
-        elapsed_s = (
-            native_res.wall_elapsed_s
-            if verbosity == 2
-            else perf_counter() - loop_started_s
-        )
+        elapsed_s = native_res.wall_elapsed_s
         if fail_fast and is_failed(native_res):
             step_name = (
-                self.replication_steps[native_res.halt_step_idx].name
-                if 0 <= native_res.halt_step_idx < len(self.replication_steps)
+                self.steps[native_res.halt_step_idx].name
+                if 0 <= native_res.halt_step_idx < len(self.steps)
                 else "<runner>"
             )
             status = MCStatus(native_res.halt_status)
@@ -196,7 +169,7 @@ class MCPipeline:
         transforms = []
         filters = []
         datagens = []
-        for s in self.replication_steps:
+        for s in self.steps:
             if s.op_type is OpType.DATAGEN:
                 datagens.append(s)
             elif s.op_type is OpType.TEST:
@@ -213,15 +186,6 @@ class MCPipeline:
         regression_summaries = _compile_regressions(regressions, prep, n_rep)
         payload_columns = _resolve_payloads(transforms, prep)
         filter_outputs = _compile_filters(filters, prep, n_rep)
-
-        postprocs, postproc_wall_times = self._run_postproc(
-            self.postproc_steps,
-            test_summaries=test_summaries,
-            regression_summaries=regression_summaries,
-            payload_columns=payload_columns,
-            fail_fast=fail_fast,
-            failures=failures,
-        )
 
         step_names = tuple(step.name for step in prep.steps)
         if verbosity == 2:
@@ -270,9 +234,7 @@ class MCPipeline:
             step_elapsed_s=step_elapsed_s,
             step_counts=step_counts,
             step_failures=step_failures,
-            postproc_elapsed_s=postproc_wall_times,
             failed_steps=failed_step_counts(failures),
-            failed_postprocs=failed_postproc_names(failures),
         )
         result = MCPipelineResult(
             n_rep=n_rep,
@@ -286,7 +248,6 @@ class MCPipeline:
             transform_outputs=payload_columns,
             failures=tuple(failures),
             regression_summaries=regression_summaries,
-            postproc=postprocs,
             run_config={
                 "n_rep": int(n_rep),
                 "fail_fast": bool(fail_fast),
@@ -300,66 +261,6 @@ class MCPipeline:
         elif verbosity == 2:
             report_mc_step_performance(meta)
         return result
-
-    def _run_postproc(
-        self,
-        postproc_steps: Sequence[MCStep],
-        *,
-        test_summaries: Mapping[str, MCTestResult],
-        regression_summaries: Mapping[str, MCRegressionResult],
-        payload_columns: Mapping[str, NDF],
-        fail_fast: bool,
-        failures: list[MCFailure],
-    ) -> tuple[dict[str, Artifact], dict[str, float]]:
-        """Run POSTPROC ops once over the assembled traces; collect artifacts.
-
-        Owns its own timing: returns ``(artifacts, postproc_elapsed_s)`` where
-        the second maps each step name to its wall-clock seconds. ``traces``
-        carries every keyed across-rep ndarray: the test/regression summary
-        traces (shared with the result wire) plus stacked transform payloads. A
-        failing op honors ``fail_fast`` (re-raise) or records an
-        :class:`MCFailure` with ``rep_idx=-1`` (post-loop sentinel) and is skipped.
-        """
-        postproc_elapsed_s: dict[str, float] = {
-            step.name: 0.0 for step in postproc_steps
-        }
-        if not postproc_steps:
-            return {}, postproc_elapsed_s
-
-        traces: dict[str, np.ndarray] = traces_from_summaries(
-            test_summaries, regression_summaries
-        )
-        keyed_payloads = {
-            "payload." + name: arr for name, arr in payload_columns.items()
-        }
-        traces.update(keyed_payloads)
-
-        postproc: dict[str, Any] = {}
-        for step in postproc_steps:
-            if step.func is None:
-                raise ValueError(
-                    f"POSTPROC step {step.name!r} has no callable function to run."
-                )
-            step_start = perf_counter()
-            out: Any = None
-            try:
-                out = step.func(
-                    traces=traces,
-                    **dict(step.kwargs),
-                )
-                postproc[step.name] = normalize_artifacts(out)
-            except Exception:
-                if fail_fast:
-                    raise
-                failures.append(
-                    MCFailure(
-                        rep_idx=-1,
-                        failures={step.name: MCStatus.POSTPROC_FAILED},
-                    )
-                )
-            finally:
-                postproc_elapsed_s[step.name] += perf_counter() - step_start
-        return postproc, postproc_elapsed_s
 
     def validate_memory_requirements(
         self,
@@ -379,12 +280,10 @@ class MCPipeline:
         breakdown, naming no step as the one to shrink: which traces are worth
         their memory is not a question the step graph can answer.
         """
-        plan = resolve_output_specs(
-            self.replication_steps, self._source_indices, models
-        )
+        plan = resolve_output_specs(self.steps, self._source_indices, models)
         return MCMemoryProfiler(
             plan,
-            self.replication_steps,
+            self.steps,
             models=models,
             n_rep=n_rep,
             n_jobs=n_jobs,
@@ -392,16 +291,12 @@ class MCPipeline:
 
     def to_spec(self) -> PipelineSpec:
         return PipelineSpec(
-            replication_steps=[s.to_spec() for s in self.replication_steps],
-            postproc_steps=[s.to_spec() for s in self.postproc_steps],
+            steps=[s.to_spec() for s in self.steps],
         )
 
     @classmethod
     def from_spec(cls, spec: PipelineSpec) -> "MCPipeline":
-        return cls(
-            replication_steps=[MCStep.from_spec(s) for s in spec.replication_steps],
-            postproc_steps=[MCStep.from_spec(s) for s in spec.postproc_steps],
-        )
+        return cls(*[MCStep.from_spec(s) for s in spec.steps])
 
 
 def _order_steps(
@@ -434,13 +329,10 @@ def _order_steps(
     return tuple(ordered)
 
 
-def _validate_steps(
-    replication_steps: tuple[MCStep, ...],
-    postproc_steps: tuple[MCStep, ...],
-) -> None:
-    if not replication_steps:
+def _validate_steps(steps: Sequence[MCStep]) -> None:
+    if not steps:
         raise ValueError("MCPipeline requires at least one per-replication step.")
-    names = [step.name for step in (*replication_steps, *postproc_steps)]
+    names = [step.name for step in steps]
     if len(set(names)) != len(names):
         raise ValueError("MCPipeline step names must be unique.")
     for name in names:
@@ -451,58 +343,15 @@ def _validate_steps(
                 f"{''.join(bad)!r}. A step name becomes a bundle member path "
                 f"and a trace column qualifier, which reserve them."
             )
-    for step in replication_steps:
-        if step.op_type is OpType.POSTPROC:
-            raise ValueError(
-                "POSTPROC steps can't be specified under replication_steps, use "
-                "postproc_steps."
-            )
-    for step in postproc_steps:
-        if step.op_type is not OpType.POSTPROC:
-            raise ValueError(
-                f"postproc_steps may only contain POSTPROC steps; {step.name!r} "
-                f"is {step.op_type}."
-            )
-
-
-def _validate_postproc_traces(
-    replication_steps: tuple[MCStep, ...],
-    postproc_steps: tuple[MCStep, ...],
-) -> None:
-    """Check each postproc's trace selectors against what the producers emit.
-
-    A reference is recognized by its own spelling, so a custom op's trace
-    selections are checked alongside a built-in's. Every trace a run can
-    emit is known from the producers, so a bad key is caught here rather
-    than after the replication loop that a post-loop op runs behind.
-
-    Presence is not checked here: a built-in's factory requires its trace,
-    and a custom op may read keys as literals in its own body, unseen from
-    anywhere outside it.
-    """
-    if not postproc_steps:
-        return
-
-    available = {key for step in replication_steps for key in trace_keys_for_step(step)}
-    for step in postproc_steps:
-        for key, value in step.kwargs.items():
-            if not is_trace_ref(value):
-                continue
-            problem = trace_ref_error(value, available)
-            if problem is not None:
-                raise ValueError(
-                    f"POSTPROC step {step.name!r} field {key!r}: {problem} "
-                    f"(available: {sorted(available)})."
-                )
 
 
 def _resolve_source_indices(
-    replication_steps: tuple[MCStep, ...],
+    steps: tuple[MCStep, ...],
 ) -> tuple[tuple[int, ...], ...]:
-    index_by_name = {step.name: index for index, step in enumerate(replication_steps)}
+    index_by_name = {step.name: index for index, step in enumerate(steps)}
 
     resolved: list[tuple[int, ...]] = []
-    for step_index, step in enumerate(replication_steps):
+    for step_index, step in enumerate(steps):
         step_indices: list[int] = []
         for selector in step.source_args:
             source_name = selector.source_step
@@ -511,7 +360,7 @@ def _resolve_source_indices(
                 raise ValueError(
                     f"Step {step.name!r} depends on unknown producer {source_name!r}."
                 )
-            producer_step = replication_steps[source_idx]
+            producer_step = steps[source_idx]
             if source_idx >= step_index:
                 raise ValueError(
                     f"Step {step.name!r} depends on {producer_step.name!r}, which does not "

@@ -31,5 +31,3 @@ __Inputs:__
 | name | Runtime step name. Downstream steps use it as `source` with `field="payload"`. |
 | payload | The array to inject, cast to `float64`. |
 | n_retain | Number of replications whose output is retained for this step. `-1` retains all replications. It may not exceed `n_rep`. |
-
-The step is a `TRANSFORM`, so its output is stacked across replications under the trace key `payload.<name>` like any other transform.

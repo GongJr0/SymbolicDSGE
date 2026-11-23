@@ -6,9 +6,8 @@ holds:
 - :func:`columns_to_parquet` / :func:`columns_from_parquet` for numeric column
   blocks (MCMC posteriors, observed ``y``, every Monte Carlo trace). Values go
   to the engine as raw buffers, so no value is ever formatted or parsed.
-- :func:`to_parquet` for text, fed NDJSON by :func:`csv_to_json` (raw data
-  files, whose cells may be strings) or :func:`frame_to_json` (tabular
-  post-processing artifacts).
+- :func:`to_parquet` for text fed NDJSON by :func:`csv_to_json` (raw data
+  files, whose cells may be strings).
 
 The bulk members are the numeric ones, and they are the reason the binary
 gateway exists: rendering a covariance path through JSON costs a Python pass per
@@ -149,7 +148,7 @@ def _raw_column(name: str, values: NDArray[Any]) -> tuple[str, bytes]:
     else:
         raise TypeError(
             f"column {name!r} has dtype {dtype}, which is not numeric; encode it "
-            f"with csv_to_json or frame_to_json instead."
+            f"with csv_to_json instead."
         )
     return _DTYPE_TAGS[values.dtype], values.tobytes()
 
@@ -216,34 +215,6 @@ def csv_to_columns(
     """
     header, columns = _parse_csv_columns(data, dialect=dialect)
     return dict(zip(header, columns))
-
-
-def frame_to_json(columns: Mapping[str, Sequence[Any]]) -> bytes:
-    """Encode a columnar table (mixed numeric / string / bool) to NDJSON.
-
-    Sibling of :func:`csv_to_json` for tabular POSTPROC artifacts (#181): each
-    value is a 1-D sequence of *scalar* cells. No 2-D expansion is performed
-    because table cells are already scalar, and columns may be non-numeric. All
-    columns must share length. Non-finite floats and ``None`` become JSON
-    ``null``. Decode with :func:`from_parquet_columns`; no
-    :func:`collapse_columns` needed.
-    """
-    if not columns:
-        return b""
-    names = list(columns)
-    length = len(columns[names[0]])
-    for name in names:
-        if len(columns[name]) != length:
-            raise ValueError(
-                f"table columns must share length; {name!r} has "
-                f"{len(columns[name])}, expected {length}"
-            )
-    out = io.BytesIO()
-    for i in range(length):
-        obj = {name: _json_scalar(columns[name][i]) for name in names}
-        out.write(json.dumps(obj, allow_nan=False).encode("utf-8"))
-        out.write(b"\n")
-    return out.getvalue()
 
 
 def trace_to_csv(columns: Mapping[str, Any]) -> bytes:

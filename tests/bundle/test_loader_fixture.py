@@ -42,7 +42,7 @@ def test_load_bundle_fixture_end_to_end():
     # beside it still rides inline
     (datagen,) = [
         step
-        for step in loaded.mc.pipeline.to_spec().replication_steps
+        for step in loaded.mc.pipeline.to_spec().steps
         if step.meta["step_type"] == "simulation"
     ]
     native, tabulated = datagen.meta["kwargs"]["shocks"]

@@ -55,7 +55,7 @@ def test_full_bundle_round_trip(tmp_path: Path, parsed_test, compiled_test) -> N
         logjac_trace=posterior["logjac"],
         burn_in=10,
     )
-    pipeline = MCPipeline([simulation_step("sim", target="reference", T=50)])
+    pipeline = MCPipeline(simulation_step("sim", target="reference", T=50))
 
     builder = (
         BundleBuilder(created_by="test-suite")
@@ -104,7 +104,7 @@ def test_full_bundle_round_trip(tmp_path: Path, parsed_test, compiled_test) -> N
 
     # monte carlo
     assert loaded.mc is not None
-    rebuilt = loaded.mc.pipeline.to_spec().replication_steps
+    rebuilt = loaded.mc.pipeline.to_spec().steps
     assert [s.meta["step_type"] for s in rebuilt] == ["simulation"]
     assert loaded.mc.result is None  # no result attached
 

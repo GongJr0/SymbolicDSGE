@@ -19,7 +19,7 @@ passthrough_step(
 
 `passthrough_step` selects a specific source/field/column combination and registers it as a transform payload. It allows the retention of specific subsets of an operation.
 
-As with any other transform, the result will be available in `MCPipelineResult.transform_outputs` and postprocessing steps can refer to it with the key `payload.<name>`. (see [MC Results](../../results.md) for further detail on acess patterns)
+As with any other transform, the result will be available in `MCPipelineResult.transform_outputs` (see [MC Results](../../results.md) for further detail on acess patterns).
 
 ???+ note "When to use `passthrough_step`"
     When retaining filter and datagen outputs, the `n_retain` parameter will only choose how many total replication outputs to retain. If you're only interested in a subset of outputs from these steps, `passthrough_step` can let you hold onto significantly more samples before your run is blocked by the memory checks.

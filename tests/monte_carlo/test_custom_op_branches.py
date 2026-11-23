@@ -2,26 +2,19 @@
 
 Custom ops ride inside shareable ``.sdsge`` bundles, so the namespace validator
 is the audit gate against footguns like ``eval``/``exec``/``open``/``import`` and
-I/O attribute access (``np.load``, ``pd.read_csv``). The headline tests assert
-those violations are rejected under *both* the numpy (transform) and pandas
-(postproc) namespaces; the rest fill the validator/capture branch coverage.
+I/O attribute access (``np.load`` etc.).
 """
 
 from __future__ import annotations
 
 import math
-from types import SimpleNamespace  # noqa: F401  (kept for parity with siblings)
-
 import pytest
 
 from SymbolicDSGE.monte_carlo.custom_op import (
     CustomFunc,
     CustomOpValidationError,
     NumpyCustomFunc,
-    PandasCustomFunc,
 )
-
-BOTH = [NumpyCustomFunc, PandasCustomFunc]
 
 # --- headline: namespace violations must trip under BOTH namespaces ---------
 
@@ -38,33 +31,19 @@ _VIOLATIONS = [
 ]
 
 
-@pytest.mark.parametrize("cls", BOTH, ids=["numpy", "pandas"])
 @pytest.mark.parametrize("name,src,match", _VIOLATIONS, ids=[v[0] for v in _VIOLATIONS])
-def test_namespace_violation_rejected_in_both(cls, name, src, match):
+def test_namespace_violation_rejected(name, src, match):
     with pytest.raises(CustomOpValidationError, match=match):
-        cls.from_source(src)
-
-
-def test_pandas_io_reader_denied():
-    with pytest.raises(CustomOpValidationError, match="deny-list"):
-        PandasCustomFunc.from_source("def f(x):\n    return pd.read_csv('a.csv')")
-    # numpy namespace has no pandas at all -> pd is unresolved, still rejected
-    with pytest.raises(CustomOpValidationError, match="could not be resolved"):
-        NumpyCustomFunc.from_source("def f(x):\n    return pd.read_csv('a.csv')")
+        NumpyCustomFunc.from_source(src)
 
 
 # --- valid ops construct and call under each namespace ----------------------
 
 
-def test_valid_numpy_and_pandas_ops():
+def test_valid_numpy_op():
     n = NumpyCustomFunc.from_source("def f(x):\n    return np.sqrt(x) + math.pi")
     assert n(4.0) == pytest.approx(2.0 + math.pi)
-    assert n.namespace_kind == "numpy"
     assert repr(n).startswith("NumpyCustomFunc(")
-
-    p = PandasCustomFunc.from_source("def g(x):\n    return int(pd.Series(x).sum())")
-    assert p([1, 2, 3]) == 6
-    assert p.namespace_kind == "pandas"
 
 
 # --- banned constructs reachable from a sync def body -----------------------

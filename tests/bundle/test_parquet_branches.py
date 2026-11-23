@@ -18,7 +18,6 @@ def test_arrays_to_parquet_guards():
 def test_empty_input_returns():
     assert P.csv_to_json("") == b""
     assert P.columns_to_parquet({}) == b""
-    assert P.frame_to_json({}) == b""
     assert P.trace_to_csv({}) == b""
     assert P._parse_csv_columns("") == ([], [])
 
@@ -37,11 +36,6 @@ def test_above_2d_folds_into_the_leading_axis():
     assert set(recovered) == {"x.0", "x.1"}
     np.testing.assert_array_equal(recovered["x.0"], [0.0, 2.0, 4.0, 6.0])
     np.testing.assert_array_equal(recovered["x.1"], [1.0, 3.0, 5.0, 7.0])
-
-
-def test_frame_to_json_length_mismatch():
-    with pytest.raises(ValueError, match="must share length"):
-        P.frame_to_json({"a": [1, 2], "b": [1]})
 
 
 def test_csv_scalar_branches():

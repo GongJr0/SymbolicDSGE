@@ -21,7 +21,6 @@ from SymbolicDSGE.monte_carlo.allocation import (
     ArenaSize,
     _compile_field_layout,
     _FieldSpec,
-    _resolve_input_asize,
     is_empty,
     resolve_output_specs,
 )
@@ -30,7 +29,6 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     add_payload_step,
     diff_step,
     log_diff_step,
-    postproc_step,
     raw_model_data_step,
     filter_step,
     regression_step,
@@ -47,9 +45,9 @@ N_REP = 2
 
 def _plan(steps: list[MCStep], reference: object = None) -> Any:
     """Resolve output layouts without lowering or allocating."""
-    pipeline = MCPipeline(steps)
+    pipeline = MCPipeline(*steps)
     return resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {
             "reference": cast(
@@ -279,14 +277,6 @@ def test_a_filter_needs_datagen_observables(solved_post82: SolvedModel) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_a_postproc_step_has_no_per_replication_layout() -> None:
-    """MCPipeline rejects these upstream, so the planner is called directly."""
-    step = postproc_step("summary", func=lambda **_: None)
-
-    with pytest.raises(NotImplementedError, match="Output-layout resolution"):
-        resolve_output_specs([step], [[]], {"reference": cast(SolvedModel, object())})
-
-
 def test_a_negative_field_dimension_is_rejected() -> None:
     """No producer emits one; the check guards the shared layout compiler."""
     fields = {"payload": _FieldSpec(shape=(4, -1), dtype=np.float64)}
@@ -294,16 +284,6 @@ def test_a_negative_field_dimension_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="has a negative dimension"):
         _compile_field_layout(fields, offsets)
-
-
-def test_a_postproc_step_has_no_input_arena() -> None:
-    """Output resolution rejects it first, so the arena sizer is called direct."""
-    step = postproc_step("summary", func=lambda **_: None)
-
-    with pytest.raises(NotImplementedError, match="Input arena resolution"):
-        _resolve_input_asize(
-            step, [], {}, [step], {"reference": cast(SolvedModel, object())}
-        )
 
 
 # --------------------------------------------------------------------------

@@ -160,7 +160,7 @@ def test_csv_mode_round_trips_through_builder_and_loader(
             result=result,
             as_parquet=False,
         )
-        .add_mc(MCPipeline([simulation_step("sim", target="reference", T=50)]))
+        .add_mc(MCPipeline(simulation_step("sim", target="reference", T=50)))
         .write(tmp_path / "csv.sdsge")
     )
 

@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
@@ -37,7 +36,6 @@ from ..estimation.spec import (
 )
 from .._diag_tests.result import MCTestResult
 from ..regression.result import MCRegressionResult
-from ..monte_carlo.postproc import Artifact, Raw, Summary
 from ..monte_carlo.spec import (
     MCRegressionResultMeta,
     MCRegressionResultSpec,
@@ -54,7 +52,6 @@ from ..monte_carlo.mc_constructs import (
     MCFilterResult,
     MCMeta,
     MCPipelineResult,
-    failed_postproc_names,
     failed_step_counts,
 )
 from .container import BundleArchive
@@ -398,8 +395,7 @@ def _load_mc(
         return StepSpec(meta=meta, func=funcs.get(name), arrays=arrays.get(name, {}))
 
     spec = PipelineSpec(
-        replication_steps=[step_spec(meta) for meta in doc["replication_steps"]],
-        postproc_steps=[step_spec(meta) for meta in doc["postproc_steps"]],
+        steps=[step_spec(meta) for meta in doc["steps"]],
     )
     result = _load_mc_result(archive, manifest)
     return LoadedMC(pipeline=MCPipeline.from_spec(spec), result=result)
@@ -619,47 +615,6 @@ def _load_mc_filters(
     return out
 
 
-def _load_mc_postprocs(
-    archive: BundleArchive, manifest: Manifest
-) -> dict[str, Artifact]:
-    metas = _mc_json(archive, manifest, "mc_postproc_steps")
-    if not metas:
-        return {}
-    columns = _mc_array_columns(archive, manifest, "mc_postproc_raw")
-    out: dict[str, Artifact] = {}
-    for name, meta in metas.items():
-        shape, summary = meta["shape"], meta["summary"]
-        out[name] = Artifact(
-            raw=(
-                None
-                if shape is None
-                else Raw(
-                    value=_mc_array(
-                        columns.get((name, "value"), {}),
-                        f"{name}.value",
-                        tuple(int(d) for d in shape),
-                    )
-                )
-            ),
-            summary=None if summary is None else Summary(value=_mc_summary(summary)),
-        )
-    return out
-
-
-def _mc_summary(value: Any) -> Any:
-    """Undo the table schema a DataFrame summary was written with."""
-    if (
-        isinstance(value, dict)
-        and isinstance(value.get("schema"), dict)
-        and "fields" in value["schema"]
-        and "data" in value
-    ):
-        import pandas as pd
-
-        return pd.read_json(StringIO(json.dumps(value)), orient="table")
-    return value
-
-
 def _load_mc_datagen(
     archive: BundleArchive, manifest: Manifest
 ) -> dict[str, MCDataGenResult]:
@@ -726,12 +681,8 @@ def _load_mc_result(
         step_failures={
             name: int(value) for name, value in run["step_failures"].items()
         },
-        postproc_elapsed_s={
-            name: float(value) for name, value in run["postproc_elapsed_s"].items()
-        },
         # Derived from the failures on the write side too, so never stored.
         failed_steps=failed_step_counts(failures),
-        failed_postprocs=failed_postproc_names(failures),
     )
     return MCPipelineResult(
         meta=meta,
@@ -743,7 +694,6 @@ def _load_mc_result(
         transform_outputs=_load_mc_transforms(archive, manifest),
         regression_summaries=_load_mc_regressions(archive, manifest),
         failures=tuple(failures),
-        postproc=_load_mc_postprocs(archive, manifest),
         run_config=dict(run["run_config"]),
     )
 

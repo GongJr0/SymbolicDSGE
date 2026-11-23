@@ -65,27 +65,25 @@ def test_transforms_consume_scalar_loglik_and_vector_payload(
 ) -> None:
     vector = np.array([-2.0, 0.0, 3.0, 7.0])
     pipeline = MCPipeline(
-        [
-            raw_model_data_step("data", observables=_observations(solved_post82)),
-            filter_step(
-                "filt", target="reference", obs_source="data", obs_field="observables"
-            ),
-            add_payload_step("vector", vector),
-            transform_step(
-                "scalar_plus_one",
-                _add_one,
-                source="filt",
-                field="loglik",
-                output_shape=(1, 1),
-            ),
-            transform_step(
-                "vector_plus_one",
-                _add_one,
-                source="vector",
-                field="payload",
-                output_shape=(vector.size, 1),
-            ),
-        ]
+        raw_model_data_step("data", observables=_observations(solved_post82)),
+        filter_step(
+            "filt", target="reference", obs_source="data", obs_field="observables"
+        ),
+        add_payload_step("vector", vector),
+        transform_step(
+            "scalar_plus_one",
+            _add_one,
+            source="filt",
+            field="loglik",
+            output_shape=(1, 1),
+        ),
+        transform_step(
+            "vector_plus_one",
+            _add_one,
+            source="vector",
+            field="payload",
+            output_shape=(vector.size, 1),
+        ),
     )
 
     result = pipeline.run(
@@ -115,20 +113,18 @@ def _run(
     **filter_kwargs: object,
 ) -> MCPipelineResult:
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(
-                "data",
-                observables=y,
-                observable_names=tuple(solved.compiled.observable_names),
-            ),
-            filter_step(
-                name,
-                target="reference",
-                obs_source="data",
-                obs_field="observables",
-                **filter_kwargs,  # type: ignore[arg-type]
-            ),
-        ]
+        raw_model_data_step(
+            "data",
+            observables=y,
+            observable_names=tuple(solved.compiled.observable_names),
+        ),
+        filter_step(
+            name,
+            target="reference",
+            obs_source="data",
+            obs_field="observables",
+            **filter_kwargs,  # type: ignore[arg-type]
+        ),
     )
     return pipeline.run({"reference": solved}, n_rep=n_rep, verbosity=0)
 
@@ -449,27 +445,25 @@ def test_retaining_nothing_still_reports_the_planned_shapes(
 def test_filters_are_keyed_by_step_name(solved_post82: SolvedModel) -> None:
     y = _observations(solved_post82)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(
-                "data",
-                observables=y,
-                observable_names=tuple(solved_post82.compiled.observable_names),
-            ),
-            filter_step(
-                "kf",
-                target="reference",
-                obs_source="data",
-                obs_field="observables",
-                filter=LinearKalman(),
-            ),
-            filter_step(
-                "ekf",
-                target="reference",
-                obs_source="data",
-                obs_field="observables",
-                filter=ExtendedKalman(),
-            ),
-        ]
+        raw_model_data_step(
+            "data",
+            observables=y,
+            observable_names=tuple(solved_post82.compiled.observable_names),
+        ),
+        filter_step(
+            "kf",
+            target="reference",
+            obs_source="data",
+            obs_field="observables",
+            filter=LinearKalman(),
+        ),
+        filter_step(
+            "ekf",
+            target="reference",
+            obs_source="data",
+            obs_field="observables",
+            filter=ExtendedKalman(),
+        ),
     )
 
     result = pipeline.run({"reference": solved_post82}, n_rep=N_REP, verbosity=0)
@@ -485,13 +479,11 @@ def test_a_pipeline_without_filters_reports_no_filter_outputs(
     """Emptiness is how every step kind reports "none of these"."""
     y = _observations(solved_post82)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(
-                "data",
-                observables=y,
-                observable_names=tuple(solved_post82.compiled.observable_names),
-            )
-        ]
+        raw_model_data_step(
+            "data",
+            observables=y,
+            observable_names=tuple(solved_post82.compiled.observable_names),
+        )
     )
 
     result = pipeline.run({"reference": solved_post82}, n_rep=N_REP, verbosity=0)
@@ -508,20 +500,18 @@ def test_filter_reads_observations_from_payload(solved_post82: SolvedModel) -> N
     payload = np.full((2, T, 2 * len(names)), 123.0)
     payload[:, :, columns] = y[:, :, order]
     pipeline = MCPipeline(
-        [
-            filter_step(
-                "filt",
-                target="reference",
-                obs_source="observations",
-                obs_field="payload",
-                obs_columns=columns.tolist(),
-                observables=[names[i] for i in order],
-            ),
-            add_payload_step("unrelated", np.zeros((T, 1))),
-            add_payload_step("observations", payload),
-        ]
+        filter_step(
+            "filt",
+            target="reference",
+            obs_source="observations",
+            obs_field="payload",
+            obs_columns=columns.tolist(),
+            observables=[names[i] for i in order],
+        ),
+        add_payload_step("unrelated", np.zeros((T, 1))),
+        add_payload_step("observations", payload),
     )
-    assert [s.name for s in pipeline.replication_steps] == [
+    assert [s.name for s in pipeline.steps] == [
         "unrelated",
         "observations",
         "filt",

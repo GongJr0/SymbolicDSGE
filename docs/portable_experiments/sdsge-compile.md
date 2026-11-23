@@ -35,8 +35,7 @@ my-experiment/
             ├── meta.json                   # the run's own metadata + run_config
             ├── tests/{test_steps.json, test_traces.parquet|.csv}
             ├── regressions/{regression_steps.json, regression_traces.parquet|.csv}
-            ├── transforms/{transform_steps.json, {step}_{field}.parquet|.csv}
-            └── postproc/{postproc_steps.json, {step}_{field}.parquet|.csv}
+            └── transforms/{transform_steps.json, {step}_{field}.parquet|.csv}
 
 ```
 

@@ -3,22 +3,14 @@ from __future__ import annotations
 from typing import cast
 
 import numpy as np
-
-from SymbolicDSGE.monte_carlo.postproc import Raw, Summary
-import pandas as pd
 import pytest
 
 from SymbolicDSGE.bundle import BundleBuilder, load_bundle
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.monte_carlo import MCPipeline
-from SymbolicDSGE.monte_carlo.custom_op import (
-    CustomOpValidationError,
-    NumbaCustomFunc,
-    PandasCustomFunc,
-)
+from SymbolicDSGE.monte_carlo.custom_op import NumbaCustomFunc
 from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,
-    postproc_step,
     raw_model_data_step,
     transform_step,
 )
@@ -36,49 +28,22 @@ def zscore(sample: np.ndarray, output: np.ndarray) -> int:
     return 0
 
 
-def pval_table(*, traces):
-    """Top-level pandas post-loop op returning a DataFrame (references `pd`)."""
-    pvals = traces["test.jb.pval"]
-    return Summary(pd.DataFrame({"rep": np.arange(pvals.size), "pval": pvals}))
-
-
-def summary_bundle(*, traces, threshold):
-    """Post-loop op filling both slots: a bulk array and a frame summary."""
-    pvals = traces["test.jb.pval"]
-    flags = (pvals < threshold).astype(float)
-    return (
-        Raw(flags),
-        Summary(pd.DataFrame({"rep": np.arange(pvals.size), "pval": pvals})),
-    )
-
-
-def selection_rate(*, traces):
-    """Top-level postproc op filling both slots."""
-    pval = traces["test.jb.pval"]
-    indicator = (pval < 0.5).astype(float)
-    return (Raw(indicator), Summary(float(indicator.mean())))
-
-
 def _raw_model_data_pipeline() -> MCPipeline:
     rng = np.random.default_rng(0)
     observables = rng.normal(size=(3, 20, 2))  # n_rep, T, k
     return MCPipeline(
-        [
-            raw_model_data_step(
-                "dat",
-                observables=observables,
-                observable_names=("y", "x"),
-            ),
-            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
-        ]
+        raw_model_data_step(
+            "dat",
+            observables=observables,
+            observable_names=("y", "x"),
+        ),
+        jarque_bera_test_step("jb", source="dat", field="observables", column=0),
     )
 
 
 def test_add_mc_ships_raw_model_data_member_and_loader_rehydrates(tmp_path) -> None:
     pipe = _raw_model_data_pipeline()
-    expected = np.asarray(
-        pipe.replication_steps[0].kwargs["observables"], dtype=np.float64
-    )
+    expected = np.asarray(pipe.steps[0].kwargs["observables"], dtype=np.float64)
 
     target = (
         BundleBuilder(created_by="mc-test").add_mc(pipe).write(tmp_path / "raw.sdsge")
@@ -91,10 +56,8 @@ def test_add_mc_ships_raw_model_data_member_and_loader_rehydrates(tmp_path) -> N
 
     # The member rehydrated into the rebuilt pipeline's datagen step.
     rebuilt = loaded.mc.pipeline
-    np.testing.assert_allclose(
-        rebuilt.replication_steps[0].kwargs["observables"], expected
-    )
-    assert [s.step_type for s in rebuilt.replication_steps] == [
+    np.testing.assert_allclose(rebuilt.steps[0].kwargs["observables"], expected)
+    assert [s.step_type for s in rebuilt.steps] == [
         "raw_model_data",
         "jarque_bera",
     ]
@@ -103,15 +66,13 @@ def test_add_mc_ships_raw_model_data_member_and_loader_rehydrates(tmp_path) -> N
 def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     observables = np.random.default_rng(1).normal(size=(2, 15, 2))
     pipe = MCPipeline(
-        [
-            raw_model_data_step(
-                "dat", observables=observables, observable_names=("y", "x")
-            ),
-            transform_step(
-                "z", zscore, source="dat", field="observables", output_shape=(15, 2)
-            ),
-            jarque_bera_test_step("jb", source="z", field="payload"),
-        ]
+        raw_model_data_step(
+            "dat", observables=observables, observable_names=("y", "x")
+        ),
+        transform_step(
+            "z", zscore, source="dat", field="observables", output_shape=(15, 2)
+        ),
+        jarque_bera_test_step("jb", source="z", field="payload"),
     )
 
     target = (
@@ -125,42 +86,10 @@ def test_add_mc_ships_custom_op_member_and_loader_rebuilds(tmp_path) -> None:
     assert any(m.kind == "mc_func" for m in loaded.manifest.members)
 
     rebuilt = loaded.mc.pipeline
-    z_step = {s.name: s for s in rebuilt.replication_steps}["z"]
+    z_step = {s.name: s for s in rebuilt.steps}["z"]
     assert z_step.step_type == "transform:custom"
     assert isinstance(z_step.func, NumbaCustomFunc)  # wrapped + source-carrying
     assert "zscore" in z_step.func.source
-
-
-def test_add_mc_ships_postproc_artifacts_and_wire_round_trips(tmp_path) -> None:
-    observables = np.random.default_rng(2).normal(size=(4, 20, 2))
-    pipe = MCPipeline(
-        [
-            raw_model_data_step(
-                "dat", observables=observables, observable_names=("y", "x")
-            ),
-            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
-        ],
-        [postproc_step("post", selection_rate)],
-    )
-    result = pipe.run(
-        models={"reference": cast(SolvedModel, object())}, n_rep=4, verbosity=0
-    )
-
-    target = (
-        BundleBuilder(created_by="mc-test")
-        .add_mc(pipe, result=result)
-        .write(tmp_path / "pp.sdsge")
-    )
-
-    loaded = load_bundle(target)
-    assert loaded.mc is not None
-    # The bulk array artifact rides its own member; the scalar summary inlines.
-    assert any(m.kind == "mc_postproc_raw" for m in loaded.manifest.members)
-    recovered = loaded.mc.result.postproc["post"]
-    np.testing.assert_array_equal(
-        recovered["raw"].value, result.postproc["post"]["raw"].value
-    )
-    assert recovered["summary"].value == result.postproc["post"]["summary"].value
 
 
 def test_add_mc_bundles_native_result_without_legacy_retention_flags(
@@ -170,12 +99,10 @@ def test_add_mc_bundles_native_result_without_legacy_retention_flags(
     # contexts or Python result objects to warn about when bundling.
     observables = np.random.default_rng(0).normal(size=(4, 20, 2))
     pipe = MCPipeline(
-        [
-            raw_model_data_step(
-                "dat", observables=observables, observable_names=("y", "x")
-            ),
-            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
-        ],
+        raw_model_data_step(
+            "dat", observables=observables, observable_names=("y", "x")
+        ),
+        jarque_bera_test_step("jb", source="dat", field="observables", column=0),
     )
     result = pipe.run(
         models={"reference": cast(SolvedModel, object())}, n_rep=4, verbosity=0
@@ -186,142 +113,6 @@ def test_add_mc_bundles_native_result_without_legacy_retention_flags(
         .write(tmp_path / "native-result.sdsge")
     )
     assert load_bundle(target).mc is not None
-
-
-def test_add_mc_ships_postproc_table_and_wire_round_trips(tmp_path) -> None:
-    from SymbolicDSGE.monte_carlo.step_factories import kde_step
-
-    observables = np.random.default_rng(3).normal(size=(4, 30, 2))
-    pipe = MCPipeline(
-        [
-            raw_model_data_step(
-                "dat", observables=observables, observable_names=("y", "x")
-            ),
-            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
-        ],
-        [kde_step("kde", trace="test.jb.statistic", grid_points=32)],
-    )
-    result = pipe.run(
-        models={"reference": cast(SolvedModel, object())}, n_rep=4, verbosity=0
-    )
-
-    target = (
-        BundleBuilder(created_by="mc-test")
-        .add_mc(pipe, result=result)
-        .write(tmp_path / "kde.sdsge")
-    )
-
-    loaded = load_bundle(target)
-    assert loaded.mc is not None
-    # The Raw curve rides a member; the descriptives frame inlines in the meta
-    # and comes back as the frame the op returned.
-    assert any(m.kind == "mc_postproc_raw" for m in loaded.manifest.members)
-    recovered = loaded.mc.result.postproc["kde"]
-    np.testing.assert_array_equal(
-        recovered["raw"].value, result.postproc["kde"]["raw"].value
-    )
-    pd.testing.assert_frame_equal(
-        recovered["summary"].value,
-        result.postproc["kde"]["summary"].value,
-        rtol=1e-13,
-        atol=0,
-    )
-
-
-def test_add_mc_ships_pandas_postproc_op_under_pandas_namespace(tmp_path) -> None:
-    observables = np.random.default_rng(5).normal(size=(6, 20, 2))
-    pipe = MCPipeline(
-        [
-            raw_model_data_step(
-                "dat", observables=observables, observable_names=("y", "x")
-            ),
-            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
-        ],
-        [postproc_step("ptab", pval_table)],  # plain func -> auto-wrapped at ship
-    )
-    result = pipe.run(
-        models={"reference": cast(SolvedModel, object())}, n_rep=6, verbosity=0
-    )
-
-    target = (
-        BundleBuilder(created_by="mc-test")
-        .add_mc(pipe, result=result)
-        .write(tmp_path / "pandas_pp.sdsge")
-    )
-
-    loaded = load_bundle(target)
-    assert loaded.mc is not None
-    # The post-loop op was wrapped under the pandas namespace and round-trips.
-    func = {s.name: s for s in loaded.mc.pipeline.postproc_steps}["ptab"].func
-    assert isinstance(func, PandasCustomFunc)
-    out = func(traces={"test.jb.pval": np.array([0.1, 0.2])})
-    assert isinstance(out, Summary) and isinstance(out.value, pd.DataFrame)
-    # A frame summary inlines rather than taking a member of its own.
-    assert isinstance(loaded.mc.result.postproc["ptab"]["summary"].value, pd.DataFrame)
-
-
-def test_postproc_custom_op_full_round_trip(tmp_path) -> None:
-    # Acceptance (#183): a pipeline with a custom POSTPROC op emitting scalar +
-    # array + table artifacts writes to .sdsge and reloads to an equivalent
-    # runnable pipeline whose re-run reproduces the recovered artifacts.
-    observables = np.random.default_rng(7).normal(size=(8, 25, 2))
-    pipe = MCPipeline(
-        [
-            raw_model_data_step(
-                "dat", observables=observables, observable_names=("y", "x")
-            ),
-            jarque_bera_test_step("jb", source="dat", field="observables", column=0),
-        ],
-        [postproc_step("sum", summary_bundle, threshold=0.5)],
-    )
-    ref = cast(SolvedModel, object())
-    result = pipe.run(models={"reference": ref}, n_rep=8, verbosity=0)
-
-    target = (
-        BundleBuilder(created_by="mc-test")
-        .add_mc(pipe, result=result)
-        .write(tmp_path / "pp_full.sdsge")
-    )
-    loaded = load_bundle(target)
-    assert loaded.mc is not None
-
-    # The bulk slot plus the custom-op blob shipped.
-    kinds = {m.kind for m in loaded.manifest.members}
-    assert {"mc_func", "mc_postproc_raw"} <= kinds
-
-    # Rebuild from the stored spec + resources -> equivalent runnable pipeline.
-    rebuilt = loaded.mc.pipeline
-
-    # The post-loop op rehydrated under the pandas namespace, kwargs preserved.
-    assert isinstance(
-        {s.name: s for s in rebuilt.postproc_steps}["sum"].func, PandasCustomFunc
-    )
-
-    assert [
-        s.step_type for s in (*rebuilt.replication_steps, *rebuilt.postproc_steps)
-    ] == [
-        "raw_model_data",
-        "jarque_bera",
-        "postproc:custom",
-    ]
-
-    # Re-running reproduces every artifact (deterministic replayed data).
-    rerun = rebuilt.run(models={"reference": ref}, n_rep=8, verbosity=0)
-    np.testing.assert_array_equal(
-        rerun.postproc["sum"]["raw"].value, result.postproc["sum"]["raw"].value
-    )
-    assert rerun.postproc["sum"]["summary"].value.equals(
-        result.postproc["sum"]["summary"].value
-    )
-
-
-def test_pandas_wrapper_rejected_outside_postproc() -> None:
-    # A PandasCustomFunc on a per-rep transform is rejected at pipeline build.
-    wrapped = PandasCustomFunc(pval_table)
-    with pytest.raises((ValueError, CustomOpValidationError), match="NumbaCustomFunc"):
-        transform_step(
-            "bad", wrapped, source="dat", field="observables", output_shape=(15, 2)
-        )
 
 
 def test_transform_step_rejects_unshippable_custom_op() -> None:

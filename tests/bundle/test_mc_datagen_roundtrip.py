@@ -66,7 +66,7 @@ def test_datagen_counts_roundtrip(
                 n_retain=2 if i == 0 else -1,
             )
         )
-    pipeline = MCPipeline(steps)
+    pipeline = MCPipeline(*steps)
     result = pipeline.run(
         models={"reference": reference} if reference is not None else None,
         n_rep=3,
@@ -93,10 +93,8 @@ def test_datagen_counts_roundtrip(
     assert restored.n_rep == result.n_rep
     assert restored.n_successful == result.n_successful
     assert restored.failures == result.failures
-    assert [s.name for s in loaded.mc.pipeline.replication_steps] == [
-        s.name for s in steps
-    ]
-    assert [s.step_type for s in loaded.mc.pipeline.replication_steps] == [
+    assert [s.name for s in loaded.mc.pipeline.steps] == [s.name for s in steps]
+    assert [s.step_type for s in loaded.mc.pipeline.steps] == [
         s.step_type for s in steps
     ]
     for name, original in result.datagen_outputs.items():

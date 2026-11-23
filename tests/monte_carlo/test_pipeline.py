@@ -124,16 +124,14 @@ def test_raw_model_data_pipeline_runs_without_dgp_and_aggregates_wald_results(
     states = _batched_states()
     target = np.zeros(2, dtype=np.float64)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(states=states),
-            wald_test_step(
-                "state_mean",
-                source="datagen",
-                field="states",
-                target=target,
-                bandwidth=0,
-            ),
-        ]
+        raw_model_data_step(states=states),
+        wald_test_step(
+            "state_mean",
+            source="datagen",
+            field="states",
+            target=target,
+            bandwidth=0,
+        ),
     )
 
     out = mc_run(pipeline, reference, n_rep=2)
@@ -155,16 +153,14 @@ def test_raw_model_data_pipeline_accepts_observables_without_states(
     observables = _batched_states()[:, :1]
     target = np.zeros(1, dtype=np.float64)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables, observable_names=("obs",)),
-            wald_test_step(
-                "obs_mean",
-                source="datagen",
-                field="observables",
-                target=target,
-                bandwidth=0,
-            ),
-        ]
+        raw_model_data_step(observables=observables, observable_names=("obs",)),
+        wald_test_step(
+            "obs_mean",
+            source="datagen",
+            field="observables",
+            target=target,
+            bandwidth=0,
+        ),
     )
 
     out = mc_run(pipeline, reference, n_rep=2)
@@ -186,17 +182,15 @@ def test_ljung_box_pipeline_selects_column_and_aggregates_results(
     )
     observables = first
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables, observable_names=("a", "b")),
-            ljung_box_test_step(
-                "lb_b",
-                source="datagen",
-                field="observables",
-                column=[1],
-                lags=2,
-                alpha=0.1,
-            ),
-        ]
+        raw_model_data_step(observables=observables, observable_names=("a", "b")),
+        ljung_box_test_step(
+            "lb_b",
+            source="datagen",
+            field="observables",
+            column=[1],
+            lags=2,
+            alpha=0.1,
+        ),
     )
 
     out = mc_run(pipeline, reference, n_rep=2)
@@ -213,15 +207,13 @@ def test_ljung_box_pipeline_rejects_multi_column_inputs(mc_run, solved_test) -> 
     reference = solved_test
     observables = np.array([[1.0, 2.0]], dtype=np.float64)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables, observable_names=("a", "b")),
-            ljung_box_test_step(
-                "lb",
-                source="datagen",
-                field="observables",
-                lags=1,
-            ),
-        ]
+        raw_model_data_step(observables=observables, observable_names=("a", "b")),
+        ljung_box_test_step(
+            "lb",
+            source="datagen",
+            field="observables",
+            lags=1,
+        ),
     )
 
     with pytest.raises(ValueError, match="single-column source"):
@@ -240,16 +232,14 @@ def test_jarque_bera_pipeline_selects_column_and_aggregates_results(
     )
     observables = base
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables, observable_names=("a", "b")),
-            jarque_bera_test_step(
-                "jb_a",
-                source="datagen",
-                field="observables",
-                column=0,
-                alpha=0.1,
-            ),
-        ]
+        raw_model_data_step(observables=observables, observable_names=("a", "b")),
+        jarque_bera_test_step(
+            "jb_a",
+            source="datagen",
+            field="observables",
+            column=0,
+            alpha=0.1,
+        ),
     )
 
     out = mc_run(pipeline, reference, n_rep=2, verbosity=0)
@@ -266,10 +256,8 @@ def test_jarque_bera_pipeline_rejects_multi_column_inputs(mc_run, solved_test) -
     reference = solved_test
     observables = np.arange(24.0, dtype=np.float64).reshape(12, 2)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            jarque_bera_test_step("jb", source="datagen", field="observables"),
-        ]
+        raw_model_data_step(observables=observables),
+        jarque_bera_test_step("jb", source="datagen", field="observables"),
     )
 
     with pytest.raises(ValueError, match="single-column source"):
@@ -284,28 +272,26 @@ def test_breusch_pagan_pipeline_selects_columns_and_aggregates_results(
     eps = rng.normal(scale=np.exp(0.4 * X[:, 0]))
     observables = np.column_stack((eps, X))
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            breusch_pagan_test_step(
-                "bp",
-                residuals_source="datagen",
-                residuals_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                residual_col=0,
-                X_columns=[1, 2],
-            ),
-            breusch_pagan_test_step(
-                "robust_bp",
-                residuals_source="datagen",
-                residuals_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                residual_col=0,
-                X_columns=[1, 2],
-                robust=True,
-            ),
-        ]
+        raw_model_data_step(observables=observables),
+        breusch_pagan_test_step(
+            "bp",
+            residuals_source="datagen",
+            residuals_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            residual_col=0,
+            X_columns=[1, 2],
+        ),
+        breusch_pagan_test_step(
+            "robust_bp",
+            residuals_source="datagen",
+            residuals_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            residual_col=0,
+            X_columns=[1, 2],
+            robust=True,
+        ),
     )
 
     out = mc_run(pipeline, solved_test, n_rep=2, verbosity=0)
@@ -330,18 +316,16 @@ def test_breusch_pagan_pipeline_supports_separate_residual_and_regressor_sources
     residuals = rng.normal(scale=np.exp(0.4 * states[:, 0]))
     observables = residuals[:, None]
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(states=states, observables=observables),
-            breusch_pagan_test_step(
-                "bp",
-                residuals_source="datagen",
-                residuals_field="observables",
-                X_source="datagen",
-                X_field="states",
-                residual_col=0,
-                X_columns=[0, 1],
-            ),
-        ]
+        raw_model_data_step(states=states, observables=observables),
+        breusch_pagan_test_step(
+            "bp",
+            residuals_source="datagen",
+            residuals_field="observables",
+            X_source="datagen",
+            X_field="states",
+            residual_col=0,
+            X_columns=[0, 1],
+        ),
     )
 
     out = mc_run(pipeline, solved_test, n_rep=2, verbosity=0)
@@ -361,18 +345,16 @@ def test_breusch_pagan_pipeline_supports_separate_payload_sources(
     # function of a source, and ``add_payload_step`` is for data the author
     # supplies. The point here is that the two legs can name different producers.
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=residuals[:, None]),
-            add_payload_step("residual_payload", residuals),
-            add_payload_step("regressor_payload", X),
-            breusch_pagan_test_step(
-                "bp",
-                residuals_source="residual_payload",
-                residuals_field="payload",
-                X_source="regressor_payload",
-                X_field="payload",
-            ),
-        ]
+        raw_model_data_step(observables=residuals[:, None]),
+        add_payload_step("residual_payload", residuals),
+        add_payload_step("regressor_payload", X),
+        breusch_pagan_test_step(
+            "bp",
+            residuals_source="residual_payload",
+            residuals_field="payload",
+            X_source="regressor_payload",
+            X_field="payload",
+        ),
     )
 
     out = mc_run(pipeline, solved_test, n_rep=2, verbosity=0)
@@ -389,17 +371,15 @@ def test_add_payload_step_registers_1d_payload_for_downstream_steps(
     payload = np.asarray([1.0, 2.0, 3.0, 5.0], dtype=np.float64)
     target = np.asarray([0.0], dtype=np.float64)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=np.zeros((payload.size, 1))),
-            add_payload_step("external", payload),
-            wald_test_step(
-                "payload_mean",
-                source="external",
-                field="payload",
-                target=target,
-                bandwidth=0,
-            ),
-        ]
+        raw_model_data_step(observables=np.zeros((payload.size, 1))),
+        add_payload_step("external", payload),
+        wald_test_step(
+            "payload_mean",
+            source="external",
+            field="payload",
+            target=target,
+            bandwidth=0,
+        ),
     )
 
     out = mc_run(pipeline, solved_test, n_rep=2)
@@ -423,16 +403,14 @@ def test_add_payload_step_registers_2d_payload_with_column_selection(
         ]
     )
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=np.zeros((payload.shape[0], 1))),
-            add_payload_step("external", payload),
-            jarque_bera_test_step(
-                "payload_jb",
-                source="external",
-                field="payload",
-                column=1,
-            ),
-        ]
+        raw_model_data_step(observables=np.zeros((payload.shape[0], 1))),
+        add_payload_step("external", payload),
+        jarque_bera_test_step(
+            "payload_jb",
+            source="external",
+            field="payload",
+            column=1,
+        ),
     )
 
     out = mc_run(pipeline, solved_test, n_rep=2)
@@ -449,10 +427,8 @@ def test_add_payload_step_selects_batched_payload_by_replication(
 ) -> None:
     payload = np.arange(12.0, dtype=np.float64).reshape(2, 3, 2)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=np.zeros((3, 1))),
-            add_payload_step("cube", payload),
-        ]
+        raw_model_data_step(observables=np.zeros((3, 1))),
+        add_payload_step("cube", payload),
     )
 
     out = mc_run(pipeline, solved_test, n_rep=2)
@@ -468,17 +444,15 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs(
 
     with pytest.raises(ValueError, match="single-column source"):
         MCPipeline(
-            [
-                raw_model_data_step(observables=observables),
-                breusch_pagan_test_step(
-                    "bp",
-                    residuals_source="datagen",
-                    residuals_field="observables",
-                    X_source="datagen",
-                    X_field="observables",
-                    X_columns=[1, 2],
-                ),
-            ]
+            raw_model_data_step(observables=observables),
+            breusch_pagan_test_step(
+                "bp",
+                residuals_source="datagen",
+                residuals_field="observables",
+                X_source="datagen",
+                X_field="observables",
+                X_columns=[1, 2],
+            ),
         ).run(
             {"reference": reference},
             n_rep=1,
@@ -488,18 +462,16 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs(
         )
 
     degenerate = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            breusch_pagan_test_step(
-                "bp",
-                residuals_source="datagen",
-                residuals_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                residual_col=0,
-                X_columns=[],
-            ),
-        ]
+        raw_model_data_step(observables=observables),
+        breusch_pagan_test_step(
+            "bp",
+            residuals_source="datagen",
+            residuals_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            residual_col=0,
+            X_columns=[],
+        ),
     ).run(
         {"reference": reference},
         n_rep=1,
@@ -513,21 +485,19 @@ def test_breusch_pagan_pipeline_validates_residual_and_regressor_inputs(
 
     with pytest.raises(ValueError, match="matching row counts"):
         MCPipeline(
-            [
-                raw_model_data_step(
-                    states=np.arange(33.0, dtype=np.float64).reshape(11, 3),
-                    observables=observables,
-                ),
-                breusch_pagan_test_step(
-                    "bp",
-                    residuals_source="datagen",
-                    residuals_field="observables",
-                    X_source="datagen",
-                    X_field="states",
-                    residual_col=0,
-                    X_columns=[0, 1],
-                ),
-            ]
+            raw_model_data_step(
+                states=np.arange(33.0, dtype=np.float64).reshape(11, 3),
+                observables=observables,
+            ),
+            breusch_pagan_test_step(
+                "bp",
+                residuals_source="datagen",
+                residuals_field="observables",
+                X_source="datagen",
+                X_field="states",
+                residual_col=0,
+                X_columns=[0, 1],
+            ),
         ).run(
             {"reference": reference},
             n_rep=1,
@@ -545,19 +515,17 @@ def test_breusch_godfrey_pipeline_selects_columns_and_aggregates_results(
     eps = rng.normal(size=40)
     observables = np.column_stack((eps, X))
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            breusch_godfrey_test_step(
-                "bg",
-                residuals_source="datagen",
-                residuals_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                residual_col=0,
-                X_columns=[1, 2],
-                lags=2,
-            ),
-        ]
+        raw_model_data_step(observables=observables),
+        breusch_godfrey_test_step(
+            "bg",
+            residuals_source="datagen",
+            residuals_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            residual_col=0,
+            X_columns=[1, 2],
+            lags=2,
+        ),
     )
 
     out = mc_run(pipeline, solved_test, n_rep=2, verbosity=0)
@@ -576,17 +544,15 @@ def test_breusch_godfrey_pipeline_validates_residual_and_regressor_inputs(
 
     with pytest.raises(ValueError, match="single-column source"):
         MCPipeline(
-            [
-                raw_model_data_step(observables=observables),
-                breusch_godfrey_test_step(
-                    "bg",
-                    residuals_source="datagen",
-                    residuals_field="observables",
-                    X_source="datagen",
-                    X_field="observables",
-                    X_columns=[1, 2],
-                ),
-            ]
+            raw_model_data_step(observables=observables),
+            breusch_godfrey_test_step(
+                "bg",
+                residuals_source="datagen",
+                residuals_field="observables",
+                X_source="datagen",
+                X_field="observables",
+                X_columns=[1, 2],
+            ),
         ).run(
             {"reference": reference},
             n_rep=1,
@@ -597,21 +563,19 @@ def test_breusch_godfrey_pipeline_validates_residual_and_regressor_inputs(
 
     with pytest.raises(ValueError, match="matching row counts"):
         MCPipeline(
-            [
-                raw_model_data_step(
-                    states=np.arange(33.0, dtype=np.float64).reshape(11, 3),
-                    observables=observables,
-                ),
-                breusch_godfrey_test_step(
-                    "bg",
-                    residuals_source="datagen",
-                    residuals_field="observables",
-                    X_source="datagen",
-                    X_field="states",
-                    residual_col=0,
-                    X_columns=[0, 1],
-                ),
-            ]
+            raw_model_data_step(
+                states=np.arange(33.0, dtype=np.float64).reshape(11, 3),
+                observables=observables,
+            ),
+            breusch_godfrey_test_step(
+                "bg",
+                residuals_source="datagen",
+                residuals_field="observables",
+                X_source="datagen",
+                X_field="states",
+                residual_col=0,
+                X_columns=[0, 1],
+            ),
         ).run(
             {"reference": reference},
             n_rep=1,
@@ -628,18 +592,16 @@ def test_cusum_pipeline_aggregates_results_with_nan_df(mc_run, solved_test) -> N
     y = X @ np.array([0.5, -0.3]) + rng.normal(size=60)
     observables = np.column_stack((y, X))
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            cusum_test_step(
-                "cs",
-                y_source="datagen",
-                y_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                y_column=0,
-                X_columns=[1, 2],
-            ),
-        ]
+        raw_model_data_step(observables=observables),
+        cusum_test_step(
+            "cs",
+            y_source="datagen",
+            y_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            y_column=0,
+            X_columns=[1, 2],
+        ),
     )
 
     out = mc_run(pipeline, solved_test, n_rep=2, verbosity=0)
@@ -659,18 +621,16 @@ def test_cusumsq_pipeline_aggregates_results(mc_run, solved_test) -> None:
     y = X @ np.array([0.5, -0.3]) + rng.normal(size=60)
     observables = np.column_stack((y, X))
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            cusumsq_test_step(
-                "csq",
-                y_source="datagen",
-                y_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                y_column=0,
-                X_columns=[1, 2],
-            ),
-        ]
+        raw_model_data_step(observables=observables),
+        cusumsq_test_step(
+            "csq",
+            y_source="datagen",
+            y_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            y_column=0,
+            X_columns=[1, 2],
+        ),
     )
 
     out = mc_run(pipeline, solved_test, n_rep=2, verbosity=0)
@@ -691,19 +651,17 @@ def test_chow_pipeline_aggregates_results(mc_run, solved_test) -> None:
     y = X @ np.array([0.5, -0.3]) + rng.normal(size=60)
     observables = np.column_stack((y, X))
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            chow_test_step(
-                "ch",
-                y_source="datagen",
-                y_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                y_column=0,
-                X_columns=[1, 2],
-                t_break=30,
-            ),
-        ]
+        raw_model_data_step(observables=observables),
+        chow_test_step(
+            "ch",
+            y_source="datagen",
+            y_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            y_column=0,
+            X_columns=[1, 2],
+            t_break=30,
+        ),
     )
 
     out = mc_run(pipeline, solved_test, n_rep=2, verbosity=0)
@@ -721,16 +679,14 @@ def test_raw_model_data_pipeline_rejects_empty_raw_model_data(
 ) -> None:
     reference = solved_test
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(),
-            wald_test_step(
-                "obs_mean",
-                source="datagen",
-                field="observables",
-                target=np.zeros(1, dtype=np.float64),
-                bandwidth=0,
-            ),
-        ]
+        raw_model_data_step(),
+        wald_test_step(
+            "obs_mean",
+            source="datagen",
+            field="observables",
+            target=np.zeros(1, dtype=np.float64),
+            bandwidth=0,
+        ),
     )
 
     with pytest.raises(ValueError, match="does not produce source field"):
@@ -743,16 +699,14 @@ def test_pipeline_result_reports_overall_and_step_performance(
     reference = solved_test
     states = _batched_states()
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(states=states),
-            wald_test_step(
-                "state_mean",
-                source="datagen",
-                field="states",
-                target=np.zeros(2, dtype=np.float64),
-                bandwidth=0,
-            ),
-        ]
+        raw_model_data_step(states=states),
+        wald_test_step(
+            "state_mean",
+            source="datagen",
+            field="states",
+            target=np.zeros(2, dtype=np.float64),
+            bandwidth=0,
+        ),
     )
 
     # Per-step timings are collected only at the highest verbosity, which is
@@ -775,13 +729,10 @@ def test_pipeline_result_reports_overall_and_step_performance(
 
     lines.clear()
     out.report_step_performance(print_func=lines.append)
-    # Overall header, then an indented worker and wall it/s line per step. The
-    # post-processing section is suppressed because this pipeline has no
-    # postproc steps.
+    # Overall header, then an indented worker and wall it/s line per step.
     assert lines[0].startswith("MC run concluded successfully in ")
     assert any("datagen" in line and "wall it/s." in line for line in lines)
     assert any("state_mean" in line and "wall it/s." in line for line in lines)
-    assert not any("Post-processing Report" in line for line in lines)
 
     lines.clear()
     report_mc_step_performance(out.meta, print_func=lines.append)
@@ -796,16 +747,14 @@ def test_pipeline_run_verbosity_controls_performance_output(
     reference = solved_test
     states = _batched_states()
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(states=states),
-            wald_test_step(
-                "state_mean",
-                source="datagen",
-                field="states",
-                target=np.zeros(2, dtype=np.float64),
-                bandwidth=0,
-            ),
-        ]
+        raw_model_data_step(states=states),
+        wald_test_step(
+            "state_mean",
+            source="datagen",
+            field="states",
+            target=np.zeros(2, dtype=np.float64),
+            bandwidth=0,
+        ),
     )
 
     # Every level is stated here rather than relying on a default: the shared
@@ -823,7 +772,6 @@ def test_pipeline_run_verbosity_controls_performance_output(
     assert lines[0].startswith("MC run concluded successfully in ")
     assert any("datagen" in line and "wall it/s." in line for line in lines)
     assert any("state_mean" in line and "wall it/s." in line for line in lines)
-    assert not any("Post-processing Report" in line for line in lines)
 
     with pytest.raises(ValueError, match="verbosity"):
         mc_run(pipeline, reference, n_rep=2, verbosity=3)
@@ -834,29 +782,27 @@ def test_output_shape_resolution_tracks_selected_transform_payloads(
 ) -> None:
     observables = np.zeros((2, 8, 3), dtype=np.float64)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            log_diff_step(
-                "growth",
-                source="datagen",
-                field="observables",
-                columns=[1, 2],
-                burn_in=1,
-            ),
-            regression_step(
-                "ols",
-                y_source="growth",
-                y_field="payload",
-                y_column=0,
-                X_source="growth",
-                X_field="payload",
-                X_columns=1,
-            ),
-        ]
+        raw_model_data_step(observables=observables),
+        log_diff_step(
+            "growth",
+            source="datagen",
+            field="observables",
+            columns=[1, 2],
+            burn_in=1,
+        ),
+        regression_step(
+            "ols",
+            y_source="growth",
+            y_field="payload",
+            y_column=0,
+            X_source="growth",
+            X_field="payload",
+            X_columns=1,
+        ),
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -890,23 +836,21 @@ def test_output_shape_resolution_tracks_selected_transform_payloads(
 )
 def test_output_specs_for_non_ols_regressions(solved_test, kind: str) -> None:
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=np.zeros((8, 2), dtype=np.float64)),
-            regression_step(
-                kind,
-                y_source="datagen",
-                y_field="observables",
-                y_column=0,
-                X_source="datagen",
-                X_field="observables",
-                X_columns=1,
-                kind=kind,
-            ),
-        ]
+        raw_model_data_step(observables=np.zeros((8, 2), dtype=np.float64)),
+        regression_step(
+            kind,
+            y_source="datagen",
+            y_field="observables",
+            y_column=0,
+            X_source="datagen",
+            X_field="observables",
+            X_columns=1,
+            kind=kind,
+        ),
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -941,20 +885,18 @@ def test_output_shape_resolution_includes_linear_filter_fields(
     periods = 8
     observables = np.zeros((2, periods, len(names)), dtype=np.float64)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables, observable_names=names),
-            filter_step(
-                target="reference",
-                obs_source="datagen",
-                obs_field="observables",
-                filter=filter,
-                observables=list(names),
-            ),
-        ]
+        raw_model_data_step(observables=observables, observable_names=names),
+        filter_step(
+            target="reference",
+            obs_source="datagen",
+            obs_field="observables",
+            filter=filter,
+            observables=list(names),
+        ),
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -984,17 +926,15 @@ def test_output_shape_resolution_includes_scalar_test_channels(
     solved_test,
 ) -> None:
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(
-                observables=np.zeros((8, 1), dtype=np.float64),
-                observable_names=("obs",),
-            ),
-            jarque_bera_test_step("jb", source="datagen", field="observables"),
-        ]
+        raw_model_data_step(
+            observables=np.zeros((8, 1), dtype=np.float64),
+            observable_names=("obs",),
+        ),
+        jarque_bera_test_step("jb", source="datagen", field="observables"),
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -1010,15 +950,13 @@ def test_output_shape_resolution_normalizes_payload_values_to_source_shapes(
     solved_test,
 ) -> None:
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=np.zeros((4, 1), dtype=np.float64)),
-            add_payload_step("vector", np.arange(4.0, dtype=np.float64)),
-            add_payload_step("matrix", np.zeros((4, 2), dtype=np.float64)),
-        ]
+        raw_model_data_step(observables=np.zeros((4, 1), dtype=np.float64)),
+        add_payload_step("vector", np.arange(4.0, dtype=np.float64)),
+        add_payload_step("matrix", np.zeros((4, 2), dtype=np.float64)),
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -1032,10 +970,10 @@ def test_output_plan_carries_step_retention_count(solved_test) -> None:
         raw_model_data_step(observables=np.zeros((4, 1), dtype=np.float64)),
         n_retain=2,
     )
-    pipeline = MCPipeline([datagen])
+    pipeline = MCPipeline(datagen)
 
     specs = resolve_output_specs(
-        pipeline.replication_steps,
+        pipeline.steps,
         pipeline._source_indices,
         {"reference": solved_test},
     )
@@ -1054,22 +992,20 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
     T = 6
     n_obs = len(reference.compiled.observable_names)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(
-                observables=np.zeros((T, n_obs), dtype=np.float64),
-                observable_names=reference.compiled.observable_names,
-            ),
-            filter_step(
-                target="reference",
-                obs_source="datagen",
-                obs_field="observables",
-                filter=UnscentedKalman(),
-            ),
-        ]
+        raw_model_data_step(
+            observables=np.zeros((T, n_obs), dtype=np.float64),
+            observable_names=reference.compiled.observable_names,
+        ),
+        filter_step(
+            target="reference",
+            obs_source="datagen",
+            obs_field="observables",
+            filter=UnscentedKalman(),
+        ),
     )
 
     specs = resolve_output_specs(
-        pipeline.replication_steps, pipeline._source_indices, {"reference": reference}
+        pipeline.steps, pipeline._source_indices, {"reference": reference}
     )
     n_state = reference.compiled.n_state
     n_z = 2 * n_state
@@ -1102,19 +1038,17 @@ def test_regression_step_runs_ols_and_stores_result_payload(
     y = 2.5 * x
     observables = np.column_stack([y, x])
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables, observable_names=("y", "x")),
-            regression_step(
-                "ols",
-                y_source="datagen",
-                y_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                y_column=0,
-                X_columns=[1],
-                variables=["x"],
-            ),
-        ]
+        raw_model_data_step(observables=observables, observable_names=("y", "x")),
+        regression_step(
+            "ols",
+            y_source="datagen",
+            y_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            y_column=0,
+            X_columns=[1],
+            variables=["x"],
+        ),
     )
 
     out = mc_run(pipeline, reference, n_rep=1)
@@ -1141,21 +1075,19 @@ def test_regression_step_runs_ridge_kind_and_aggregates_summary(
     alpha = np.float64(0.5)
     observables = np.column_stack([y, x])
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables, observable_names=("y", "x")),
-            regression_step(
-                "ridge",
-                kind="ridge",
-                y_source="datagen",
-                y_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                y_column=0,
-                X_columns=[1],
-                variables=["x"],
-                alpha=alpha,
-            ),
-        ]
+        raw_model_data_step(observables=observables, observable_names=("y", "x")),
+        regression_step(
+            "ridge",
+            kind="ridge",
+            y_source="datagen",
+            y_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            y_column=0,
+            X_columns=[1],
+            variables=["x"],
+            alpha=alpha,
+        ),
     )
 
     out = mc_run(pipeline, reference, n_rep=1)
@@ -1190,21 +1122,19 @@ def test_regression_step_runs_lasso_kind_and_aggregates_summary(
     y = np.array([3.0, -1.0, 0.25], dtype=np.float64)
     observables = np.column_stack([y, x])
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            regression_step(
-                "lasso",
-                kind="lasso",
-                y_source="datagen",
-                y_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                y_column=0,
-                X_columns=[1, 2, 3],
-                intercept=False,
-                alpha=np.float64(0.5),
-            ),
-        ]
+        raw_model_data_step(observables=observables),
+        regression_step(
+            "lasso",
+            kind="lasso",
+            y_source="datagen",
+            y_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            y_column=0,
+            X_columns=[1, 2, 3],
+            intercept=False,
+            alpha=np.float64(0.5),
+        ),
     )
 
     out = mc_run(pipeline, reference, n_rep=1)
@@ -1228,22 +1158,20 @@ def test_regression_step_runs_elastic_net_kind_and_aggregates_summary(
     y = np.array([3.0, -1.0, 0.25], dtype=np.float64)
     observables = np.column_stack([y, x])
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            regression_step(
-                "elastic_net",
-                kind="elastic_net",
-                y_source="datagen",
-                y_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                y_column=0,
-                X_columns=[1, 2, 3],
-                intercept=False,
-                alpha=np.float64(0.5),
-                l1_ratio=np.float64(0.5),
-            ),
-        ]
+        raw_model_data_step(observables=observables),
+        regression_step(
+            "elastic_net",
+            kind="elastic_net",
+            y_source="datagen",
+            y_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            y_column=0,
+            X_columns=[1, 2, 3],
+            intercept=False,
+            alpha=np.float64(0.5),
+            l1_ratio=np.float64(0.5),
+        ),
     )
 
     out = mc_run(pipeline, reference, n_rep=1)
@@ -1263,24 +1191,22 @@ def test_regression_step_runs_elastic_net_grid_search_kind(mc_run, solved_test) 
     y = np.array([3.0, -1.0], dtype=np.float64)
     observables = np.column_stack([y, x])
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            regression_step(
-                "elastic_net_gs",
-                kind="elastic_net_gs",
-                y_source="datagen",
-                y_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                y_column=0,
-                X_columns=[1, 2],
-                intercept=False,
-                start=np.float64(0.5),
-                stop=np.float64(2.0),
-                num=3,
-                l1_ratio=np.float64(0.5),
-            ),
-        ]
+        raw_model_data_step(observables=observables),
+        regression_step(
+            "elastic_net_gs",
+            kind="elastic_net_gs",
+            y_source="datagen",
+            y_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            y_column=0,
+            X_columns=[1, 2],
+            intercept=False,
+            start=np.float64(0.5),
+            stop=np.float64(2.0),
+            num=3,
+            l1_ratio=np.float64(0.5),
+        ),
     )
 
     out = mc_run(pipeline, reference, n_rep=1)
@@ -1301,18 +1227,16 @@ def test_regression_step_requires_single_response_column(mc_run, solved_test) ->
         ]
     )
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(observables=observables),
-            regression_step(
-                "ols",
-                y_source="datagen",
-                y_field="observables",
-                X_source="datagen",
-                X_field="observables",
-                y_column=[0, 1],
-                X_columns=[2],
-            ),
-        ]
+        raw_model_data_step(observables=observables),
+        regression_step(
+            "ols",
+            y_source="datagen",
+            y_field="observables",
+            X_source="datagen",
+            X_field="observables",
+            y_column=[0, 1],
+            X_columns=[2],
+        ),
     )
 
     with pytest.raises(ValueError, match="response must resolve to one column"):
@@ -1324,18 +1248,16 @@ def test_regression_step_requires_matching_row_counts(mc_run, solved_test) -> No
     states = np.arange(10.0, dtype=np.float64).reshape(5, 2)
     observables = np.arange(4.0, dtype=np.float64).reshape(4, 1)
     pipeline = MCPipeline(
-        [
-            raw_model_data_step(states=states, observables=observables),
-            regression_step(
-                "ols",
-                y_source="datagen",
-                y_field="observables",
-                X_source="datagen",
-                X_field="states",
-                y_column=0,
-                X_columns=[0],
-            ),
-        ]
+        raw_model_data_step(states=states, observables=observables),
+        regression_step(
+            "ols",
+            y_source="datagen",
+            y_field="observables",
+            X_source="datagen",
+            X_field="states",
+            y_column=0,
+            X_columns=[0],
+        ),
     )
 
     with pytest.raises(ValueError, match="same number of rows"):
@@ -1345,37 +1267,31 @@ def test_regression_step_requires_matching_row_counts(mc_run, solved_test) -> No
 def test_pipeline_validates_step_order_and_unique_names() -> None:
     with pytest.raises(ValueError, match="unknown producer"):
         MCPipeline(
-            [
-                wald_test_step(
-                    "state_mean",
-                    source="datagen",
-                    field="states",
-                    target=np.zeros(2, dtype=np.float64),
-                )
-            ]
+            wald_test_step(
+                "state_mean",
+                source="datagen",
+                field="states",
+                target=np.zeros(2, dtype=np.float64),
+            )
         )
 
     with pytest.raises(ValueError, match="unique"):
         MCPipeline(
-            [
-                raw_model_data_step(name="dup", states=_batched_states()),
-                MCStep(
-                    name="dup",
-                    op_type=OpType.TRANSFORM,
-                    func=lambda **_: np.zeros((1, 1), dtype=np.float64),
-                ),
-            ]
+            raw_model_data_step(name="dup", states=_batched_states()),
+            MCStep(
+                name="dup",
+                op_type=OpType.TRANSFORM,
+                func=lambda **_: np.zeros((1, 1), dtype=np.float64),
+            ),
         )
 
 
 def test_pipeline_orders_steps_declared_before_their_sources() -> None:
     pipeline = MCPipeline(
-        [
-            simulation_step("datagen", target="reference", T=8),
-            log_step("tf2", source="tf1", field="payload"),
-            log_step("tf1", source="tf0", field="payload"),
-            standardize_step("tf0", source="datagen", field="observables"),
-        ]
+        simulation_step("datagen", target="reference", T=8),
+        log_step("tf2", source="tf1", field="payload"),
+        log_step("tf1", source="tf0", field="payload"),
+        standardize_step("tf0", source="datagen", field="observables"),
     )
-    ordered = [step.name for step in pipeline.replication_steps]
+    ordered = [step.name for step in pipeline.steps]
     assert ordered.index("tf0") < ordered.index("tf1") < ordered.index("tf2")

@@ -29,12 +29,8 @@ from SymbolicDSGE import Shock, parse_config, solve_model, LinearKalman
 from SymbolicDSGE.monte_carlo import (
     MCPipeline,
     custom_transform,
-    pandas_operation,
-    Summary,
 )
 from SymbolicDSGE.monte_carlo.step_factories import (
-    kde_step,
-    postproc_step,
     filter_step,
     simulation_step,
     standardize_step,
@@ -70,25 +66,18 @@ from SymbolicDSGE.monte_carlo import MCPipeline
 T = 200  # (1)!
 n_obs = reference.compiled.n_obs  # (2)!
 
-pipeline = MCPipeline(
-    replication_steps=[...],  # (3)!
-    postproc_steps=[...],  # (4)!
-)
+pipeline = MCPipeline(...) # (3)!
 ```
 
 1. Length of each simulated sample.
 2. Number of observables the model(s) have.
-3. Steps here are executed per replication.
-4. This field is reserved for `POSTPROC` steps; these execute once, after the replication loop concludes.
+3. Steps are passed as arguments to `MCPipeline`
 
 `MCPipeline` is used to compile the steps that need to be executed for each repetition.
 Every step of `MCPipeline` must be an `MCStep` object.
 The pipeline will be built using the step-generating functions under `SymbolicDSGE.monte_carlo.step_factories`.
 
 ### Data Generation
-
-???+ warning "Step Ordering"
-    Data generation is done exactly once, in the first step of the pipeline.
 
 Using the `simulation_step` function, we generate an `MCStep` object that samples the DGP model with a given simulation specification.
 
@@ -106,7 +95,7 @@ datagen_step = simulation_step(
 ```
 
 1. `target` is the name of a model later supplied to the pipeline. It can be any key in the `models` dictionary passed to `MCPipeline.run(...)`.
-2. `n_retain` controls how many replications are retained for post-processing. `-1` retains all, `0` retains none, and any positive integer retains that many evenly spaced replications.
+2. `n_retain` controls how many replications are retained as outputs. `-1` retains all, `0` retains none, and any positive integer retains that many evenly spaced replications.
 
 ???+ note "Replication Streams"
     Normal and uniform shocks are drawn inside the native loop. Each replication addresses its own stream of a counter based engine keyed on the specification's seed and its position in the mapping, so replications never overlap and two specifications sharing a seed stay independent.
@@ -136,8 +125,16 @@ The first step after datagen is filtering the reference model using a Kalman fil
 ```python
 from SymbolicDSGE.monte_carlo.step_factories import filter_step
 
-kf_step = filter_step(target="reference", obs_source="datagen", obs_field="observables", filter=LinearKalman())
+kf_step = filter_step(
+    target="reference",
+    obs_source="datagen",
+    obs_field="observables",
+    filter=LinearKalman(),
+    n_retain=0, # (1)!
+)
 ```
+
+1. Filter steps produce a lot of data, setting `n_retain=0` let's us run the pipeline for more replications without running out of memory.
 
 `filter_step` additionally accepts `observables`, `x0`, `P0`, `R`, mirroring the `Filter.filter(...)` signature.
 
@@ -203,7 +200,7 @@ With a custom function defined, the step can be created using the generic `trans
 
 ```python
 custom_std = transform_step(
-    "custom_std",  # (1)!
+    "custom_std",
     custom_standardize,  # (2)!
     source="filter",  # (3)!
     field="innov",
@@ -218,83 +215,22 @@ builtin_std = standardize_step(
 
 ```
 
-1. Name of the step. It becomes the trace key `payload.custom_std`.
 2. The function to be executed. A bare function is wrapped in `NumbaCustomFunc` automatically.
 3. `source` and `field` select the upstream array. `columns` and `burn_in` narrow it further.
 4. Required. The output buffer is planned before the run starts, so the transform must declare the exact `(rows, columns)` it writes.
 5. In this case, the `innov` attribute (raw innovations) of the filter output is used.
 
-### Post-Processing
-
-Post-processing is executed separately from the replication loop. The `kde_step` function is the only built-in. Custom post-processing steps stay in plain Python and are encapsulated by a `pandas_operation` decorator, which extends the numeric namespace with allowed `pandas` functionality. Post-processing functions do not see individual replications. Instead, they receive a flattened `traces` dictionary containing transform payloads, test results, and regression results.
-
-Access to a given array follows a `"."` separated path, for example, the custom standardization step (which is a payload) is accessed as `traces["payload.custom_std"]`. Payload traces are stacked across retained replications, so a transform writing `(T, p)` per replication appears as `(n_retained, T, p)`. The same stacked arrays are on the result as `result.transform_outputs["custom_std"]`. Test and regression results are structured:
-
-__Test Traces:__
-
-- `"test.{name}.pval"`: Array of p-values for each replication.
-- `"test.{name}.statistic"`: Array of test statistics for each replication.
-- `"test.{name}.status"`: Array of test statuses for each replication.
-
-__Regressions Traces:__
-
-- `"regression.{name}.coef"`: 2D array of regression coefficients for each replication.
-- `"regression.{name}.r2"`: Array of R-squared values for each replication.
-- `"regression.{name}.status"`: Array of regression statuses for each replication.
-
-A custom post-processing function is defined as follows:
-
-```python
-@pandas_operation
-def get_std_obs_mean(*, traces) -> pd.DataFrame:
-    stacked = traces["payload.custom_std"]  # (1)!
-    return Summary(value=pd.DataFrame({"mean": stacked.mean(axis=(0, 1))}))
-```
-
-1. Shape `(n_retained, T, n_obs)`. Averaging over the first two axes gives the per-observable mean across the experiment.
-
-???+ note "Post-Processing Return Types"
-    Post-processes return `Raw(value)`, `Summary(value)`, or a 2-`tuple` of them in any order. `Raw` handles large, bare array returns while `Summary` can handle smaller arrays, scalars, and tabular data. Bare ojects are rejected.
-
-To create a step out of this function, we use `postproc_step`:
-
-```python
-custom_postproc = postproc_step(
-    "custom_postproc",  # (1)!
-    get_std_obs_mean,  # (2)!
-)
-
-builtin_kde = kde_step(
-    "builtin_kde",
-    trace="payload.builtin_std",  # (3)!
-    grid_points=100,  # (4)!
-)
-
-```
-
-1. Name of the step. It is the key the artifact is stored under in `MCPipelineResult.postproc`.
-2. The function to be executed. Any callable with the signature of a custom post-processing function can be used here.
-3. The trace to be used for the KDE. This is a payload in this case, but it can also be a test or regression result.
-4. The number of grid points to use for the KDE. This is only applicable to the built-in KDE step.
-
-???+ tip "Render Hints"
-    Wrapping a returned artifact in `Summary(value, title=...)` or `Raw(value)` tells downstream consumers such as the GUI how to display it. Both are exported from `SymbolicDSGE.monte_carlo` and are optional; returning a bare object is fine.
 
 ### Complete Pipeline
 
 ```python
 pipeline = MCPipeline(
-    replication_steps=[
     datagen_step,
     kf_step,
     custom_std,
     builtin_std,
     mean_test_step,
-],
-postproc_steps=[
-    custom_postproc,
-    builtin_kde,
-])
+)
 ```
 
 ## Running the Pipeline
@@ -305,32 +241,27 @@ The `MCPipeline` object explains the procedure that will run per iteration.
 ```python
 mc = pipeline.run(
     models={"reference": reference, "dgp": dgp},
-    n_rep=1000,
+    n_rep=100_000,
     n_jobs=-1,  # (1)!
     verbosity=2,  # (2)!
 )
 ```
 
 1. Number of worker threads. `None` runs single-threaded, a positive value is taken literally, and a negative value resolves to `max(1, cpu_count + 1 + n_jobs)` following the joblib convention.
-2. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints the run total and the post-processing total, and `2` additionally prints per-step throughput.
+2. Verbosity level for logging output `{0, 1, 2}`. `0` prints nothing, `1` prints the run total, and `2` additionally prints per-step throughput.
 
 ???+ warning "Per-step Timings Require `verbosity=2`"
     The native loop only collects per-step profiling when it is asked to. At any lower verbosity `meta.step_elapsed_s`, `meta.step_counts`, and `meta.step_failures` are empty dictionaries.
 
 ```bash
->>> MC run concluded successfully in 0.02s with 55655.12 it/s.
+>>> MC run concluded successfully in 1.48s with 67738.96 it/s.
 Per-step Report:
 
-    datagen: 0 failures, 39143.54 worker it/s (0.03 worker-s), 55655.12 wall it/s.
-    filter: 0 failures, 3793.83 worker it/s (0.26 worker-s), 55655.12 wall it/s.
-    custom_std: 0 failures, 194654.87 worker it/s (0.01 worker-s), 55655.12 wall it/s.
-    builtin_std: 0 failures, 157980.29 worker it/s (0.01 worker-s), 55655.12 wall it/s.
-    std_innov_mean: 0 failures, 78649.14 worker it/s (0.01 worker-s), 55655.12 wall it/s.
-
-Post-processing Report:
-
-    custom_postproc: Succeeded in 0.0024s.
-    builtin_kde: Succeeded in 1.3965s.
+    datagen: 0 failures, 43131.65 worker it/s (2.32 worker-s), 67738.96 wall it/s.
+    filter: 0 failures, 4432.02 worker it/s (22.56 worker-s), 67738.96 wall it/s.
+    custom_std: 0 failures, 222469.76 worker it/s (0.45 worker-s), 67738.96 wall it/s.
+    builtin_std: 0 failures, 219478.16 worker it/s (0.46 worker-s), 67738.96 wall it/s.
+    std_innov_mean: 0 failures, 83566.82 worker it/s (1.20 worker-s), 67738.96 wall it/s.
 ```
 
 ???+ note "Worker Time vs Wall Time"
@@ -367,17 +298,17 @@ print(t_summary.round(3))
 
 ```bash
 >>>                mean_statistic  mean_pval  rejection_rate  ci_low  ci_high
-std_innov_mean           4.829      0.373           0.178   0.354    0.392
+std_innov_mean           4.758      0.372           0.175    0.37    0.374
+
 ```
 
-Regression results are accessed similarly in `MCPipelineResult.regression_summaries`, and post-processing artifacts are accessed by key in `MCPipelineResult.postproc: dict[str, Any]`.
+Regression results are accessed similarly via `MCPipelineResult.regression_summaries`.
 
 ???+ tip "Retaining Fewer Replications"
-    Large runs can routinely exceed hardware memory in size requirements. It is strongly recommended to set `n_retain=0` for intermediate steps that are not needed for later
-    analysis or post-processing. This will allow you to retain much more replications for steps you care about before running out of memory. `n_retain=0` will not make the data unavailable to downstream steps, all data makes it through the pipeline, but non-retained replications are discarded after used. `n_retain=-1` is the default and retains all replications.
+    Large runs can routinely exceed hardware memory in size requirements. It is strongly recommended to set `n_retain=0` for intermediate steps that are not needed for later analysis. This will allow you to retain much more replications for steps you care about before running out of memory. `n_retain=0` will not make the data unavailable to downstream steps, all data makes it through the pipeline, but non-retained replications are discarded after used. `n_retain=-1` is the default and retains all replications.
 
 ???+ tip "Sizing a Run Before It Allocates"
-    `MCPipeline.validate_memory_requirements` takes the arguments `run` takes and reports what they would allocate, broken down by step. `run` performs the same check unless `check_memory_availability=False`. If a run is provably too large (meaning your RAM and swap combined are smaller than the required allocation), a `MemoryError` will block the run instead of seeing it crash hours later. `check_memory_availability=False` also disables this behavior.
+    `MCPipeline.validate_memory_requirements` takes the arguments `run` takes and reports what they would allocate, broken down by step. `run` performs the same check unless `check_memory_availability=False`. If a run is provably too large (meaning your available RAM and swap combined are smaller than the required allocation), a `MemoryError` will block the run instead of seeing it crash hours later. `check_memory_availability=False` also disables this behavior.
 
     ```python
     pipeline.validate_memory_requirements(models={"reference": reference, "dgp": dgp}, n_rep=400_000, n_jobs=-1)
@@ -405,14 +336,14 @@ Regression results are accessed similarly in `MCPipelineResult.regression_summar
 
     ```
 
-    `allocated` is what the run commits, and it is exact. The `reserve` on top of it is held for the process that hosts the run rather than for the arenas: the interpreter growing as results are read back, a notebook kernel holding its own copy, and the allocator's transient peaks. None of that scales with the size of the run, which is why the reserve is a flat floor plus a small fraction instead of a multiple. A shock specification the native draw cannot reproduce adds a `prematerialized shocks` row, which is an `(n_rep, T, n_exog)` array built in Python before the loop starts.
+    `allocated` is what the run commits, and it is exact. The `reserve` on top of it is held for the process that hosts the run rather than for the arenas: the interpreter growing as results are read back, a notebook kernel holding its own copy, and the allocator's transient peaks. None of that scales with the size of the run, which is why the reserve is a flat floor plus a small fraction instead of a multiple.
 
     Passing `available` means the run no longer fits in physical memory and will page, which costs throughput. Passing `ceiling` means it does not fit even with swap counted. At that point, a mid-run crash is significantly more likely, and this is the point where `MCPipeline.run` raises `MemoryError`.
 
 ## Conclusion
 
 This guide demonstrates the usage of basic MC functionality through the pre-configured steps available in the library.
-Custom transforms are available through `transform_step(...)` and bundle-safe custom operations can be wrapped with `custom_transform` or `pandas_operation`. See the [Monte Carlo custom operation API reference](../documentation/monte_carlo/custom_ops.md) for the current contract.
+Custom transforms are available through `transform_step(...)` and bundle-safe custom operations can be wrapped with `custom_transform`. See the [Monte Carlo custom operation API reference](../documentation/monte_carlo/custom_ops.md) for the current contract.
 
 For future reference or a ready-made boilerplate, you can visit [this](../assets/monte_carlo.ipynb) link to access a notebook containing the process outlined in this guide.
 

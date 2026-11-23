@@ -108,8 +108,7 @@ See the [Estimation Guide](estimation_guide.md) for the run methods in detail.
 mc = loaded.mc
 assert mc
 
-print("Runtime Steps:", [step.name for step in mc.pipeline.replication_steps])
-print("Post-Processing:", [step.name for step in mc.pipeline.postproc_steps])
+print("Runtime Steps:", [step.name for step in mc.pipeline.steps])
 ```
 
 ### Run a Monte Carlo pipeline from a loaded bundle

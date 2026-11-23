@@ -82,18 +82,16 @@ def _datagen_stub() -> MCStep:
 
 def test_planned_bytes_match_the_allocation_exactly(solved_test: SolvedModel) -> None:
     pipeline = MCPipeline(
-        [
-            simulation_step(
-                "sim",
-                target="reference",
-                T=6,
-                shocks={
-                    name: Shock(dist="norm", seed=index)
-                    for index, name in enumerate(solved_test.compiled.shock_names)
-                },
-                observables=True,
-            )
-        ]
+        simulation_step(
+            "sim",
+            target="reference",
+            T=6,
+            shocks={
+                name: Shock(dist="norm", seed=index)
+                for index, name in enumerate(solved_test.compiled.shock_names)
+            },
+            observables=True,
+        )
     )
     report = pipeline.validate_memory_requirements(
         models={"reference": solved_test}, n_rep=8, n_jobs=3
@@ -141,7 +139,7 @@ def test_the_reserve_is_a_floor_plus_a_fraction_not_a_multiple(
 ) -> None:
     """A reserve proportional to the machine withholds far too much on a large host."""
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=True)]
+        simulation_step("sim", target="reference", T=6, observables=True)
     )
     report = pipeline.validate_memory_requirements(
         models={"reference": solved_test}, n_rep=8, n_jobs=1
@@ -161,7 +159,7 @@ def test_paging_warns_but_is_allowed_because_it_only_costs_throughput(
 ) -> None:
     """A run past physical memory completes, slowly, so it must not be refused."""
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=True)]
+        simulation_step("sim", target="reference", T=6, observables=True)
     )
     sized = pipeline.validate_memory_requirements(
         models={"reference": solved_test}, n_rep=64, n_jobs=1
@@ -183,7 +181,7 @@ def test_validate_raises_only_once_swap_cannot_absorb_it_either(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=True)]
+        simulation_step("sim", target="reference", T=6, observables=True)
     )
     sized = pipeline.validate_memory_requirements(
         models={"reference": solved_test}, n_rep=64, n_jobs=1
@@ -202,7 +200,7 @@ def test_the_ceiling_counts_swap_on_top_of_physical(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=True)]
+        simulation_step("sim", target="reference", T=6, observables=True)
     )
     # Distinct readings, so summing them cannot be confused with doubling one.
     _pin_memory(monkeypatch, available=ABUNDANT_BYTES, swap_free=ABUNDANT_BYTES // 4)
@@ -223,7 +221,7 @@ def test_the_raised_message_is_one_line_and_the_table_is_printed(
 ) -> None:
     """The table must not ride along in the exception, or it renders after the traceback."""
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=True)]
+        simulation_step("sim", target="reference", T=6, observables=True)
     )
     sized = pipeline.validate_memory_requirements(
         models={"reference": solved_test}, n_rep=64, n_jobs=1
@@ -252,7 +250,7 @@ def test_a_rule_separates_the_step_rows_from_the_whole_run_totals(
     solved_test: SolvedModel,
 ) -> None:
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=True)]
+        simulation_step("sim", target="reference", T=6, observables=True)
     )
 
     lines = str(
@@ -274,7 +272,7 @@ def test_the_warned_message_is_one_line_and_the_table_is_printed(
 ) -> None:
     """A table at the tail of a warning is trailed by the source line warnings echoes."""
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=True)]
+        simulation_step("sim", target="reference", T=6, observables=True)
     )
     sized = pipeline.validate_memory_requirements(
         models={"reference": solved_test}, n_rep=64, n_jobs=1
@@ -307,8 +305,9 @@ def test_the_warning_blames_the_caller_not_the_library(
     entry_point: str,
 ) -> None:
     """The shallowest and deepest routes to validate sit four frames apart."""
-    steps = [simulation_step("sim", target="reference", T=6, observables=True)]
-    pipeline = MCPipeline(steps)
+    pipeline = MCPipeline(
+        simulation_step("sim", target="reference", T=6, observables=True)
+    )
     sized = pipeline.validate_memory_requirements(
         models={"reference": solved_test}, n_rep=64, n_jobs=1
     )
@@ -340,7 +339,7 @@ def test_nothing_is_printed_when_the_plan_fits(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=True)]
+        simulation_step("sim", target="reference", T=6, observables=True)
     )
 
     pipeline.validate_memory_requirements(
@@ -355,7 +354,7 @@ def test_run_refuses_an_oversized_plan_unless_the_check_is_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=True)]
+        simulation_step("sim", target="reference", T=6, observables=True)
     )
     sized = pipeline.validate_memory_requirements(
         models={"reference": solved_test}, n_rep=64, n_jobs=1
@@ -384,7 +383,7 @@ def test_report_renders_a_table_naming_no_reduction_target(
     solved_test: SolvedModel,
 ) -> None:
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=True)]
+        simulation_step("sim", target="reference", T=6, observables=True)
     )
 
     rendered = str(
@@ -403,7 +402,7 @@ def test_report_renders_the_total_both_before_and_after_the_margin(
     solved_test: SolvedModel,
 ) -> None:
     pipeline = MCPipeline(
-        [simulation_step("sim", target="reference", T=6, observables=True)]
+        simulation_step("sim", target="reference", T=6, observables=True)
     )
     report = pipeline.validate_memory_requirements(
         models={"reference": solved_test}, n_rep=8, n_jobs=1

@@ -14,7 +14,6 @@ from ..filters.gaussian import LinearKalman
 
 from .custom_op import NumbaCustomFunc
 from .mc_constructs import ColumnSelector, MCStep, OpType, _compile_source_args
-from .postproc import run_kde
 
 NDF = NDArray[np.float64]
 
@@ -1356,107 +1355,4 @@ def chow_test_step(
         burn_in=burn_in,
         kwargs={"t_break": t_break, "alpha": alpha},
         n_retain=n_retain,
-    )
-
-
-def postproc_step(name: str, func: Callable[..., Any], **kwargs: Any) -> MCStep:
-    """Custom POSTPROC step applying a user-defined function to the run's traces.
-
-    The callable is invoked once after the replication loop as
-    ``func(traces=..., **kwargs)``. ``traces`` maps every across-replication trace
-    key the pipeline emitted to its stacked array, not only the transform payloads:
-
-    - ``"payload.<name>"`` for a transform step's stacked per-rep payload
-    - ``"test.<name>.<sub>"`` with ``sub`` one of ``statistic``, ``pval``, ``status``
-    - ``"regression.<name>.<sub>"`` with ``sub`` one of ``coef``, ``ssr``, ``sst``,
-      ``se``, ``r2``, ``status``
-
-    A payload key has no sub-channel, since a transform emits a single array.
-
-    Returns must be wrapped in :class:`Raw` for bulk numeric arrays or
-    :class:`Summary` for aggregate outputs such as scalars, vectors, matrices and
-    ``DataFrame``/``Series``. A step may return one of each, either alone or in an
-    order-invariant tuple of length two; two of the same kind is rejected.
-
-    ``func`` is stored as given. Decorating it with :func:`pandas_operation` makes
-    it a :class:`PandasCustomFunc`, which is what subjects it to the namespace
-    restrictions and makes it shippable inside a bundle; an undecorated callable is
-    passed through unwrapped and unvalidated. Either way a POSTPROC op stays
-    Python, unlike the compiled custom TRANSFORM callables.
-
-    Parameters
-    ----------
-    name : str
-        Step name, used to reference the step in later steps and results.
-    func : Callable[..., Any]
-        Callable to run over the assembled traces. Must accept a ``traces`` keyword
-        and return :class:`Raw`, :class:`Summary`, or a tuple holding one of each.
-
-    Returns
-    -------
-    MCStep
-        Step object to include in a :class:`MCPipeline` as a post-loop step.
-        A POSTPROC step cannot be used as a per-replication step.
-    """
-    return MCStep(
-        name=name,
-        op_type=OpType.POSTPROC,
-        func=func,
-        kwargs=kwargs,
-        step_type="postproc:custom",
-    )
-
-
-def kde_step(
-    name: str,
-    *,
-    trace: str,
-    bandwidth: str | float = "scott",
-    grid_points: int = 200,
-    kernel: str = "gaussian",
-) -> MCStep:
-    """POSTPROC step computing a kernel density estimate over one across-rep trace.
-
-    Parameters
-    ----------
-    name : str
-        Step name, used to reference the step in later steps and results.
-    trace : str
-        Key of the trace to estimate over. A transform payload is keyed
-        ``"payload.<name>"``; a test or regression sub-channel is keyed
-        ``"test.<name>.<sub>"`` or ``"regression.<name>.<sub>"``. The trace is
-        flattened and non-finite values are dropped before estimation, which needs
-        at least two finite values.
-    bandwidth : str | float
-        Bandwidth selection rule or fixed bandwidth, forwarded to
-        :class:`scipy.stats.gaussian_kde` as its ``bw_method`` argument. Accepts
-        anything that argument does, including a callable.
-    grid_points : int
-        Number of evenly spaced points spanning the data range at which the density
-        is evaluated. Must be a positive integer.
-    kernel : str
-        Kernel type. Only ``"gaussian"`` is currently implemented and anything else
-        raises; the argument exists so a non-Gaussian kernel can be added without a
-        signature change.
-
-    Returns
-    -------
-    MCStep
-        Step object to include in a :class:`MCPipeline` as a post-loop step. The
-        step produces a :class:`Raw` artifact holding a ``(grid_points, 2)`` array
-        of grid values against density, and a :class:`Summary` artifact holding a
-        ``DataFrame`` of count, mean, standard deviation, minimum, quartiles,
-        median and maximum for the estimated sample.
-    """
-    return MCStep(
-        name=name,
-        op_type=OpType.POSTPROC,
-        func=run_kde,
-        kwargs={
-            "trace": trace,
-            "bandwidth": bandwidth,
-            "grid_points": grid_points,
-            "kernel": kernel,
-        },
-        step_type="kde",
     )

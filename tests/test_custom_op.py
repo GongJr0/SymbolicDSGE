@@ -15,17 +15,12 @@ import cloudpickle
 import numpy as np
 import pytest
 
-import pandas as pd
-
 from SymbolicDSGE.monte_carlo.custom_op import (
-    CustomFunc,
     CustomOpValidationError,
     NumbaCustomFunc,
     NumpyCustomFunc,
-    PandasCustomFunc,
     SAFE_NAMESPACE_VERSION,
     custom_transform,
-    pandas_operation,
 )
 
 WEIGHTS = np.array([1.0, 2.0, 3.0])
@@ -550,62 +545,3 @@ def test_from_source_rejects_unsafe_names() -> None:
 def test_from_source_reports_syntax_errors() -> None:
     with pytest.raises(CustomOpValidationError, match="did not parse"):
         NumpyCustomFunc.from_source("def f(**kwargs)\n    return 1\n")
-
-
-# ---- PandasCustomFunc (post-loop pandas namespace) -----------------------
-
-
-@pandas_operation
-def _summary_table(*, traces, **kwargs):
-    return pd.DataFrame({"stat": ["mean"], "value": [float(np.mean(traces["x"]))]})
-
-
-def test_pandas_operation_produces_pandas_custom_func() -> None:
-    assert isinstance(_summary_table, PandasCustomFunc)
-    assert isinstance(_summary_table, CustomFunc)
-    assert _summary_table.namespace_kind == "pandas"
-    out = _summary_table(traces={"x": np.array([1.0, 3.0])}, reference=None, dgp=None)
-    assert isinstance(out, pd.DataFrame)
-    assert out.loc[0, "value"] == 2.0
-
-
-def test_pandas_op_round_trips_through_cloudpickle() -> None:
-    restored = cloudpickle.loads(cloudpickle.dumps(_summary_table))
-    assert isinstance(restored, PandasCustomFunc)
-    assert restored.namespace_kind == "pandas"
-    out = restored(traces={"x": np.array([2.0, 4.0])})
-    assert out.loc[0, "value"] == 3.0
-
-
-def test_numpy_namespace_rejects_pandas_reference() -> None:
-    # The per-rep numpy contract has no `pd`; the same op fails under it.
-    with pytest.raises(CustomOpValidationError):
-        NumpyCustomFunc(_summary_table._func)
-
-
-def _reads_csv(*, traces, **kwargs):
-    return pd.read_csv("x.csv")
-
-
-def test_pandas_io_footgun_is_denied() -> None:
-    with pytest.raises(CustomOpValidationError, match="read_csv"):
-        PandasCustomFunc(_reads_csv)
-
-
-_PANDAS_FROM_SOURCE = """@pandas_operation
-def describe(*, traces, **kwargs):
-    return pd.DataFrame({"v": [float(np.sum(traces["x"]))]})
-"""
-
-
-def test_from_source_pandas_validates_and_runs() -> None:
-    func = PandasCustomFunc.from_source(_PANDAS_FROM_SOURCE)
-    assert isinstance(func, PandasCustomFunc)
-    assert "@pandas_operation" in func.source
-    out = func(traces={"x": np.array([1.0, 2.0, 3.0])}, reference=None, dgp=None)
-    assert out.loc[0, "v"] == 6.0
-
-
-def test_pandas_source_rejected_by_numpy_from_source() -> None:
-    with pytest.raises(CustomOpValidationError):
-        NumpyCustomFunc.from_source(_PANDAS_FROM_SOURCE)

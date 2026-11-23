@@ -5,25 +5,19 @@ tags:
 # MCPipeline
 
 ```python
-class MCPipeline(
-    replication_steps: Sequence[MCStep],
-    postproc_steps: Sequence[MCStep] = (),
-)
+class MCPipeline(*steps: MCStep)
 ```
 
-`MCPipeline` holds two step lists: `replication_steps` (the dependency DAG executed inside every replication) and `postproc_steps` (post-loop ops run **once** after the loop, over the assembled across-rep traces). The two are separate because a postproc is a terminal reduction, not a graph node.
+`MCPipeline` receives `MCStep` objects as arguments and constructs an execution plan (the dependency DAG executed inside every replication). Each step is ordered such that it's sources are availbe as that step executes. The order of specification does not matter, and the constructor will raise when a dependency cycle or otherwise unsatisfiable specification is presented.
 
-Per-replication steps execute in a native `nogil` loop. Building the pipeline resolves each step's producers, and lowering resolves the whole run into buffer arenas and native step descriptors before any replication starts.
+The pipeline can be though of as a declarative configuration that feeds the native experiment runner, the Python-side only resolves the graph and constructd the context for the native execution engine to consume.
 
 __Contract:__
 
 | __Rule__ | __Description__ |
 |:---------|----------------:|
-| One data-generation step | `replication_steps` must have exactly one step with `op_type=OpType.DATAGEN`. Later per-rep steps cannot generate data once `DATAGEN` is performed. |
-| Postproc list is post-loop only | `postproc_steps` may contain only `OpType.POSTPROC` steps; per-rep steps may not. |
-| Unique step names | Names are used as result and trace keys, unique across both lists. |
+| Unique step names | Names are used as result and trace keys. |
 | Reserved characters | Step names cannot contain the characters `.`, `:`, `\`, `/`. |
-| Post-loop inputs are traces | Postprocs do not see individual replications. They receive the assembled `traces` mapping built after every replication finishes. |
 
 ```python
 MCPipeline.run(
@@ -51,11 +45,11 @@ __Returns:__
 
 | __Type__ | __Description__ |
 |:---------|----------------:|
-| `#!python MCPipelineResult` | Aggregate container with test summaries, regression summaries, post-loop artifacts, run metadata, and failures. |
+| `#!python MCPipelineResult` | Aggregate container with test summaries, regression summaries, run metadata, and failures. |
 
 ???+ note "Step timings need verbosity 2"
     `MCMeta.step_elapsed_s`, `step_counts`, and `step_failures` are populated only when the run is started with `verbosity=2`, since per-step profiling instruments the native loop. At lower verbosity they are empty mappings.
 
 ???+ warning "Serializable steps"
     Use the factories in `SymbolicDSGE.monte_carlo.step_factories` rather than hand-building `MCStep` objects when the pipeline needs to enter a `.sdsge` bundle.
-    Custom transforms `NumbaCustomFunc` and postprocs `PandasCustomFunc` are the only bundle-safe custom operations.
+    Custom transforms (`NumbaCustomFunc`, functions are auto-converted) are the only bundle-safe custom operations.
