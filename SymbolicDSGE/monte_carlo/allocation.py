@@ -673,7 +673,6 @@ def _resolve_filter_fields(
                 comp.n_exog,
                 n_obs,
                 T,
-                bool(step.kwargs.get("return_shocks", False)),
             )
         case "unscented":
             n_state = comp.n_state

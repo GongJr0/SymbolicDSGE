@@ -47,14 +47,12 @@ cdef extern from "layout.h":
         )
     arena_offset sdsge_filter_linear_output_arena_offset(
             int64_t n, int64_t m, int64_t k, int64_t T,
-            int return_shocks
             )
     arena_offset sdsge_filter_extended_input_arena_offset(
             int64_t n, int64_t m, int64_t k, int64_t T, int64_t n_par
             )
     arena_offset sdsge_filter_extended_output_arena_offset(
             int64_t n, int64_t m, int64_t k, int64_t T,
-            int return_shocks
             )
     arena_offset sdsge_filter_unscented_input_arena_offset(
             int64_t n_state, int64_t n_ctrl, int64_t n_exog, int64_t n_obs,
@@ -352,19 +350,14 @@ def filter_output_offsets(
     int64_t n_exog,
     int64_t n_obs,
     int64_t T,
-    bint return_shocks=False,
 ):
-    """Return the output boundaries for a filter.
-
-    ``eps_hat`` closes where ``S`` did unless ``return_shocks``. Unscented has
-    no such field, and no such argument, so the flag does not reach it.
-    """
+    """Return the output boundaries for a filter."""
     if kind == "linear":
         return _offset(sdsge_filter_linear_output_arena_offset(
-            n_state + n_ctrl, n_obs, n_exog, T, return_shocks))
+            n_state + n_ctrl, n_obs, n_exog, T))
     if kind == "extended":
         return _offset(sdsge_filter_extended_output_arena_offset(
-            n_state + n_ctrl, n_obs, n_exog, T, return_shocks))
+            n_state + n_ctrl, n_obs, n_exog, T))
     if kind == "unscented":
         return _offset(sdsge_filter_unscented_output_arena_offset(
             n_state, n_ctrl, n_obs, T))

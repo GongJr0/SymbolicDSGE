@@ -867,9 +867,7 @@ def test_output_specs_for_non_ols_regressions(solved_test, kind: str) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "filter", (LinearKalman(return_shocks=True), ExtendedKalman(return_shocks=True))
-)
+@pytest.mark.parametrize("filter", (LinearKalman(), ExtendedKalman()))
 def test_output_shape_resolution_includes_linear_filter_fields(
     solved_test, filter: Filter
 ) -> None:

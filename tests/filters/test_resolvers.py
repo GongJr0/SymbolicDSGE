@@ -67,7 +67,6 @@ def test_resolve_linear_args_is_a_complete_run_argument_set(solved_multishock, y
         ["g_obs", "c_obs", "k_obs"],
         jitter=0.125,
         symmetrize=True,
-        return_shocks=True,
     )
 
     assert set(args) == set(LinearRunArgs.__annotations__)
@@ -88,7 +87,6 @@ def test_resolve_linear_args_is_a_complete_run_argument_set(solved_multishock, y
     assert args["jitter"] == pytest.approx(0.125)
     assert args["symmetrize"] is True
     assert args["joseph_cov"] is False
-    assert args["return_shocks"] is True
 
 
 def test_default_p0_is_solved_from_the_policy(solved_multishock, y3):
@@ -175,9 +173,8 @@ def test_resolve_unscented_args_embeds_x0_and_defaults_the_sigma_point_weights(
     assert args["kappa"] == pytest.approx(1.0)
     assert args["jitter"] == pytest.approx(0.25)
     assert args["symmetrize"] is False
-    # No joseph_cov or return_shocks: the unscented kernel takes neither.
+    # Unscented kernel doesn't accept joseph_cov
     assert "joseph_cov" not in args
-    assert "return_shocks" not in args
 
 
 def test_resolve_unscented_args_rejects_a_first_order_policy_and_a_bad_x0(

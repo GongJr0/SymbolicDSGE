@@ -93,7 +93,6 @@ def filter_linear_step(
     symmetrize: bool = True,
     joseph_cov: bool = False,
     jitter: float = 0.0,
-    return_shocks: bool = False,
 ) -> NativeStep: ...
 def filter_extended_step(
     name: str,
@@ -107,7 +106,6 @@ def filter_extended_step(
     symmetrize: bool = True,
     joseph_cov: bool = False,
     jitter: float = 0.0,
-    return_shocks: bool = False,
 ) -> NativeStep: ...
 def filter_unscented_step(
     name: str,

@@ -119,8 +119,7 @@ int sdsge_mc_filter_linear_runner(const i64 rep_idx,
   (void)int_work;
   const int status = sdsge_filter_linear_step(
       float_in_work, float_in_work + input_size, ctx->T, ctx->n, ctx->m, ctx->k,
-      ctx->symmetrize, ctx->joseph_cov, ctx->jitter, ctx->return_shocks,
-      float_out);
+      ctx->symmetrize, ctx->joseph_cov, ctx->jitter, float_out);
   return sdsge_mc_finish_status(status, int_out);
 }
 
@@ -139,8 +138,7 @@ int sdsge_mc_filter_extended_runner(const i64 rep_idx,
   const int status = sdsge_filter_extended_step(
       float_in_work, float_in_work + input_size, ctx->measurement,
       ctx->jacobian, ctx->T, ctx->n, ctx->m, ctx->k, ctx->n_par,
-      ctx->symmetrize, ctx->joseph_cov, ctx->jitter, ctx->return_shocks,
-      float_out);
+      ctx->symmetrize, ctx->joseph_cov, ctx->jitter, float_out);
   return sdsge_mc_finish_status(status, int_out);
 }
 
@@ -282,7 +280,7 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                              f64 *SDSGE_RESTRICT scratch_arena, const i64 T,
                              const i64 n, const i64 m, const i64 k,
                              const int symmetrize, const int joseph_cov,
-                             const f64 jitter, const int return_shocks,
+                             const f64 jitter,
                              f64 *SDSGE_RESTRICT output_arena) {
   const arena_offset in_off =
       sdsge_filter_linear_input_arena_offset(n, m, k, T);
@@ -298,7 +296,7 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
   const f64 *P0 = input_arena + in_off.foffset[8];
 
   const arena_offset out_off =
-      sdsge_filter_linear_output_arena_offset(n, m, k, T, return_shocks);
+      sdsge_filter_linear_output_arena_offset(n, m, k, T);
   kf_outputs out = {.x_pred = output_arena};
   out.x_filt = output_arena + out_off.foffset[0];
   out.P_pred = output_arena + out_off.foffset[1];
@@ -308,7 +306,7 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
   out.innov = output_arena + out_off.foffset[5];
   out.std_innov = output_arena + out_off.foffset[6];
   out.S = output_arena + out_off.foffset[7];
-  out.eps_hat = return_shocks ? output_arena + out_off.foffset[8] : NULL;
+  out.eps_hat = output_arena + out_off.foffset[8];
   out.loglik = output_arena + out_off.foffset[9];
 
   const kf_inputs in = {.n = n,
@@ -328,19 +326,15 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                         .symmetrize = symmetrize,
                         .joseph_cov = joseph_cov,
                         .jitter = jitter,
-                        .return_shocks = return_shocks,
                         .store_history = 1};
   return kf_forward(&in, scratch_arena, &out);
 }
 
-int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
-                               f64 *SDSGE_RESTRICT scratch_arena,
-                               const meas_fn meas, const meas_fn jac,
-                               const i64 T, const i64 n, const i64 m,
-                               const i64 k, const i64 n_par,
-                               const int symmetrize, const int joseph_cov,
-                               const f64 jitter, const int return_shocks,
-                               f64 *SDSGE_RESTRICT output_arena) {
+int sdsge_filter_extended_step(
+    const f64 *SDSGE_RESTRICT input_arena, f64 *SDSGE_RESTRICT scratch_arena,
+    const meas_fn meas, const meas_fn jac, const i64 T, const i64 n,
+    const i64 m, const i64 k, const i64 n_par, const int symmetrize,
+    const int joseph_cov, const f64 jitter, f64 *SDSGE_RESTRICT output_arena) {
   const arena_offset in_off =
       sdsge_filter_extended_input_arena_offset(n, m, k, T, n_par);
   const f64 *A = input_arena;
@@ -354,7 +348,7 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
   const f64 *P0 = input_arena + in_off.foffset[7];
 
   const arena_offset out_off =
-      sdsge_filter_extended_output_arena_offset(n, m, k, T, return_shocks);
+      sdsge_filter_extended_output_arena_offset(n, m, k, T);
   ekf_outputs out = {.x_pred = output_arena};
   out.x_filt = output_arena + out_off.foffset[0];
   out.P_pred = output_arena + out_off.foffset[1];
@@ -364,7 +358,7 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
   out.innov = output_arena + out_off.foffset[5];
   out.std_innov = output_arena + out_off.foffset[6];
   out.S = output_arena + out_off.foffset[7];
-  out.eps_hat = return_shocks ? output_arena + out_off.foffset[8] : NULL;
+  out.eps_hat = output_arena + out_off.foffset[8];
   out.loglik = output_arena + out_off.foffset[9];
 
   const ekf_inputs in = {.meas = meas,
@@ -386,8 +380,6 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
                          .jitter = jitter,
                          .symmetrize = symmetrize,
                          .joseph_cov = joseph_cov,
-                         .compute_y_filt = 1,
-                         .return_shocks = return_shocks,
                          .store_history = 1};
   return ekf_forward(&in, scratch_arena, &out);
 }

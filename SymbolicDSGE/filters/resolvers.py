@@ -65,7 +65,6 @@ class LinearRunArgs(TypedDict):
     y: NDF
     x0: NDF
     P0: NDF
-    return_shocks: bool
     symmetrize: bool
     joseph_cov: bool
     jitter: float
@@ -83,7 +82,6 @@ class ExtendedRunArgs(TypedDict):
     y: NDF
     x0: NDF
     P0: NDF
-    return_shocks: bool
     symmetrize: bool
     joseph_cov: bool
     jitter: float
@@ -127,7 +125,6 @@ def _resolve_linear_args(
     jitter: Float64Like | None = None,
     symmetrize: bool = True,
     joseph_cov: bool = False,
-    return_shocks: bool = False,
 ) -> LinearRunArgs:
     """Complete argument set for ``KalmanFilter.run_raw``."""
     obs, y_canonical = _resolve_observations(model, observables, y)
@@ -144,7 +141,6 @@ def _resolve_linear_args(
         y=y_canonical,
         x0=model._initial_state(x0),
         P0=_build_P0(model, FilterMode.LINEAR, P0),
-        return_shocks=bool(return_shocks),
         symmetrize=bool(symmetrize),
         joseph_cov=bool(joseph_cov),
         jitter=_jitter(jitter),
@@ -162,7 +158,6 @@ def _resolve_extended_args(
     jitter: Float64Like | None = None,
     symmetrize: bool = True,
     joseph_cov: bool = False,
-    return_shocks: bool = False,
 ) -> ExtendedRunArgs:
     """Complete argument set for ``KalmanFilter.run_extended_raw``."""
     obs, y_canonical = _resolve_observations(model, observables, y)
@@ -179,7 +174,6 @@ def _resolve_extended_args(
         y=y_canonical,
         x0=model._initial_state(x0),
         P0=_build_P0(model, FilterMode.EXTENDED, P0),
-        return_shocks=bool(return_shocks),
         symmetrize=bool(symmetrize),
         joseph_cov=bool(joseph_cov),
         jitter=_jitter(jitter),

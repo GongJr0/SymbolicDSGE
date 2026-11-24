@@ -137,7 +137,7 @@ def test_run_linear_outputs_shapes_and_first_prediction():
     assert out.y_filt.shape == (5, 1)
     assert out.innov.shape == (5, 1)
     assert out.S.shape == (5, 1, 1)
-    assert out.eps_hat is None
+    assert out.eps_hat.shape == (5, 1)
     assert np.isfinite(out.loglik)
 
     # x0 is the prior for the first observed state, so the first prediction is
@@ -187,7 +187,7 @@ def test_run_linear_return_shocks():
     A, B, C, d, Q, R, ss = _linear_system_1d()
     y = np.zeros((4, 1), dtype=float64)
 
-    out = run_linear(A, B, C, d, Q, R, ss, y, return_shocks=True)
+    out = run_linear(A, B, C, d, Q, R, ss, y)
 
     assert out.eps_hat is not None
     assert out.eps_hat.shape == (4, 1)
@@ -374,7 +374,6 @@ def test_run_extended_can_skip_history_storage_for_loglik_only_path():
         R=R,
         steady_state=ss,
         y=y,
-        compute_y_filt=False,
     )
     full = run_extended(**kwargs)
     minimal = run_extended(**kwargs, _store_history=False)
@@ -390,44 +389,6 @@ def test_run_extended_can_skip_history_storage_for_loglik_only_path():
     assert minimal.std_innov.shape == (0, 1)
     assert minimal.S.shape == (0, 1, 1)
     assert minimal.eps_hat is None
-
-
-def test_run_extended_compute_y_filt_false_and_return_shocks():
-    A, B, _, _, Q, R, ss = _linear_system_1d()
-    y = np.zeros((4, 1), dtype=float64)
-    calib = np.array([], dtype=float64)
-    out_true = run_extended(
-        meas_addr=_ekf_lin_meas.address,
-        jac_addr=_ekf_lin_jac.address,
-        A=A,
-        B=B,
-        calib_params=calib,
-        Q=Q,
-        R=R,
-        steady_state=ss,
-        y=y,
-        compute_y_filt=True,
-        return_shocks=True,
-    )
-
-    out = run_extended(
-        meas_addr=_ekf_lin_meas.address,
-        jac_addr=_ekf_lin_jac.address,
-        A=A,
-        B=B,
-        calib_params=calib,
-        Q=Q,
-        R=R,
-        steady_state=ss,
-        y=y,
-        compute_y_filt=False,
-        return_shocks=True,
-    )
-
-    assert np.array_equal(out.y_filt, np.zeros_like(out.y_filt))
-    assert np.allclose(out.loglik, out_true.loglik)
-    assert out.eps_hat is not None
-    assert out.eps_hat.shape == (4, 1)
 
 
 def _linear_ukf_pair():

@@ -30,7 +30,6 @@ def kf_forward(
     symmetrize: bool,
     joseph_cov: bool,
     jitter: float,
-    return_shocks: bool = False,
     store_history: bool = True,
 ) -> tuple[
     int,
@@ -87,8 +86,6 @@ def ekf_forward(
     symmetrize: bool,
     joseph_cov: bool,
     jitter: float,
-    compute_y_filt: bool = True,
-    return_shocks: bool = False,
     store_history: bool = True,
 ) -> tuple[
     int,

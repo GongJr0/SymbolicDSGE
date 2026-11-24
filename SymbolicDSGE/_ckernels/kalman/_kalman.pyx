@@ -63,7 +63,6 @@ cdef extern from "linear.h":
         int symmetrize
         int joseph_cov
         double jitter
-        int return_shocks
         int store_history
 
     ctypedef struct kf_outputs:
@@ -121,8 +120,6 @@ cdef extern from "extended.h":
         double jitter
         int symmetrize
         int joseph_cov
-        int compute_y_filt
-        int return_shocks
         int store_history
 
     ctypedef struct ekf_outputs:
@@ -253,7 +250,6 @@ cdef tuple _kf_build(
     bint symmetrize,
     bint joseph_cov,
     double jitter,
-    bint return_shocks,
     bint store_history,
 ):
     """Fill the linear filter's input and output structs.
@@ -269,7 +265,6 @@ cdef tuple _kf_build(
         raise ValueError("y must have at least one row.")
 
     cdef int64_t hist_T = T if store_history else 0
-    cdef int64_t shock_T = T if (return_shocks and store_history) else 0
 
     A_arr = np.ascontiguousarray(A, dtype=np.float64)
     B_arr = np.ascontiguousarray(B, dtype=np.float64)
@@ -302,7 +297,7 @@ cdef tuple _kf_build(
     innov = np.zeros((hist_T, m), dtype=np.float64)
     std_innov = np.zeros((hist_T, m), dtype=np.float64)
     S = np.zeros((hist_T, m, m), dtype=np.float64)
-    eps_hat = np.zeros((shock_T, k), dtype=np.float64)
+    eps_hat = np.zeros((hist_T, k), dtype=np.float64)
 
     cdef double[:, ::1] x_pred_mv = x_pred
     cdef double[:, ::1] x_filt_mv = x_filt
@@ -332,7 +327,6 @@ cdef tuple _kf_build(
     inp.symmetrize = symmetrize
     inp.joseph_cov = joseph_cov
     inp.jitter = jitter
-    inp.return_shocks = return_shocks
     inp.store_history = store_history
 
     outp.x_pred = &x_pred_mv[0, 0]
@@ -366,7 +360,6 @@ def kf_forward(
     bint symmetrize,
     bint joseph_cov,
     double jitter,
-    bint return_shocks=False,
     bint store_history=True,
 ):
     """Run the linear Kalman filter."""
@@ -375,7 +368,7 @@ def kf_forward(
     cdef double loglik = 0.0
     _, hist = _kf_build(
         &inp, &outp, &loglik, T, nmk, A, B, C, d, Q, R, steady_state, y, x0,
-        P0, symmetrize, joseph_cov, jitter, return_shocks, store_history,
+        P0, symmetrize, joseph_cov, jitter, store_history,
     )
 
     arena = np.empty(kf_arena_size(inp.n, inp.m, inp.k).n_float, dtype=np.float64)
@@ -407,7 +400,7 @@ def kf_smooth(
     cdef double loglik = 0.0
     _, hist = _kf_build(
         &inp, &outp, &loglik, T, nmk, A, B, C, d, Q, R, steady_state, y, x0,
-        P0, symmetrize, joseph_cov, jitter, False, True,
+        P0, symmetrize, joseph_cov, jitter, True,
     )
     cdef int64_t n = inp.n
     cdef int64_t k = inp.k
@@ -500,8 +493,6 @@ cdef tuple _ekf_build(
     bint symmetrize,
     bint joseph_cov,
     double jitter,
-    bint compute_y_filt,
-    bint return_shocks,
     bint store_history,
 ):
     """Fill the extended filter's input and output structs.
@@ -522,7 +513,6 @@ cdef tuple _ekf_build(
         raise ValueError("y must have at least one row.")
 
     cdef int64_t hist_T = T if store_history else 0
-    cdef int64_t shock_T = T if (return_shocks and store_history) else 0
 
     A_arr = np.ascontiguousarray(A, dtype=np.float64)
     B_arr = np.ascontiguousarray(B, dtype=np.float64)
@@ -553,7 +543,7 @@ cdef tuple _ekf_build(
     innov = np.zeros((hist_T, m), dtype=np.float64)
     std_innov = np.zeros((hist_T, m), dtype=np.float64)
     S = np.zeros((hist_T, m, m), dtype=np.float64)
-    eps_hat = np.zeros((shock_T, k), dtype=np.float64)
+    eps_hat = np.zeros((hist_T, k), dtype=np.float64)
 
     cdef double[:, ::1] x_pred_mv = x_pred
     cdef double[:, ::1] x_filt_mv = x_filt
@@ -585,8 +575,6 @@ cdef tuple _ekf_build(
     inp.jitter = jitter
     inp.symmetrize = symmetrize
     inp.joseph_cov = joseph_cov
-    inp.compute_y_filt = compute_y_filt
-    inp.return_shocks = return_shocks
     inp.store_history = store_history
 
     outp.x_pred = &x_pred_mv[0, 0]
@@ -620,8 +608,6 @@ def ekf_forward(
     bint symmetrize,
     bint joseph_cov,
     double jitter,
-    bint compute_y_filt=True,
-    bint return_shocks=False,
     bint store_history=True,
 ):
     """Run the native extended Kalman filter (linear transition, nonlinear
@@ -631,8 +617,7 @@ def ekf_forward(
     cdef double loglik = 0.0
     _, hist = _ekf_build(
         &inp, &outp, &loglik, meas_addr, jac_addr, A, B, calib_params, Q, R,
-        steady_state, y, x0, P0, symmetrize, joseph_cov, jitter,
-        compute_y_filt, return_shocks, store_history,
+        steady_state, y, x0, P0, symmetrize, joseph_cov, jitter, store_history,
     )
 
     arena = np.empty(ekf_arena_size(inp.n, inp.m, inp.k).n_float, dtype=np.float64)
@@ -657,7 +642,6 @@ def ekf_smooth(
     bint symmetrize,
     bint joseph_cov,
     double jitter,
-    bint compute_y_filt=True,
 ):
     """Run the extended Kalman filter and smoother."""
     cdef ekf_inputs inp
@@ -665,8 +649,7 @@ def ekf_smooth(
     cdef double loglik = 0.0
     _, hist = _ekf_build(
         &inp, &outp, &loglik, meas_addr, jac_addr, A, B, calib_params, Q, R,
-        steady_state, y, x0, P0, symmetrize, joseph_cov, jitter,
-        compute_y_filt, True, True,
+        steady_state, y, x0, P0, symmetrize, joseph_cov, jitter, True,
     )
     cdef int64_t n = inp.n
     cdef int64_t k = inp.k

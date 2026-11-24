@@ -217,27 +217,12 @@ def test_unscented_covariances_are_in_the_augmented_frame(
 # --------------------------------------------------------------------------
 
 
-def test_shocks_are_absent_unless_the_step_asked_for_them(
-    solved_post82: SolvedModel,
-) -> None:
-    """The layout sizes ``eps_hat`` to nothing, which reads as "not produced"."""
-    y = _observations(solved_post82)
-
-    filt = _run(
-        solved_post82, y, filter=LinearKalman(return_shocks=False)
-    ).filter_outputs["filt"]
-
-    assert filt.eps_hat is None
-
-
-def test_requested_shocks_come_back_shaped_by_the_exogenous_count(
+def test_shocks_come_back_shaped_by_the_exogenous_count(
     solved_post82: SolvedModel,
 ) -> None:
     y = _observations(solved_post82)
 
-    filt = _run(
-        solved_post82, y, filter=LinearKalman(return_shocks=True)
-    ).filter_outputs["filt"]
+    filt = _run(solved_post82, y, filter=LinearKalman()).filter_outputs["filt"]
 
     assert filt.eps_hat is not None
     assert filt.eps_hat.shape == (N_REP, T, solved_post82.compiled.n_exog)
@@ -273,9 +258,7 @@ def test_the_unscented_layout_reserves_nothing_for_shocks(
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "filter", [LinearKalman(return_shocks=True), ExtendedKalman(return_shocks=True)]
-)
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
 def test_each_replication_matches_the_reference_filter_on_its_own_data(
     solved_post82: SolvedModel, filter: Filter
 ) -> None:
@@ -336,7 +319,6 @@ def test_a_replication_reads_back_as_a_plain_filter_result(
     assert isinstance(one, FilterResult)
     np.testing.assert_array_equal(one.x_filt, filt.x_filt[2])
     np.testing.assert_array_equal(one.S, filt.S[2])
-    assert one.eps_hat is None
 
 
 def test_a_replication_of_an_unscented_run_carries_the_pruned_state(

@@ -3,7 +3,9 @@
 from .._ckernels.kalman import (
     stationary_covariance,
     kf_forward,
+    kf_smooth,
     ekf_forward,
+    ekf_smooth,
     ukf_forward,
 )
 from .errors import (
@@ -19,7 +21,7 @@ from numpy import (
 )
 from numpy.typing import NDArray
 
-from typing import Tuple
+from typing import Tuple, TypeVar, Generic
 
 NDF = NDArray[float64]
 
@@ -107,6 +109,18 @@ class UnscentedFilterResult(FilterResult):
     x2_filt: NDF
 
 
+FilterT = TypeVar("FilterT", bound=FilterResult)
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class SmootherResult(Generic[FilterT]):
+    filter_result: FilterT
+
+    x_smooth: NDF
+    P_smooth: NDF
+    eps_smooth: NDF | None = None
+
+
 def _shape_validate(
     A: NDF,
     B: NDF,
@@ -132,6 +146,81 @@ def _shape_validate(
     if d is not None:
         if d.shape != (m,):
             raise ShapeMismatchError("d", f"({m},)", str(d.shape))
+
+
+def _ukf_shape_validate(
+    hx: NDF,
+    gx: NDF,
+    bu: NDF,
+    hxx: NDF,
+    gxx: NDF,
+    hxu: NDF,
+    gxu: NDF,
+    huu: NDF,
+    guu: NDF,
+    hss: NDF,
+    gss: NDF,
+    steady_state: NDF,
+    Q: NDF,
+    R: NDF,
+    y: NDF,
+    z0: NDF,
+) -> None:
+    if hx.ndim != 2 or hx.shape[0] != hx.shape[1]:
+        raise ShapeMismatchError("hx", "(n_state, n_state)", str(hx.shape))
+
+    n_state = hx.shape[0]
+    n_var = n_state + gx.shape[0]
+    n_z = 2 * n_state
+
+    if bu.ndim != 2 or bu.shape[0] != n_var:
+        raise ShapeMismatchError("bu", f"({n_var}, n_exog)", str(bu.shape))
+    n_exog = bu.shape[1]
+
+    if gx.ndim != 2 or gx.shape[1] != n_state:
+        raise ShapeMismatchError("gx", f"(n_ctrl, {n_state})", str(gx.shape))
+    n_ctrl = gx.shape[0]
+    n_var = n_state + n_ctrl
+
+    if hxx.shape != (n_state, n_state, n_state):
+        raise ShapeMismatchError(
+            "hxx", f"({n_state}, {n_state}, {n_state})", str(hxx.shape)
+        )
+    if gxx.shape != (n_ctrl, n_state, n_state):
+        raise ShapeMismatchError(
+            "gxx", f"({n_ctrl}, {n_state}, {n_state})", str(gxx.shape)
+        )
+    if hxu.shape != (n_state, n_state, n_exog):
+        raise ShapeMismatchError(
+            "hxu", f"({n_state}, {n_state}, {n_exog})", str(hxu.shape)
+        )
+    if gxu.shape != (n_ctrl, n_state, n_exog):
+        raise ShapeMismatchError(
+            "gxu", f"({n_ctrl}, {n_state}, {n_exog})", str(gxu.shape)
+        )
+    if huu.shape != (n_state, n_exog, n_exog):
+        raise ShapeMismatchError(
+            "huu", f"({n_state}, {n_exog}, {n_exog})", str(huu.shape)
+        )
+    if guu.shape != (n_ctrl, n_exog, n_exog):
+        raise ShapeMismatchError(
+            "guu", f"({n_ctrl}, {n_exog}, {n_exog})", str(guu.shape)
+        )
+    if hss.shape != (n_state,):
+        raise ShapeMismatchError("hss", f"({n_state},)", str(hss.shape))
+    if gss.shape != (n_ctrl,):
+        raise ShapeMismatchError("gss", f"({n_ctrl},)", str(gss.shape))
+    if steady_state.shape != (n_var,):
+        raise ShapeMismatchError("steady_state", f"({n_var},)", str(steady_state.shape))
+    if Q.shape != (n_exog, n_exog):
+        raise ShapeMismatchError("Q", f"({n_exog}, {n_exog})", str(Q.shape))
+    if y.ndim != 2:
+        raise ShapeMismatchError("y", "(T, n_obs)", str(y.shape))
+    n_obs = y.shape[1]
+    if R.shape != (n_obs, n_obs):
+        raise ShapeMismatchError("R", f"({n_obs}, {n_obs})", str(R.shape))
+    if z0.shape != (n_z,):
+        raise ShapeMismatchError("z0", f"({n_z},)", str(z0.shape))
 
 
 def _sym(P: NDF) -> NDF:
@@ -189,6 +278,87 @@ def _initalize_P0_unscented(
     return out
 
 
+def _filter_result(
+    out: tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
+    status: int = 0,
+) -> FilterResult:
+    # fmt: off
+    (
+        x_pred, x_filt,
+        P_pred, P_filt,
+        y_pred, y_filt,
+        v, u,
+        S,
+        eps_hat,
+        loglik,
+    ) = out
+    return FilterResult(
+        x_pred=x_pred, x_filt=x_filt,
+        P_pred=P_pred, P_filt=P_filt,
+        y_pred=y_pred, y_filt=y_filt,
+        innov=v, std_innov=u,
+        S=S,
+        eps_hat=(
+            eps_hat
+            if isinstance(eps_hat, np.ndarray) and eps_hat.size > 0
+            else None
+        ),
+        loglik=loglik,
+        status=status,
+    )
+    # fmt: on
+
+
+def _smoother_result(
+    fwd: tuple[NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64],
+    smooth: tuple[NDF, NDF, NDF],
+    status: int = 0,
+) -> SmootherResult[FilterResult]:
+    fwd_res = _filter_result(fwd, status)
+    x_smooth, P_smooth, eps_smooth = smooth
+    return SmootherResult(
+        filter_result=fwd_res,
+        x_smooth=x_smooth,
+        P_smooth=P_smooth,
+        eps_smooth=(
+            eps_smooth
+            if isinstance(eps_smooth, np.ndarray) and eps_smooth.size > 0
+            else None
+        ),
+    )
+
+
+def _unscented_result(
+    out: tuple[
+        NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64
+    ],
+    status: int = 0,
+) -> UnscentedFilterResult:
+    # fmt: off
+    (
+        x1_pred, x2_pred,
+        x1_filt, x2_filt,
+        x_pred, x_filt,
+        P_pred, P_filt,
+        y_pred, y_filt,
+        v, u,
+        S,
+        loglik,
+    ) = out
+    return UnscentedFilterResult(
+        x_pred=x_pred, x_filt=x_filt,
+        P_pred=P_pred, P_filt=P_filt,
+        y_pred=y_pred, y_filt=y_filt,
+        innov=v, std_innov=u,
+        S=S,
+        x1_pred=x1_pred, x2_pred=x2_pred,
+        x1_filt=x1_filt, x2_filt=x2_filt,
+        loglik=loglik,
+        status=status,
+    )
+    # fmt: on
+
+
 def run_linear(
     A: NDF,
     B: NDF,
@@ -200,7 +370,6 @@ def run_linear(
     y: NDF,
     x0: NDF | None = None,
     P0: NDF | None = None,
-    return_shocks: bool = False,
     symmetrize: bool = True,
     joseph_cov: bool = False,
     jitter: float = 0.0,
@@ -231,8 +400,6 @@ def run_linear(
         State vector at t-1 to initialize the filter.
     P0 : NDF | None
         State covariance matrix at t-1 to initialize the filter.
-    return_shocks : bool
-        Whether to compute shock estimates (:attr:`FilterResult.eps_hat`).
     symmetrize : bool
         Whether to symmetrize the covariance matrices at each step via (M + M.T)/2.
     joseph_cov : bool
@@ -256,69 +423,112 @@ def run_linear(
     n = A.shape[0]  # n: state dim
     k = B.shape[1]  # k: shock dim
 
-    _shape_validate(
-        A,
-        B,
-        Q,
-        R,
-        C,
-        d,
-        nmk=(n, m, k),
-    )
+    _shape_validate(A, B, Q, R, C, d, nmk=(n, m, k))
 
     x_prev = x0.reshape(n) if x0 is not None else np.zeros((n,), dtype=float64)
     P_prev = _initialize_P0(P0, A, B, Q, n, symmetrize)
 
+    # fmt: off
     err, out = kf_forward(
-        T,
-        (n, m, k),
-        A,
-        B,
-        C,
-        d,
-        Q,
-        R,
+        T, (n, m, k),
+        A, B, C, d,
+        Q, R,
         steady_state,
         y,
-        x_prev,
-        P_prev,
+        x_prev, P_prev,
         symmetrize,
         joseph_cov,
         jitter,
-        return_shocks,
         _store_history,
     )
+    # fmt: on
     if err != 0 and _raise_on_error:
         ErrorConstructor = get_error_constructor(ErrorCode(err))
         raise ErrorConstructor(err)
-    (
-        x_pred,
-        x_filt,
-        P_pred,
-        P_filt,
-        y_pred,
-        y_filt,
-        v,
-        u,
-        S,
-        eps_hat,
-        loglik,
-    ) = out
+    return _filter_result(out, err)
 
-    return FilterResult(
-        x_pred=x_pred,
-        x_filt=x_filt,
-        P_pred=P_pred,
-        P_filt=P_filt,
-        y_pred=y_pred,
-        y_filt=y_filt,
-        innov=v,
-        std_innov=u,
-        S=S,
-        eps_hat=eps_hat if (return_shocks and _store_history) else None,
-        loglik=loglik,
-        status=err,
+
+def smooth_linear(
+    A: NDF,
+    B: NDF,
+    C: NDF,
+    d: NDF,
+    Q: NDF,
+    R: NDF,
+    steady_state: NDF,
+    y: NDF,
+    x0: NDF | None = None,
+    P0: NDF | None = None,
+    symmetrize: bool = True,
+    joseph_cov: bool = False,
+    jitter: float = 0.0,
+    _raise_on_error: bool = True,
+) -> SmootherResult[FilterResult]:
+    """Linear Gaussian Kalman smoother.
+
+    Parameters
+    ----------
+    A : NDF
+        State transition matrix. (SolvedModel.policy.A)
+    B : NDF
+        Shock loading matrix. (SolvedModel.policy.B)
+    C : NDF
+        Linear measurement coefficient matrix.
+    d : NDF
+        Linear measurement constant vector.
+    Q : NDF
+        Shock covariance matrix.
+    R : NDF
+        Measurement-noise covariance matrix.
+    steady_state : NDF
+        Steady-state vector of the state variables.
+    y : NDF
+        Observations in declared order. Shape (T, m) where T is the number of periods and m is the number of observed variables.
+    x0 : NDF | None
+        State vector at t-1 to initialize the filter.
+    P0 : NDF | None
+        State covariance matrix at t-1 to initialize the filter.
+    symmetrize : bool
+        Whether to symmetrize the covariance matrices at each step via (M + M.T)/2.
+    joseph_cov : bool
+        Whether to use the Joseph form of the covariance update.
+    jitter : float
+        Jitter to add when a cholesky decomposition fails. Set to 0.0 to disable.
+    _raise_on_error : bool
+        Whether to raise an exception if the filter encounters an error. If False, the filter will return a FilterResult with a nonzero :attr:`status` code.
+
+    Returns
+    -------
+    SmootherResult[FilterResult]
+        The result container of linear and extended Kalman smoothers.
+        Contains the forward pass filter result, smoothed states, state covariances, and shock estimates.
+    """
+    T, m = y.shape  # T: time steps, m: obs dim
+    n = A.shape[0]  # n: state dim
+    k = B.shape[1]  # k: shock dim
+
+    _shape_validate(A, B, Q, R, C, d, nmk=(n, m, k))
+
+    x_prev = x0.reshape(n) if x0 is not None else np.zeros((n,), dtype=float64)
+    P_prev = _initialize_P0(P0, A, B, Q, n, symmetrize)
+
+    # fmt: off
+    err, fwd, smooth = kf_smooth(
+        T, (n, m, k),
+        A, B, C, d,
+        Q, R,
+        steady_state,
+        y,
+        x_prev, P_prev,
+        symmetrize,
+        joseph_cov,
+        jitter,
     )
+    # fmt: on
+    if err != 0 and _raise_on_error:
+        ErrorConstructor = get_error_constructor(ErrorCode(err))
+        raise ErrorConstructor(err)
+    return _smoother_result(fwd, smooth, err)
 
 
 def run_unscented(
@@ -421,73 +631,12 @@ def run_unscented(
     """
     if meas_addr == 0:
         raise ValueError("meas_addr must be a nonzero measurement cfunc address.")
+    _ukf_shape_validate(
+        hx, gx, bu, hxx, gxx, hxu, gxu, huu, guu, hss, gss, steady_state, Q, R, y, z0
+    )
 
-    if hx.ndim != 2 or hx.shape[0] != hx.shape[1]:
-        raise ShapeMismatchError("hx", "(n_state, n_state)", str(hx.shape))
     n_state = hx.shape[0]
-    n_var = n_state + gx.shape[0]
     n_z = 2 * n_state
-
-    if bu.ndim != 2 or bu.shape[0] != n_var:
-        raise ShapeMismatchError("bu", f"({n_var}, n_exog)", str(bu.shape))
-    n_exog = bu.shape[1]
-
-    if gx.ndim != 2 or gx.shape[1] != n_state:
-        raise ShapeMismatchError("gx", f"(n_ctrl, {n_state})", str(gx.shape))
-    n_ctrl = gx.shape[0]
-    n_var = n_state + n_ctrl
-
-    if hxx.shape != (n_state, n_state, n_state):
-        raise ShapeMismatchError(
-            "hxx",
-            f"({n_state}, {n_state}, {n_state})",
-            str(hxx.shape),
-        )
-    if gxx.shape != (n_ctrl, n_state, n_state):
-        raise ShapeMismatchError(
-            "gxx",
-            f"({n_ctrl}, {n_state}, {n_state})",
-            str(gxx.shape),
-        )
-    if hxu.shape != (n_state, n_state, n_exog):
-        raise ShapeMismatchError(
-            "hxu",
-            f"({n_state}, {n_state}, {n_exog})",
-            str(hxu.shape),
-        )
-    if gxu.shape != (n_ctrl, n_state, n_exog):
-        raise ShapeMismatchError(
-            "gxu",
-            f"({n_ctrl}, {n_state}, {n_exog})",
-            str(gxu.shape),
-        )
-    if huu.shape != (n_state, n_exog, n_exog):
-        raise ShapeMismatchError(
-            "huu",
-            f"({n_state}, {n_exog}, {n_exog})",
-            str(huu.shape),
-        )
-    if guu.shape != (n_ctrl, n_exog, n_exog):
-        raise ShapeMismatchError(
-            "guu",
-            f"({n_ctrl}, {n_exog}, {n_exog})",
-            str(guu.shape),
-        )
-    if hss.shape != (n_state,):
-        raise ShapeMismatchError("hss", f"({n_state},)", str(hss.shape))
-    if gss.shape != (n_ctrl,):
-        raise ShapeMismatchError("gss", f"({n_ctrl},)", str(gss.shape))
-    if steady_state.shape != (n_var,):
-        raise ShapeMismatchError("steady_state", f"({n_var},)", str(steady_state.shape))
-    if Q.shape != (n_exog, n_exog):
-        raise ShapeMismatchError("Q", f"({n_exog}, {n_exog})", str(Q.shape))
-    if y.ndim != 2:
-        raise ShapeMismatchError("y", "(T, n_obs)", str(y.shape))
-    n_obs = y.shape[1]
-    if R.shape != (n_obs, n_obs):
-        raise ShapeMismatchError("R", f"({n_obs}, {n_obs})", str(R.shape))
-    if z0.shape != (n_z,):
-        raise ShapeMismatchError("z0", f"({n_z},)", str(z0.shape))
 
     P0 = _initalize_P0_unscented(P0, hx, bu[:n_state, :], Q, n_state, symmetrize)
     if P0.shape != (n_z, n_z):
@@ -497,70 +646,29 @@ def run_unscented(
         Q = _sym(Q)  # pyright: ignore
         R = _sym(R)  # pyright: ignore
 
+    # fmt: off
     err, out = ukf_forward(
         meas_addr,
-        hx,
-        gx,
-        bu,
-        hxx,
-        gxx,
-        hxu,
-        gxu,
-        huu,
-        guu,
-        hss,
-        gss,
+        hx, gx, bu,
+        hxx, gxx,
+        hxu, gxu,
+        huu, guu,
+        hss, gss,
         steady_state,
         calib_params,
-        Q,
-        R,
+        Q, R,
         y,
-        z0,
-        P0,
-        alpha,
-        beta,
-        kappa,
+        z0, P0,
+        alpha, beta, kappa,
         jitter,
         symmetrize,
         _store_history,
     )
+    # fmt: on
     if err != 0 and _raise_on_error:
         ErrorConstructor = get_error_constructor(ErrorCode(err))
         raise ErrorConstructor(err)
-
-    (
-        x1_pred,
-        x2_pred,
-        x1_filt,
-        x2_filt,
-        x_pred,
-        x_filt,
-        P_pred,
-        P_filt,
-        y_pred,
-        y_filt,
-        v,
-        u,
-        S,
-        loglik,
-    ) = out
-    return UnscentedFilterResult(
-        x_pred=x_pred,
-        x_filt=x_filt,
-        P_pred=P_pred,
-        P_filt=P_filt,
-        y_pred=y_pred,
-        y_filt=y_filt,
-        innov=v,
-        std_innov=u,
-        S=S,
-        x1_pred=x1_pred,
-        x2_pred=x2_pred,
-        x1_filt=x1_filt,
-        x2_filt=x2_filt,
-        loglik=loglik,
-        status=err,
-    )
+    return _unscented_result(out, err)
 
 
 def run_extended(
@@ -575,11 +683,9 @@ def run_extended(
     y: NDF,
     x0: NDF | None = None,
     P0: NDF | None = None,
-    return_shocks: bool = False,
     symmetrize: bool = True,
     joseph_cov: bool = False,
     jitter: float = 0.0,
-    compute_y_filt: bool = True,
     _store_history: bool = True,
     _raise_on_error: bool = True,
 ) -> FilterResult:
@@ -622,10 +728,6 @@ def run_extended(
     P0 : NDF | None
         Initial state covariance ``P_{0|0}``, shape ``(n, n)``. None starts from
         ``1e2 * I_n``.
-    return_shocks : bool
-        Whether to compute shock estimates (:attr:`FilterResult.eps_hat`) using the
-        same formula as the linear filter. Interpretable only where the
-        innovation-to-shock mapping is meaningful under the measurement design.
     symmetrize : bool
         Whether to symmetrize the covariance matrices at each step via ``(M + M.T)/2``.
     joseph_cov : bool
@@ -633,9 +735,6 @@ def run_extended(
     jitter : float
         Diagonal jitter added to ``S_t``, and only when its Cholesky factorization
         fails. Set to 0.0 to disable.
-    compute_y_filt : bool
-        Whether to evaluate ``y_filt[t] = h(x_filt[t], t)``. When False, ``y_filt``
-        is left as zeros with shape ``(T, m)``.
     _store_history : bool
         Whether to store the full history of the filter. If False, the filter
         operates in likelihood-only mode.
@@ -654,66 +753,130 @@ def run_extended(
     k = B.shape[1]
 
     # Shapes (reuse existing helper; C/d not used here)
-    _shape_validate(
-        A,
-        B,
-        Q,
-        R,
-        C=None,
-        d=None,
-        nmk=(n, m, k),
-    )
+    _shape_validate(A, B, Q, R, C=None, d=None, nmk=(n, m, k))
 
     x0 = x0.reshape(n) if x0 is not None else zeros((n,), dtype=float64)
     P0 = _initialize_P0(P0, A, B, Q, n, symmetrize)
+
+    # fmt: off
     err, out = ekf_forward(
-        meas_addr,
-        jac_addr,
-        A,
-        B,
+        meas_addr, jac_addr,
+        A, B,
         calib_params,
-        Q,
-        R,
+        Q, R,
         steady_state,
         y,
-        x0,
-        P0,
+        x0, P0,
         symmetrize,
         joseph_cov,
         jitter,
-        compute_y_filt,
-        return_shocks,
         _store_history,
     )
-
+    # fmt: on
     if err != 0 and _raise_on_error:
         ErrorConstructor = get_error_constructor(ErrorCode(err))
         raise ErrorConstructor(err)
-    (
-        x_pred,
-        x_filt,
-        P_pred,
-        P_filt,
-        y_pred,
-        y_filt,
-        v,
-        u,
-        S,
-        eps_hat,
-        loglik,
-    ) = out
+    return _filter_result(out, err)
 
-    return FilterResult(
-        x_pred=x_pred,
-        x_filt=x_filt,
-        P_pred=P_pred,
-        P_filt=P_filt,
-        y_pred=y_pred,
-        y_filt=y_filt,
-        innov=v,
-        std_innov=u,
-        S=S,
-        eps_hat=eps_hat if (return_shocks and _store_history) else None,
-        loglik=loglik,
-        status=err,
+
+def smooth_extended(
+    meas_addr: int,
+    jac_addr: int,
+    A: NDF,
+    B: NDF,
+    calib_params: NDF,
+    Q: NDF,
+    R: NDF,
+    steady_state: NDF,
+    y: NDF,
+    x0: NDF | None = None,
+    P0: NDF | None = None,
+    symmetrize: bool = True,
+    joseph_cov: bool = False,
+    jitter: float = 0.0,
+    _raise_on_error: bool = True,
+) -> SmootherResult[FilterResult]:
+    """Extended Kalman smoother with a linear transition and nonlinear measurement.
+
+    The state evolves linearly while the measurement does not:
+
+        x_t = A x_{t-1} + B eps_t,     eps_t ~ N(0, Q)
+        y_t = h(x_t, t) + v_t,         v_t   ~ N(0, R)
+
+    The prediction step is the standard linear recursion. The update step
+    linearizes the measurement around the predicted state, taking
+    ``H_t = dh/dx`` evaluated at ``x_{t|t-1}``.
+
+    Parameters
+    ----------
+    meas_addr : int
+        Address of the compiled measurement cfunc. Evaluates ``h`` at a single
+        state, returning a vector of length ``m``.
+    jac_addr : int
+        Address of the compiled measurement Jacobian cfunc. Returns ``H_t`` with
+        shape ``(m, n)``.
+    A : NDF
+        State transition matrix, shape ``(n, n)``.
+    B : NDF
+        Shock loading matrix, shape ``(n, k)``.
+    calib_params : NDF
+        Calibration parameter vector passed to both cfuncs.
+    Q : NDF
+        Shock covariance matrix, shape ``(k, k)``. Process noise lives in shock
+        space, so ``Q`` is ``(k, k)`` against a ``(n, k)`` loading.
+    R : NDF
+        Measurement-noise covariance matrix, shape ``(m, m)``.
+    steady_state : NDF
+        Steady-state vector of the state variables.
+    y : NDF
+        Observations in declared order, shape ``(T, m)``.
+    x0 : NDF | None
+        Initial state mean ``x_{0|0}``, shape ``(n,)``. None starts from zeros.
+    P0 : NDF | None
+        Initial state covariance ``P_{0|0}``, shape ``(n, n)``. None starts from
+        ``1e2 * I_n``.
+    symmetrize : bool
+        Whether to symmetrize the covariance matrices at each step via ``(M + M.T)/2``.
+    joseph_cov : bool
+        Whether to use the Joseph form of the covariance update.
+    jitter : float
+        Diagonal jitter added to ``S_t``, and only when its Cholesky factorization
+        fails. Set to 0.0 to disable.
+    _raise_on_error : bool
+        Whether to raise if the recursion fails. If False, a result carrying a
+        nonzero ``status`` is returned instead.
+
+    Returns
+    -------
+    SmootherResult[FilterResult]
+        The result container of extended Kalman smoothers.
+        Contains the forward pass filter result, smoothed states, state covariances, and shock estimates.
+    """
+    _, m = y.shape
+    n = A.shape[0]
+    k = B.shape[1]
+
+    # Shapes (reuse existing helper; C/d not used here)
+    _shape_validate(A, B, Q, R, C=None, d=None, nmk=(n, m, k))
+
+    x0 = x0.reshape(n) if x0 is not None else zeros((n,), dtype=float64)
+    P0 = _initialize_P0(P0, A, B, Q, n, symmetrize)
+
+    # fmt: off
+    err, fwd, smooth = ekf_smooth(
+        meas_addr, jac_addr,
+        A, B,
+        calib_params,
+        Q, R,
+        steady_state,
+        y,
+        x0, P0,
+        symmetrize,
+        joseph_cov,
+        jitter,
     )
+    # fmt: on
+    if err != 0 and _raise_on_error:
+        ErrorConstructor = get_error_constructor(ErrorCode(err))
+        raise ErrorConstructor(err)
+    return _smoother_result(fwd, smooth, err)

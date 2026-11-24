@@ -136,7 +136,6 @@ cdef extern from "../kalman/linear.h":
         int symmetrize
         int joseph_cov
         double jitter
-        int return_shocks
         int store_history
     arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
 
@@ -161,8 +160,6 @@ cdef extern from "../kalman/extended.h":
         double jitter
         int symmetrize
         int joseph_cov
-        int compute_y_filt
-        int return_shocks
         int store_history
     arena_size ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
 

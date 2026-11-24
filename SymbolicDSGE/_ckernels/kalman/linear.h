@@ -23,13 +23,11 @@ typedef struct {
   int symmetrize;    /* symmetrize P/S each step (0/1) */
   int joseph_cov;    /* use Joseph form for P update (0/1) */
   f64 jitter;        /* diagonal jitter for the Cholesky */
-  int return_shocks; /* compute eps_hat (0/1) */
   int store_history; /* fill the per-step history arrays (0/1) */
 } kf_inputs;
 
 /* Caller-allocated outputs. When store_history is 0 the history arrays may be
- * NULL / zero-length; eps_hat is written only when return_shocks &&
- * store_history. loglik is always written. */
+ * zero-length. */
 typedef struct {
   f64 *x_pred, *x_filt;   /* (T, n) */
   f64 *P_pred, *P_filt;   /* (T, n, n) */

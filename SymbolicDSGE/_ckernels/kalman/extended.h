@@ -14,7 +14,7 @@ typedef struct {
   const f64 *P0; /* (n, n) initial state covariance (pre-symmetrized) */
   i64 T, n, m, k, n_par;
   f64 jitter;
-  int symmetrize, joseph_cov, compute_y_filt, return_shocks, store_history;
+  int symmetrize, joseph_cov, store_history;
 } ekf_inputs;
 
 typedef struct {

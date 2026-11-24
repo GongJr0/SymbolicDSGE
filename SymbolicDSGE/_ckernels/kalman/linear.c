@@ -52,7 +52,7 @@ static int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
   f64 *temp_km = M + k * m;
 
   kf_build_bqbt(in->B, in->Q, temp_nk, BQBT, n, k);
-  if (in->return_shocks && in->store_history)
+  if (in->store_history)
     kf_build_shock_projection(in->B, in->C, in->Q, temp_km, M, n, k, m);
 
   const f64 const_term = (f64)m * log(TWO_PI); /* m * log(2*pi) */
@@ -98,10 +98,8 @@ static int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
     loglik += -0.5 * (const_term + sdsge_logdet_from_chol(L, m) +
                       sdsge_dot(v_buf, S_inv_v, m));
 
-    if (in->return_shocks && in->store_history)
-      sdsge_matvec(M, S_inv_v, out->eps_hat + t * k, k, m);
-
     if (in->store_history) {
+      sdsge_matvec(M, S_inv_v, out->eps_hat + t * k, k, m);
       sdsge_matvec_plus_vec(in->C, x_filt_buf, in->d, y_filt_buf, m, n);
 
       memcpy(out->x_pred + t * n, x_pred_buf, (size_t)n * sizeof(f64));

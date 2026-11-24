@@ -113,7 +113,6 @@ def test_run_extended_matches_ekf_oracle():
         y,
         x0=x0,
         P0=P0,
-        return_shocks=True,
     )
     ref = ekf_reference(
         A,

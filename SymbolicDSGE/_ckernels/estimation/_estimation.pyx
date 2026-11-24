@@ -312,7 +312,6 @@ cdef void _alloc_fill_kf(sdsge_linear_ctx *c, object kf_dto, object sol_dto,
     c.kf_ctx.symmetrize = <int>bool(kf_dto.symmetrize)
     c.kf_ctx.joseph_cov = <int>bool(kf_dto.joseph_cov)
     c.kf_ctx.jitter = <double>kf_dto.jitter
-    c.kf_ctx.return_shocks = 0
     c.kf_ctx.store_history = 0
 
 
@@ -342,8 +341,6 @@ cdef void _alloc_fill_ekf(sdsge_extended_ctx *c, object kf_dto, object sol_dto,
     c.ekf_ctx.jitter = <double>kf_dto.jitter
     c.ekf_ctx.symmetrize = <int>bool(kf_dto.symmetrize)
     c.ekf_ctx.joseph_cov = <int>bool(kf_dto.joseph_cov)
-    c.ekf_ctx.compute_y_filt = 0
-    c.ekf_ctx.return_shocks = 0
     c.ekf_ctx.store_history = 0
 
 

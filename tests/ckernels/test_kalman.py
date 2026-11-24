@@ -9,9 +9,7 @@ from numba import cfunc, types
 
 from SymbolicDSGE.filters.errors import ErrorCode
 from SymbolicDSGE._ckernels.kalman import (
-    stationary_covariance,
     kf_forward,
-    ekf_forward,
     ukf_forward,
 )
 from _oracles.kalman import kf_reference
@@ -77,7 +75,6 @@ def _ukf_measure_first_var(model_vars, _params, out):
 )
 @pytest.mark.parametrize("symmetrize", [True, False])
 @pytest.mark.parametrize("joseph_cov", [True, False])
-@pytest.mark.parametrize("return_shocks", [True, False])
 @pytest.mark.parametrize("store_history", [True, False])
 def test_kalman_matches_oracle(
     n: int,
@@ -86,7 +83,6 @@ def test_kalman_matches_oracle(
     T: int,
     symmetrize: bool,
     joseph_cov: bool,
-    return_shocks: bool,
     store_history: bool,
 ) -> None:
     A, B, C, d, Q, R, ss, y, x0, P0 = _make_system(
@@ -108,7 +104,6 @@ def test_kalman_matches_oracle(
         symmetrize,
         joseph_cov,
         0.0,
-        return_shocks,
         store_history,
     )
 
@@ -151,7 +146,6 @@ def test_kalman_non_pd_returns_error_code() -> None:
         True,
         True,
         0.0,
-        False,
         True,
     )
     status, _ = kf_forward(*args)

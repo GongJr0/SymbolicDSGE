@@ -113,13 +113,11 @@ static int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
     loglik += -0.5 * (const_term + sdsge_logdet_from_chol(L, m) +
                       sdsge_dot(v_buf, S_inv_v, m));
 
-    if (in->return_shocks && in->store_history) {
+    if (in->store_history) {
       /* H_buf changes each step, so rebuild the shock projection per step. */
       kf_build_shock_projection(in->B, H_buf, in->Q, temp_km, M, n, k, m);
       sdsge_matvec(M, S_inv_v, out->eps_hat + t * k, k, m);
-    }
 
-    if (in->store_history) {
       memcpy(out->x_pred + t * n, x_pred_buf, (size_t)n * sizeof(f64));
       memcpy(out->x_filt + t * n, x_filt_buf, (size_t)n * sizeof(f64));
 
@@ -134,15 +132,13 @@ static int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
              (size_t)(n * n) * sizeof(f64));
       memcpy(out->y_pred + t * m, y_pred_buf, (size_t)m * sizeof(f64));
 
-      if (in->compute_y_filt) {
-        if (in->steady_state != NULL) {
-          for (i64 i = 0; i < n; ++i) {
-            x_lvl[i] = x_filt_buf[i] + in->steady_state[i];
-          }
-          in->meas(x_lvl, in->calib_params, out->y_filt + t * m);
-        } else {
-          in->meas(x_filt_buf, in->calib_params, out->y_filt + t * m);
+      if (in->steady_state != NULL) {
+        for (i64 i = 0; i < n; ++i) {
+          x_lvl[i] = x_filt_buf[i] + in->steady_state[i];
         }
+        in->meas(x_lvl, in->calib_params, out->y_filt + t * m);
+      } else {
+        in->meas(x_filt_buf, in->calib_params, out->y_filt + t * m);
       }
 
       memcpy(out->innov + t * m, v_buf, (size_t)m * sizeof(f64));

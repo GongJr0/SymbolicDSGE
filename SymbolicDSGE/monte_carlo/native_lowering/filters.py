@@ -165,8 +165,6 @@ def lower_filter_step(
         )
 
     else:  # mode == "unscented"
-        if step.kwargs.get("return_shocks"):
-            raise ValueError("Unscented filtering does not support return_shocks.")
         policy = model.policy
         if not isinstance(policy, SecondOrderSolution):
             raise ValueError(

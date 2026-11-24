@@ -11,8 +11,11 @@ from .base import Filter, ResultT
 from .filter import (
     FilterResult,
     UnscentedFilterResult,
+    SmootherResult,
     run_linear,
+    smooth_linear,
     run_extended,
+    smooth_extended,
     run_unscented,
 )
 from .resolvers import (
@@ -35,7 +38,6 @@ class GaussianFilter(Filter[ResultT]):
 class LinearKalman(GaussianFilter[FilterResult]):
     mode: ClassVar[FilterMode] = FilterMode.LINEAR
     joseph_cov: bool = False
-    return_shocks: bool = False
 
     def filter(
         self,
@@ -88,7 +90,29 @@ class LinearKalman(GaussianFilter[FilterResult]):
                 jitter=self.jitter,
                 symmetrize=self.symmetrize,
                 joseph_cov=self.joseph_cov,
-                return_shocks=self.return_shocks,
+            )
+        )
+
+    def smooth(
+        self,
+        model: SolvedModel,
+        y: NDArray[float64],
+        observables: list[str] | tuple[str, ...] | None = None,
+        R: NDArray[float64] | None = None,
+        x0: dict[str, float] | list[float] | NDArray[float64] | None = None,
+        P0: NDArray[float64] | None = None,
+    ) -> SmootherResult[FilterResult]:
+        return smooth_linear(
+            **_resolve_linear_args(
+                model,
+                y,
+                observables,
+                x0=x0,
+                P0=P0,
+                R=R,
+                jitter=self.jitter,
+                symmetrize=self.symmetrize,
+                joseph_cov=self.joseph_cov,
             )
         )
 
@@ -97,7 +121,6 @@ class LinearKalman(GaussianFilter[FilterResult]):
 class ExtendedKalman(GaussianFilter[FilterResult]):
     mode: ClassVar[FilterMode] = FilterMode.EXTENDED
     joseph_cov: bool = False
-    return_shocks: bool = False
 
     def filter(
         self,
@@ -150,7 +173,29 @@ class ExtendedKalman(GaussianFilter[FilterResult]):
                 jitter=self.jitter,
                 symmetrize=self.symmetrize,
                 joseph_cov=self.joseph_cov,
-                return_shocks=self.return_shocks,
+            )
+        )
+
+    def smooth(
+        self,
+        model: SolvedModel,
+        y: NDArray[float64],
+        observables: list[str] | tuple[str, ...] | None = None,
+        R: NDArray[float64] | None = None,
+        x0: dict[str, float] | list[float] | NDArray[float64] | None = None,
+        P0: NDArray[float64] | None = None,
+    ) -> SmootherResult[FilterResult]:
+        return smooth_extended(
+            **_resolve_extended_args(
+                model,
+                y,
+                observables,
+                x0=x0,
+                P0=P0,
+                R=R,
+                jitter=self.jitter,
+                symmetrize=self.symmetrize,
+                joseph_cov=self.joseph_cov,
             )
         )
 
@@ -225,3 +270,14 @@ class UnscentedKalman(GaussianFilter[UnscentedFilterResult]):
                 kappa=self.kappa,
             )
         )
+
+    def smooth(
+        self,
+        model: SolvedModel,
+        y: NDArray[float64],
+        observables: list[str] | tuple[str, ...] | None = None,
+        R: NDArray[float64] | None = None,
+        x0: dict[str, float] | list[float] | NDArray[float64] | None = None,
+        P0: NDArray[float64] | None = None,
+    ) -> SmootherResult[UnscentedFilterResult]:
+        raise NotImplementedError("Unscented Kalman smoothing is not implemented.")
