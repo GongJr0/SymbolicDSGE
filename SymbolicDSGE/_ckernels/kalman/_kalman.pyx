@@ -79,11 +79,25 @@ cdef extern from "linear.h":
         double *eps_hat
         double *loglik
 
+    ctypedef struct kf_smooth_outputs:
+        kf_outputs *fwd_out
+        double *x_smooth
+        double *P_smooth
+        double *eps_smooth
+
     arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
     int c_kf_forward "kf_forward"(
         const kf_inputs *inp,
         double *arena,
         kf_outputs *outp,
+    ) nogil
+
+    arena_size kf_smooth_arena_size(int64_t n, int64_t m,
+                                    int64_t k, int64_t T) nogil
+    int c_kf_smooth "kf_smooth"(
+        const kf_inputs *inp,
+        double *arena,
+        kf_smooth_outputs *outp,
     ) nogil
 
 cdef extern from "extended.h":
@@ -124,11 +138,25 @@ cdef extern from "extended.h":
         double *eps_hat
         double *loglik
 
+    ctypedef struct ekf_smooth_outputs:
+        ekf_outputs *fwd_out
+        double *x_smooth
+        double *P_smooth
+        double *eps_smooth
+
     arena_size ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
     int c_ekf_forward "ekf_forward"(
         const ekf_inputs *inp,
         double *arena,
         ekf_outputs *outp,
+    ) nogil
+
+    arena_size ekf_smooth_arena_size(int64_t n, int64_t m,
+                                     int64_t k, int64_t T) nogil
+    int c_ekf_smooth "ekf_smooth"(
+        const ekf_inputs *inp,
+        double *arena,
+        ekf_smooth_outputs *outp,
     ) nogil
 
 cdef extern from "unscented.h":
@@ -210,6 +238,122 @@ KF_ERR_S_FACTORIZATION = c_KF_ERR_S_FACTORIZATION
 KF_ERR_BAD_HYPERPARAMS = c_KF_ERR_BAD_HYPERPARAMS
 
 
+cdef tuple _kf_build(
+    kf_inputs *inp,
+    kf_outputs *outp,
+    double *loglik,
+    int64_t T,
+    nmk,
+    A, B,
+    C, d,
+    Q, R,
+    steady_state,
+    y,
+    x0, P0,
+    bint symmetrize,
+    bint joseph_cov,
+    double jitter,
+    bint return_shocks,
+    bint store_history,
+):
+    """Fill the linear filter's input and output structs.
+
+    Returns ``(inputs, history)``: the coerced inputs the structs point into,
+    and the history arrays. Both must stay referenced until the kernel returns.
+    """
+    cdef int64_t n = nmk[0]
+    cdef int64_t m = nmk[1]
+    cdef int64_t k = nmk[2]
+
+    if T <= 0:
+        raise ValueError("y must have at least one row.")
+
+    cdef int64_t hist_T = T if store_history else 0
+    cdef int64_t shock_T = T if (return_shocks and store_history) else 0
+
+    A_arr = np.ascontiguousarray(A, dtype=np.float64)
+    B_arr = np.ascontiguousarray(B, dtype=np.float64)
+    C_arr = np.ascontiguousarray(C, dtype=np.float64)
+    d_arr = np.ascontiguousarray(d, dtype=np.float64)
+    Q_arr = np.ascontiguousarray(Q, dtype=np.float64)
+    R_arr = np.ascontiguousarray(R, dtype=np.float64)
+    ss_arr = np.ascontiguousarray(steady_state, dtype=np.float64)
+    y_arr = np.ascontiguousarray(y, dtype=np.float64)
+    x0_arr = np.ascontiguousarray(x0, dtype=np.float64)
+    P0_arr = np.ascontiguousarray(P0, dtype=np.float64)
+
+    cdef double[:, ::1] Av = A_arr
+    cdef double[:, ::1] Bv = B_arr
+    cdef double[:, ::1] Cv = C_arr
+    cdef double[::1] dv = d_arr
+    cdef double[:, ::1] Qv = Q_arr
+    cdef double[:, ::1] Rv = R_arr
+    cdef double[::1] ssv = ss_arr
+    cdef const double[:, ::1] yv = y_arr
+    cdef double[::1] x0v = x0_arr
+    cdef double[:, ::1] P0v = P0_arr
+
+    x_pred = np.zeros((hist_T, n), dtype=np.float64)
+    x_filt = np.zeros((hist_T, n), dtype=np.float64)
+    P_pred = np.zeros((hist_T, n, n), dtype=np.float64)
+    P_filt = np.zeros((hist_T, n, n), dtype=np.float64)
+    y_pred = np.zeros((hist_T, m), dtype=np.float64)
+    y_filt = np.zeros((hist_T, m), dtype=np.float64)
+    innov = np.zeros((hist_T, m), dtype=np.float64)
+    std_innov = np.zeros((hist_T, m), dtype=np.float64)
+    S = np.zeros((hist_T, m, m), dtype=np.float64)
+    eps_hat = np.zeros((shock_T, k), dtype=np.float64)
+
+    cdef double[:, ::1] x_pred_mv = x_pred
+    cdef double[:, ::1] x_filt_mv = x_filt
+    cdef double[:, :, ::1] P_pred_mv = P_pred
+    cdef double[:, :, ::1] P_filt_mv = P_filt
+    cdef double[:, ::1] y_pred_mv = y_pred
+    cdef double[:, ::1] y_filt_mv = y_filt
+    cdef double[:, ::1] innov_mv = innov
+    cdef double[:, ::1] std_innov_mv = std_innov
+    cdef double[:, :, ::1] S_mv = S
+    cdef double[:, ::1] eps_hat_mv = eps_hat
+
+    inp.n = n
+    inp.m = m
+    inp.k = k
+    inp.T = T
+    inp.A = &Av[0, 0]
+    inp.B = &Bv[0, 0]
+    inp.C = &Cv[0, 0]
+    inp.d = &dv[0]
+    inp.Q = &Qv[0, 0]
+    inp.R = &Rv[0, 0]
+    inp.steady_state = &ssv[0]
+    inp.y = &yv[0, 0]
+    inp.x0 = &x0v[0]
+    inp.P0 = &P0v[0, 0]
+    inp.symmetrize = symmetrize
+    inp.joseph_cov = joseph_cov
+    inp.jitter = jitter
+    inp.return_shocks = return_shocks
+    inp.store_history = store_history
+
+    outp.x_pred = &x_pred_mv[0, 0]
+    outp.x_filt = &x_filt_mv[0, 0]
+    outp.P_pred = &P_pred_mv[0, 0, 0]
+    outp.P_filt = &P_filt_mv[0, 0, 0]
+    outp.y_pred = &y_pred_mv[0, 0]
+    outp.y_filt = &y_filt_mv[0, 0]
+    outp.innov = &innov_mv[0, 0]
+    outp.std_innov = &std_innov_mv[0, 0]
+    outp.S = &S_mv[0, 0, 0]
+    outp.eps_hat = &eps_hat_mv[0, 0]
+    outp.loglik = loglik
+
+    return (
+        (A_arr, B_arr, C_arr, d_arr, Q_arr, R_arr, ss_arr, y_arr, x0_arr, P0_arr),
+        (x_pred, x_filt, P_pred, P_filt, y_pred, y_filt, innov, std_innov, S,
+         eps_hat),
+    )
+
+
 def kf_forward(
     int64_t T,
     nmk,
@@ -225,114 +369,72 @@ def kf_forward(
     bint return_shocks=False,
     bint store_history=True,
 ):
-    """Run the linear Kalman filter.
-
-    Array inputs are coerced to contiguous float64 here. Returns
-    ``(status, out)`` where ``status`` is a ``kalman.errors`` code (KF_OK on
-    success) and ``out`` is the history tuple + loglik; the caller maps a nonzero
-    status to the matching in-house exception.
-    """
-    cdef int64_t n = nmk[0]
-    cdef int64_t m = nmk[1]
-    cdef int64_t k = nmk[2]
-
-    cdef int64_t hist_T = T if store_history else 0
-    cdef int64_t shock_T = T if (return_shocks and store_history) else 0
-
-    cdef double[:, ::1] Av = np.ascontiguousarray(A, dtype=np.float64)
-    cdef double[:, ::1] Bv = np.ascontiguousarray(B, dtype=np.float64)
-    cdef double[:, ::1] Cv = np.ascontiguousarray(C, dtype=np.float64)
-    cdef double[::1] dv = np.ascontiguousarray(d, dtype=np.float64)
-
-    cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
-    cdef double[:, ::1] Rv = np.ascontiguousarray(R, dtype=np.float64)
-
-    cdef double[::1] ssv = np.ascontiguousarray(steady_state, dtype=np.float64)
-
-    cdef const double[:, ::1] yv = np.ascontiguousarray(y, dtype=np.float64)
-
-    cdef double[::1] x0v = np.ascontiguousarray(x0, dtype=np.float64)
-    cdef double[:, ::1] P0v = np.ascontiguousarray(P0, dtype=np.float64)
-
-    x_pred = np.zeros((hist_T, n), dtype=np.float64)
-    x_filt = np.zeros((hist_T, n), dtype=np.float64)
-    P_pred = np.zeros((hist_T, n, n), dtype=np.float64)
-    P_filt = np.zeros((hist_T, n, n), dtype=np.float64)
-    y_pred = np.zeros((hist_T, m), dtype=np.float64)
-    y_filt = np.zeros((hist_T, m), dtype=np.float64)
-    innov = np.zeros((hist_T, m), dtype=np.float64)
-    std_innov = np.zeros((hist_T, m), dtype=np.float64)
-    S = np.zeros((hist_T, m, m), dtype=np.float64)
-    eps_hat = np.zeros((shock_T, k), dtype=np.float64)
-    arena = np.empty(kf_arena_size(n, m, k).n_float, dtype=np.float64)
-    cdef double loglik = 0.0
-
-    cdef double[:, ::1] x_pred_mv = x_pred
-    cdef double[:, ::1] x_filt_mv = x_filt
-    cdef double[:, :, ::1] P_pred_mv = P_pred
-    cdef double[:, :, ::1] P_filt_mv = P_filt
-    cdef double[:, ::1] y_pred_mv = y_pred
-    cdef double[:, ::1] y_filt_mv = y_filt
-    cdef double[:, ::1] innov_mv = innov
-    cdef double[:, ::1] std_innov_mv = std_innov
-    cdef double[:, :, ::1] S_mv = S
-    cdef double[:, ::1] eps_hat_mv = eps_hat
-    cdef double[::1] arena_mv = arena
-
+    """Run the linear Kalman filter."""
     cdef kf_inputs inp
-    inp.n = n
-    inp.m = m
-    inp.k = k
-    inp.T = T
-    inp.A = &Av[0, 0]
-    inp.B = &Bv[0, 0]
-    inp.C = &Cv[0, 0]
-    inp.d = &dv[0]
-    inp.Q = &Qv[0, 0]
-    inp.R = &Rv[0, 0]
-    inp.steady_state = &ssv[0]
-    inp.y = &yv[0, 0] if T > 0 else NULL
-    inp.x0 = &x0v[0]
-    inp.P0 = &P0v[0, 0]
-    inp.symmetrize = symmetrize
-    inp.joseph_cov = joseph_cov
-    inp.jitter = jitter
-    inp.return_shocks = return_shocks
-    inp.store_history = store_history
-
     cdef kf_outputs outp
-    outp.x_pred = &x_pred_mv[0, 0] if hist_T > 0 else NULL
-    outp.x_filt = &x_filt_mv[0, 0] if hist_T > 0 else NULL
-    outp.P_pred = &P_pred_mv[0, 0, 0] if hist_T > 0 else NULL
-    outp.P_filt = &P_filt_mv[0, 0, 0] if hist_T > 0 else NULL
-    outp.y_pred = &y_pred_mv[0, 0] if hist_T > 0 else NULL
-    outp.y_filt = &y_filt_mv[0, 0] if hist_T > 0 else NULL
-    outp.innov = &innov_mv[0, 0] if hist_T > 0 else NULL
-    outp.std_innov = &std_innov_mv[0, 0] if hist_T > 0 else NULL
-    outp.S = &S_mv[0, 0, 0] if hist_T > 0 else NULL
-    outp.eps_hat = &eps_hat_mv[0, 0] if shock_T > 0 else NULL
-    outp.loglik = &loglik
+    cdef double loglik = 0.0
+    _, hist = _kf_build(
+        &inp, &outp, &loglik, T, nmk, A, B, C, d, Q, R, steady_state, y, x0,
+        P0, symmetrize, joseph_cov, jitter, return_shocks, store_history,
+    )
+
+    arena = np.empty(kf_arena_size(inp.n, inp.m, inp.k).n_float, dtype=np.float64)
+    cdef double[::1] arena_mv = arena
 
     cdef int status
     with nogil:
         status = c_kf_forward(&inp, &arena_mv[0], &outp)
 
-    return (
-        status,
-        (
-            x_pred,
-            x_filt,
-            P_pred,
-            P_filt,
-            y_pred,
-            y_filt,
-            innov,
-            std_innov,
-            S,
-            eps_hat,
-            loglik,
-        ),
+    return status, (*hist, loglik)
+
+
+def kf_smooth(
+    int64_t T,
+    nmk,
+    A, B,
+    C, d,
+    Q, R,
+    steady_state,
+    y,
+    x0, P0,
+    bint symmetrize,
+    bint joseph_cov,
+    double jitter,
+):
+    """Run the linear Kalman filter and smoother."""
+    cdef kf_inputs inp
+    cdef kf_outputs outp
+    cdef double loglik = 0.0
+    _, hist = _kf_build(
+        &inp, &outp, &loglik, T, nmk, A, B, C, d, Q, R, steady_state, y, x0,
+        P0, symmetrize, joseph_cov, jitter, False, True,
     )
+    cdef int64_t n = inp.n
+    cdef int64_t k = inp.k
+
+    x_smooth = np.zeros((T, n), dtype=np.float64)
+    P_smooth = np.zeros((T, n, n), dtype=np.float64)
+    eps_smooth = np.zeros((T, k), dtype=np.float64)
+    cdef double[:, ::1] x_smooth_mv = x_smooth
+    cdef double[:, :, ::1] P_smooth_mv = P_smooth
+    cdef double[:, ::1] eps_smooth_mv = eps_smooth
+
+    cdef kf_smooth_outputs sout
+    sout.fwd_out = &outp
+    sout.x_smooth = &x_smooth_mv[0, 0]
+    sout.P_smooth = &P_smooth_mv[0, 0, 0]
+    sout.eps_smooth = &eps_smooth_mv[0, 0]
+
+    arena = np.empty(
+        kf_smooth_arena_size(n, inp.m, k, T).n_float, dtype=np.float64
+    )
+    cdef double[::1] arena_mv = arena
+
+    cdef int status
+    with nogil:
+        status = c_kf_smooth(&inp, &arena_mv[0], &sout)
+
+    return status, (*hist, loglik), (x_smooth, P_smooth, eps_smooth)
 
 
 def stationary_covariance(
@@ -383,6 +485,129 @@ def stationary_covariance(
     return status, P
 
 
+cdef tuple _ekf_build(
+    ekf_inputs *inp,
+    ekf_outputs *outp,
+    double *loglik,
+    size_t meas_addr,
+    size_t jac_addr,
+    A, B,
+    calib_params,
+    Q, R,
+    steady_state,
+    y,
+    x0, P0,
+    bint symmetrize,
+    bint joseph_cov,
+    double jitter,
+    bint compute_y_filt,
+    bint return_shocks,
+    bint store_history,
+):
+    """Fill the extended filter's input and output structs.
+
+    Returns ``(inputs, history)``: the coerced inputs the structs point into,
+    and the history arrays. Both must stay referenced until the kernel returns.
+    """
+    cdef int64_t n = A.shape[0]
+    cdef int64_t k = B.shape[1]
+    cdef int64_t T = y.shape[0]
+    cdef int64_t m = y.shape[1]
+    cdef int64_t n_par = calib_params.shape[0]
+
+    if meas_addr == 0 or jac_addr == 0:
+        raise ValueError("The extended filter requires nonzero measurement "
+                         "and jacobian function addresses.")
+    if T <= 0:
+        raise ValueError("y must have at least one row.")
+
+    cdef int64_t hist_T = T if store_history else 0
+    cdef int64_t shock_T = T if (return_shocks and store_history) else 0
+
+    A_arr = np.ascontiguousarray(A, dtype=np.float64)
+    B_arr = np.ascontiguousarray(B, dtype=np.float64)
+    Q_arr = np.ascontiguousarray(Q, dtype=np.float64)
+    R_arr = np.ascontiguousarray(R, dtype=np.float64)
+    ss_arr = np.ascontiguousarray(steady_state, dtype=np.float64)
+    y_arr = np.ascontiguousarray(y, dtype=np.float64)
+    x0_arr = np.ascontiguousarray(x0, dtype=np.float64)
+    P0_arr = np.ascontiguousarray(P0, dtype=np.float64)
+    calib_arr = np.ascontiguousarray(calib_params, dtype=np.float64)
+
+    cdef double[:, ::1] Av = A_arr
+    cdef double[:, ::1] Bv = B_arr
+    cdef double[:, ::1] Qv = Q_arr
+    cdef double[:, ::1] Rv = R_arr
+    cdef double[::1] ssv = ss_arr
+    cdef const double[:, ::1] yv = y_arr
+    cdef double[::1] x0v = x0_arr
+    cdef double[:, ::1] P0v = P0_arr
+    cdef double[::1] calib_paramsv = calib_arr
+
+    x_pred = np.zeros((hist_T, n), dtype=np.float64)
+    x_filt = np.zeros((hist_T, n), dtype=np.float64)
+    P_pred = np.zeros((hist_T, n, n), dtype=np.float64)
+    P_filt = np.zeros((hist_T, n, n), dtype=np.float64)
+    y_pred = np.zeros((hist_T, m), dtype=np.float64)
+    y_filt = np.zeros((hist_T, m), dtype=np.float64)
+    innov = np.zeros((hist_T, m), dtype=np.float64)
+    std_innov = np.zeros((hist_T, m), dtype=np.float64)
+    S = np.zeros((hist_T, m, m), dtype=np.float64)
+    eps_hat = np.zeros((shock_T, k), dtype=np.float64)
+
+    cdef double[:, ::1] x_pred_mv = x_pred
+    cdef double[:, ::1] x_filt_mv = x_filt
+    cdef double[:, :, ::1] P_pred_mv = P_pred
+    cdef double[:, :, ::1] P_filt_mv = P_filt
+    cdef double[:, ::1] y_pred_mv = y_pred
+    cdef double[:, ::1] y_filt_mv = y_filt
+    cdef double[:, ::1] innov_mv = innov
+    cdef double[:, ::1] std_innov_mv = std_innov
+    cdef double[:, :, ::1] S_mv = S
+    cdef double[:, ::1] eps_hat_mv = eps_hat
+
+    inp.meas = <meas_fn><void*>meas_addr
+    inp.jac = <meas_fn><void*>jac_addr
+    inp.A = &Av[0, 0]
+    inp.B = &Bv[0, 0]
+    inp.calib_params = &calib_paramsv[0] if n_par > 0 else NULL
+    inp.Q = &Qv[0, 0]
+    inp.R = &Rv[0, 0]
+    inp.steady_state = &ssv[0]
+    inp.y = &yv[0, 0]
+    inp.x0 = &x0v[0]
+    inp.P0 = &P0v[0, 0]
+    inp.T = T
+    inp.n = n
+    inp.m = m
+    inp.k = k
+    inp.n_par = n_par
+    inp.jitter = jitter
+    inp.symmetrize = symmetrize
+    inp.joseph_cov = joseph_cov
+    inp.compute_y_filt = compute_y_filt
+    inp.return_shocks = return_shocks
+    inp.store_history = store_history
+
+    outp.x_pred = &x_pred_mv[0, 0]
+    outp.x_filt = &x_filt_mv[0, 0]
+    outp.P_pred = &P_pred_mv[0, 0, 0]
+    outp.P_filt = &P_filt_mv[0, 0, 0]
+    outp.y_pred = &y_pred_mv[0, 0]
+    outp.y_filt = &y_filt_mv[0, 0]
+    outp.innov = &innov_mv[0, 0]
+    outp.std_innov = &std_innov_mv[0, 0]
+    outp.S = &S_mv[0, 0, 0]
+    outp.eps_hat = &eps_hat_mv[0, 0]
+    outp.loglik = loglik
+
+    return (
+        (A_arr, B_arr, Q_arr, R_arr, ss_arr, y_arr, x0_arr, P0_arr, calib_arr),
+        (x_pred, x_filt, P_pred, P_filt, y_pred, y_filt, innov, std_innov, S,
+         eps_hat),
+    )
+
+
 def ekf_forward(
     size_t meas_addr,
     size_t jac_addr,
@@ -400,126 +625,76 @@ def ekf_forward(
     bint store_history=True,
 ):
     """Run the native extended Kalman filter (linear transition, nonlinear
-    measurement via the ``meas``/``jac`` @cfunc addresses).
-
-    ``meas_addr``/``jac_addr`` are real-valued @cfunc addresses with signature
-    ``void(double* x, double* params, double* out)``: ``meas`` writes
-    ``out[m]``, ``jac`` writes the (m, n) row-major jacobian. Array inputs are
-    coerced to contiguous float64 here. Returns ``(status, out)`` with the
-    history tuple + loglik; the caller maps a nonzero status to the matching
-    in-house exception.
-    """
-    cdef int64_t n = A.shape[0]
-    cdef int64_t k = B.shape[1]
-    cdef int64_t T = y.shape[0]
-    cdef int64_t m = y.shape[1]
-    cdef int64_t n_par = calib_params.shape[0]
-
-    if meas_addr == 0 or jac_addr == 0:
-        raise ValueError("ekf_forward requires nonzero measurement and "
-                         "jacobian function addresses.")
-
-    cdef int64_t hist_T = T if store_history else 0
-    cdef int64_t shock_T = T if (return_shocks and store_history) else 0
-
-    cdef double[:, ::1] Av = np.ascontiguousarray(A, dtype=np.float64)
-    cdef double[:, ::1] Bv = np.ascontiguousarray(B, dtype=np.float64)
-    cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
-    cdef double[:, ::1] Rv = np.ascontiguousarray(R, dtype=np.float64)
-    cdef double[::1] ssv = np.ascontiguousarray(steady_state, dtype=np.float64)
-
-    cdef const double[:, ::1] yv = np.ascontiguousarray(y, dtype=np.float64)
-
-    cdef double[::1] x0v = np.ascontiguousarray(x0, dtype=np.float64)
-    cdef double[:, ::1] P0v = np.ascontiguousarray(P0, dtype=np.float64)
-
-    cdef double[::1] calib_paramsv = np.ascontiguousarray(
-            calib_params,
-            dtype=np.float64,
+    measurement via the ``meas``/``jac`` @cfunc addresses)."""
+    cdef ekf_inputs inp
+    cdef ekf_outputs outp
+    cdef double loglik = 0.0
+    _, hist = _ekf_build(
+        &inp, &outp, &loglik, meas_addr, jac_addr, A, B, calib_params, Q, R,
+        steady_state, y, x0, P0, symmetrize, joseph_cov, jitter,
+        compute_y_filt, return_shocks, store_history,
     )
 
-    x_pred = np.zeros((hist_T, n), dtype=np.float64)
-    x_filt = np.zeros((hist_T, n), dtype=np.float64)
-    P_pred = np.zeros((hist_T, n, n), dtype=np.float64)
-    P_filt = np.zeros((hist_T, n, n), dtype=np.float64)
-    y_pred = np.zeros((hist_T, m), dtype=np.float64)
-    y_filt = np.zeros((hist_T, m), dtype=np.float64)
-    innov = np.zeros((hist_T, m), dtype=np.float64)
-    std_innov = np.zeros((hist_T, m), dtype=np.float64)
-    S = np.zeros((hist_T, m, m), dtype=np.float64)
-    eps_hat = np.zeros((shock_T, k), dtype=np.float64)
-    arena = np.empty(ekf_arena_size(n, m, k).n_float, dtype=np.float64)
-    cdef double loglik = 0.0
-
-    cdef double[:, ::1] x_pred_mv = x_pred
-    cdef double[:, ::1] x_filt_mv = x_filt
-    cdef double[:, :, ::1] P_pred_mv = P_pred
-    cdef double[:, :, ::1] P_filt_mv = P_filt
-    cdef double[:, ::1] y_pred_mv = y_pred
-    cdef double[:, ::1] y_filt_mv = y_filt
-    cdef double[:, ::1] innov_mv = innov
-    cdef double[:, ::1] std_innov_mv = std_innov
-    cdef double[:, :, ::1] S_mv = S
-    cdef double[:, ::1] eps_hat_mv = eps_hat
+    arena = np.empty(ekf_arena_size(inp.n, inp.m, inp.k).n_float, dtype=np.float64)
     cdef double[::1] arena_mv = arena
-
-    cdef ekf_inputs inp
-    inp.meas = <meas_fn><void*>meas_addr
-    inp.jac = <meas_fn><void*>jac_addr
-    inp.A = &Av[0, 0]
-    inp.B = &Bv[0, 0]
-    inp.calib_params = &calib_paramsv[0] if n_par > 0 else NULL
-    inp.Q = &Qv[0, 0]
-    inp.R = &Rv[0, 0]
-    inp.steady_state = &ssv[0]
-    inp.y = &yv[0, 0] if T > 0 else NULL
-    inp.x0 = &x0v[0]
-    inp.P0 = &P0v[0, 0]
-    inp.T = T
-    inp.n = n
-    inp.m = m
-    inp.k = k
-    inp.n_par = n_par
-    inp.jitter = jitter
-    inp.symmetrize = symmetrize
-    inp.joseph_cov = joseph_cov
-    inp.compute_y_filt = compute_y_filt
-    inp.return_shocks = return_shocks
-    inp.store_history = store_history
-
-    cdef ekf_outputs outp
-    outp.x_pred = &x_pred_mv[0, 0] if hist_T > 0 else NULL
-    outp.x_filt = &x_filt_mv[0, 0] if hist_T > 0 else NULL
-    outp.P_pred = &P_pred_mv[0, 0, 0] if hist_T > 0 else NULL
-    outp.P_filt = &P_filt_mv[0, 0, 0] if hist_T > 0 else NULL
-    outp.y_pred = &y_pred_mv[0, 0] if hist_T > 0 else NULL
-    outp.y_filt = &y_filt_mv[0, 0] if hist_T > 0 else NULL
-    outp.innov = &innov_mv[0, 0] if hist_T > 0 else NULL
-    outp.std_innov = &std_innov_mv[0, 0] if hist_T > 0 else NULL
-    outp.S = &S_mv[0, 0, 0] if hist_T > 0 else NULL
-    outp.eps_hat = &eps_hat_mv[0, 0] if shock_T > 0 else NULL
-    outp.loglik = &loglik
 
     cdef int status
     with nogil:
         status = c_ekf_forward(&inp, &arena_mv[0], &outp)
 
-    return (
-        status,
-        (
-            x_pred,
-            x_filt,
-            P_pred,
-            P_filt,
-            y_pred,
-            y_filt,
-            innov,
-            std_innov,
-            S,
-            eps_hat,
-            loglik,
-        ),
+    return status, (*hist, loglik)
+
+
+def ekf_smooth(
+    size_t meas_addr,
+    size_t jac_addr,
+    A, B,
+    calib_params,
+    Q, R,
+    steady_state,
+    y,
+    x0, P0,
+    bint symmetrize,
+    bint joseph_cov,
+    double jitter,
+    bint compute_y_filt=True,
+):
+    """Run the extended Kalman filter and smoother."""
+    cdef ekf_inputs inp
+    cdef ekf_outputs outp
+    cdef double loglik = 0.0
+    _, hist = _ekf_build(
+        &inp, &outp, &loglik, meas_addr, jac_addr, A, B, calib_params, Q, R,
+        steady_state, y, x0, P0, symmetrize, joseph_cov, jitter,
+        compute_y_filt, True, True,
     )
+    cdef int64_t n = inp.n
+    cdef int64_t k = inp.k
+    cdef int64_t T = inp.T
+
+    x_smooth = np.zeros((T, n), dtype=np.float64)
+    P_smooth = np.zeros((T, n, n), dtype=np.float64)
+    eps_smooth = np.zeros((T, k), dtype=np.float64)
+    cdef double[:, ::1] x_smooth_mv = x_smooth
+    cdef double[:, :, ::1] P_smooth_mv = P_smooth
+    cdef double[:, ::1] eps_smooth_mv = eps_smooth
+
+    cdef ekf_smooth_outputs sout
+    sout.fwd_out = &outp
+    sout.x_smooth = &x_smooth_mv[0, 0]
+    sout.P_smooth = &P_smooth_mv[0, 0, 0]
+    sout.eps_smooth = &eps_smooth_mv[0, 0]
+
+    arena = np.empty(
+        ekf_smooth_arena_size(n, inp.m, k, T).n_float, dtype=np.float64
+    )
+    cdef double[::1] arena_mv = arena
+
+    cdef int status
+    with nogil:
+        status = c_ekf_smooth(&inp, &arena_mv[0], &sout)
+
+    return status, (*hist, loglik), (x_smooth, P_smooth, eps_smooth)
 
 
 def ukf_forward(
@@ -596,6 +771,8 @@ def ukf_forward(
         raise ValueError("hx must have at least one state.")
     if n_obs <= 0:
         raise ValueError("obs must have at least one observable column.")
+    if T <= 0:
+        raise ValueError("obs must have at least one row.")
     if hxv.shape[1] != n_state:
         raise ValueError("hx must have shape (n_state, n_state).")
     if buv.shape[0] != n_var:
@@ -676,7 +853,7 @@ def ukf_forward(
     inp.params = &paramsv[0] if n_params > 0 else NULL
     inp.Q = &Qv[0, 0] if n_exog > 0 else NULL
     inp.R = &Rv[0, 0]
-    inp.obs = &obsv[0, 0] if T > 0 else NULL
+    inp.obs = &obsv[0, 0]
     inp.z0 = &z0v[0]
     inp.P0 = &P0v[0, 0]
     inp.T = T
@@ -706,19 +883,19 @@ def ukf_forward(
         inp.guu = NULL
 
     cdef ukf_outputs outp
-    outp.x1_pred = &x1_pred_mv[0, 0] if hist_T > 0 else NULL
-    outp.x2_pred = &x2_pred_mv[0, 0] if hist_T > 0 else NULL
-    outp.x1_filt = &x1_filt_mv[0, 0] if hist_T > 0 else NULL
-    outp.x2_filt = &x2_filt_mv[0, 0] if hist_T > 0 else NULL
-    outp.x_pred = &x_pred_mv[0, 0] if hist_T > 0 else NULL
-    outp.x_filt = &x_filt_mv[0, 0] if hist_T > 0 else NULL
-    outp.P_pred = &P_pred_mv[0, 0, 0] if hist_T > 0 else NULL
-    outp.P_filt = &P_filt_mv[0, 0, 0] if hist_T > 0 else NULL
-    outp.y_pred = &y_pred_mv[0, 0] if hist_T > 0 else NULL
-    outp.y_filt = &y_filt_mv[0, 0] if hist_T > 0 else NULL
-    outp.innov = &innov_mv[0, 0] if hist_T > 0 else NULL
-    outp.std_innov = &std_innov_mv[0, 0] if hist_T > 0 else NULL
-    outp.S = &S_mv[0, 0, 0] if hist_T > 0 else NULL
+    outp.x1_pred = &x1_pred_mv[0, 0]
+    outp.x2_pred = &x2_pred_mv[0, 0]
+    outp.x1_filt = &x1_filt_mv[0, 0]
+    outp.x2_filt = &x2_filt_mv[0, 0]
+    outp.x_pred = &x_pred_mv[0, 0]
+    outp.x_filt = &x_filt_mv[0, 0]
+    outp.P_pred = &P_pred_mv[0, 0, 0]
+    outp.P_filt = &P_filt_mv[0, 0, 0]
+    outp.y_pred = &y_pred_mv[0, 0]
+    outp.y_filt = &y_filt_mv[0, 0]
+    outp.innov = &innov_mv[0, 0]
+    outp.std_innov = &std_innov_mv[0, 0]
+    outp.S = &S_mv[0, 0, 0]
     outp.loglik = &loglik
 
     cdef int status

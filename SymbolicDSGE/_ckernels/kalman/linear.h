@@ -54,6 +54,8 @@ int kf_forward(const kf_inputs *in, f64 *SDSGE_RESTRICT arena, kf_outputs *out);
 
 /* Linear Kalman smoother. Cannot fail unless the forward pass fails.
  * Returns KF_OK, KF_ERR_S_FACTORIZATION. */
+arena_size kf_smooth_arena_size(const i64 n, const i64 m, const i64 k,
+                                const i64 T);
 int kf_smooth(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
               kf_smooth_outputs *out);
 

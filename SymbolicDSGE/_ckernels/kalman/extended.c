@@ -216,9 +216,10 @@ int ekf_smooth(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
   f64 *f = Ls + m * m;
   f64 *b = f + m;
 
-  sdsge_matmul_abt(in->Q, in->B, QBt, k, k, n);
   memset(r, 0, (size_t)n * sizeof(f64));
   memset(N_cur, 0, (size_t)(n * n) * sizeof(f64));
+
+  sdsge_matmul_abt(in->Q, in->B, QBt, k, k, n);
 
   for (i64 t = T - 1; t >= 0; --t) {
     const f64 *H = cache.H + t * m * n;

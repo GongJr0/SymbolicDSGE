@@ -38,6 +38,30 @@ def kf_forward(
 ]:
     """Run the linear Kalman filter."""
 
+def kf_smooth(
+    T: int,
+    nmk: tuple[int, int, int],
+    A: _F64,
+    B: _F64,
+    C: _F64,
+    d: _F64,
+    Q: _F64,
+    R: _F64,
+    steady_state: _F64,
+    y: _F64,
+    x0: _F64,
+    P0: _F64,
+    symmetrize: bool,
+    joseph_cov: bool,
+    jitter: float,
+) -> tuple[
+    int,
+    tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
+    tuple[_F64, _F64, _F64],
+]:
+    """Run the linear Kalman filter and smoother."""
+    ...
+
 def stationary_covariance(
     A: _F64,
     B: _F64,
@@ -46,6 +70,7 @@ def stationary_covariance(
     max_iterations: int = ...,
 ) -> tuple[int, _F64]:
     """Solve ``P = A P A.T + B Q B.T`` and return ``(status, P)``."""
+    ...
 
 def ekf_forward(
     meas_addr: int,
@@ -72,6 +97,32 @@ def ekf_forward(
     """Run the native extended Kalman filter (nonlinear measurement via the
     meas/jac @cfunc addresses).
     """
+    ...
+
+def ekf_smooth(
+    meas_addr: int,
+    jac_addr: int,
+    A: _F64,
+    B: _F64,
+    calib_params: _F64,
+    Q: _F64,
+    R: _F64,
+    steady_state: _F64,
+    y: _F64,
+    x0: _F64,
+    P0: _F64,
+    symmetrize: bool,
+    joseph_cov: bool,
+    jitter: float,
+) -> tuple[
+    int,
+    tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
+    tuple[_F64, _F64, _F64],
+]:
+    """Run the native extended Kalman filter and smoother (nonlinear measurement
+    via the meas/jac @cfunc addresses).
+    """
+    ...
 
 def ukf_forward(
     meas_addr: int,
@@ -119,3 +170,4 @@ def ukf_forward(
     ],
 ]:
     """Run the native second-order UKF hot loop."""
+    ...

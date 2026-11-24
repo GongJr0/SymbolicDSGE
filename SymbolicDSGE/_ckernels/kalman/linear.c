@@ -187,9 +187,10 @@ int kf_smooth(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
   f64 *f = Ls + m * m;
   f64 *b = f + m;
 
-  sdsge_matmul_abt(in->Q, in->B, QBt, k, k, n);
   memset(r, 0, (size_t)n * sizeof(f64));
   memset(N_cur, 0, (size_t)(n * n) * sizeof(f64));
+
+  sdsge_matmul_abt(in->Q, in->B, QBt, k, k, n);
 
   for (i64 i = 0; i < m; ++i) {
     for (i64 j = 0; j < n; ++j) {
