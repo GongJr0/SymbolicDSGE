@@ -1,6 +1,10 @@
 #include "core_steps.h"
 #include "../core/core.h"
 #include "../core/shocks.h"
+#include "../kalman/extended.h"
+#include "../kalman/kalman.h"
+#include "../kalman/linear.h"
+#include "../kalman/unscented.h"
 #include "layout.h"
 #include <string.h>
 
@@ -153,7 +157,7 @@ int sdsge_mc_filter_unscented_runner(const i64 rep_idx,
                              .n_float;
   (void)rep_idx;
   (void)int_work;
-  const int status = (int)sdsge_filter_unscented_step(
+  const int status = sdsge_filter_unscented_step(
       float_in_work, float_in_work + input_size, ctx->measurement, ctx->T,
       ctx->n_state, ctx->n_ctrl, ctx->n_exog, ctx->n_obs, ctx->n_par,
       ctx->alpha, ctx->beta, ctx->kappa, ctx->symmetrize, ctx->jitter,
@@ -326,7 +330,7 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                         .jitter = jitter,
                         .return_shocks = return_shocks,
                         .store_history = 1};
-  return kf_hot_loop(&in, scratch_arena, &out);
+  return kf_forward(&in, scratch_arena, &out);
 }
 
 int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
@@ -385,10 +389,10 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
                          .compute_y_filt = 1,
                          .return_shocks = return_shocks,
                          .store_history = 1};
-  return ekf_hot_loop(&in, scratch_arena, &out);
+  return ekf_forward(&in, scratch_arena, &out);
 }
 
-i64 sdsge_filter_unscented_step(
+int sdsge_filter_unscented_step(
     const f64 *SDSGE_RESTRICT input_arena, f64 *SDSGE_RESTRICT scratch_arena,
     const meas_fn meas, const i64 T, const i64 n_state, const i64 n_ctrl,
     const i64 n_exog, const i64 n_obs, const i64 n_par, const f64 alpha,
@@ -463,5 +467,5 @@ i64 sdsge_filter_unscented_step(
                          .jitter = jitter,
                          .symmetrize = symmetrize,
                          .store_history = 1};
-  return ukf_hot_loop(&in, scratch_arena, &out);
+  return ukf_forward(&in, scratch_arena, &out);
 }

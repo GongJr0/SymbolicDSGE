@@ -2,7 +2,6 @@
 #define SDSGE_MC_LAYOUT_H
 
 #include "../_common/sdsge_common.h"
-#include "../kalman/kalman.h"
 
 /* from core_steps.h */
 /* Source passthrough. ``input`` is the bound (n, p) source span in the input

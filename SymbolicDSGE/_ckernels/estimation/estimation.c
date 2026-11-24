@@ -1,7 +1,10 @@
 #include "estimation.h"
 #include "../core/klein_classify.h"
 #include "../core/klein_solve.h"
+#include "../kalman/extended.h"
 #include "../kalman/kalman.h"
+#include "../kalman/linear.h"
+#include "../kalman/unscented.h"
 #include "../optim/nelder_mead.h"
 #include "../optim/optim.h"
 #include <float.h>
@@ -281,7 +284,7 @@ f64 sdsge_obj_linear(sdsge_linear_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
 
   f64 ll = 0.0;
   kf_outputs llout = {.loglik = &ll};
-  if (kf_hot_loop(kfin, b->arena, &llout) != KF_OK) {
+  if (kf_forward(kfin, b->arena, &llout) != KF_OK) {
     return -INFINITY;
   }
   return sdsge_add_lp(b, theta, ll, has_priors);
@@ -315,7 +318,7 @@ f64 sdsge_obj_extended(sdsge_extended_ctx *ctx, const f64 *SDSGE_RESTRICT theta,
 
   f64 ll = 0.0;
   ekf_outputs llout = {.loglik = &ll};
-  if (ekf_hot_loop(ekfin, b->arena, &llout) != KF_OK) {
+  if (ekf_forward(ekfin, b->arena, &llout) != KF_OK) {
     return -INFINITY;
   }
   return sdsge_add_lp(b, theta, ll, has_priors);
@@ -350,7 +353,7 @@ f64 sdsge_obj_unscented(sdsge_unscented_ctx *ctx,
 
   f64 ll = 0.0;
   ukf_outputs ukfout = {.loglik = &ll};
-  if (ukf_hot_loop(ukfin, b->arena, &ukfout) != KF_OK) {
+  if (ukf_forward(ukfin, b->arena, &ukfout) != KF_OK) {
 
     return -INFINITY;
   }

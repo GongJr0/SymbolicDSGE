@@ -1,12 +1,4 @@
-"""Type stubs for the compiled ``_kalman`` extension.
-
-The native kernel carries no inspectable type information (the type checker never
-parses ``_kalman.pyx`` nor introspects the compiled object), so this signature
-exists solely to give the LSP and mypy the shape of the exported function. It
-must stay in sync with ``_kalman.pyx`` / ``kalman.c`` and the numba reference
-``SymbolicDSGE.kalman.filter._kalman_hot_loop`` (the two are interchangeable at
-the call site); the parity tests guard the runtime behavior, not this stub.
-"""
+"""Type stubs for the compiled ``_kalman`` extension."""
 
 from numpy import float64
 from numpy.typing import NDArray
@@ -22,7 +14,7 @@ KF_ERR_Q_FACTORIZATION: int = ...
 KF_ERR_S_FACTORIZATION: int = ...
 KF_ERR_BAD_HYPERPARAMS: int = ...
 
-def kalman_hot_loop(
+def kf_forward(
     T: int,
     nmk: tuple[int, int, int],
     A: _F64,
@@ -44,7 +36,7 @@ def kalman_hot_loop(
     int,
     tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
 ]:
-    """Run the linear Kalman filter; mirrors numba ``_kalman_hot_loop``."""
+    """Run the linear Kalman filter."""
 
 def stationary_covariance(
     A: _F64,
@@ -55,7 +47,7 @@ def stationary_covariance(
 ) -> tuple[int, _F64]:
     """Solve ``P = A P A.T + B Q B.T`` and return ``(status, P)``."""
 
-def ekf_hot_loop(
+def ekf_forward(
     meas_addr: int,
     jac_addr: int,
     A: _F64,
@@ -81,7 +73,7 @@ def ekf_hot_loop(
     meas/jac @cfunc addresses).
     """
 
-def ukf_hot_loop(
+def ukf_forward(
     meas_addr: int,
     hx: _F64,
     gx: _F64,

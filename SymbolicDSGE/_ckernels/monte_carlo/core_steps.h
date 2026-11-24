@@ -194,7 +194,7 @@ int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
                                f64 jitter, int return_shocks,
                                f64 *SDSGE_RESTRICT output_arena);
 
-i64 sdsge_filter_unscented_step(const f64 *SDSGE_RESTRICT input_arena,
+int sdsge_filter_unscented_step(const f64 *SDSGE_RESTRICT input_arena,
                                 f64 *SDSGE_RESTRICT scratch_arena, meas_fn meas,
                                 i64 T, i64 n_state, i64 n_ctrl, i64 n_exog,
                                 i64 n_obs, i64 n_par, f64 alpha, f64 beta,

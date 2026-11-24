@@ -2,9 +2,9 @@
 
 from .._ckernels.kalman import (
     stationary_covariance,
-    kalman_hot_loop,
-    ukf_hot_loop,
-    ekf_hot_loop,
+    kf_forward,
+    ekf_forward,
+    ukf_forward,
 )
 from .errors import (
     ErrorCode,
@@ -269,7 +269,7 @@ def run_linear(
     x_prev = x0.reshape(n) if x0 is not None else np.zeros((n,), dtype=float64)
     P_prev = _initialize_P0(P0, A, B, Q, n, symmetrize)
 
-    err, out = kalman_hot_loop(
+    err, out = kf_forward(
         T,
         (n, m, k),
         A,
@@ -497,7 +497,7 @@ def run_unscented(
         Q = _sym(Q)  # pyright: ignore
         R = _sym(R)  # pyright: ignore
 
-    err, out = ukf_hot_loop(
+    err, out = ukf_forward(
         meas_addr,
         hx,
         gx,
@@ -666,7 +666,7 @@ def run_extended(
 
     x0 = x0.reshape(n) if x0 is not None else zeros((n,), dtype=float64)
     P0 = _initialize_P0(P0, A, B, Q, n, symmetrize)
-    err, out = ekf_hot_loop(
+    err, out = ekf_forward(
         meas_addr,
         jac_addr,
         A,

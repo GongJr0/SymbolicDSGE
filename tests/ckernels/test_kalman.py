@@ -8,9 +8,13 @@ import pytest
 from numba import cfunc, types
 
 from SymbolicDSGE.filters.errors import ErrorCode
+from SymbolicDSGE._ckernels.kalman import (
+    stationary_covariance,
+    kf_forward,
+    ekf_forward,
+    ukf_forward,
+)
 from _oracles.kalman import kf_reference
-
-kf = pytest.importorskip("SymbolicDSGE._ckernels.kalman")
 
 # Cross-compiler FP (log/sqrt/division last-ULP) accumulates over T steps, so
 # compare tightly rather than bit-exact.
@@ -109,7 +113,7 @@ def test_kalman_matches_oracle(
     )
 
     out_ref = kf_reference(*args)
-    _status, out_native = kf.kalman_hot_loop(*args)
+    _status, out_native = kf_forward(*args)
 
     for i, name in enumerate(_HIST):
         np.testing.assert_allclose(
@@ -150,7 +154,7 @@ def test_kalman_non_pd_returns_error_code() -> None:
         False,
         True,
     )
-    status, _ = kf.kalman_hot_loop(*args)
+    status, _ = kf_forward(*args)
     assert status == ErrorCode.S_FACTORIZATION
 
 
@@ -176,7 +180,7 @@ def test_ukf_returns_model_variable_history() -> None:
     z0 = _c([0.1, 0.0])
     P0 = _c(np.diag([0.2, 0.3]))
 
-    _, out = kf.ukf_hot_loop(
+    _, out = ukf_forward(
         _ukf_measure_first_var.address,
         hx,
         gx,

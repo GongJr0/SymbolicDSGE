@@ -158,12 +158,10 @@ def test_run_converts_error_code_to_matrix_condition(monkeypatch):
     A, B, C, d, Q, R, ss = _linear_system_1d()
     y = np.zeros((2, 1), dtype=float64)
 
-    # The native hot loop returns (err, out); a nonzero status is mapped to the
-    # matching in-house exception in one place. No numpy exception leaks out.
-    def error_hot_loop(*args, **kwargs):
+    def error_kf(*args, **kwargs):
         return ErrorCode.S_FACTORIZATION, ()
 
-    monkeypatch.setattr(filter_module, "kalman_hot_loop", error_hot_loop)
+    monkeypatch.setattr(filter_module, "kf_forward", error_kf)
     with pytest.raises(MatrixFactorizationError):
         run_linear(A, B, C, d, Q, R, ss, y)
 
@@ -172,13 +170,10 @@ def test_run_extended_converts_error_code_to_matrix_condition(monkeypatch):
     A, B, _, _, Q, R, ss = _linear_system_1d()
     y = np.zeros((2, 1), dtype=float64)
 
-    # A nonzero status from the native hot loop is mapped to the matching
-    # in-house exception via the ErrorCode registry (mirrors the linear path).
-    # meas/jac addresses are unused because the hot loop is monkeypatched.
     def error_ekf(*args, **kwargs):
         return ErrorCode.S_FACTORIZATION, ()
 
-    monkeypatch.setattr(filter_module, "ekf_hot_loop", error_ekf)
+    monkeypatch.setattr(filter_module, "ekf_forward", error_ekf)
     with pytest.raises(MatrixFactorizationError):
         run_extended(
             1,
@@ -219,10 +214,10 @@ def test_run_status_carries_error_code(monkeypatch):
     # A clean run reports success on ``status``.
     assert run_linear(A, B, C, d, Q, R, ss, y).status == 0
 
-    def error_hot_loop(*args, **kwargs):
+    def error_kf(*args, **kwargs):
         return ErrorCode.S_FACTORIZATION, _placeholder_out_11()
 
-    monkeypatch.setattr(filter_module, "kalman_hot_loop", error_hot_loop)
+    monkeypatch.setattr(filter_module, "kf_forward", error_kf)
 
     # Default: a nonzero status raises the mapped exception.
     with pytest.raises(MatrixFactorizationError):
@@ -241,10 +236,8 @@ def test_run_extended_status_carries_error_code(monkeypatch):
     def error_ekf(*args, **kwargs):
         return ErrorCode.S_FACTORIZATION, _placeholder_out_11()
 
-    monkeypatch.setattr(filter_module, "ekf_hot_loop", error_ekf)
+    monkeypatch.setattr(filter_module, "ekf_forward", error_ekf)
 
-    # Default raises; _raise_on_error=False carries the code on ``status``. The
-    # meas/jac addresses are unused because the hot loop is monkeypatched.
     with pytest.raises(MatrixFactorizationError):
         run_extended(1, 1, A, B, calib, Q, R, ss, y)
 

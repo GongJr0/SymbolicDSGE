@@ -72,9 +72,11 @@ cdef extern from "layout.h":
                                                        int64_t T, int64_t n_par) nogil
 
 
-cdef extern from "kalman.h":
+cdef extern from "linear.h":
     arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
+cdef extern from "extended.h":
     arena_size ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
+cdef extern from "unscented.h":
     arena_size ukf_arena_size(int64_t n_state, int64_t n_ctrl,
                               int64_t n_exog, int64_t n_obs) nogil
 

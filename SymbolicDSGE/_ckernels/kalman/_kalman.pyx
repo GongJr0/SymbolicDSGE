@@ -1,12 +1,5 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True
-"""Cython shim for the linear Kalman filter hot loop.
-
-Allocates the history output arrays, marshals the NumPy buffers into the C
-kf_inputs/kf_outputs structs, runs kf_hot_loop under nogil, and translates the
-status code back into the exceptions KalmanFilter.run already handles. The
-public signature and return shape match the numba `_kalman_hot_loop` so the two
-are interchangeable at the call site.
-"""
+"""Cython shim for the filters in kalman.c"""
 
 import numpy as np
 
@@ -27,6 +20,31 @@ cdef extern from "kalman.h":
     int c_KF_ERR_S_FACTORIZATION "KF_ERR_S_FACTORIZATION"
     int c_KF_ERR_BAD_HYPERPARAMS "KF_ERR_BAD_HYPERPARAMS"
 
+    arena_size kf_stationary_covariance_arena_size(
+        int64_t n,
+        int64_t k,
+    ) nogil
+
+    int kf_stationary_covariance(
+        const double *A,
+        const double *B,
+        const double *Q,
+        double tolerance,
+        int64_t max_iterations,
+        double *arena,
+        double *out,
+        int64_t n,
+        int64_t k,
+        int64_t ld_out,
+    ) nogil
+
+    ctypedef void (*meas_fn)(
+        const double *x,
+        const double *params,
+        double *out,
+    ) noexcept nogil
+
+cdef extern from "linear.h":
     ctypedef struct kf_inputs:
         int64_t n
         int64_t m
@@ -62,34 +80,13 @@ cdef extern from "kalman.h":
         double *loglik
 
     arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
-    int kf_hot_loop(
+    int c_kf_forward "kf_forward"(
         const kf_inputs *inp,
         double *arena,
         kf_outputs *outp,
     ) nogil
-    arena_size kf_stationary_covariance_arena_size(
-        int64_t n,
-        int64_t k,
-    ) nogil
-    int kf_stationary_covariance(
-        const double *A,
-        const double *B,
-        const double *Q,
-        double tolerance,
-        int64_t max_iterations,
-        double *arena,
-        double *out,
-        int64_t n,
-        int64_t k,
-        int64_t ld_out,
-    ) nogil
 
-    ctypedef void (*meas_fn)(
-        const double *x,
-        const double *params,
-        double *out,
-    ) noexcept nogil
-
+cdef extern from "extended.h":
     ctypedef struct ekf_inputs:
         meas_fn meas
         meas_fn jac
@@ -128,12 +125,13 @@ cdef extern from "kalman.h":
         double *loglik
 
     arena_size ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
-    int c_ekf_hot_loop "ekf_hot_loop"(
+    int c_ekf_forward "ekf_forward"(
         const ekf_inputs *inp,
         double *arena,
         ekf_outputs *outp,
     ) nogil
 
+cdef extern from "unscented.h":
     ctypedef struct ukf_inputs:
         meas_fn meas
         double *hx
@@ -196,7 +194,7 @@ cdef extern from "kalman.h":
         int64_t n_exog,
         int64_t n_obs,
     ) nogil
-    int64_t c_ukf_hot_loop "ukf_hot_loop"(
+    int c_ukf_forward "ukf_forward"(
         const ukf_inputs *inp,
         double *arena,
         ukf_outputs *outp,
@@ -212,7 +210,7 @@ KF_ERR_S_FACTORIZATION = c_KF_ERR_S_FACTORIZATION
 KF_ERR_BAD_HYPERPARAMS = c_KF_ERR_BAD_HYPERPARAMS
 
 
-def kalman_hot_loop(
+def kf_forward(
     int64_t T,
     nmk,
     A, B,
@@ -315,9 +313,9 @@ def kalman_hot_loop(
     outp.eps_hat = &eps_hat_mv[0, 0] if shock_T > 0 else NULL
     outp.loglik = &loglik
 
-    cdef int64_t status
+    cdef int status
     with nogil:
-        status = kf_hot_loop(&inp, &arena_mv[0], &outp)
+        status = c_kf_forward(&inp, &arena_mv[0], &outp)
 
     return (
         status,
@@ -385,7 +383,7 @@ def stationary_covariance(
     return status, P
 
 
-def ekf_hot_loop(
+def ekf_forward(
     size_t meas_addr,
     size_t jac_addr,
     A, B,
@@ -418,7 +416,7 @@ def ekf_hot_loop(
     cdef int64_t n_par = calib_params.shape[0]
 
     if meas_addr == 0 or jac_addr == 0:
-        raise ValueError("ekf_hot_loop requires nonzero measurement and "
+        raise ValueError("ekf_forward requires nonzero measurement and "
                          "jacobian function addresses.")
 
     cdef int64_t hist_T = T if store_history else 0
@@ -504,7 +502,7 @@ def ekf_hot_loop(
 
     cdef int status
     with nogil:
-        status = c_ekf_hot_loop(&inp, &arena_mv[0], &outp)
+        status = c_ekf_forward(&inp, &arena_mv[0], &outp)
 
     return (
         status,
@@ -524,7 +522,7 @@ def ekf_hot_loop(
     )
 
 
-def ukf_hot_loop(
+def ukf_forward(
     size_t meas_addr,
     hx,
     gx,
@@ -592,7 +590,7 @@ def ukf_hot_loop(
     cdef int64_t n_var = n_state + n_ctrl
 
     if meas_addr == 0:
-        raise ValueError("ukf_hot_loop requires a nonzero "
+        raise ValueError("ukf_forward requires a nonzero "
                          "measurement function address.")
     if n_state <= 0:
         raise ValueError("hx must have at least one state.")
@@ -723,9 +721,9 @@ def ukf_hot_loop(
     outp.S = &S_mv[0, 0, 0] if hist_T > 0 else NULL
     outp.loglik = &loglik
 
-    cdef int64_t status
+    cdef int status
     with nogil:
-        status = c_ukf_hot_loop(&inp, &arena_mv[0], &outp)
+        status = c_ukf_forward(&inp, &arena_mv[0], &outp)
 
     return (
         status,
