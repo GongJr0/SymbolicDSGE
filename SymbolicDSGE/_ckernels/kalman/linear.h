@@ -52,4 +52,9 @@ typedef struct {
 arena_size kf_arena_size(const i64 n, const i64 m, const i64 k);
 int kf_forward(const kf_inputs *in, f64 *SDSGE_RESTRICT arena, kf_outputs *out);
 
+/* Linear Kalman smoother. Cannot fail unless the forward pass fails.
+ * Returns KF_OK, KF_ERR_S_FACTORIZATION. */
+int kf_smooth(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
+              kf_smooth_outputs *out);
+
 #endif /* SDSGE_KF_LINEAR_H */

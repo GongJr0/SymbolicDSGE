@@ -41,4 +41,11 @@ arena_size ekf_arena_size(const i64 n, const i64 m, const i64 k);
 int ekf_forward(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
                 ekf_outputs *out);
 
+/* Extended Kalman smoother. Does not relinearize in the backward pass.
+ * Cannot fail if the forward pass succeeds.
+ * Returns KF_OK, KF_ERR_S_FACTORIZATION */
+arena_size ekf_smooth_arena_size(const i64 n, const i64 m, const i64 k,
+                                 const i64 T);
+int ekf_smooth(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
+               ekf_smooth_outputs *out);
 #endif // !SDSGE_KF_EXTENDED_H

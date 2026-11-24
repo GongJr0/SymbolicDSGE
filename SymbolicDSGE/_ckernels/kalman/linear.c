@@ -9,6 +9,9 @@ typedef struct {
   f64 *K;       /* (T, n, m) */
 } kf_cache;
 
+static arena_size kf_cache_size(const i64 n, const i64 m, const i64 T) {
+  return make_sizer(T * m + T * n * m, 0);
+}
 arena_size kf_arena_size(const i64 n, const i64 m, const i64 k) {
   return make_sizer(2 * n + 7 * m    /* vectors + triangular-solve scratch */
                         + 6 * n * n  /* covariance work, retained capacity */
@@ -140,4 +143,110 @@ static int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
 int kf_forward(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
                kf_outputs *out) {
   return kf_hot_loop(in, arena, out, NULL);
+}
+
+static arena_size kf_smooth_loop_arena(const i64 n, const i64 m, const i64 k) {
+  const arena_size fwd_arena = kf_arena_size(n, m, k);
+  const arena_size smooth_arena =
+      make_sizer(5 * n * n + 2 * n * m + m * m + 2 * n + 3 * m + n * k, 0);
+  return sdsge_max_arena(fwd_arena, smooth_arena);
+}
+arena_size kf_smooth_arena_size(const i64 n, const i64 m, const i64 k,
+                                const i64 T) {
+  return add_arena(kf_smooth_loop_arena(n, m, k), kf_cache_size(n, m, T));
+}
+
+int kf_smooth(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
+              kf_smooth_outputs *out) {
+  int rc;
+  kf_cache cache;
+  const i64 akf = kf_smooth_loop_arena(in->n, in->m, in->k).n_float;
+
+  cache.S_inv_v = arena + akf;
+  cache.K = cache.S_inv_v + in->T * in->m;
+
+  rc = kf_hot_loop(in, arena, out->fwd_out, &cache);
+  if (rc != KF_OK) {
+    return rc;
+  }
+
+  const i64 n = in->n, m = in->m, k = in->k, T = in->T;
+
+  f64 *r = arena;
+  f64 *w = r + n;
+  f64 *g = w + n;
+  f64 *QBt = g + m;
+  f64 *N_cur = QBt + k * n;
+  f64 *N_next = N_cur + n * n;
+  f64 *KC_Lt = N_next + n * n;
+  f64 *I_minus_KC = KC_Lt + n * n;
+  f64 *tmp_nn = I_minus_KC + n * n;
+  f64 *Ct = tmp_nn + n * n;
+  f64 *CtSi = Ct + n * m;
+  f64 *Ls = CtSi + n * m;
+  f64 *f = Ls + m * m;
+  f64 *b = f + m;
+
+  sdsge_matmul_abt(in->Q, in->B, QBt, k, k, n);
+  memset(r, 0, (size_t)n * sizeof(f64));
+  memset(N_cur, 0, (size_t)(n * n) * sizeof(f64));
+
+  for (i64 i = 0; i < m; ++i) {
+    for (i64 j = 0; j < n; ++j) {
+      Ct[j * m + i] = in->C[i * n + j];
+    }
+  }
+
+  for (i64 t = T - 1; t >= 0; --t) {
+    const f64 *Kt = cache.K + t * n * m;
+    /* Means + shocks */
+    sdsge_matvec_atb(in->A, r, w, n, n);
+    sdsge_matvec_atb(Kt, w, g, n, m);
+    sdsge_vsub(cache.S_inv_v + t * m, g, g, m);
+    sdsge_matvec_atb_plus_vec(in->C, g, w, r, m, n);
+    sdsge_matvec(QBt, r, out->eps_smooth + t * k, k, n);
+
+    /* Covariances */
+    const f64 *St = out->fwd_out->S + t * m * m;
+    const f64 *Pt = out->fwd_out->P_pred + t * n * n;
+    f64 *Vt = out->P_smooth + t * n * n;
+    sdsge_chol(St, in->jitter, Ls, m);
+    kf_gain_from_pc_t(Ls, Ct, f, b, CtSi, n, m);
+
+    sdsge_matmul(Kt, in->C, KC_Lt, n, m, n);
+    kf_identity_minus(KC_Lt, I_minus_KC, n);
+    sdsge_matmul(in->A, I_minus_KC, KC_Lt, n, n, n);
+
+    sdsge_matmul(N_cur, KC_Lt, tmp_nn, n, n, n);
+    sdsge_matmul_atb(KC_Lt, tmp_nn, N_next, n, n, n);
+    sdsge_matmul(CtSi, in->C, tmp_nn, n, m, n);
+    for (i64 i = 0; i < n * n; ++i) {
+      N_next[i] += tmp_nn[i];
+    }
+
+    sdsge_matmul(Pt, N_next, tmp_nn, n, n, n);
+    sdsge_matmul(tmp_nn, Pt, Vt, n, n, n);
+    sdsge_vsub(Pt, Vt, Vt, n * n);
+    if (in->symmetrize) {
+      sdsge_sym_inplace(N_next, n);
+      sdsge_sym_inplace(Vt, n);
+    }
+
+    f64 *tmp = N_cur;
+    N_cur = N_next;
+    N_next = tmp;
+  }
+
+  sdsge_matvec_plus_vec(in->P0, r, in->x0, w, n, n); /* x_s0 = x0 + P0 * r0 */
+  for (i64 t = 0; t < T; ++t) {
+    if (t > 0) {
+      sdsge_matvec(in->A, w, r, n, n);
+      sdsge_matvec_plus_vec(in->B, out->eps_smooth + t * k, r, w, n, k);
+    }
+    for (i64 i = 0; i < n; ++i) {
+      out->x_smooth[t * n + i] = w[i] + in->steady_state[i];
+    }
+  }
+
+  return KF_OK;
 }

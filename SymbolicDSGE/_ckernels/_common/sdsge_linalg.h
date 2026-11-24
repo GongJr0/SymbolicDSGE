@@ -37,6 +37,13 @@ void sdsge_matvec(const f64 *A, const f64 *x, f64 *out, i64 n, i64 m);
 void sdsge_matvec_plus_vec(const f64 *A, const f64 *x, const f64 *b, f64 *out,
                            i64 n, i64 m);
 
+/* out(p) := A(n,p)^T @ x(n) */
+void sdsge_matvec_atb(const f64 *A, const f64 *x, f64 *out, i64 n, i64 m);
+
+/* out(p) := A(n,p)^T @ x(n) + b(p) */
+void sdsge_matvec_atb_plus_vec(const f64 *A, const f64 *x, const f64 *b,
+                               f64 *out, i64 n, i64 m);
+
 /* out(n) := a(n) - b(n).  out may alias a or b. */
 void sdsge_vsub(const f64 *a, const f64 *b, f64 *out, i64 n);
 
