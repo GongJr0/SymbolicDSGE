@@ -28,29 +28,32 @@ typedef void (*meas_fn)(const f64 *SDSGE_RESTRICT x,
 /* out(m) := A[row, :] - x(m), where A has m columns */
 void kf_row_minus_vec(const f64 *A, i64 row, const f64 *x, f64 *out, i64 m);
 
-/* Solve (L L^T) x = B[row, :] for the single row; writes x into out[row, :].
- * `n` is the Cholesky dimension (= column count of B and out); fbuf/bbuf are
- * scratch of length n. */
-void kf_chol_solve_row(const f64 *L, const f64 *B, i64 row, f64 *fbuf,
-                       f64 *bbuf, f64 *out, i64 n);
-
 /* ---- Kalman-specific composition helpers ---- */
 
 /* out(n,n) := A P_prev A^T + BQBT, via temp_nn(n,n) */
 void kf_predict_cov(const f64 *A, const f64 *P_prev, const f64 *BQBT,
                     f64 *temp_nn, f64 *out, i64 n);
 
-/* out(m,m) := C P_pred C^T + R, via temp_mn(m,n) */
-void kf_measurement_cov(const f64 *C, const f64 *P_pred, const f64 *R,
-                        f64 *temp_mn, f64 *out, i64 n, i64 m);
+/* out(m,m) := C(m,n) @ PCt(n,m) + R, with PCt = P_pred C^T */
+void kf_measurement_cov(const f64 *C, const f64 *PCt, const f64 *R, f64 *out,
+                        i64 n, i64 m);
 
 /* out(n,m) := P_pred(n,n) @ C(m,n)^T */
 void kf_pc_t(const f64 *P_pred, const f64 *C, f64 *out, i64 n, i64 m);
 
-/* out K(n,m): solve (L L^T) K[r,:] = PCt[r,:] per row; L is the m×m chol of S.
- * fbuf/bbuf are scratch of length m. */
-void kf_gain_from_pc_t(const f64 *L, const f64 *PCt, f64 *fbuf, f64 *bbuf,
-                       f64 *out, i64 n, i64 m);
+/* PCt(n,m) := PCt L^{-T} in place, the whitened gain W with K = W L^{-1};
+ * L is the m×m chol of S. */
+void kf_whiten_pc_t(const f64 *L, f64 *PCt, i64 n, i64 m);
+
+/* out K(n,m) := W(n,m) L^{-1}, the gain from its whitened form. */
+void kf_gain_from_whitened(const f64 *L, const f64 *W, f64 *out, i64 n, i64 m);
+
+/* out G(m,n) := L^{-1} C(m,n), the whitened measurement. */
+void kf_whiten_meas(const f64 *L, const f64 *C, f64 *out, i64 m, i64 n);
+
+/* out(n,n) := P_pred - W(n,m) W^T. Each product is formed once and
+ * subtracted from both mirrored entries. */
+void kf_cov_downdate(const f64 *P_pred, const f64 *W, f64 *out, i64 n, i64 m);
 
 /* out(n) := x_pred(n) + K(n,m) @ v(m) */
 void kf_state_update(const f64 *x_pred, const f64 *K, const f64 *v, f64 *out,
@@ -65,12 +68,6 @@ void kf_identity_minus(const f64 *A, f64 *out, i64 n);
 void kf_joseph_cov(const f64 *K, const f64 *C, const f64 *P_pred, const f64 *R,
                    f64 *KC, f64 *I_minus_KC, f64 *temp_nn, f64 *temp_nm,
                    f64 *out, i64 n, i64 m);
-
-/* Simplified covariance update:
- *   out(n,n) := P_pred - K(n,m) (P_pred C^T)^T
- * PCt is P_pred C^T, computed before the gain. */
-void kf_simple_cov(const f64 *K, const f64 *PCt, const f64 *P_pred, f64 *out,
-                   i64 n, i64 m);
 
 /* out(n,n) := sym(B(n,k) Q(k,k) B^T), via temp_nk(n,k) */
 void kf_build_bqbt(const f64 *B, const f64 *Q, f64 *temp_nk, f64 *out, i64 n,

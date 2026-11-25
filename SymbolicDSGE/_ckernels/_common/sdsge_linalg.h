@@ -17,6 +17,10 @@ void sdsge_sym_inplace(f64 *P, i64 n);
 /* out(n,m) := A(n,p) @ B(p,m) */
 void sdsge_matmul(const f64 *A, const f64 *B, f64 *out, i64 n, i64 p, i64 m);
 
+/* out(n,m) := A(n,p) @ B(p,m) + C(n,m) */
+void sdsge_matmul_plus_c(const f64 *A, const f64 *B, const f64 *C, f64 *out,
+                         i64 n, i64 p, i64 m);
+
 /* out(p,m) := A(n,p)^T @ B(n,m). `out` must not alias A or B; A and B may
  * overlap each other (e.g. lagged views of one buffer). */
 void sdsge_matmul_atb(const f64 *A, const f64 *B, f64 *out, i64 n, i64 p,

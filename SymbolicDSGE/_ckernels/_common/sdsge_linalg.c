@@ -32,6 +32,20 @@ void sdsge_matmul(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
   }
 }
 
+void sdsge_matmul_plus_c(const f64 *SDSGE_RESTRICT A,
+                         const f64 *SDSGE_RESTRICT B,
+                         const f64 *SDSGE_RESTRICT C,
+                         f64 *SDSGE_RESTRICT out, i64 n, i64 p, i64 m) {
+  for (i64 i = 0; i < n; ++i) {
+    for (i64 j = 0; j < m; ++j) {
+      f64 s = 0.0;
+      for (i64 k = 0; k < p; ++k)
+        s += A[i * p + k] * B[k * m + j];
+      out[i * m + j] = s + C[i * m + j];
+    }
+  }
+}
+
 void sdsge_matmul_atb(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
                       f64 *SDSGE_RESTRICT out, i64 n, i64 p, i64 m) {
   /* Row-contraction accumulated row-by-row (matches sdsge_gram's order, and is

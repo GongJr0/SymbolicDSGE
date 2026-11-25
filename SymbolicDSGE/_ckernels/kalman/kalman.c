@@ -11,28 +11,6 @@ void kf_row_minus_vec(const f64 *SDSGE_RESTRICT A, i64 row,
     out[j] = Arow[j] - x[j];
 }
 
-void kf_chol_solve_row(const f64 *SDSGE_RESTRICT L, const f64 *SDSGE_RESTRICT B,
-                       i64 row, f64 *SDSGE_RESTRICT fbuf,
-                       f64 *SDSGE_RESTRICT bbuf, f64 *SDSGE_RESTRICT out,
-                       i64 n) {
-  const f64 *Brow = B + row * n;
-  for (i64 i = 0; i < n; ++i) {
-    f64 s = 0.0;
-    for (i64 j = 0; j < i; ++j)
-      s += L[i * n + j] * fbuf[j];
-    fbuf[i] = (Brow[i] - s) / L[i * n + i];
-  }
-  for (i64 i = n - 1; i >= 0; --i) {
-    f64 s = 0.0;
-    for (i64 j = i + 1; j < n; ++j)
-      s += L[j * n + i] * bbuf[j];
-    bbuf[i] = (fbuf[i] - s) / L[i * n + i];
-  }
-  f64 *outrow = out + row * n;
-  for (i64 i = 0; i < n; ++i)
-    outrow[i] = bbuf[i];
-}
-
 void kf_predict_cov(const f64 *SDSGE_RESTRICT A,
                     const f64 *SDSGE_RESTRICT P_prev,
                     const f64 *SDSGE_RESTRICT BQBT, f64 *SDSGE_RESTRICT temp_nn,
@@ -42,12 +20,10 @@ void kf_predict_cov(const f64 *SDSGE_RESTRICT A,
 }
 
 void kf_measurement_cov(const f64 *SDSGE_RESTRICT C,
-                        const f64 *SDSGE_RESTRICT P_pred,
-                        const f64 *SDSGE_RESTRICT R,
-                        f64 *SDSGE_RESTRICT temp_mn, f64 *SDSGE_RESTRICT out,
+                        const f64 *SDSGE_RESTRICT PCt,
+                        const f64 *SDSGE_RESTRICT R, f64 *SDSGE_RESTRICT out,
                         i64 n, i64 m) {
-  sdsge_matmul(C, P_pred, temp_mn, m, n, n);
-  sdsge_matmul_abt_plus_c(temp_mn, C, R, out, m, n, m);
+  sdsge_matmul_plus_c(C, PCt, R, out, m, n, m);
 }
 
 void kf_pc_t(const f64 *SDSGE_RESTRICT P_pred, const f64 *SDSGE_RESTRICT C,
@@ -62,12 +38,62 @@ void kf_pc_t(const f64 *SDSGE_RESTRICT P_pred, const f64 *SDSGE_RESTRICT C,
   }
 }
 
-void kf_gain_from_pc_t(const f64 *SDSGE_RESTRICT L,
-                       const f64 *SDSGE_RESTRICT PCt, f64 *SDSGE_RESTRICT fbuf,
-                       f64 *SDSGE_RESTRICT bbuf, f64 *SDSGE_RESTRICT out, i64 n,
-                       i64 m) {
-  for (i64 row = 0; row < n; ++row)
-    kf_chol_solve_row(L, PCt, row, fbuf, bbuf, out, m);
+void kf_whiten_pc_t(const f64 *SDSGE_RESTRICT L, f64 *SDSGE_RESTRICT PCt, i64 n,
+                    i64 m) {
+  for (i64 i = 0; i < n; ++i) {
+    sdsge_forward_subst(L, PCt + i * m, PCt + i * m, m);
+  }
+}
+
+void kf_gain_from_whitened(const f64 *SDSGE_RESTRICT L,
+                           const f64 *SDSGE_RESTRICT W, f64 *SDSGE_RESTRICT out,
+                           i64 n, i64 m) {
+  for (i64 i = 0; i < n; ++i) {
+    sdsge_backward_subst_chol_t(L, W + i * m, out + i * m, m);
+  }
+}
+
+void kf_whiten_meas(const f64 *SDSGE_RESTRICT L, const f64 *SDSGE_RESTRICT C,
+                    f64 *SDSGE_RESTRICT out, i64 m, i64 n) {
+  for (i64 i = 0; i < m; ++i) {
+    f64 *Gi = out + i * n;
+    const f64 *Ci = C + i * n;
+    for (i64 c = 0; c < n; ++c) {
+      Gi[c] = Ci[c];
+    }
+
+    for (i64 j = 0; j < i; ++j) {
+      const f64 l = L[i * m + j];
+      const f64 *Gj = out + j * n;
+      for (i64 c = 0; c < n; ++c) {
+        Gi[c] -= l * Gj[c];
+      }
+    }
+
+    const f64 d = L[i * m + i];
+    for (i64 c = 0; c < n; ++c) {
+      Gi[c] /= d;
+    }
+  }
+}
+
+void kf_cov_downdate(const f64 *SDSGE_RESTRICT P_pred,
+                     const f64 *SDSGE_RESTRICT W, f64 *SDSGE_RESTRICT out,
+                     i64 n, i64 m) {
+  for (i64 i = 0; i < n; ++i) {
+    const f64 *Wi = W + i * m;
+    for (i64 j = 0; j <= i; ++j) {
+      const f64 *Wj = W + j * m;
+
+      f64 s = 0.0;
+      for (i64 k = 0; k < m; ++k) {
+        s += Wi[k] * Wj[k];
+      }
+
+      out[i * n + j] = P_pred[i * n + j] - s;
+      out[j * n + i] = P_pred[j * n + i] - s;
+    }
+  }
 }
 
 void kf_state_update(const f64 *SDSGE_RESTRICT x_pred,
@@ -109,13 +135,6 @@ void kf_joseph_cov(const f64 *SDSGE_RESTRICT K, const f64 *SDSGE_RESTRICT C,
       out[i * n + j] += s;
     }
   }
-}
-
-void kf_simple_cov(const f64 *SDSGE_RESTRICT K, const f64 *SDSGE_RESTRICT PCt,
-                   const f64 *SDSGE_RESTRICT P_pred, f64 *SDSGE_RESTRICT out,
-                   i64 n, i64 m) {
-  sdsge_matmul_abt(K, PCt, out, n, m, n);
-  sdsge_vsub(P_pred, out, out, n * n);
 }
 
 void kf_build_bqbt(const f64 *SDSGE_RESTRICT B, const f64 *SDSGE_RESTRICT Q,

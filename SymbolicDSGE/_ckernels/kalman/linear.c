@@ -5,12 +5,12 @@
 #include <string.h>
 
 typedef struct {
-  f64 *S_inv_v; /* (T, m) */
-  f64 *K;       /* (T, n, m) */
+  f64 *W; /* (T, n, m) */
+  f64 *G; /* (T, m, n) */
 } kf_cache;
 
 static arena_size kf_cache_size(const i64 n, const i64 m, const i64 T) {
-  return make_sizer(T * m + T * n * m, 0);
+  return make_sizer(2 * T * n * m, 0);
 }
 arena_size kf_arena_size(const i64 n, const i64 m, const i64 k) {
   return make_sizer(2 * n + 7 * m    /* vectors + triangular-solve scratch */
@@ -34,9 +34,7 @@ static int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
   f64 *v_buf = y_filt_buf + m;
   f64 *u_buf = v_buf + m;
   f64 *S_inv_v = u_buf + m;
-  f64 *solve_f = S_inv_v + m;
-  f64 *solve_b = solve_f + m;
-  f64 *P_pred_buf = solve_b + m;
+  f64 *P_pred_buf = S_inv_v + m;
   f64 *P_filt_buf = P_pred_buf + n * n;
   f64 *KC = P_filt_buf + n * n;
   f64 *I_minus_KC = KC + n * n;
@@ -50,6 +48,8 @@ static int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
   f64 *temp_nk = temp_mn + m * n;
   f64 *M = temp_nk + n * k;
   f64 *temp_km = M + k * m;
+  /* Whitened in place once S is factored. */
+  f64 *W = PCt;
 
   kf_build_bqbt(in->B, in->Q, temp_nk, BQBT, n, k);
   if (in->store_history)
@@ -69,7 +69,9 @@ static int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
   for (i64 t = 0; t < T; ++t) {
     sdsge_matvec_plus_vec(in->C, x_pred_buf, in->d, y_pred_buf, m, n);
     kf_row_minus_vec(in->y, t, y_pred_buf, v_buf, m);
-    kf_measurement_cov(in->C, P_pred_buf, in->R, temp_mn, S_buf, n, m);
+
+    kf_pc_t(P_pred_buf, in->C, PCt, n, m);
+    kf_measurement_cov(in->C, PCt, in->R, S_buf, n, m);
     if (in->symmetrize)
       sdsge_sym_inplace(S_buf, m);
 
@@ -79,26 +81,25 @@ static int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
     }
 
     sdsge_forward_subst(L, v_buf, u_buf, m);
-    sdsge_backward_subst_chol_t(L, u_buf, S_inv_v, m);
+    kf_whiten_pc_t(L, PCt, n, m);
 
-    kf_pc_t(P_pred_buf, in->C, PCt, n, m);
-    kf_gain_from_pc_t(L, PCt, solve_f, solve_b, K, n, m);
-
-    kf_state_update(x_pred_buf, K, v_buf, x_filt_buf, n, m);
+    kf_state_update(x_pred_buf, W, u_buf, x_filt_buf, n, m);
     if (in->joseph_cov) {
+      kf_gain_from_whitened(L, W, K, n, m);
       kf_joseph_cov(K, in->C, P_pred_buf, in->R, KC, I_minus_KC, temp_nn,
                     temp_mn, P_filt_buf, n, m);
     } else {
-      kf_simple_cov(K, PCt, P_pred_buf, P_filt_buf, n, m);
+      kf_cov_downdate(P_pred_buf, W, P_filt_buf, n, m);
     }
 
     if (in->symmetrize)
       sdsge_sym_inplace(P_filt_buf, n);
 
     loglik += -0.5 * (const_term + sdsge_logdet_from_chol(L, m) +
-                      sdsge_dot(v_buf, S_inv_v, m));
+                      sdsge_dot(u_buf, u_buf, m));
 
     if (in->store_history) {
+      sdsge_backward_subst_chol_t(L, u_buf, S_inv_v, m);
       sdsge_matvec(M, S_inv_v, out->eps_hat + t * k, k, m);
       sdsge_matvec_plus_vec(in->C, x_filt_buf, in->d, y_filt_buf, m, n);
 
@@ -122,8 +123,8 @@ static int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
     }
 
     if (cache) {
-      memcpy(cache->S_inv_v + t * m, S_inv_v, (size_t)m * sizeof(f64));
-      memcpy(cache->K + t * n * m, K, (size_t)(n * m) * sizeof(f64));
+      memcpy(cache->W + t * n * m, W, (size_t)(n * m) * sizeof(f64));
+      kf_whiten_meas(L, in->C, cache->G + t * m * n, m, n);
     }
 
     /* Carry the posterior forward: the next period opens on this prediction. */
@@ -145,8 +146,7 @@ int kf_forward(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
 
 static arena_size kf_smooth_loop_arena(const i64 n, const i64 m, const i64 k) {
   const arena_size fwd_arena = kf_arena_size(n, m, k);
-  const arena_size smooth_arena =
-      make_sizer(5 * n * n + 2 * n * m + m * m + 2 * n + 3 * m + n * k, 0);
+  const arena_size smooth_arena = make_sizer(5 * n * n + 2 * n + m + n * k, 0);
   return sdsge_max_arena(fwd_arena, smooth_arena);
 }
 arena_size kf_smooth_arena_size(const i64 n, const i64 m, const i64 k,
@@ -160,8 +160,8 @@ int kf_smooth(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
   kf_cache cache;
   const i64 akf = kf_smooth_loop_arena(in->n, in->m, in->k).n_float;
 
-  cache.S_inv_v = arena + akf;
-  cache.K = cache.S_inv_v + in->T * in->m;
+  cache.W = arena + akf;
+  cache.G = cache.W + in->T * in->n * in->m;
 
   rc = kf_hot_loop(in, arena, out->fwd_out, &cache);
   if (rc != KF_OK) {
@@ -179,46 +179,33 @@ int kf_smooth(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
   f64 *KC_Lt = N_next + n * n;
   f64 *I_minus_KC = KC_Lt + n * n;
   f64 *tmp_nn = I_minus_KC + n * n;
-  f64 *Ct = tmp_nn + n * n;
-  f64 *CtSi = Ct + n * m;
-  f64 *Ls = CtSi + n * m;
-  f64 *f = Ls + m * m;
-  f64 *b = f + m;
 
   memset(r, 0, (size_t)n * sizeof(f64));
   memset(N_cur, 0, (size_t)(n * n) * sizeof(f64));
 
   sdsge_matmul_abt(in->Q, in->B, QBt, k, k, n);
 
-  for (i64 i = 0; i < m; ++i) {
-    for (i64 j = 0; j < n; ++j) {
-      Ct[j * m + i] = in->C[i * n + j];
-    }
-  }
-
   for (i64 t = T - 1; t >= 0; --t) {
-    const f64 *Kt = cache.K + t * n * m;
+    const f64 *Wt = cache.W + t * n * m;
+    const f64 *Gt = cache.G + t * m * n;
     /* Means + shocks */
     sdsge_matvec_atb(in->A, r, w, n, n);
-    sdsge_matvec_atb(Kt, w, g, n, m);
-    sdsge_vsub(cache.S_inv_v + t * m, g, g, m);
-    sdsge_matvec_atb_plus_vec(in->C, g, w, r, m, n);
+    sdsge_matvec_atb(Wt, w, g, n, m);
+    sdsge_vsub(out->fwd_out->std_innov + t * m, g, g, m);
+    sdsge_matvec_atb_plus_vec(Gt, g, w, r, m, n);
     sdsge_matvec(QBt, r, out->eps_smooth + t * k, k, n);
 
     /* Covariances */
-    const f64 *St = out->fwd_out->S + t * m * m;
     const f64 *Pt = out->fwd_out->P_pred + t * n * n;
     f64 *Vt = out->P_smooth + t * n * n;
-    sdsge_chol(St, in->jitter, Ls, m);
-    kf_gain_from_pc_t(Ls, Ct, f, b, CtSi, n, m);
 
-    sdsge_matmul(Kt, in->C, KC_Lt, n, m, n);
+    sdsge_matmul(Wt, Gt, KC_Lt, n, m, n);
     kf_identity_minus(KC_Lt, I_minus_KC, n);
     sdsge_matmul(in->A, I_minus_KC, KC_Lt, n, n, n);
 
     sdsge_matmul(N_cur, KC_Lt, tmp_nn, n, n, n);
     sdsge_matmul_atb(KC_Lt, tmp_nn, N_next, n, n, n);
-    sdsge_matmul(CtSi, in->C, tmp_nn, n, m, n);
+    sdsge_matmul_atb(Gt, Gt, tmp_nn, m, n, n);
     for (i64 i = 0; i < n * n; ++i) {
       N_next[i] += tmp_nn[i];
     }

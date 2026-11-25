@@ -120,20 +120,6 @@ static void ukf_weighted_meas_cov_cross(const f64 *SDSGE_RESTRICT sigma_z,
   }
 }
 
-static void ukf_cov_update(const f64 *SDSGE_RESTRICT P_pred,
-                           const f64 *SDSGE_RESTRICT K,
-                           const f64 *SDSGE_RESTRICT Pzy,
-                           f64 *SDSGE_RESTRICT P_filt, i64 nz, i64 no) {
-  for (i64 i = 0; i < nz; ++i) {
-    for (i64 j = 0; j < nz; ++j) {
-      f64 s = P_pred[i * nz + j];
-      for (i64 l = 0; l < no; ++l)
-        s -= K[i * no + l] * Pzy[j * no + l];
-      P_filt[i * nz + j] = s;
-    }
-  }
-}
-
 static void ukf_store_history(const ukf_inputs *in, const f64 *SDSGE_RESTRICT z,
                               const f64 *SDSGE_RESTRICT vars,
                               f64 *SDSGE_RESTRICT x1, f64 *SDSGE_RESTRICT x2,
@@ -222,18 +208,16 @@ static int ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
   f64 *innov = y_pred + no;
   f64 *std_innov = innov + no;
   f64 *S_inv_v = std_innov + no;
-  f64 *solve_f = S_inv_v + no;
-  f64 *solve_b = solve_f + no;
-  f64 *S = solve_b + no;
+  f64 *S = S_inv_v + no;
   f64 *L = S + no * no;
   f64 *Pzy = L + no * no;
-  f64 *K = Pzy + nz * no;
-  f64 *sigma_v = K + nz * no;
+  f64 *sigma_v = Pzy + nz * no;
   f64 *vars_pred = sigma_v + n_sig * nv;
   f64 *vars_filt = vars_pred + nv;
   f64 *Pvy = vars_filt + nv;
-  f64 *Kv = Pvy + nv * no;
-  f64 *z_aug = Kv + nv * no;
+  f64 *z_aug = Pvy + nv * no;
+  /* Whitened in place once S is factored. */
+  f64 *W = Pzy;
 
   memcpy(z_prev, in->z0, (size_t)nz * sizeof(f64));
   memcpy(P_prev, in->P0, (size_t)(nz * nz) * sizeof(f64));
@@ -299,16 +283,19 @@ static int ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
       break;
     }
     sdsge_forward_subst(L, innov, std_innov, no);
-    sdsge_backward_subst_chol_t(L, std_innov, S_inv_v, no);
 
-    kf_gain_from_pc_t(L, Pzy, solve_f, solve_b, K, nz, no);
-    kf_state_update(z_pred, K, innov, z_filt, nz, no);
-    ukf_cov_update(P_pred, K, Pzy, P_filt, nz, no);
+    kf_whiten_pc_t(L, Pzy, nz, no);
+    kf_state_update(z_pred, W, std_innov, z_filt, nz, no);
+    kf_cov_downdate(P_pred, W, P_filt, nz, no);
     if (in->symmetrize)
       sdsge_sym_inplace(P_filt, nz);
 
     loglik += -0.5 * (const_term + sdsge_logdet_from_chol(L, no) +
-                      sdsge_dot(innov, S_inv_v, no));
+                      sdsge_dot(std_innov, std_innov, no));
+
+    if (in->store_history || cache) {
+      sdsge_backward_subst_chol_t(L, std_innov, S_inv_v, no);
+    }
 
     if (in->store_history) {
       /* The variable vector is an output, not a state: it is never carried
@@ -319,8 +306,8 @@ static int ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
       ukf_weighted_mean(sigma_v, w0_m, wi, n_sig, nv, vars_pred);
       ukf_weighted_cross(sigma_v, vars_pred, sigma_y, y_pred, w0_c, wi, n_sig,
                          nv, no, Pvy);
-      kf_gain_from_pc_t(L, Pvy, solve_f, solve_b, Kv, nv, no);
-      kf_state_update(vars_pred, Kv, innov, vars_filt, nv, no);
+      kf_whiten_pc_t(L, Pvy, nv, no);
+      kf_state_update(vars_pred, Pvy, std_innov, vars_filt, nv, no);
 
       if (ne > 0) {
         f64 *dy = sigma_y + (1 + nz) * no;
