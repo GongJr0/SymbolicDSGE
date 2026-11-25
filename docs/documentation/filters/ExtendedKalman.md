@@ -23,13 +23,9 @@ __Fields:__
 | jitter | `float` | `0.0` | Amount added to a covariance diagonal when a Cholesky factorization fails. |
 | symmetrize | `bool` | `False` | Symmetrize the covariance matrices via their transposes `0.5 * (M + M.T)`. |
 | joseph_cov | `bool` | `False` | Use the Joseph form for the covariance update. |
-| return_shocks | `bool` | `False` | Recover the structural shocks implied by the filtered path into `eps_hat`. |
 
 ???+ note "Joseph Form"
     The Joseph form computes the posterior covariance as $(I - KC) P (I - KC)^\top + K R K^\top$, which stays symmetric and positive semidefinite under rounding where the short form need not. It costs one additional matrix product per period and is disabled by default.
-
-???+ tip "Shock Recovery"
-    `return_shocks=True` populates `eps_hat` on the result with the structural shocks implied by the filtered path.
 
 &nbsp;
 
