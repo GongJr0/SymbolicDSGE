@@ -5,10 +5,40 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Per period, conditioned on Y_t, with a = [z_{t-1}; eps_t]:
+ *   C  = Cov(a_t, z_t)                        (T, na, nz)
+ *   Wa = Cov(z_{t-1}, y_t) L^{-T}             (T, nz, n_obs)
+ *   Cv = Cov(v_t, z_t)                        (T, nv, nz) */
 typedef struct {
-  f64 *S_inv_v; /* (T, n_obs) */
-  f64 *D;       /* (T, 2*n_state + n_exog, 2*n_state) */
+  f64 *C;
+  f64 *Wa;
+  f64 *Cv;
 } ukf_cache;
+
+static arena_size ukf_cache_size(const i64 n_state, const i64 n_ctrl,
+                                 const i64 n_exog, const i64 n_obs,
+                                 const i64 T) {
+  const i64 nz = 2 * n_state;
+  const i64 na = nz + n_exog;
+  const i64 nv = n_state + n_ctrl;
+  return make_sizer(T * (na * nz + nz * n_obs + nv * nz), 0);
+}
+
+/* out(n,m) -= A(n,p) @ B(m,p)^T */
+static void ukf_sub_abt(const f64 *SDSGE_RESTRICT A,
+                        const f64 *SDSGE_RESTRICT B, f64 *SDSGE_RESTRICT out,
+                        i64 n, i64 p, i64 m) {
+  for (i64 i = 0; i < n; ++i) {
+    const f64 *Ai = A + i * p;
+    for (i64 j = 0; j < m; ++j) {
+      const f64 *Bj = B + j * p;
+      f64 s = 0.0;
+      for (i64 k = 0; k < p; ++k)
+        s += Ai[k] * Bj[k];
+      out[i * m + j] -= s;
+    }
+  }
+}
 
 static void ukf_build_sigma_points(const f64 *SDSGE_RESTRICT mean,
                                    const f64 *SDSGE_RESTRICT chol, f64 gamma,
@@ -222,9 +252,9 @@ static int ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
   memcpy(z_prev, in->z0, (size_t)nz * sizeof(f64));
   memcpy(P_prev, in->P0, (size_t)(nz * nz) * sizeof(f64));
 
-  /* Q is fixed for the run, so its factor is taken once. The augmented root
-   * is block diagonal and only its state block moves, so the innovation block
-   * is written here and never again. */
+  /* Q is fixed for the run. The augmented root is block diagonal and only its
+   * state block moves, so the innovation block is written here and never again.
+   */
   if (ne > 0 && ukf_chol_auto(in->Q, in->jitter, Q_chol, ne) != SDSGE_OK)
     return KF_ERR_Q_FACTORIZATION;
   sdsge_zero_mat(A_chol, na, na);
@@ -251,9 +281,6 @@ static int ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
       z_aug[i] = 0.0;
     ukf_build_sigma_points(z_aug, A_chol, gamma, sigma_a, na);
 
-    /* One sweep: the same point gives the state it carries forward and the
-     * observation of the period it lands in, which is the only way the
-     * measurement sees this period's innovation. */
     for (i64 r = 0; r < n_sig; ++r) {
       const f64 *SDSGE_RESTRICT a = sigma_a + r * na;
       f64 *SDSGE_RESTRICT zn = sigma_z + r * nz;
@@ -293,27 +320,50 @@ static int ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
     loglik += -0.5 * (const_term + sdsge_logdet_from_chol(L, no) +
                       sdsge_dot(std_innov, std_innov, no));
 
-    if (in->store_history || cache) {
-      sdsge_backward_subst_chol_t(L, std_innov, S_inv_v, no);
-    }
-
     if (in->store_history) {
-      /* The variable vector is an output, not a state: it is never carried
-       * and never initialized, so it is filtered by its own gain against the
-       * same innovation rather than re-derived from z_filt. Deriving it there
-       * would drop this period's shock, which no longer exists once the sigma
-       * set has been marginalized down to the pruned state. */
       ukf_weighted_mean(sigma_v, w0_m, wi, n_sig, nv, vars_pred);
       ukf_weighted_cross(sigma_v, vars_pred, sigma_y, y_pred, w0_c, wi, n_sig,
                          nv, no, Pvy);
       kf_whiten_pc_t(L, Pvy, nv, no);
       kf_state_update(vars_pred, Pvy, std_innov, vars_filt, nv, no);
 
+      if (cache) {
+        f64 *Cv = cache->Cv + t * nv * nz;
+        ukf_weighted_cross(sigma_v, vars_pred, sigma_z, z_pred, w0_c, wi, n_sig,
+                           nv, nz, Cv);
+        ukf_sub_abt(Pvy, W, Cv, nv, no, nz);
+      }
+
+      /* Every cross with a is w_i * gamma * A_chol @ (x_{+j} - x_{-j}): the
+       * augmented root is block diagonal and the paired weights are equal.
+       * Plus points are rows 1..na, minus points rows na+1..2na. Shocks only
+       * need the shock pairs; the cache needs all of them. */
+      const i64 d0 = cache ? 0 : nz;
+      f64 *dy = sigma_y + (1 + d0) * no;
+      sdsge_vsub(dy, sigma_y + (1 + na + d0) * no, dy, (na - d0) * no);
       if (ne > 0) {
-        f64 *dy = sigma_y + (1 + nz) * no;
-        sdsge_vsub(dy, sigma_y + (1 + na + nz) * no, dy, ne * no);
-        sdsge_matvec(dy, S_inv_v, out->eps_hat + t * ne, ne, no);
+        sdsge_backward_subst_chol_t(L, std_innov, S_inv_v, no);
+        sdsge_matvec(sigma_y + (1 + nz) * no, S_inv_v, out->eps_hat + t * ne,
+                     ne, no);
         sdsge_trmv_lower_inplace(Q_chol, out->eps_hat + t * ne, wi * gamma, ne);
+      }
+
+      if (cache) {
+        f64 *dz = sigma_z + nz;
+        sdsge_vsub(dz, sigma_z + (1 + na) * nz, dz, na * nz);
+        f64 *dyw = sigma_y + no;
+        kf_whiten_pc_t(L, dyw, na, no);
+
+        f64 *C = cache->C + t * na * nz;
+        memcpy(C, dz, (size_t)(na * nz) * sizeof(f64));
+        ukf_sub_abt(dyw, W, C, na, no, nz);
+        sdsge_trmm_lower_inplace(P_chol, C, wi * gamma, nz, nz);
+        if (ne > 0)
+          sdsge_trmm_lower_inplace(Q_chol, C + nz * nz, wi * gamma, ne, nz);
+
+        f64 *Wa = cache->Wa + t * nz * no;
+        memcpy(Wa, dyw, (size_t)(nz * no) * sizeof(f64));
+        sdsge_trmm_lower_inplace(P_chol, Wa, wi * gamma, nz, no);
       }
 
       ukf_store_history(in, z_pred, vars_pred, out->x1_pred, out->x2_pred,
@@ -331,12 +381,6 @@ static int ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
       memcpy(out->S + t * no * no, S, (size_t)(no * no) * sizeof(f64));
     }
 
-    if (cache) {
-      memcpy(cache->S_inv_v + t * no, S_inv_v, (size_t)no * sizeof(f64));
-      ukf_weighted_cross(sigma_a, z_aug, sigma_z, z_pred, w0_c, wi, n_sig, na,
-                         nz, cache->D + t * na * nz);
-    }
-
     f64 *z_tmp = z_prev;
     z_prev = z_filt;
     z_filt = z_tmp;
@@ -352,4 +396,112 @@ static int ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
 int ukf_forward(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
                 ukf_outputs *out) {
   return ukf_hot_loop(in, arena, out, NULL);
+}
+
+static arena_size ukf_smooth_loop_arena(const i64 n_state, const i64 n_ctrl,
+                                        const i64 n_exog, const i64 n_obs) {
+  const i64 nz = 2 * n_state;
+  const arena_size fwd_arena = ukf_arena_size(n_state, n_ctrl, n_exog, n_obs);
+  const arena_size smooth_arena = make_sizer(3 * nz + 5 * nz * nz, 0);
+  return sdsge_max_arena(fwd_arena, smooth_arena);
+}
+arena_size ukf_smooth_arena_size(const i64 n_state, const i64 n_ctrl,
+                                 const i64 n_exog, const i64 n_obs,
+                                 const i64 T) {
+  return add_arena(ukf_smooth_loop_arena(n_state, n_ctrl, n_exog, n_obs),
+                   ukf_cache_size(n_state, n_ctrl, n_exog, n_obs, T));
+}
+
+int ukf_smooth(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
+               ukf_smooth_outputs *out) {
+
+  int rc;
+  ukf_cache cache;
+  ukf_outputs *fwd = out->fwd_out;
+
+  const i64 ns = in->n_state;
+  const i64 ne = in->n_exog;
+  const i64 no = in->n_obs;
+  const i64 T = in->T;
+  const i64 nz = 2 * ns;
+  const i64 na = nz + ne;
+  const i64 nv = ns + in->n_ctrl;
+
+  const i64 akf = ukf_smooth_loop_arena(ns, in->n_ctrl, ne, no).n_float;
+  cache.C = arena + akf;
+  cache.Wa = cache.C + T * na * nz;
+  cache.Cv = cache.Wa + T * nz * no;
+
+  rc = ukf_hot_loop(in, arena, fwd, &cache);
+  if (rc != KF_OK)
+    return rc;
+
+  f64 *zlag = arena;
+  f64 *dz = zlag + nz;
+  f64 *q = dz + nz;
+  f64 *Plag = q + nz;
+  f64 *dP = Plag + nz * nz;
+  f64 *Lp = dP + nz * nz;
+  f64 *G = Lp + nz * nz;
+  f64 *tmp = G + nz * nz;
+
+  memcpy(out->x1_smooth + (T - 1) * ns, fwd->x1_filt + (T - 1) * ns,
+         (size_t)ns * sizeof(f64));
+  memcpy(out->x2_smooth + (T - 1) * ns, fwd->x2_filt + (T - 1) * ns,
+         (size_t)ns * sizeof(f64));
+  memcpy(out->P_smooth + (T - 1) * nz * nz, fwd->P_filt + (T - 1) * nz * nz,
+         (size_t)(nz * nz) * sizeof(f64));
+
+  for (i64 t = T - 1; t >= 0; --t) {
+    f64 *Ct = cache.C + t * na * nz;
+    const f64 *Pf = fwd->P_filt + t * nz * nz;
+
+    sdsge_vsub(out->x1_smooth + t * ns, fwd->x1_filt + t * ns, dz, ns);
+    sdsge_vsub(out->x2_smooth + t * ns, fwd->x2_filt + t * ns, dz + ns, ns);
+    sdsge_vsub(out->P_smooth + t * nz * nz, Pf, dP, nz * nz);
+
+    if (ukf_chol_auto(Pf, in->jitter, Lp, nz) != SDSGE_OK) {
+      return KF_ERR_P_FACTORIZATION;
+    }
+
+    sdsge_forward_subst(Lp, dz, q, nz);
+    sdsge_backward_subst_chol_t(Lp, q, q, nz);
+
+    if (ne > 0) {
+      sdsge_matvec_plus_vec(Ct + nz * nz, q, fwd->eps_hat + t * ne,
+                            out->eps_smooth + t * ne, ne, nz);
+    }
+    sdsge_matvec_plus_vec(cache.Cv + t * nv * nz, q, fwd->x_filt + t * nv,
+                          out->x_smooth + t * nv, nv, nz);
+
+    if (t == 0) {
+      break;
+    }
+
+    /* Condition z_{t-1} on y_t, then on the smoothed z_t. */
+    const f64 *Wa = cache.Wa + t * nz * no;
+    const f64 *u = fwd->std_innov + t * no;
+    kf_state_update(fwd->x1_filt + (t - 1) * ns, Wa, u, zlag, ns, no);
+    kf_state_update(fwd->x2_filt + (t - 1) * ns, Wa + ns * no, u, zlag + ns, ns,
+                    no);
+    kf_cov_downdate(fwd->P_filt + (t - 1) * nz * nz, Wa, Plag, nz, no);
+
+    sdsge_matvec_plus_vec(Ct, q, zlag, out->x1_smooth + (t - 1) * ns, ns, nz);
+    sdsge_matvec_plus_vec(Ct + ns * nz, q, zlag + ns,
+                          out->x2_smooth + (t - 1) * ns, ns, nz);
+
+    /* Each period's cache entry is read once, so the gain whitens it in
+     * place. */
+    kf_whiten_pc_t(Lp, Ct, nz, nz);
+    kf_gain_from_whitened(Lp, Ct, G, nz, nz);
+    f64 *Ps_prev = out->P_smooth + (t - 1) * nz * nz;
+    sdsge_matmul(G, dP, tmp, nz, nz, nz);
+    sdsge_matmul_abt_plus_c(tmp, G, Plag, Ps_prev, nz, nz, nz);
+
+    if (in->symmetrize) {
+      sdsge_sym_inplace(Ps_prev, nz);
+    }
+  }
+
+  return KF_OK;
 }

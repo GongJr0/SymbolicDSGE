@@ -66,8 +66,11 @@ typedef struct {
 
 typedef struct {
   ukf_outputs *fwd_out;
-  f64 *x_smooth; /* (T, n_state + n_ctrl) */
-  f64 *P_smooth; /* (T, 2*n_state, 2*n_state) */
+  f64 *x1_smooth;  /* (T, n_state) */
+  f64 *x2_smooth;  /* (T, n_state) */
+  f64 *x_smooth;   /* (T, n_state + n_ctrl) */
+  f64 *P_smooth;   /* (T, 2*n_state, 2*n_state) */
+  f64 *eps_smooth; /* (T, n_exog) */
 } ukf_smooth_outputs;
 
 /* Run the unscented Kalman filter: second-order transition, nonlinear
@@ -77,5 +80,14 @@ arena_size ukf_arena_size(const i64 n_state, const i64 n_ctrl, const i64 n_exog,
                           const i64 n_obs);
 int ukf_forward(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
                 ukf_outputs *out);
+
+/* Unscented RTS smoother on the augmented [z_{t-1}; eps_t] state. Returns the
+ * forward pass's codes, or KF_ERR_P_FACTORIZATION if a filtered covariance
+ * cannot be factored. */
+arena_size ukf_smooth_arena_size(const i64 n_state, const i64 n_ctrl,
+                                 const i64 n_exog, const i64 n_obs,
+                                 const i64 T);
+int ukf_smooth(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
+               ukf_smooth_outputs *out);
 
 #endif // !SDSGE_KF_UNSCENTED_H

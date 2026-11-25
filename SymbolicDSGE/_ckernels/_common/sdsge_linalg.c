@@ -143,6 +143,25 @@ void sdsge_trmv_lower_inplace(const f64 *SDSGE_RESTRICT L,
   }
 }
 
+void sdsge_trmm_lower_inplace(const f64 *SDSGE_RESTRICT L,
+                              f64 *SDSGE_RESTRICT X, f64 alpha, i64 n, i64 m) {
+  for (i64 i = n - 1; i >= 0; --i) {
+    f64 *Xi = X + i * m;
+    const f64 *Li = L + i * n;
+    const f64 d = Li[i];
+    for (i64 c = 0; c < m; ++c)
+      Xi[c] *= d;
+    for (i64 j = 0; j < i; ++j) {
+      const f64 l = Li[j];
+      const f64 *Xj = X + j * m;
+      for (i64 c = 0; c < m; ++c)
+        Xi[c] += l * Xj[c];
+    }
+    for (i64 c = 0; c < m; ++c)
+      Xi[c] *= alpha;
+  }
+}
+
 void sdsge_vsub(const f64 *a, const f64 *b, f64 *out, i64 n) {
   for (i64 i = 0; i < n; ++i)
     out[i] = a[i] - b[i];
