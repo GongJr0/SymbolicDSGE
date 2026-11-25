@@ -69,7 +69,7 @@ smooth(
     R: ndarray | None = None,
     x0: Mapping[str, float] | None = None,
     P0: ndarray | None = None,
-) -> FilterResult
+) -> SmootherResult[FilterResult]
 ```
 
 Run the smoother over `y`.
@@ -91,3 +91,6 @@ __Returns:__
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `SmootherResult` | Smoothed states, state covariance, and conditional shock estimates. The result also contains a [`FilterResult`](./FilterResult.md) representing the forward pass alone. |
+
+???+ note "Linearization of Measurements"
+    The smoother does not re-linearize the measurement function during the backward pass. The forward filter caches the linearization at each date and the smoother reads that backward.

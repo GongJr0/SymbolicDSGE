@@ -29,8 +29,8 @@ __Hierarchy and Available Options:__
 ```text
 Filter
 └── GaussianFilter          jitter, symmetrize
-    ├── LinearKalman        + joseph_cov, return_shocks
-    ├── ExtendedKalman      + joseph_cov, return_shocks
+    ├── LinearKalman        + joseph_cov
+    ├── ExtendedKalman      + joseph_cov
     └── UnscentedKalman     + alpha, beta, kappa
 ```
 

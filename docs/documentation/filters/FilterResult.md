@@ -46,7 +46,7 @@ __Fields:__
 class UnscentedFilterResult(FilterResult)
 ```
 
-Returned by `UnscentedKalman.filter`. Extends `FilterResult` with the first- and second-order components of the unscented state estimate. All `FilterResult` fields are present; `eps_hat` is `None`, since shock recovery (`return_shocks`) is not supported for the UKF.
+Returned by `UnscentedKalman.filter`. Extends `FilterResult` with the first- and second-order components of the unscented state estimate.
 
 __Additional Fields:__
 

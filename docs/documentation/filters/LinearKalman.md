@@ -69,7 +69,7 @@ smooth(
     R: ndarray | None = None,
     x0: Mapping[str, float] | None = None,
     P0: ndarray | None = None,
-) -> FilterResult
+) -> SmootherResult[FilterResult]
 ```
 
 Run the smoother over `y`.

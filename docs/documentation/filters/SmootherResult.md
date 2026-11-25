@@ -15,9 +15,9 @@ __Fields:__
 | __Name__ | __Type__ | __Description__ |
 |:---------|:--------:|----------------:|
 | filter_result | `FilterT` (`FilterResult`) | Results of the forward pass. Equivalent to the return of `Filter.filter` on the same object. |
-| x_smooth | `ndarray` | Smoothed state estimates. Shape `(T, n_state)`. |
-| P_smooth | `ndarray` | Smoothed state covariance. Shape `(T, n_state, n_state)`. |
-| eps_smooth | `ndarray` | Smoothed structural shock estimates. Shape `(T, n_shock)`. |
+| x_smooth | `ndarray` | Smoothed state estimates. |
+| P_smooth | `ndarray` | Smoothed state covariance. |
+| eps_smooth | `ndarray` | Smoothed structural shock estimates. |
 
 ???+ info "Filter Results"
     See [`FilterResult`](./FilterResult.md) for the fields of the forward pass results for a given filter implementation.
