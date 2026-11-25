@@ -7,6 +7,7 @@ from ._kalman import (
     ekf_forward,
     ekf_smooth,
     ukf_forward,
+    ukf_smooth,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "ekf_forward",
     "ekf_smooth",
     "ukf_forward",
+    "ukf_smooth",
 ]

@@ -169,3 +169,52 @@ def ukf_forward(
 ]:
     """Run the native second-order UKF hot loop."""
     ...
+
+def ukf_smooth(
+    meas_addr: int,
+    hx: _F64,
+    gx: _F64,
+    bu: _F64,
+    hxx: _F64,
+    gxx: _F64,
+    hxu: _F64,
+    gxu: _F64,
+    huu: _F64,
+    guu: _F64,
+    hss: _F64,
+    gss: _F64,
+    steady_state: _F64,
+    params: _F64,
+    Q: _F64,
+    R: _F64,
+    obs: _F64,
+    z0: _F64,
+    P0: _F64,
+    alpha: float,
+    beta: float,
+    kappa: float,
+    jitter: float,
+    symmetrize: bool = True,
+) -> tuple[
+    int,
+    tuple[
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        float64,
+    ],
+    tuple[_F64, _F64, _F64, _F64, _F64],
+]:
+    """Run the unscented Kalman filter and smoother."""
+    ...

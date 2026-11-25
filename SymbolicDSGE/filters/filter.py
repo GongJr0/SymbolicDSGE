@@ -7,6 +7,7 @@ from .._ckernels.kalman import (
     ekf_forward,
     ekf_smooth,
     ukf_forward,
+    ukf_smooth,
 )
 from .errors import (
     ErrorCode,
@@ -15,10 +16,7 @@ from .errors import (
 )
 from dataclasses import dataclass
 import numpy as np
-from numpy import (
-    float64,
-    zeros,
-)
+from numpy import float64
 from numpy.typing import NDArray
 
 from typing import Tuple, TypeVar, Generic
@@ -117,6 +115,12 @@ class SmootherResult(Generic[FilterT]):
     x_smooth: NDF
     P_smooth: NDF
     eps_smooth: NDF
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class UnscentedSmootherResult(SmootherResult[UnscentedFilterResult]):
+    x1_smooth: NDF
+    x2_smooth: NDF
 
 
 def _shape_validate(
@@ -246,7 +250,7 @@ def _initialize_P0(
         return P0
 
 
-def _initalize_P0_unscented(
+def _initialize_P0_unscented(
     P0: NDF | None,
     A: NDF,
     B: NDF,
@@ -274,6 +278,82 @@ def _initalize_P0_unscented(
             P = np.eye(n_state, dtype=float64)
         out[:n_state, :n_state] = P
     return out
+
+
+def _prep_gaussian(
+    A: NDF,
+    B: NDF,
+    Q: NDF,
+    R: NDF,
+    C: NDF | None,
+    d: NDF | None,
+    y: NDF,
+    x0: NDF | None,
+    P0: NDF | None,
+    symmetrize: bool,
+) -> tuple[int, tuple[int, int, int], NDF, NDF]:
+    """Validate a linear or extended run and resolve its prior.
+
+    Returns ``(T, (n, m, k), x0, P0)``. The extended filter passes ``C`` and
+    ``d`` as None.
+    """
+    T, m = y.shape
+    n = A.shape[0]
+    k = B.shape[1]
+    _shape_validate(A, B, Q, R, C, d, nmk=(n, m, k))
+    x0 = x0.reshape(n) if x0 is not None else np.zeros((n,), dtype=float64)
+    P0 = _initialize_P0(P0, A, B, Q, n, symmetrize)
+    return T, (n, m, k), x0, P0
+
+
+def _prep_unscented(
+    meas_addr: int,
+    hx: NDF,
+    gx: NDF,
+    bu: NDF,
+    hxx: NDF,
+    gxx: NDF,
+    hxu: NDF,
+    gxu: NDF,
+    huu: NDF,
+    guu: NDF,
+    hss: NDF,
+    gss: NDF,
+    steady_state: NDF,
+    Q: NDF,
+    R: NDF,
+    y: NDF,
+    z0: NDF,
+    P0: NDF | None,
+    symmetrize: bool,
+) -> tuple[NDF, NDF, NDF]:
+    """Validate an unscented run and resolve its pruned prior.
+
+    Returns ``(P0, Q, R)`` with ``P0`` in the pruned dimension and ``Q``/``R``
+    symmetrized when requested.
+    """
+    if meas_addr == 0:
+        raise ValueError("meas_addr must be a nonzero measurement cfunc address.")
+    _ukf_shape_validate(
+        hx, gx, bu, hxx, gxx, hxu, gxu, huu, guu, hss, gss, steady_state, Q, R, y, z0
+    )
+
+    n_state = hx.shape[0]
+    n_z = 2 * n_state
+
+    P0 = _initialize_P0_unscented(P0, hx, bu[:n_state, :], Q, n_state, symmetrize)
+    if P0.shape != (n_z, n_z):
+        raise ShapeMismatchError("P0", f"({n_z}, {n_z})", str(P0.shape))
+
+    if symmetrize:
+        Q = _sym(Q)  # pyright: ignore
+        R = _sym(R)  # pyright: ignore
+    return P0, Q, R
+
+
+def _raise_status(err: int, raise_on_error: bool) -> None:
+    if err != 0 and raise_on_error:
+        raise get_error_constructor(ErrorCode(err))(err)
 
 
 def _filter_result(
@@ -351,6 +431,25 @@ def _unscented_result(
     # fmt: on
 
 
+def _unscented_smoother_result(
+    fwd: tuple[
+        NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64
+    ],
+    smooth: tuple[NDF, NDF, NDF, NDF, NDF],
+    status: int = 0,
+) -> UnscentedSmootherResult:
+    fwd_res = _unscented_result(fwd, status)
+    x_smooth, P_smooth, eps_smooth, x1_smooth, x2_smooth = smooth
+    return UnscentedSmootherResult(
+        filter_result=fwd_res,
+        x_smooth=x_smooth,
+        P_smooth=P_smooth,
+        eps_smooth=eps_smooth,
+        x1_smooth=x1_smooth,
+        x2_smooth=x2_smooth,
+    )
+
+
 def run_linear(
     A: NDF,
     B: NDF,
@@ -411,18 +510,11 @@ def run_linear(
         innovations and standardized innovations; innovation covariances; log-likelihood; and shock estimates if requested.
 
     """
-    T, m = y.shape  # T: time steps, m: obs dim
-    n = A.shape[0]  # n: state dim
-    k = B.shape[1]  # k: shock dim
-
-    _shape_validate(A, B, Q, R, C, d, nmk=(n, m, k))
-
-    x_prev = x0.reshape(n) if x0 is not None else np.zeros((n,), dtype=float64)
-    P_prev = _initialize_P0(P0, A, B, Q, n, symmetrize)
+    T, nmk, x_prev, P_prev = _prep_gaussian(A, B, Q, R, C, d, y, x0, P0, symmetrize)
 
     # fmt: off
     err, out = kf_forward(
-        T, (n, m, k),
+        T, nmk,
         A, B, C, d,
         Q, R,
         steady_state,
@@ -434,9 +526,7 @@ def run_linear(
         _store_history,
     )
     # fmt: on
-    if err != 0 and _raise_on_error:
-        ErrorConstructor = get_error_constructor(ErrorCode(err))
-        raise ErrorConstructor(err)
+    _raise_status(err, _raise_on_error)
     return _filter_result(out, err)
 
 
@@ -495,18 +585,11 @@ def smooth_linear(
         The result container of linear and extended Kalman smoothers.
         Contains the forward pass filter result, smoothed states, state covariances, and shock estimates.
     """
-    T, m = y.shape  # T: time steps, m: obs dim
-    n = A.shape[0]  # n: state dim
-    k = B.shape[1]  # k: shock dim
-
-    _shape_validate(A, B, Q, R, C, d, nmk=(n, m, k))
-
-    x_prev = x0.reshape(n) if x0 is not None else np.zeros((n,), dtype=float64)
-    P_prev = _initialize_P0(P0, A, B, Q, n, symmetrize)
+    T, nmk, x_prev, P_prev = _prep_gaussian(A, B, Q, R, C, d, y, x0, P0, symmetrize)
 
     # fmt: off
     err, fwd, smooth = kf_smooth(
-        T, (n, m, k),
+        T, nmk,
         A, B, C, d,
         Q, R,
         steady_state,
@@ -517,9 +600,7 @@ def smooth_linear(
         jitter,
     )
     # fmt: on
-    if err != 0 and _raise_on_error:
-        ErrorConstructor = get_error_constructor(ErrorCode(err))
-        raise ErrorConstructor(err)
+    _raise_status(err, _raise_on_error)
     return _smoother_result(fwd, smooth, err)
 
 
@@ -555,7 +636,7 @@ def run_unscented(
 
     The policy tensors and ``steady_state`` come from an ``order=2`` solve. The
     measurement is propagated through the sigma points via ``meas_addr``, so no
-    observation Jacobian is required. Shock recovery is not supported.
+    observation Jacobian is required.
 
     Parameters
     ----------
@@ -621,22 +702,27 @@ def run_unscented(
         Filter outputs, extending :class:`FilterResult` with the first- and
         second-order components of the state estimate.
     """
-    if meas_addr == 0:
-        raise ValueError("meas_addr must be a nonzero measurement cfunc address.")
-    _ukf_shape_validate(
-        hx, gx, bu, hxx, gxx, hxu, gxu, huu, guu, hss, gss, steady_state, Q, R, y, z0
+    P0, Q, R = _prep_unscented(
+        meas_addr,
+        hx,
+        gx,
+        bu,
+        hxx,
+        gxx,
+        hxu,
+        gxu,
+        huu,
+        guu,
+        hss,
+        gss,
+        steady_state,
+        Q,
+        R,
+        y,
+        z0,
+        P0,
+        symmetrize,
     )
-
-    n_state = hx.shape[0]
-    n_z = 2 * n_state
-
-    P0 = _initalize_P0_unscented(P0, hx, bu[:n_state, :], Q, n_state, symmetrize)
-    if P0.shape != (n_z, n_z):
-        raise ShapeMismatchError("P0", f"({n_z}, {n_z})", str(P0.shape))
-
-    if symmetrize:
-        Q = _sym(Q)  # pyright: ignore
-        R = _sym(R)  # pyright: ignore
 
     # fmt: off
     err, out = ukf_forward(
@@ -657,10 +743,147 @@ def run_unscented(
         _store_history,
     )
     # fmt: on
-    if err != 0 and _raise_on_error:
-        ErrorConstructor = get_error_constructor(ErrorCode(err))
-        raise ErrorConstructor(err)
+    _raise_status(err, _raise_on_error)
     return _unscented_result(out, err)
+
+
+def smooth_unscented(
+    meas_addr: int,
+    hx: NDF,
+    gx: NDF,
+    bu: NDF,
+    hxx: NDF,
+    gxx: NDF,
+    hxu: NDF,
+    gxu: NDF,
+    huu: NDF,
+    guu: NDF,
+    hss: NDF,
+    gss: NDF,
+    steady_state: NDF,
+    calib_params: NDF,
+    Q: NDF,
+    R: NDF,
+    y: NDF,
+    z0: NDF,
+    P0: NDF | None,
+    alpha: float = 1.0,
+    beta: float = 2.0,
+    kappa: float = 1.0,
+    symmetrize: bool = True,
+    jitter: float = 0.0,
+    _raise_on_error: bool = True,
+) -> UnscentedSmootherResult:
+    """Unscented Kalman smoother run against a second-order model solution.
+
+    The policy tensors and ``steady_state`` come from an ``order=2`` solve. The
+    measurement is propagated through the sigma points via ``meas_addr``, so no
+    observation Jacobian is required.
+
+    Parameters
+    ----------
+    meas_addr : int
+        Address of the compiled measurement cfunc, applied to each sigma point.
+    hx : NDF
+        First-order state transition tensor.
+    gx : NDF
+        First-order control policy tensor.
+    bu : NDF
+        Shock loading tensor.
+    hxx : NDF
+        Second-order state transition tensor in the state.
+    gxx : NDF
+        Second-order control policy tensor in the state.
+    hxu : NDF
+        Second-order state transition cross term in state and shock.
+    gxu : NDF
+        Second-order control policy cross term in state and shock.
+    huu : NDF
+        Second-order state transition tensor in the shock.
+    guu : NDF
+        Second-order control policy tensor in the shock.
+    hss : NDF
+        Risk correction term of the state transition.
+    gss : NDF
+        Risk correction term of the control policy.
+    steady_state : NDF
+        Steady-state vector of the state variables.
+    calib_params : NDF
+        Calibration parameter vector passed to the measurement cfunc.
+    Q : NDF
+        Shock covariance matrix.
+    R : NDF
+        Measurement-noise covariance matrix.
+    y : NDF
+        Observations in declared order, shape ``(T, m)``.
+    z0 : NDF
+        Augmented initial state of length ``2 * n_state``, describing the state
+        before the first observation.
+    P0 : NDF | None
+        Covariance of the augmented state, shape ``(2 * n_state, 2 * n_state)``.
+    alpha : float
+        Sigma-point spread parameter.
+    beta : float
+        Sigma-point prior-knowledge parameter.
+    kappa : float
+        Secondary sigma-point scaling parameter.
+    symmetrize : bool
+        Whether to symmetrize the covariance matrices at each step via ``(M + M.T)/2``.
+    jitter : float
+        Jitter to add when a cholesky decomposition fails. Set to 0.0 to disable.
+    _raise_on_error : bool
+        Whether to raise if the recursion fails. If False, a result carrying a
+        nonzero ``status`` is returned instead.
+
+    Returns
+    -------
+    UnscentedSmootherResult
+        Smoother outputs, extending :class:`SmootherResult` with the first- and
+        second-order components of the state estimate. Contains the forward pass
+        filter result, smoothed states, state covariances, and shock estimates.
+    """
+    P0, Q, R = _prep_unscented(
+        meas_addr,
+        hx,
+        gx,
+        bu,
+        hxx,
+        gxx,
+        hxu,
+        gxu,
+        huu,
+        guu,
+        hss,
+        gss,
+        steady_state,
+        Q,
+        R,
+        y,
+        z0,
+        P0,
+        symmetrize,
+    )
+
+    # fmt: off
+    err, fwd, smooth = ukf_smooth(
+        meas_addr,
+        hx, gx, bu,
+        hxx, gxx,
+        hxu, gxu,
+        huu, guu,
+        hss, gss,
+        steady_state,
+        calib_params,
+        Q, R,
+        y,
+        z0, P0,
+        alpha, beta, kappa,
+        jitter,
+        symmetrize,
+    )
+    # fmt: on
+    _raise_status(err, _raise_on_error)
+    return _unscented_smoother_result(fwd, smooth, err)
 
 
 def run_extended(
@@ -740,15 +963,7 @@ def run_extended(
         Predicted and filtered states, their covariances, measurements,
         innovations and the log likelihood.
     """
-    _, m = y.shape
-    n = A.shape[0]
-    k = B.shape[1]
-
-    # Shapes (reuse existing helper; C/d not used here)
-    _shape_validate(A, B, Q, R, C=None, d=None, nmk=(n, m, k))
-
-    x0 = x0.reshape(n) if x0 is not None else zeros((n,), dtype=float64)
-    P0 = _initialize_P0(P0, A, B, Q, n, symmetrize)
+    _, _, x0, P0 = _prep_gaussian(A, B, Q, R, None, None, y, x0, P0, symmetrize)
 
     # fmt: off
     err, out = ekf_forward(
@@ -765,9 +980,7 @@ def run_extended(
         _store_history,
     )
     # fmt: on
-    if err != 0 and _raise_on_error:
-        ErrorConstructor = get_error_constructor(ErrorCode(err))
-        raise ErrorConstructor(err)
+    _raise_status(err, _raise_on_error)
     return _filter_result(out, err)
 
 
@@ -844,15 +1057,7 @@ def smooth_extended(
         The result container of extended Kalman smoothers.
         Contains the forward pass filter result, smoothed states, state covariances, and shock estimates.
     """
-    _, m = y.shape
-    n = A.shape[0]
-    k = B.shape[1]
-
-    # Shapes (reuse existing helper; C/d not used here)
-    _shape_validate(A, B, Q, R, C=None, d=None, nmk=(n, m, k))
-
-    x0 = x0.reshape(n) if x0 is not None else zeros((n,), dtype=float64)
-    P0 = _initialize_P0(P0, A, B, Q, n, symmetrize)
+    _, _, x0, P0 = _prep_gaussian(A, B, Q, R, None, None, y, x0, P0, symmetrize)
 
     # fmt: off
     err, fwd, smooth = ekf_smooth(
@@ -868,7 +1073,5 @@ def smooth_extended(
         jitter,
     )
     # fmt: on
-    if err != 0 and _raise_on_error:
-        ErrorConstructor = get_error_constructor(ErrorCode(err))
-        raise ErrorConstructor(err)
+    _raise_status(err, _raise_on_error)
     return _smoother_result(fwd, smooth, err)

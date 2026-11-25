@@ -214,6 +214,14 @@ cdef extern from "unscented.h":
         double *eps_hat
         double *loglik
 
+    ctypedef struct ukf_smooth_outputs:
+        ukf_outputs *fwd_out
+        double *x1_smooth
+        double *x2_smooth
+        double *x_smooth
+        double *P_smooth
+        double *eps_smooth
+
     arena_size ukf_arena_size(
         int64_t n_state,
         int64_t n_ctrl,
@@ -224,6 +232,19 @@ cdef extern from "unscented.h":
         const ukf_inputs *inp,
         double *arena,
         ukf_outputs *outp,
+    ) nogil
+
+    arena_size ukf_smooth_arena_size(
+        int64_t n_state,
+        int64_t n_ctrl,
+        int64_t n_exog,
+        int64_t n_obs,
+        int64_t T,
+    ) nogil
+    int c_ukf_smooth "ukf_smooth"(
+        const ukf_inputs *inp,
+        double *arena,
+        ukf_smooth_outputs *outp,
     ) nogil
 
 KF_OK = c_KF_OK
@@ -681,7 +702,10 @@ def ekf_smooth(
     return status, (*hist, loglik), (x_smooth, P_smooth, eps_smooth)
 
 
-def ukf_forward(
+cdef tuple _ukf_build(
+    ukf_inputs *inp,
+    ukf_outputs *outp,
+    double *loglik,
     size_t meas_addr,
     hx,
     gx,
@@ -705,39 +729,51 @@ def ukf_forward(
     double beta,
     double kappa,
     double jitter,
-    bint symmetrize=True,
-    bint store_history=True,
+    bint symmetrize,
+    bint store_history,
 ):
-    """Run the native second-order UKF hot loop.
+    """Fill the unscented filter's input and output structs.
 
-    ``meas_addr`` is a real-valued measurement ``@cfunc`` address with signature
-    ``void(double* vars, double* params, double* out)``. Array inputs are coerced
-    to contiguous float64 here. Returns ``(status, out)``; the caller maps a
-    nonzero status to the matching in-house exception.
-
-    ``bu`` spans every variable rather than the state block: a control responds
-    to an innovation contemporaneously. ``hxu``/``gxu`` and ``huu``/``guu`` are
-    the quadratic blocks the shocks earn once they are no longer states.
+    Returns ``(inputs, history)``: the coerced inputs the structs point into,
+    and the history arrays. Both must stay referenced until the kernel returns.
     """
-    cdef double[:, ::1] hxv = np.ascontiguousarray(hx, dtype=np.float64)
-    cdef double[:, ::1] gxv = np.ascontiguousarray(gx, dtype=np.float64)
-    cdef double[:, ::1] buv = np.ascontiguousarray(bu, dtype=np.float64)
-    cdef double[:, :, ::1] hxxv = np.ascontiguousarray(hxx, dtype=np.float64)
-    cdef double[:, :, ::1] gxxv = np.ascontiguousarray(gxx, dtype=np.float64)
-    cdef double[:, :, ::1] hxuv = np.ascontiguousarray(hxu, dtype=np.float64)
-    cdef double[:, :, ::1] gxuv = np.ascontiguousarray(gxu, dtype=np.float64)
-    cdef double[:, :, ::1] huuv = np.ascontiguousarray(huu, dtype=np.float64)
-    cdef double[:, :, ::1] guuv = np.ascontiguousarray(guu, dtype=np.float64)
-    cdef double[::1] hssv = np.ascontiguousarray(hss, dtype=np.float64)
-    cdef double[::1] gssv = np.ascontiguousarray(gss, dtype=np.float64)
-    cdef double[::1] steady_statev = np.ascontiguousarray(
-            steady_state, dtype=np.float64)
-    cdef double[::1] paramsv = np.ascontiguousarray(params, dtype=np.float64)
-    cdef double[:, ::1] Qv = np.ascontiguousarray(Q, dtype=np.float64)
-    cdef double[:, ::1] Rv = np.ascontiguousarray(R, dtype=np.float64)
-    cdef const double[:, ::1] obsv = np.ascontiguousarray(obs, dtype=np.float64)
-    cdef double[::1] z0v = np.ascontiguousarray(z0, dtype=np.float64)
-    cdef double[:, ::1] P0v = np.ascontiguousarray(P0, dtype=np.float64)
+    hx_arr = np.ascontiguousarray(hx, dtype=np.float64)
+    gx_arr = np.ascontiguousarray(gx, dtype=np.float64)
+    bu_arr = np.ascontiguousarray(bu, dtype=np.float64)
+    hxx_arr = np.ascontiguousarray(hxx, dtype=np.float64)
+    gxx_arr = np.ascontiguousarray(gxx, dtype=np.float64)
+    hxu_arr = np.ascontiguousarray(hxu, dtype=np.float64)
+    gxu_arr = np.ascontiguousarray(gxu, dtype=np.float64)
+    huu_arr = np.ascontiguousarray(huu, dtype=np.float64)
+    guu_arr = np.ascontiguousarray(guu, dtype=np.float64)
+    hss_arr = np.ascontiguousarray(hss, dtype=np.float64)
+    gss_arr = np.ascontiguousarray(gss, dtype=np.float64)
+    ss_arr = np.ascontiguousarray(steady_state, dtype=np.float64)
+    params_arr = np.ascontiguousarray(params, dtype=np.float64)
+    Q_arr = np.ascontiguousarray(Q, dtype=np.float64)
+    R_arr = np.ascontiguousarray(R, dtype=np.float64)
+    obs_arr = np.ascontiguousarray(obs, dtype=np.float64)
+    z0_arr = np.ascontiguousarray(z0, dtype=np.float64)
+    P0_arr = np.ascontiguousarray(P0, dtype=np.float64)
+
+    cdef double[:, ::1] hxv = hx_arr
+    cdef double[:, ::1] gxv = gx_arr
+    cdef double[:, ::1] buv = bu_arr
+    cdef double[:, :, ::1] hxxv = hxx_arr
+    cdef double[:, :, ::1] gxxv = gxx_arr
+    cdef double[:, :, ::1] hxuv = hxu_arr
+    cdef double[:, :, ::1] gxuv = gxu_arr
+    cdef double[:, :, ::1] huuv = huu_arr
+    cdef double[:, :, ::1] guuv = guu_arr
+    cdef double[::1] hssv = hss_arr
+    cdef double[::1] gssv = gss_arr
+    cdef double[::1] steady_statev = ss_arr
+    cdef double[::1] paramsv = params_arr
+    cdef double[:, ::1] Qv = Q_arr
+    cdef double[:, ::1] Rv = R_arr
+    cdef const double[:, ::1] obsv = obs_arr
+    cdef double[::1] z0v = z0_arr
+    cdef double[:, ::1] P0v = P0_arr
 
     cdef int64_t n_state = hxv.shape[0]
     cdef int64_t n_ctrl = gxv.shape[0]
@@ -749,7 +785,7 @@ def ukf_forward(
     cdef int64_t n_var = n_state + n_ctrl
 
     if meas_addr == 0:
-        raise ValueError("ukf_forward requires a nonzero "
+        raise ValueError("The unscented filter requires a nonzero "
                          "measurement function address.")
     if n_state <= 0:
         raise ValueError("hx must have at least one state.")
@@ -806,10 +842,6 @@ def ukf_forward(
     std_innov = np.zeros((hist_T, n_obs), dtype=np.float64)
     S = np.zeros((hist_T, n_obs, n_obs), dtype=np.float64)
     eps_hat = np.zeros((hist_T, n_exog), dtype=np.float64)
-    arena = np.empty(
-        ukf_arena_size(n_state, n_ctrl, n_exog, n_obs).n_float, dtype=np.float64
-    )
-    cdef double loglik = 0.0
 
     cdef double[:, ::1] x1_pred_mv = x1_pred
     cdef double[:, ::1] x2_pred_mv = x2_pred
@@ -825,9 +857,7 @@ def ukf_forward(
     cdef double[:, ::1] std_innov_mv = std_innov
     cdef double[:, :, ::1] S_mv = S
     cdef double[:, ::1] eps_hat_mv = eps_hat
-    cdef double[::1] arena_mv = arena
 
-    cdef ukf_inputs inp
     inp.meas = <meas_fn><void*>meas_addr
     inp.hx = &hxv[0, 0]
     inp.bu = &buv[0, 0] if n_exog > 0 else NULL
@@ -868,7 +898,6 @@ def ukf_forward(
         inp.gxu = NULL
         inp.guu = NULL
 
-    cdef ukf_outputs outp
     outp.x1_pred = &x1_pred_mv[0, 0]
     outp.x2_pred = &x2_pred_mv[0, 0]
     outp.x1_filt = &x1_filt_mv[0, 0]
@@ -883,29 +912,139 @@ def ukf_forward(
     outp.std_innov = &std_innov_mv[0, 0]
     outp.S = &S_mv[0, 0, 0]
     outp.eps_hat = &eps_hat_mv[0, 0]
-    outp.loglik = &loglik
+    outp.loglik = loglik
+
+    return (
+        (hx_arr, gx_arr, bu_arr, hxx_arr, gxx_arr, hxu_arr, gxu_arr, huu_arr,
+         guu_arr, hss_arr, gss_arr, ss_arr, params_arr, Q_arr, R_arr, obs_arr,
+         z0_arr, P0_arr),
+        (x1_pred, x2_pred, x1_filt, x2_filt, x_pred, x_filt, P_pred, P_filt,
+         y_pred, y_filt, innov, std_innov, S, eps_hat),
+    )
+
+
+def ukf_forward(
+    size_t meas_addr,
+    hx,
+    gx,
+    bu,
+    hxx,
+    gxx,
+    hxu,
+    gxu,
+    huu,
+    guu,
+    hss,
+    gss,
+    steady_state,
+    params,
+    Q,
+    R,
+    obs,
+    z0,
+    P0,
+    double alpha,
+    double beta,
+    double kappa,
+    double jitter,
+    bint symmetrize=True,
+    bint store_history=True,
+):
+    """Run the native second-order UKF hot loop."""
+    cdef ukf_inputs inp
+    cdef ukf_outputs outp
+    cdef double loglik = 0.0
+    _, hist = _ukf_build(
+        &inp, &outp, &loglik, meas_addr, hx, gx, bu, hxx, gxx, hxu, gxu, huu,
+        guu, hss, gss, steady_state, params, Q, R, obs, z0, P0, alpha, beta,
+        kappa, jitter, symmetrize, store_history,
+    )
+
+    arena = np.empty(
+        ukf_arena_size(inp.n_state, inp.n_ctrl, inp.n_exog, inp.n_obs).n_float,
+        dtype=np.float64,
+    )
+    cdef double[::1] arena_mv = arena
 
     cdef int status
     with nogil:
         status = c_ukf_forward(&inp, &arena_mv[0], &outp)
 
+    return status, (*hist, loglik)
+
+
+def ukf_smooth(
+    size_t meas_addr,
+    hx,
+    gx,
+    bu,
+    hxx,
+    gxx,
+    hxu,
+    gxu,
+    huu,
+    guu,
+    hss,
+    gss,
+    steady_state,
+    params,
+    Q,
+    R,
+    obs,
+    z0,
+    P0,
+    double alpha,
+    double beta,
+    double kappa,
+    double jitter,
+    bint symmetrize=True,
+):
+    """Run the unscented Kalman filter and smoother."""
+    cdef ukf_inputs inp
+    cdef ukf_outputs outp
+    cdef double loglik = 0.0
+    _, hist = _ukf_build(
+        &inp, &outp, &loglik, meas_addr, hx, gx, bu, hxx, gxx, hxu, gxu, huu,
+        guu, hss, gss, steady_state, params, Q, R, obs, z0, P0, alpha, beta,
+        kappa, jitter, symmetrize, True,
+    )
+    cdef int64_t n_state = inp.n_state
+    cdef int64_t n_ctrl = inp.n_ctrl
+    cdef int64_t n_exog = inp.n_exog
+    cdef int64_t T = inp.T
+    cdef int64_t nz = 2 * n_state
+
+    x_smooth = np.zeros((T, n_state + n_ctrl), dtype=np.float64)
+    P_smooth = np.zeros((T, nz, nz), dtype=np.float64)
+    eps_smooth = np.zeros((T, n_exog), dtype=np.float64)
+    x1_smooth = np.zeros((T, n_state), dtype=np.float64)
+    x2_smooth = np.zeros((T, n_state), dtype=np.float64)
+    cdef double[:, ::1] x_smooth_mv = x_smooth
+    cdef double[:, :, ::1] P_smooth_mv = P_smooth
+    cdef double[:, ::1] eps_smooth_mv = eps_smooth
+    cdef double[:, ::1] x1_smooth_mv = x1_smooth
+    cdef double[:, ::1] x2_smooth_mv = x2_smooth
+
+    cdef ukf_smooth_outputs sout
+    sout.fwd_out = &outp
+    sout.x_smooth = &x_smooth_mv[0, 0]
+    sout.P_smooth = &P_smooth_mv[0, 0, 0]
+    sout.eps_smooth = &eps_smooth_mv[0, 0]
+    sout.x1_smooth = &x1_smooth_mv[0, 0]
+    sout.x2_smooth = &x2_smooth_mv[0, 0]
+
+    arena = np.empty(
+        ukf_smooth_arena_size(n_state, n_ctrl, n_exog, inp.n_obs, T).n_float,
+        dtype=np.float64,
+    )
+    cdef double[::1] arena_mv = arena
+
+    cdef int status
+    with nogil:
+        status = c_ukf_smooth(&inp, &arena_mv[0], &sout)
+
     return (
         status,
-        (
-            x1_pred,
-            x2_pred,
-            x1_filt,
-            x2_filt,
-            x_pred,
-            x_filt,
-            P_pred,
-            P_filt,
-            y_pred,
-            y_filt,
-            innov,
-            std_innov,
-            S,
-            eps_hat,
-            loglik,
-        ),
+        (*hist, loglik),
+        (x_smooth, P_smooth, eps_smooth, x1_smooth, x2_smooth),
     )

@@ -12,11 +12,13 @@ from .filter import (
     FilterResult,
     UnscentedFilterResult,
     SmootherResult,
+    UnscentedSmootherResult,
     run_linear,
     smooth_linear,
     run_extended,
     smooth_extended,
     run_unscented,
+    smooth_unscented,
 )
 from .resolvers import (
     FilterMode,
@@ -279,5 +281,19 @@ class UnscentedKalman(GaussianFilter[UnscentedFilterResult]):
         R: NDArray[float64] | None = None,
         x0: dict[str, float] | list[float] | NDArray[float64] | None = None,
         P0: NDArray[float64] | None = None,
-    ) -> SmootherResult[UnscentedFilterResult]:
-        raise NotImplementedError("Unscented Kalman smoothing is not implemented.")
+    ) -> UnscentedSmootherResult:
+        return smooth_unscented(
+            **_resolve_unscented_args(
+                model,
+                y,
+                observables,
+                x0=x0,
+                P0=P0,
+                R=R,
+                jitter=self.jitter,
+                symmetrize=self.symmetrize,
+                alpha=self.alpha,
+                beta=self.beta,
+                kappa=self.kappa,
+            )
+        )
