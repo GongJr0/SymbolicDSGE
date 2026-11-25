@@ -322,6 +322,13 @@ static int ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
       kf_gain_from_pc_t(L, Pvy, solve_f, solve_b, Kv, nv, no);
       kf_state_update(vars_pred, Kv, innov, vars_filt, nv, no);
 
+      if (ne > 0) {
+        f64 *dy = sigma_y + (1 + nz) * no;
+        sdsge_vsub(dy, sigma_y + (1 + na + nz) * no, dy, ne * no);
+        sdsge_matvec(dy, S_inv_v, out->eps_hat + t * ne, ne, no);
+        sdsge_trmv_lower_inplace(Q_chol, out->eps_hat + t * ne, wi * gamma, ne);
+      }
+
       ukf_store_history(in, z_pred, vars_pred, out->x1_pred, out->x2_pred,
                         out->x_pred, t);
       ukf_store_history(in, z_filt, vars_filt, out->x1_filt, out->x2_filt,

@@ -124,6 +124,7 @@ def serialize_filter_results(
             "P_pred": result.P_pred,
             "P_filt": result.P_filt,
             "S": result.S,
+            "eps_hat": result.eps_hat,
             "innov": result.innov,
             "std_innov": result.std_innov,
             "loglik": result.loglik,
@@ -135,8 +136,6 @@ def serialize_filter_results(
             fields["_x1_filt"] = result.x1_filt
             fields["_x2_pred"] = result.x2_pred
             fields["_x2_filt"] = result.x2_filt
-        if result.eps_hat is not None:
-            fields["eps_hat"] = result.eps_hat
 
         meta = MCFilterResultMeta(
             n_rep=int(result.n_rep),

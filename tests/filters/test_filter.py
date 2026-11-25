@@ -180,7 +180,7 @@ def test_run_linear_can_skip_history_storage_for_loglik_only_path():
     assert minimal.innov.shape == (0, 1)
     assert minimal.std_innov.shape == (0, 1)
     assert minimal.S.shape == (0, 1, 1)
-    assert minimal.eps_hat is None
+    assert minimal.eps_hat.shape == (0, 1)
 
 
 def test_run_linear_return_shocks():
@@ -388,7 +388,7 @@ def test_run_extended_can_skip_history_storage_for_loglik_only_path():
     assert minimal.innov.shape == (0, 1)
     assert minimal.std_innov.shape == (0, 1)
     assert minimal.S.shape == (0, 1, 1)
-    assert minimal.eps_hat is None
+    assert minimal.eps_hat.shape == (0, 1)
 
 
 def _linear_ukf_pair():

@@ -80,9 +80,11 @@ arena_offset sdsge_filter_unscented_input_arena_offset(i64 n_state, i64 n_ctrl,
                                                        i64 n_exog, i64 n_obs,
                                                        i64 T, i64 n_par);
 arena_size sdsge_filter_unscented_output_arena_size(i64 n_state, i64 n_ctrl,
-                                                    i64 n_obs, i64 T);
+                                                    i64 n_exog, i64 n_obs,
+                                                    i64 T);
 arena_offset sdsge_filter_unscented_output_arena_offset(i64 n_state, i64 n_ctrl,
-                                                        i64 n_obs, i64 T);
+                                                        i64 n_exog, i64 n_obs,
+                                                        i64 T);
 
 /* from tests.h */
 /* A diagnostic stages its data, then hands the `diag` kernels one work block

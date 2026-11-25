@@ -242,17 +242,6 @@ def test_the_pruned_state_is_unavailable_off_the_unscented_path(
         getattr(filt, field)
 
 
-def test_the_unscented_layout_reserves_nothing_for_shocks(
-    solved_rbc_so: SolvedModel,
-) -> None:
-    """The unscented kernel cannot return shocks, so the field is simply absent."""
-    y = _observations(solved_rbc_so)
-
-    filt = _run(solved_rbc_so, y, filter=UnscentedKalman()).filter_outputs["filt"]
-
-    assert filt.eps_hat is None
-
-
 # --------------------------------------------------------------------------
 # Values: each retained replication carries its own filter, not a neighbour's
 # --------------------------------------------------------------------------

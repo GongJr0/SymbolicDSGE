@@ -563,12 +563,12 @@ _FILTER_FIELDS = (
     "y_pred",
     "y_filt",
     "S",
+    "eps_hat",
     "innov",
     "std_innov",
     "loglik",
 )
 _FILTER_OPTIONAL_FIELDS = (
-    "eps_hat",
     "_x1_pred",
     "_x2_pred",
     "_x1_filt",

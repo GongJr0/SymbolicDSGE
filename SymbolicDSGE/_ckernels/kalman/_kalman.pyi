@@ -163,6 +163,7 @@ def ukf_forward(
         _F64,
         _F64,
         _F64,
+        _F64,
         float64,
     ],
 ]:

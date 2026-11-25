@@ -59,7 +59,8 @@ cdef extern from "layout.h":
             int64_t T, int64_t n_par
             )
     arena_offset sdsge_filter_unscented_output_arena_offset(
-            int64_t n_state, int64_t n_ctrl, int64_t n_obs, int64_t T
+            int64_t n_state, int64_t n_ctrl, int64_t n_exog,
+            int64_t n_obs, int64_t T
             )
 
     # Regression Steps
@@ -360,7 +361,7 @@ def filter_output_offsets(
             n_state + n_ctrl, n_obs, n_exog, T))
     if kind == "unscented":
         return _offset(sdsge_filter_unscented_output_arena_offset(
-            n_state, n_ctrl, n_obs, T))
+            n_state, n_ctrl, n_exog, n_obs, T))
     raise ValueError(f"Unsupported native filter kind: {kind!r}.")
 
 

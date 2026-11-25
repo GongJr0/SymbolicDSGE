@@ -516,18 +516,12 @@ def _compile_filters(
         P_filt = _read_float_field(arena, layout, "P_filt")
 
         S = _read_float_field(arena, layout, "S")
+        eps_hat = _read_float_field(arena, layout, "eps_hat")
 
         innov = _read_float_field(arena, layout, "innov")
         std_innov = _read_float_field(arena, layout, "std_innov")
 
         loglik = _read_float_field(arena, layout, "loglik")
-
-        # Shocks are sized out of the layout when they were not requested, and
-        # the unscented layout has no slot for them at all.
-        if _has_field(layout, "eps_hat"):
-            eps_hat = _read_float_field(arena, layout, "eps_hat")
-        else:
-            eps_hat = None
 
         if mode == "unscented":
             x1_pred = _read_float_field(arena, layout, "x1_pred")

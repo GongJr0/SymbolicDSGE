@@ -677,6 +677,7 @@ def _resolve_filter_fields(
         case "unscented":
             n_state = comp.n_state
             n_z = 2 * n_state
+            n_exog = comp.n_exog
             fields = {
                 "x_pred": _field((T, n_var)),
                 "x_filt": _field((T, n_var)),
@@ -687,6 +688,7 @@ def _resolve_filter_fields(
                 "innov": _field((T, n_obs)),
                 "std_innov": _field((T, n_obs)),
                 "S": _field((T, n_obs, n_obs)),
+                "eps_hat": _field((T, n_exog)),
                 "loglik": _field(()),
                 "x1_pred": _field((T, n_state)),
                 "x2_pred": _field((T, n_state)),
@@ -694,7 +696,7 @@ def _resolve_filter_fields(
                 "x2_filt": _field((T, n_state)),
             }
             return _with_int_flags(fields), o.filter_output_offsets(
-                mode, n_state, comp.n_ctrl, comp.n_exog, n_obs, T
+                mode, n_state, comp.n_ctrl, n_exog, n_obs, T
             )
         case _:
             raise ValueError(f"Unrecognized filter mode {mode!r}.")

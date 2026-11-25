@@ -211,6 +211,7 @@ cdef extern from "unscented.h":
         double *std_innov
         double *S
 
+        double *eps_hat
         double *loglik
 
     arena_size ukf_arena_size(
@@ -804,6 +805,7 @@ def ukf_forward(
     innov = np.zeros((hist_T, n_obs), dtype=np.float64)
     std_innov = np.zeros((hist_T, n_obs), dtype=np.float64)
     S = np.zeros((hist_T, n_obs, n_obs), dtype=np.float64)
+    eps_hat = np.zeros((hist_T, n_exog), dtype=np.float64)
     arena = np.empty(
         ukf_arena_size(n_state, n_ctrl, n_exog, n_obs).n_float, dtype=np.float64
     )
@@ -822,6 +824,7 @@ def ukf_forward(
     cdef double[:, ::1] innov_mv = innov
     cdef double[:, ::1] std_innov_mv = std_innov
     cdef double[:, :, ::1] S_mv = S
+    cdef double[:, ::1] eps_hat_mv = eps_hat
     cdef double[::1] arena_mv = arena
 
     cdef ukf_inputs inp
@@ -879,6 +882,7 @@ def ukf_forward(
     outp.innov = &innov_mv[0, 0]
     outp.std_innov = &std_innov_mv[0, 0]
     outp.S = &S_mv[0, 0, 0]
+    outp.eps_hat = &eps_hat_mv[0, 0]
     outp.loglik = &loglik
 
     cdef int status
@@ -901,6 +905,7 @@ def ukf_forward(
             innov,
             std_innov,
             S,
+            eps_hat,
             loglik,
         ),
     )

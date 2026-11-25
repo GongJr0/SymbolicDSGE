@@ -97,7 +97,7 @@ class FilterResult:
 
     loglik: float64
 
-    eps_hat: NDF | None = None
+    eps_hat: NDF
     status: int = 0
 
 
@@ -118,7 +118,7 @@ class SmootherResult(Generic[FilterT]):
 
     x_smooth: NDF
     P_smooth: NDF
-    eps_smooth: NDF | None = None
+    eps_smooth: NDF
 
 
 def _shape_validate(
@@ -298,11 +298,7 @@ def _filter_result(
         y_pred=y_pred, y_filt=y_filt,
         innov=v, std_innov=u,
         S=S,
-        eps_hat=(
-            eps_hat
-            if isinstance(eps_hat, np.ndarray) and eps_hat.size > 0
-            else None
-        ),
+        eps_hat=eps_hat,
         loglik=loglik,
         status=status,
     )
@@ -320,17 +316,13 @@ def _smoother_result(
         filter_result=fwd_res,
         x_smooth=x_smooth,
         P_smooth=P_smooth,
-        eps_smooth=(
-            eps_smooth
-            if isinstance(eps_smooth, np.ndarray) and eps_smooth.size > 0
-            else None
-        ),
+        eps_smooth=eps_smooth,
     )
 
 
 def _unscented_result(
     out: tuple[
-        NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64
+        NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, NDF, float64
     ],
     status: int = 0,
 ) -> UnscentedFilterResult:
@@ -343,6 +335,7 @@ def _unscented_result(
         y_pred, y_filt,
         v, u,
         S,
+        eps_hat,
         loglik,
     ) = out
     return UnscentedFilterResult(
@@ -351,6 +344,7 @@ def _unscented_result(
         y_pred=y_pred, y_filt=y_filt,
         innov=v, std_innov=u,
         S=S,
+        eps_hat=eps_hat,
         x1_pred=x1_pred, x2_pred=x2_pred,
         x1_filt=x1_filt, x2_filt=x2_filt,
         loglik=loglik,

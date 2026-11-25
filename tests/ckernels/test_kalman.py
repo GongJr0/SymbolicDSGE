@@ -215,6 +215,7 @@ def test_ukf_returns_model_variable_history() -> None:
         _innov,
         _std_innov,
         _S,
+        _eps_hat,
         _loglik,
     ) = out
 

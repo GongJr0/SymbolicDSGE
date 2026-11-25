@@ -1007,7 +1007,7 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
     )
     n_state = reference.compiled.n_state
     n_z = 2 * n_state
-
+    n_exog = reference.compiled.n_exog
     _assert_output_plan(
         specs["filter"],
         "filter",
@@ -1020,6 +1020,7 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
         ("innov", (T, n_obs), np.float64),
         ("std_innov", (T, n_obs), np.float64),
         ("S", (T, n_obs, n_obs), np.float64),
+        ("eps_hat", (T, n_exog), np.float64),
         ("loglik", (), np.float64),
         ("x1_pred", (T, n_state), np.float64),
         ("x2_pred", (T, n_state), np.float64),

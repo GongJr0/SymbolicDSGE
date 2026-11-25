@@ -411,8 +411,8 @@ int sdsge_filter_unscented_step(
   const f64 *z0 = input_arena + in_off.foffset[15];
   const f64 *P0 = input_arena + in_off.foffset[16];
 
-  const arena_offset out_off =
-      sdsge_filter_unscented_output_arena_offset(n_state, n_ctrl, n_obs, T);
+  const arena_offset out_off = sdsge_filter_unscented_output_arena_offset(
+      n_state, n_ctrl, n_exog, n_obs, T);
   ukf_outputs out = {.x_pred = output_arena};
   out.x_filt = output_arena + out_off.foffset[0];
   out.P_pred = output_arena + out_off.foffset[1];
@@ -422,11 +422,12 @@ int sdsge_filter_unscented_step(
   out.innov = output_arena + out_off.foffset[5];
   out.std_innov = output_arena + out_off.foffset[6];
   out.S = output_arena + out_off.foffset[7];
-  out.loglik = output_arena + out_off.foffset[8];
-  out.x1_pred = output_arena + out_off.foffset[9];
-  out.x2_pred = output_arena + out_off.foffset[10];
-  out.x1_filt = output_arena + out_off.foffset[11];
-  out.x2_filt = output_arena + out_off.foffset[12];
+  out.eps_hat = output_arena + out_off.foffset[8];
+  out.loglik = output_arena + out_off.foffset[9];
+  out.x1_pred = output_arena + out_off.foffset[10];
+  out.x2_pred = output_arena + out_off.foffset[11];
+  out.x1_filt = output_arena + out_off.foffset[12];
+  out.x2_filt = output_arena + out_off.foffset[13];
 
   const ukf_inputs in = {.meas = meas,
                          .hx = hx,

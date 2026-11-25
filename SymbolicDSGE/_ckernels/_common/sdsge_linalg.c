@@ -118,6 +118,17 @@ void sdsge_matvec_atb_plus_vec(const f64 *A, const f64 *x, const f64 *b,
   }
 }
 
+void sdsge_trmv_lower_inplace(const f64 *SDSGE_RESTRICT L,
+                              f64 *SDSGE_RESTRICT x, f64 alpha, i64 n) {
+  for (i64 i = n - 1; i >= 0; --i) {
+    const f64 *Li = L + i * n;
+    f64 s = 0.0;
+    for (i64 j = 0; j <= i; ++j)
+      s += Li[j] * x[j];
+    x[i] = alpha * s;
+  }
+}
+
 void sdsge_vsub(const f64 *a, const f64 *b, f64 *out, i64 n) {
   for (i64 i = 0; i < n; ++i)
     out[i] = a[i] - b[i];

@@ -60,6 +60,7 @@ typedef struct {
   f64 *std_innov; /* (T, n_obs) */
   f64 *S;         /* (T, n_obs, n_obs) */
 
+  f64 *eps_hat; /* (T, n_exog) */
   f64 *loglik;
 } ukf_outputs;
 
