@@ -65,10 +65,8 @@ class FilterResult:
         Innovation covariance over time.
     loglik : float64
         Log likelihood of the measurements.
-    eps_hat : NDF | None
+    eps_hat : NDF
         Conditional estimates of the structural shocks given the observed data.
-        Present when the run was made with shock recovery requested, otherwise
-        ``None``. Never available for the unscented filter.
     status : int
         Error code from the recursion. Zero on success; a nonzero value is set
         instead of raising when the run suppressed errors.

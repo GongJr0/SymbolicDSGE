@@ -592,7 +592,7 @@ class MCFilterResult:
         Per-replication log likelihood of the measurements, shape ``(n_retained,)``.
     eps_hat : NDF
         Conditional estimates of the structural shocks given observed data, shape
-        ``(n_retained, T, n_shock)``. None when the step ran without shock recovery.
+        ``(n_retained, T, n_shock)``.
     x1_pred : NDF
         First-order component of the predicted state, shape
         ``(n_retained, T, n_state)``. Unscented filter steps only.
