@@ -2,7 +2,7 @@
 tags:
     - doc
 ---
-#ExtendedKalman
+# ExtendedKalman
 
 ```python
 from SymbolicDSGE.filters import ExtendedKalman
