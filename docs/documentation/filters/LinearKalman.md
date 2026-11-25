@@ -61,3 +61,36 @@ __Returns:__
 | __Type__ | __Description__ |
 |:---------|----------------:|
 | `FilterResult` | Predicted and filtered states, covariances, observables, innovations, and the log likelihood. |
+
+&nbsp;
+
+```python
+smooth(
+    model: SolvedModel,
+    y: ndarray | DataFrame,
+    observables: list[str] | tuple[str, ...] | None = None,
+    R: ndarray | None = None,
+    x0: Mapping[str, float] | None = None,
+    P0: ndarray | None = None,
+) -> FilterResult
+```
+
+Run the smoother over `y`.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| model | Solved model at first order or higher. |
+| y | Observed data. Shape `(T, n_obs)`, or a `DataFrame` whose columns name the observables. |
+| observables | Model observables the data corresponds to. Defaults to all of them in declaration order. |
+| R | Measurement noise covariance. Shape `(n_obs, n_obs)`. Defaults to the model's `calibration.measurement_noise`. |
+| x0 | Prior state mean, in levels. Defaults to the steady state. |
+| P0 | Prior state covariance. Shape `(n_var, n_var)`. Defaults to the model's stationary covariance. |
+
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `SmootherResult` | Smoothed states, state covariance, and conditional shock estimates. The result also contains a [`FilterResult`](./FilterResult.md) representing the forward pass alone. |
