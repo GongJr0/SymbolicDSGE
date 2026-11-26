@@ -21,8 +21,9 @@ from SymbolicDSGE.filters.filter import (
     run_unscented,
     smooth_extended,
     smooth_linear,
+    smooth_unscented,
 )
-from SymbolicDSGE.filters.gaussian import ExtendedKalman, LinearKalman
+from SymbolicDSGE.filters.gaussian import ExtendedKalman, LinearKalman, UnscentedKalman
 
 
 def _linear_system_1d():
@@ -463,20 +464,59 @@ def test_run_unscented_rejects_degenerate_inputs():
     with pytest.raises(ValueError, match="meas_addr"):
         run_unscented(**(kwargs | {"meas_addr": 0}))
 
-    with pytest.raises(ShapeMismatchError, match="hxx"):
-        run_unscented(**(kwargs | {"hxx": np.zeros((1, 1), dtype=float64)}))
 
-    with pytest.raises(MatrixFactorizationError):
-        run_unscented(
-            **(
-                kwargs
-                | {
-                    "P0": np.zeros((2, 2), dtype=float64),
-                    "Q": np.zeros((1, 1), dtype=float64),
-                    "jitter": 0.0,
-                }
-            )
-        )
+@pytest.mark.parametrize(
+    ("name", "bad"),
+    [
+        ("hx", np.zeros((1, 2), dtype=float64)),
+        ("bu", np.zeros((3, 1), dtype=float64)),
+        ("gx", np.zeros((1, 2), dtype=float64)),
+        ("hxx", np.zeros((1, 1), dtype=float64)),
+        ("gxx", np.zeros((1, 1), dtype=float64)),
+        ("hxu", np.zeros((1, 1), dtype=float64)),
+        ("gxu", np.zeros((1, 1), dtype=float64)),
+        ("huu", np.zeros((1, 1), dtype=float64)),
+        ("guu", np.zeros((1, 1), dtype=float64)),
+        ("hss", np.zeros(2, dtype=float64)),
+        ("gss", np.zeros(2, dtype=float64)),
+        ("steady_state", np.zeros(3, dtype=float64)),
+        ("Q", np.zeros((2, 2), dtype=float64)),
+        ("y", np.zeros(4, dtype=float64)),
+        ("R", np.zeros((2, 2), dtype=float64)),
+        ("z0", np.zeros(3, dtype=float64)),
+    ],
+)
+def test_run_unscented_rejects_every_misshaped_argument(name, bad):
+    with pytest.raises(ShapeMismatchError, match=f"'{name}'"):
+        run_unscented(**(_ukf_system_1d() | {name: bad}))
+
+
+def test_run_unscented_reports_each_kernel_failure_by_its_own_code():
+    kwargs = _ukf_system_1d()
+    cases = [
+        # The augmented dimension is 2 n_state + n_exog = 3, so this scale is zero.
+        ({"kappa": -3.0}, ErrorCode.BAD_HYPERPARAMS, HyperparameterError),
+        (
+            {"Q": np.array([[-1.0]])},
+            ErrorCode.Q_FACTORIZATION,
+            MatrixFactorizationError,
+        ),
+        (
+            {"P0": -np.eye(2, dtype=float64), "jitter": 0.0},
+            ErrorCode.P_FACTORIZATION,
+            MatrixFactorizationError,
+        ),
+        (
+            {"R": np.array([[-10.0]])},
+            ErrorCode.S_FACTORIZATION,
+            MatrixFactorizationError,
+        ),
+    ]
+    for override, code, error in cases:
+        system = kwargs | override
+        assert run_unscented(**system, _raise_on_error=False).status == int(code)
+        with pytest.raises(error):
+            run_unscented(**system)
 
 
 def test_run_extended_matches_linear_when_measurement_is_linear():
@@ -707,3 +747,109 @@ def test_unscented_without_curvature_still_moves_with_the_shock_loading():
 
     assert not np.isclose(moved_ukf, base, rtol=1e-6)
     assert moved_ukf == pytest.approx(moved_kf, rel=1e-9, abs=1e-9)
+
+
+def test_unscented_keeps_states_controls_observables_and_shocks_on_their_own_axes(
+    solved_multishock, multishock_c_k_panel
+):
+    obs, y = multishock_c_k_panel
+    out = UnscentedKalman().smooth(solved_multishock, y, obs)
+    fwd = out.filter_result
+    compiled = solved_multishock.compiled
+    T, ns, nv = len(y), compiled.n_state, compiled.n_var
+    nz, m, k = 2 * ns, len(obs), len(compiled.shock_names)
+
+    for x in (fwd.x_pred, fwd.x_filt, out.x_smooth):
+        assert x.shape == (T, nv)
+    for x in (fwd.x1_pred, fwd.x2_pred, fwd.x1_filt, fwd.x2_filt):
+        assert x.shape == (T, ns)
+    for x in (out.x1_smooth, out.x2_smooth):
+        assert x.shape == (T, ns)
+    for P in (fwd.P_pred, fwd.P_filt, out.P_smooth):
+        assert P.shape == (T, nz, nz)
+    for v in (fwd.y_pred, fwd.y_filt, fwd.innov, fwd.std_innov):
+        assert v.shape == (T, m)
+    assert fwd.S.shape == (T, m, m)
+    assert fwd.eps_hat.shape == (T, k)
+    assert out.eps_smooth.shape == (T, k)
+
+
+def test_unscented_smoother_runs_the_filter_forward_and_ends_on_its_last_period(
+    solved_multishock, multishock_c_k_panel
+):
+    obs, y = multishock_c_k_panel
+    out = UnscentedKalman().smooth(solved_multishock, y, obs)
+    fwd = out.filter_result
+    filtered = UnscentedKalman().filter(solved_multishock, y, obs)
+
+    for name in (
+        "x_pred",
+        "x_filt",
+        "x1_pred",
+        "x2_pred",
+        "x1_filt",
+        "x2_filt",
+        "P_pred",
+        "P_filt",
+        "y_pred",
+        "y_filt",
+        "innov",
+        "std_innov",
+        "S",
+        "eps_hat",
+    ):
+        assert np.array_equal(getattr(fwd, name), getattr(filtered, name)), name
+    assert fwd.loglik == filtered.loglik
+
+    # Nothing comes after the last observation, so smoothing leaves it filtered.
+    assert np.array_equal(out.x_smooth[-1], fwd.x_filt[-1])
+    assert np.array_equal(out.x1_smooth[-1], fwd.x1_filt[-1])
+    assert np.array_equal(out.x2_smooth[-1], fwd.x2_filt[-1])
+    assert np.array_equal(out.P_smooth[-1], fwd.P_filt[-1])
+    assert np.array_equal(out.eps_smooth[-1], fwd.eps_hat[-1])
+
+
+def test_unscented_smoother_reduces_to_the_linear_smoother_without_curvature():
+    unscented, linear, _ = _linear_ukf_pair()
+
+    ukf = smooth_unscented(**unscented)
+    kf = smooth_linear(**linear)
+
+    np.testing.assert_allclose(ukf.x_smooth, kf.x_smooth, rtol=1e-7, atol=1e-9)
+    np.testing.assert_allclose(ukf.eps_smooth, kf.eps_smooth, rtol=1e-7, atol=1e-9)
+
+
+def test_unscented_weights_are_inert_without_curvature():
+    # The unscented transform is exact for an affine map whatever its weights.
+    unscented, _, _ = _linear_ukf_pair()
+    base = run_unscented(**unscented).loglik
+
+    for alpha, beta, kappa in ((0.5, 2.0, 0.0), (1.0, 0.0, 3.0)):
+        moved = run_unscented(
+            **(unscented | {"alpha": alpha, "beta": beta, "kappa": kappa})
+        ).loglik
+        assert abs(moved - base) < 1e-12
+
+
+def test_unscented_weights_reach_the_kernel_with_curvature(
+    solved_multishock, multishock_c_k_panel
+):
+    obs, y = multishock_c_k_panel
+    base = UnscentedKalman().filter(solved_multishock, y, obs).loglik
+
+    for alpha, beta, kappa in ((0.5, 2.0, 0.0), (1.0, 0.0, 3.0)):
+        moved = UnscentedKalman(alpha=alpha, beta=beta, kappa=kappa).filter(
+            solved_multishock, y, obs
+        )
+        assert abs(moved.loglik - base) > 1e-4
+
+
+def test_unscented_symmetrize_makes_every_covariance_exactly_symmetric(
+    solved_multishock, multishock_c_k_panel
+):
+    obs, y = multishock_c_k_panel
+    out = UnscentedKalman(symmetrize=True).smooth(solved_multishock, y, obs)
+    fwd = out.filter_result
+
+    for P in (fwd.P_pred, fwd.P_filt, fwd.S, out.P_smooth):
+        assert np.array_equal(P, np.transpose(P, (0, 2, 1)))

@@ -61,6 +61,14 @@ def _simulate(solved, T, seed):
     return solved.sim(T=T, shocks=[ShockPath(eps, *sn)], observables=True)
 
 
+@pytest.fixture(scope="session")
+def multishock_c_k_panel(solved_multishock):
+    """The multishock RBC observed through c and k only, so no two axes share a length."""
+    sim = _simulate(solved_multishock, T=30, seed=3)
+    obs = ("c_obs", "k_obs")
+    return obs, np.column_stack([sim.observables[name] for name in obs])
+
+
 @pytest.fixture(
     scope="session",
     params=[
