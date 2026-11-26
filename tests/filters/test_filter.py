@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
 from numba import cfunc, types
 from numpy import float64
@@ -484,11 +483,26 @@ def test_run_unscented_rejects_degenerate_inputs():
         ("y", np.zeros(4, dtype=float64)),
         ("R", np.zeros((2, 2), dtype=float64)),
         ("z0", np.zeros(3, dtype=float64)),
+        ("P0", np.zeros((3, 3), dtype=float64)),
     ],
 )
 def test_run_unscented_rejects_every_misshaped_argument(name, bad):
     with pytest.raises(ShapeMismatchError, match=f"'{name}'"):
         run_unscented(**(_ukf_system_1d() | {name: bad}))
+
+
+def test_run_unscented_embeds_a_state_block_P0_over_a_zero_second_order_block():
+    kwargs = _ukf_system_1d()
+    block = np.array([[0.4]], dtype=float64)
+    embedded = np.zeros((2, 2), dtype=float64)
+    embedded[:1, :1] = block
+
+    from_block = run_unscented(**(kwargs | {"P0": block}))
+    from_embedded = run_unscented(**(kwargs | {"P0": embedded}))
+
+    assert np.array_equal(from_block.P_filt, from_embedded.P_filt)
+    assert np.array_equal(from_block.x_filt, from_embedded.x_filt)
+    assert from_block.loglik == from_embedded.loglik
 
 
 def test_run_unscented_reports_each_kernel_failure_by_its_own_code():

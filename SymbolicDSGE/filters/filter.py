@@ -258,18 +258,27 @@ def _initialize_P0_unscented(
     n_state: int,
     symmetrize: bool,
 ) -> NDF:
-    """Initialize the state covariance matrix P0 for the unscented Kalman filter.
+    """Initialize the pruned state covariance P0 for the unscented Kalman filter.
 
-    If P0 is provided, it is used as is. If not, a large diagonal matrix is
-    returned.
+    A provided P0 is either the pruned covariance, shape ``(2 * n_state, 2 * n_state)``,
+    or the state block, shape ``(n_state, n_state)``, embedded over a zero
+    second-order block; it is symmetrized when requested. If not provided, the
+    stationary covariance of the state block is embedded the same way, or the
+    identity when there is none.
     """
     n_z = 2 * n_state
     out = np.zeros((n_z, n_z), dtype=float64)
     if P0 is not None:
         if P0.shape == (n_z, n_z):
             out[:] = P0
+        elif P0.shape == (n_state, n_state):
+            out[:n_state, :n_state] = P0
         else:
-            out[:n_state, :n_state] = P0.reshape(n_state, n_state)
+            raise ShapeMismatchError(
+                "P0",
+                f"({n_state}, {n_state}) for the state block or ({n_z}, {n_z}) for the pruned state",
+                str(P0.shape),
+            )
         if symmetrize:
             out = _sym(out)
     else:
@@ -339,11 +348,7 @@ def _prep_unscented(
     )
 
     n_state = hx.shape[0]
-    n_z = 2 * n_state
-
     P0 = _initialize_P0_unscented(P0, hx, bu[:n_state, :], Q, n_state, symmetrize)
-    if P0.shape != (n_z, n_z):
-        raise ShapeMismatchError("P0", f"({n_z}, {n_z})", str(P0.shape))
 
     if symmetrize:
         Q = _sym(Q)  # pyright: ignore
@@ -684,7 +689,10 @@ def run_unscented(
         Augmented initial state of length ``2 * n_state``, describing the state
         before the first observation.
     P0 : NDF | None
-        Covariance of the augmented state, shape ``(2 * n_state, 2 * n_state)``.
+        Covariance of the augmented state, shape ``(2 * n_state, 2 * n_state)``, or
+        its state block, shape ``(n_state, n_state)``, over a zero second-order
+        block. None starts from the stationary covariance of the state block, or
+        the identity when there is none.
     alpha : float
         Sigma-point spread parameter.
     beta : float
@@ -826,7 +834,10 @@ def smooth_unscented(
         Augmented initial state of length ``2 * n_state``, describing the state
         before the first observation.
     P0 : NDF | None
-        Covariance of the augmented state, shape ``(2 * n_state, 2 * n_state)``.
+        Covariance of the augmented state, shape ``(2 * n_state, 2 * n_state)``, or
+        its state block, shape ``(n_state, n_state)``, over a zero second-order
+        block. None starts from the stationary covariance of the state block, or
+        the identity when there is none.
     alpha : float
         Sigma-point spread parameter.
     beta : float
