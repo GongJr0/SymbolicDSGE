@@ -563,14 +563,14 @@ def test_extended_matches_linear_on_a_levels_model(solved_rbc_so):
     # filter that evaluates it at deviations drops `h(ss)` from every prediction.
     compiled = solved_rbc_so.compiled
     obs = list(compiled.observable_names)
-    ss = np.asarray(solved_rbc_so.policy.steady_state, dtype=np.float64)
+    ss = solved_rbc_so.policy.steady_state
 
     # Guard the premise: at ss == 0 both conventions coincide and the test below
     # cannot fail for the reason it exists.
     assert np.max(np.abs(ss)) > 1.0
 
     rng = np.random.default_rng(0)
-    y = pd.DataFrame(rng.normal(size=(24, len(obs))), columns=obs)
+    y = rng.normal(size=(24, len(obs)))
     R = np.eye(len(obs), dtype=np.float64) * 1e-4
 
     linear = LinearKalman().filter(solved_rbc_so, y, R=R)
