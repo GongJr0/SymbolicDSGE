@@ -462,3 +462,13 @@ int sdsge_filter_unscented_step(
                          .store_history = 1};
   return ukf_forward(&in, scratch_arena, &out);
 }
+
+int sdsge_smoother_linear_step(const f64 *SDSGE_RESTRICT input_arena,
+                               f64 *SDSGE_RESTRICT scratch_arena, const i64 T,
+                               const i64 n, const i64 m, const i64 k,
+                               const int symmetrize, const int joseph_cov,
+                               const f64 jitter,
+                               f64 *SDSGE_RESTRICT output_arena) {
+  const arena_offset in_off = make_offset(0, 0);
+  return 0;
+}

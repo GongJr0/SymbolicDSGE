@@ -56,6 +56,12 @@ arena_offset sdsge_filter_linear_input_arena_offset(i64 n, i64 m, i64 k, i64 T);
 arena_size sdsge_filter_linear_output_arena_size(i64 n, i64 m, i64 k, i64 T);
 arena_offset sdsge_filter_linear_output_arena_offset(i64 n, i64 m, i64 k,
                                                      i64 T);
+arena_size sdsge_smoother_linear_input_arena_size(i64 n, i64 m, i64 k, i64 T);
+arena_offset sdsge_smoother_linear_input_arena_offset(i64 n, i64 m, i64 k,
+                                                      i64 T);
+arena_size sdsge_smoother_linear_output_arena_size(i64 n, i64 m, i64 k, i64 T);
+arena_offset sdsge_smoother_linear_output_arena_offset(i64 n, i64 m, i64 k,
+                                                       i64 T);
 /* Extended filter input is [A(n,n), B(n,k), params(n_par), Q(k,k), R(m,m),
  * y(T,m), x0(n), P0(n,n)]. Output has the linear filter layout. */
 arena_size sdsge_filter_extended_input_arena_size(i64 n, i64 m, i64 k, i64 T,
@@ -65,6 +71,14 @@ arena_offset sdsge_filter_extended_input_arena_offset(i64 n, i64 m, i64 k,
 arena_size sdsge_filter_extended_output_arena_size(i64 n, i64 m, i64 k, i64 T);
 arena_offset sdsge_filter_extended_output_arena_offset(i64 n, i64 m, i64 k,
                                                        i64 T);
+arena_size sdsge_smoother_extended_input_arena_size(i64 n, i64 m, i64 k, i64 T,
+                                                    i64 n_par);
+arena_offset sdsge_smoother_extended_input_arena_offset(i64 n, i64 m, i64 k,
+                                                        i64 T, i64 n_par);
+arena_size sdsge_smoother_extended_output_arena_size(i64 n, i64 m, i64 k,
+                                                     i64 T);
+arena_offset sdsge_smoother_extended_output_arena_offset(i64 n, i64 m, i64 k,
+                                                         i64 T);
 
 /* Unscented input is [hx(ns,ns), gx(nc,ns), bu(ns+nc,ne), hxx(ns,ns,ns),
  * gxx(nc,ns,ns), hxu(ns,ns,ne), gxu(nc,ns,ne), huu(ns,ne,ne), guu(nc,ne,ne),
@@ -85,6 +99,20 @@ arena_size sdsge_filter_unscented_output_arena_size(i64 n_state, i64 n_ctrl,
 arena_offset sdsge_filter_unscented_output_arena_offset(i64 n_state, i64 n_ctrl,
                                                         i64 n_exog, i64 n_obs,
                                                         i64 T);
+arena_size sdsge_smoother_unscented_input_arena_size(i64 n_state, i64 n_ctrl,
+                                                     i64 n_exog, i64 n_obs,
+                                                     i64 T, i64 n_par);
+arena_offset sdsge_smoother_unscented_input_arena_offset(i64 n_state,
+                                                         i64 n_ctrl, i64 n_exog,
+                                                         i64 n_obs, i64 T,
+                                                         i64 n_par);
+arena_size sdsge_smoother_unscented_output_arena_size(i64 n_state, i64 n_ctrl,
+                                                      i64 n_exog, i64 n_obs,
+                                                      i64 T);
+arena_offset sdsge_smoother_unscented_output_arena_offset(i64 n_state,
+                                                          i64 n_ctrl,
+                                                          i64 n_exog, i64 n_obs,
+                                                          i64 T);
 
 /* from tests.h */
 /* A diagnostic stages its data, then hands the `diag` kernels one work block

@@ -34,7 +34,7 @@ typedef struct {
   f64 *y_pred, *y_filt;   /* (T, m) */
   f64 *innov, *std_innov; /* (T, m)  innovations v */
   f64 *S;                 /* (T, m, m) innovation covariances */
-  f64 *eps_hat;           /* (T, k) or NULL */
+  f64 *eps_hat;           /* (T, k) */
   f64 *loglik;            /* scalar out */
 } kf_outputs;
 
