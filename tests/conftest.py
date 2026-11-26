@@ -147,6 +147,14 @@ def solved_post82(post82_bundle):
 
 
 @pytest.fixture(scope="session")
+def post82_kf_goldens():
+    """The Kalman filter and smoother goldens for POST82"""
+    from tests.fixtures.goldens import load_dynare
+
+    return load_dynare("post82_kf_goldens").kf
+
+
+@pytest.fixture(scope="session")
 def test_bundle(test_model_path):
     from SymbolicDSGE import parse_config, compile_model, solve_model
 

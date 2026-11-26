@@ -1,59 +1,9 @@
-"""Exact parity against Dynare's first-order solution of POST82.
-
-``tests/fixtures/models/POST82.yaml`` and
-``tests/fixtures/models/post82_first_order.mod`` are the same model written
-twice, both at natural dating. Goldens are transcribed in
-``tests/_oracles/dynare_post82_first_order``, raw: nothing was re-dated,
-rescaled or reordered on the way out of Dynare.
-
-Both sides carry the same variables in the same order: Dynare's state is the
-model's own lagged variables and so is ours, so the two decision rules are
-compared outright, with no selection and no transform. ``ghx`` is ``[p; f]``
-stacked, ``ghu`` is ``B``, and ``A`` is Dynare's ``A``.
-
-One quantity still does not carry, and it is a filter convention rather than a
-coordinate one. Our filter predicts before its first update, so a ``P0`` argument
-is the covariance one period behind the same argument to Dynare's. The
-unconditional covariance is a fixed point of that map, which is why it is parity
-outright while a unit prior is not.
-
-The filter goldens are Dynare's own, not a second recursion of ours: the
-likelihoods come from ``kalman_filter.m`` called directly, the state paths from
-Dynare's smoother. Two conventions differ, and both are asserted rather than
-absorbed.
-
-The first is what a row index means. Dynare dates a prediction by the information
-set behind it, so ``oo_.FilteredVariables[t]`` is the forecast made standing at
-``t``, which is ``a_{t+1|t}``. We date it by the period being estimated, so
-``x_pred[t]`` is ``a_{t|t-1}``. Same quantity, one row apart, and each array is
-complete under its own rule: ours runs ``a_{1|0}`` to ``a_{T|T-1}`` and Dynare's
-``a_{2|1}`` to ``a_{T+1|T}``, the last of those a step past the sample.
-``oo_.UpdatedVariables`` is ``a_{t|t}`` and lines up with ``x_filt`` directly.
-
-The second is what ``P0`` covers. The two filters run the same recursion with
-mirrored loop invariants: ``kalman_filter.m`` carries the prediction and folds
-the update into the transition, ours carries the update and predicts at the top.
-``P0`` is the covariance of whichever invariant the loop is entered on, so the
-argument names covariances one period apart. The unconditional covariance is a
-fixed point of the map between them, which is why that case alone needs no
-translation.
-
-This model is why the goldens are worth having. ``e_r`` enters a Taylor rule
-carrying ``Pi(t)`` and ``x(t)``, so the impact of ``e_r`` on ``r`` is a fixed
-point, 0.3336, and ``e_g`` moves ``r`` by 0.3470 through the same rule. Issue
-#390 recorded a hand-built impact block writing those two entries as 1.0 and
-0.0. Lifting every shock into a state of its own puts ``r`` in the control
-block, where ``f`` carries the feedback.
-"""
-
 from __future__ import annotations
 
 import numpy as np
 import pytest
-from scipy.linalg import solve_discrete_lyapunov
 
 from SymbolicDSGE.core.resolvers import shock_covariance
-from SymbolicDSGE.filters.filter import run_linear
 
 from _oracles import dynare_post82_first_order as dyn
 
@@ -88,17 +38,6 @@ def _path(compiled, out) -> np.ndarray:
 
 def _shocks(block: np.ndarray) -> dict[str, np.ndarray]:
     return {name: block[:, j] for j, name in enumerate(dyn.EXO_COLUMNS)}
-
-
-def _measurement(config, compiled):
-    params = config.calibration.parameters
-    par = np.fromiter(params.values(), dtype=np.float64, count=compiled.n_par)
-    C, d = compiled.build_affine_measurement_matrices(
-        par,
-        list(compiled.observable_names),
-        np.zeros(len(compiled.var_names)),
-    )
-    return shock_covariance(config, params), C, d
 
 
 # --- ordering ---------------------------------------------------------------
@@ -140,8 +79,8 @@ def test_impact_on_declared_variables_matches_ghu(solved_post82):
     assert r_row[dyn.EXO_COLUMNS.index("e_g")] == pytest.approx(0.34702357, abs=1e-8)
 
 
-def test_shock_covariance_matches_dynare(parsed_post82, compiled_post82):
-    Q, _, _ = _measurement(parsed_post82, compiled_post82)
+def test_shock_covariance_matches_dynare(parsed_post82):
+    Q = shock_covariance(parsed_post82, parsed_post82.calibration.parameters)
 
     assert np.abs(Q - dyn.SIGMA_E).max() < TOL
 
@@ -199,104 +138,3 @@ def test_unit_innovation_response_matches_dynare(solved_post82, shock):
     out = solution.sim(T=horizon, shocks=_shocks(block))
 
     assert np.abs(_path(solution.compiled, out) - dyn.IRF[shock]).max() < TOL
-
-
-# --- measurement and filter -------------------------------------------------
-
-
-def test_measurement_matrices_match_dynare(parsed_post82, compiled_post82):
-    compiled = compiled_post82
-    _, C, d = _measurement(parsed_post82, compiled)
-
-    assert np.abs(C[:, _declared(compiled)] - dyn.KF_Z).max() < TOL
-    assert np.abs(d - dyn.KF_D).max() < TOL
-
-
-def _filter(solution, P0):
-    Q, C, d = _measurement(solution.config, solution.compiled)
-    return run_linear(
-        np.real(solution.policy.A),
-        np.real(solution.policy.B),
-        C,
-        d,
-        Q,
-        dyn.KF_H,
-        solution.policy.steady_state,
-        dyn.KF_DATA,
-        x0=np.zeros((solution.compiled.n_var,), dtype=np.float64),
-        P0=P0,
-    )
-
-
-def _unconditional_P0(solution):
-    A, B = np.real(solution.policy.A), np.real(solution.policy.B)
-    Q, _, _ = _measurement(solution.config, solution.compiled)
-    P0 = solve_discrete_lyapunov(A, B @ Q @ B.T)
-    return 0.5 * (P0 + P0.T)
-
-
-def test_kalman_loglik_matches_dynare_from_the_unconditional_P0(solved_post82):
-    # Both filters start the model at its own stationary distribution, so this
-    # comparison needs no coordinate change in either direction.
-    solution = solved_post82
-    out = _filter(solution, _unconditional_P0(solution))
-
-    assert float(out.loglik) == pytest.approx(dyn.LOGLIK_UNCOND, abs=1e-9)
-
-
-def test_filtered_states_match_dynares_updated_variables(solved_post82):
-    # a_{t|t} on both sides, dated the same way, so nothing to align.
-    solution = solved_post82
-    out = _filter(solution, _unconditional_P0(solution))
-
-    x_filt = np.asarray(out.x_filt)[:, _declared(solution.compiled)]
-    assert np.abs(x_filt - dyn.UPDATED).max() < TOL
-
-
-def test_predicted_states_match_dynares_filtered_variables_one_period_on(solved_post82):
-    # Dynare indexes a prediction by the information set behind it and we index
-    # it by the period estimated, so the same quantity sits one row apart. The
-    # overlap is every row but an endpoint each. Aligning the two without the
-    # shift disagrees by 0.37 here, which the second assert holds the line on.
-    solution = solved_post82
-    out = _filter(solution, _unconditional_P0(solution))
-
-    x_pred = np.asarray(out.x_pred)[:, _declared(solution.compiled)]
-    assert np.abs(x_pred[1:] - dyn.FILTERED[: len(x_pred) - 1]).max() < TOL
-    assert np.abs(x_pred - dyn.FILTERED[: len(x_pred)]).max() > 0.3
-
-
-def test_prediction_is_the_transition_applied_to_the_previous_update(solved_post82):
-    # x_pred[t] = A x_filt[t-1]: the shocks are mean zero, so a prediction is the
-    # update behind it carried forward. The second assert reads that same
-    # identity off Dynare's array, where the index is the information set date,
-    # so it needs no shift and reaches the row past the end of the sample.
-    solution = solved_post82
-    out = _filter(solution, _unconditional_P0(solution))
-    A = np.real(solution.policy.A)
-
-    x_filt = np.asarray(out.x_filt)
-    x_pred = np.asarray(out.x_pred)
-    assert np.abs(x_pred[1:] - x_filt[:-1] @ A.T).max() < TOL
-
-    assert (
-        np.abs((x_filt @ A.T)[:, _declared(solution.compiled)] - dyn.FILTERED).max()
-        < TOL
-    )
-
-
-def test_kalman_loglik_matches_dynare_from_a_unit_prior_on_dynares_states(
-    solved_post82,
-):
-    # Dynare's P0 is the identity on five variables, which is the same matrix in
-    # our coordinates now, so nothing is carried across.
-    #
-    # An arbitrary prior, not the unconditional one: both loops now open on the
-    # update, so P0 is the covariance of the same state on both sides and any
-    # prior agrees. Under a predict-first loop only the unconditional covariance
-    # did, being the one fixed point of the prediction map.
-    solution = solved_post82
-
-    out = _filter(solution, np.eye(solution.compiled.n_var))
-
-    assert float(out.loglik) == pytest.approx(dyn.LOGLIK_FIXED_DYNARE, abs=1e-9)

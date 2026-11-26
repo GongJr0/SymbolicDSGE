@@ -1,11 +1,10 @@
-// post82_first_order.mod plus the yaml's observation block, so Dynare's own
-// smoother runs on it and produces the state paths our filter is checked
-// against. Economics are untouched.
+// post82_first_order.mod plus the yaml's observation block. A fixed shock path
+// is simulated into observations held in memory, and Dynare's own smoother runs
+// on them to produce the state paths and covariances our filter and smoother
+// are checked against. Economics are untouched.
 //
 // Run, in this order:
-//   dynare post82_first_order.mod noclearall
-//   make_post82_first_order_goldens      // writes post82_kf_data.m
-//   dynare post82_kf.mod noclearall nograph
+//   dynare post82_kf.mod nograph
 //   make_post82_kf_goldens
 //
 // calib_smoother displays and saves smoother figures. nograph is a dynare
@@ -73,6 +72,55 @@ end;
 
 varobs OutGap Infl Rate;
 
+// check solves the model without storing the decision rule; simult_ reads it
+// off oo_.dr. calib_smoother solves the model again and does not use this one.
+stoch_simul(order = 1, irf = 0, noprint);
+
+// simult_ returns y0 in column 1 followed by one period per row of the shock
+// matrix, so ex_(k,:) drives column k + 1. The observed rows are levels: the
+// measurement intercepts are the steady states of Infl and Rate.
+verbatim;
+  kf_x0_states = [0.5; -0.3; 0.2];   % [g; z; r], deviations from ys
+
+  % Columns [e_g, e_z, e_r].
+  kf_shock_block = [
+     0.25  -0.10   0.40
+    -0.70   0.55  -0.15
+     0.10   0.20   0.00
+     0.60  -0.35   0.25
+    -0.20   0.05  -0.50
+     0.00   0.30   0.10
+     0.35  -0.45   0.20
+    -0.45   0.15  -0.30
+     0.15   0.60   0.05
+    -0.10  -0.25   0.35
+     0.05   0.40  -0.20
+     0.20  -0.05   0.15
+  ];
+
+  kf_endo_idx = @(names) cellfun(@(nm) find(strcmp(cellstr(M_.endo_names), nm), 1), names);
+  kf_exo_idx  = @(names) cellfun(@(nm) find(strcmp(cellstr(M_.exo_names), nm), 1), names);
+
+  kf_y0 = oo_.dr.ys;
+  kf_y0(kf_endo_idx({'g', 'z', 'r'})) = kf_y0(kf_endo_idx({'g', 'z', 'r'})) + kf_x0_states;
+
+  kf_ex = zeros(size(kf_shock_block, 1), M_.exo_nbr);
+  kf_ex(:, kf_exo_idx({'e_g', 'e_z', 'e_r'})) = kf_shock_block;
+
+  kf_path = simult_(M_, options_, kf_y0, oo_.dr, kf_ex, 1);
+
+  kf_obs_names = {'OutGap', 'Infl', 'Rate'};
+  kf_obs = dseries(kf_path(kf_endo_idx(kf_obs_names), 2:end)', [], kf_obs_names);
+end;
+
+data(series = kf_obs);
+
+// smoothed_state_uncertainty is not a calib_smoother option; the smoother reads
+// it off options_ directly.
+verbatim;
+  options_.smoothed_state_uncertainty = true;
+end;
+
 // lik_init defaults to 1 for a stationary model, the unconditional covariance,
 // which is the initialization both libraries read the same way.
-calib_smoother(datafile = post82_kf_data, filtered_vars, filter_step_ahead = [1]);
+calib_smoother(filtered_vars, filter_step_ahead = [1], filter_covariance);
