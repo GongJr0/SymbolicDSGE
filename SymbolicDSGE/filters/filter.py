@@ -234,9 +234,9 @@ def _initialize_P0(
 ) -> NDF:
     """Initialize the state covariance matrix P0.
 
-    If P0 is provided, it is used as is. If not, the stationary covariance
-    is computed from A, B, and Q. If that fails, a large diagonal matrix is
-    returned.
+    If P0 is provided, it is used as given, symmetrized when requested. If not,
+    the stationary covariance is computed from A, B, and Q. If that fails, the
+    identity is returned.
     """
     if P0 is not None:
         P0 = P0.reshape(n, n)
@@ -488,9 +488,12 @@ def run_linear(
     y : NDF
         Observations in declared order. Shape (T, m) where T is the number of periods and m is the number of observed variables.
     x0 : NDF | None
-        State vector at t-1 to initialize the filter.
+        Prior mean of the first observed state ``x_{1|0}``, in deviations from
+        ``steady_state``, shape ``(n,)``. None starts from zeros, the steady state.
     P0 : NDF | None
-        State covariance matrix at t-1 to initialize the filter.
+        Prior covariance of the first observed state ``P_{1|0}``, shape ``(n, n)``.
+        None starts from the stationary covariance of ``A`` and ``B Q B^T``, or the
+        identity when there is none.
     symmetrize : bool
         Whether to symmetrize the covariance matrices at each step via (M + M.T)/2.
     joseph_cov : bool
@@ -567,9 +570,12 @@ def smooth_linear(
     y : NDF
         Observations in declared order. Shape (T, m) where T is the number of periods and m is the number of observed variables.
     x0 : NDF | None
-        State vector at t-1 to initialize the filter.
+        Prior mean of the first observed state ``x_{1|0}``, in deviations from
+        ``steady_state``, shape ``(n,)``. None starts from zeros, the steady state.
     P0 : NDF | None
-        State covariance matrix at t-1 to initialize the filter.
+        Prior covariance of the first observed state ``P_{1|0}``, shape ``(n, n)``.
+        None starts from the stationary covariance of ``A`` and ``B Q B^T``, or the
+        identity when there is none.
     symmetrize : bool
         Whether to symmetrize the covariance matrices at each step via (M + M.T)/2.
     joseph_cov : bool
@@ -939,10 +945,12 @@ def run_extended(
     y : NDF
         Observations in declared order, shape ``(T, m)``.
     x0 : NDF | None
-        Initial state mean ``x_{0|0}``, shape ``(n,)``. None starts from zeros.
+        Prior mean of the first observed state ``x_{1|0}``, in deviations from
+        ``steady_state``, shape ``(n,)``. None starts from zeros, the steady state.
     P0 : NDF | None
-        Initial state covariance ``P_{0|0}``, shape ``(n, n)``. None starts from
-        ``1e2 * I_n``.
+        Prior covariance of the first observed state ``P_{1|0}``, shape ``(n, n)``.
+        None starts from the stationary covariance of ``A`` and ``B Q B^T``, or the
+        identity when there is none.
     symmetrize : bool
         Whether to symmetrize the covariance matrices at each step via ``(M + M.T)/2``.
     joseph_cov : bool
@@ -1036,10 +1044,12 @@ def smooth_extended(
     y : NDF
         Observations in declared order, shape ``(T, m)``.
     x0 : NDF | None
-        Initial state mean ``x_{0|0}``, shape ``(n,)``. None starts from zeros.
+        Prior mean of the first observed state ``x_{1|0}``, in deviations from
+        ``steady_state``, shape ``(n,)``. None starts from zeros, the steady state.
     P0 : NDF | None
-        Initial state covariance ``P_{0|0}``, shape ``(n, n)``. None starts from
-        ``1e2 * I_n``.
+        Prior covariance of the first observed state ``P_{1|0}``, shape ``(n, n)``.
+        None starts from the stationary covariance of ``A`` and ``B Q B^T``, or the
+        identity when there is none.
     symmetrize : bool
         Whether to symmetrize the covariance matrices at each step via ``(M + M.T)/2``.
     joseph_cov : bool
