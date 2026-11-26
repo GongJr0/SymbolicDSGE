@@ -469,6 +469,22 @@ int sdsge_smoother_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                                const int symmetrize, const int joseph_cov,
                                const f64 jitter,
                                f64 *SDSGE_RESTRICT output_arena) {
-  const arena_offset in_off = make_offset(0, 0);
+  return 0;
+}
+
+int sdsge_smoother_extended_step(
+    const f64 *SDSGE_RESTRICT input_arena, f64 *SDSGE_RESTRICT scratch_arena,
+    const meas_fn meas, const meas_fn jac, const i64 T, const i64 n,
+    const i64 m, const i64 k, const i64 n_par, const int symmetrize,
+    const int joseph_cov, const f64 jitter, f64 *SDSGE_RESTRICT output_arena) {
+  return 0;
+}
+
+int sdsge_smoother_unscented_step(
+    const f64 *SDSGE_RESTRICT input_arena, f64 *SDSGE_RESTRICT scratch_arena,
+    const meas_fn meas, const i64 T, const i64 n_state, const i64 n_ctrl,
+    const i64 n_exog, const i64 n_obs, const i64 n_par, const f64 alpha,
+    const f64 beta, const f64 kappa, const int symmetrize, const f64 jitter,
+    f64 *SDSGE_RESTRICT output_arena) {
   return 0;
 }
