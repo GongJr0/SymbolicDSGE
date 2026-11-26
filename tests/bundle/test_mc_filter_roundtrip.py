@@ -40,7 +40,7 @@ _REQUIRED = (
 )
 _PRUNED = ("x1_pred", "x2_pred", "x1_filt", "x2_filt")
 #: Fields a linear or extended run leaves unpopulated, read through the guards.
-_OPTIONAL = ("eps_hat", "_x1_pred", "_x2_pred", "_x1_filt", "_x2_filt")
+_OPTIONAL = ("_x1_pred", "_x2_pred", "_x1_filt", "_x2_filt")
 
 
 def _pipeline(solved: SolvedModel, *filters: object) -> MCPipeline:
@@ -166,34 +166,22 @@ def test_the_mode_is_read_back_rather_than_inferred(
 # --------------------------------------------------------------------------
 
 
-def test_requested_shocks_come_back_and_absent_ones_stay_absent(
-    solved_post82: SolvedModel, tmp_path
-) -> None:
+def test_shocks_come_back(solved_post82: SolvedModel, tmp_path) -> None:
     pipeline = _pipeline(
         solved_post82,
         filter_step(
-            "with_shocks",
+            "filter",
             target="reference",
             obs_source="data",
             obs_field="observables",
-            filter=LinearKalman(return_shocks=True),
-        ),
-        filter_step(
-            "without_shocks",
-            target="reference",
-            obs_source="data",
-            obs_field="observables",
-            filter=LinearKalman(return_shocks=False),
+            filter=LinearKalman(),
         ),
     )
 
     before, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
-    assert after["with_shocks"].eps_hat is not None
-    np.testing.assert_array_equal(
-        after["with_shocks"].eps_hat, before["with_shocks"].eps_hat
-    )
-    assert after["without_shocks"].eps_hat is None
+    assert after["filter"].eps_hat is not None
+    np.testing.assert_array_equal(after["filter"].eps_hat, before["filter"].eps_hat)
 
 
 @pytest.mark.parametrize("name", _PRUNED)
@@ -326,7 +314,7 @@ def test_filters_round_trip_through_csv_members(
             target="reference",
             obs_source="data",
             obs_field="observables",
-            filter=LinearKalman(return_shocks=True),
+            filter=LinearKalman(),
         ),
     )
 

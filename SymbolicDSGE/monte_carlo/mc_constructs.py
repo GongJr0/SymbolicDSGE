@@ -590,9 +590,9 @@ class MCFilterResult:
         Innovations standardized by their covariance, shape ``(n_retained, T, n_obs)``.
     loglik : NDF
         Per-replication log likelihood of the measurements, shape ``(n_retained,)``.
-    eps_hat : NDF | None
+    eps_hat : NDF
         Conditional estimates of the structural shocks given observed data, shape
-        ``(n_retained, T, n_shock)``. None when the step ran without shock recovery.
+        ``(n_retained, T, n_shock)``.
     x1_pred : NDF
         First-order component of the predicted state, shape
         ``(n_retained, T, n_state)``. Unscented filter steps only.
@@ -621,11 +621,11 @@ class MCFilterResult:
     y_filt: NDF
 
     S: NDF
+    eps_hat: NDF
 
     innov: NDF
     std_innov: NDF
     loglik: NDF
-    eps_hat: NDF | None = None
 
     # Unscented-specific
     _x1_pred: NDF | None = None
@@ -662,7 +662,7 @@ class MCFilterResult:
                 x1_filt=self.x1_filt[idx],
                 x2_pred=self.x2_pred[idx],
                 x2_filt=self.x2_filt[idx],
-                eps_hat=self.eps_hat[idx] if self.eps_hat is not None else None,
+                eps_hat=self.eps_hat[idx],
             )
         return FilterResult(
             x_pred=self.x_pred[idx],
@@ -675,7 +675,7 @@ class MCFilterResult:
             innov=self.innov[idx],
             std_innov=self.std_innov[idx],
             loglik=self.loglik[idx],
-            eps_hat=self.eps_hat[idx] if self.eps_hat is not None else None,
+            eps_hat=self.eps_hat[idx],
         )
 
     @cached_property

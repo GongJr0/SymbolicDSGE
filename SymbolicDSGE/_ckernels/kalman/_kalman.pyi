@@ -1,12 +1,4 @@
-"""Type stubs for the compiled ``_kalman`` extension.
-
-The native kernel carries no inspectable type information (the type checker never
-parses ``_kalman.pyx`` nor introspects the compiled object), so this signature
-exists solely to give the LSP and mypy the shape of the exported function. It
-must stay in sync with ``_kalman.pyx`` / ``kalman.c`` and the numba reference
-``SymbolicDSGE.kalman.filter._kalman_hot_loop`` (the two are interchangeable at
-the call site); the parity tests guard the runtime behavior, not this stub.
-"""
+"""Type stubs for the compiled ``_kalman`` extension."""
 
 from numpy import float64
 from numpy.typing import NDArray
@@ -22,7 +14,7 @@ KF_ERR_Q_FACTORIZATION: int = ...
 KF_ERR_S_FACTORIZATION: int = ...
 KF_ERR_BAD_HYPERPARAMS: int = ...
 
-def kalman_hot_loop(
+def kf_forward(
     T: int,
     nmk: tuple[int, int, int],
     A: _F64,
@@ -38,13 +30,36 @@ def kalman_hot_loop(
     symmetrize: bool,
     joseph_cov: bool,
     jitter: float,
-    return_shocks: bool = False,
     store_history: bool = True,
 ) -> tuple[
     int,
     tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
 ]:
-    """Run the linear Kalman filter; mirrors numba ``_kalman_hot_loop``."""
+    """Run the linear Kalman filter."""
+
+def kf_smooth(
+    T: int,
+    nmk: tuple[int, int, int],
+    A: _F64,
+    B: _F64,
+    C: _F64,
+    d: _F64,
+    Q: _F64,
+    R: _F64,
+    steady_state: _F64,
+    y: _F64,
+    x0: _F64,
+    P0: _F64,
+    symmetrize: bool,
+    joseph_cov: bool,
+    jitter: float,
+) -> tuple[
+    int,
+    tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
+    tuple[_F64, _F64, _F64],
+]:
+    """Run the linear Kalman filter and smoother."""
+    ...
 
 def stationary_covariance(
     A: _F64,
@@ -54,8 +69,9 @@ def stationary_covariance(
     max_iterations: int = ...,
 ) -> tuple[int, _F64]:
     """Solve ``P = A P A.T + B Q B.T`` and return ``(status, P)``."""
+    ...
 
-def ekf_hot_loop(
+def ekf_forward(
     meas_addr: int,
     jac_addr: int,
     A: _F64,
@@ -70,8 +86,6 @@ def ekf_hot_loop(
     symmetrize: bool,
     joseph_cov: bool,
     jitter: float,
-    compute_y_filt: bool = True,
-    return_shocks: bool = False,
     store_history: bool = True,
 ) -> tuple[
     int,
@@ -80,8 +94,34 @@ def ekf_hot_loop(
     """Run the native extended Kalman filter (nonlinear measurement via the
     meas/jac @cfunc addresses).
     """
+    ...
 
-def ukf_hot_loop(
+def ekf_smooth(
+    meas_addr: int,
+    jac_addr: int,
+    A: _F64,
+    B: _F64,
+    calib_params: _F64,
+    Q: _F64,
+    R: _F64,
+    steady_state: _F64,
+    y: _F64,
+    x0: _F64,
+    P0: _F64,
+    symmetrize: bool,
+    joseph_cov: bool,
+    jitter: float,
+) -> tuple[
+    int,
+    tuple[_F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, _F64, float64],
+    tuple[_F64, _F64, _F64],
+]:
+    """Run the native extended Kalman filter and smoother (nonlinear measurement
+    via the meas/jac @cfunc addresses).
+    """
+    ...
+
+def ukf_forward(
     meas_addr: int,
     hx: _F64,
     gx: _F64,
@@ -123,7 +163,58 @@ def ukf_hot_loop(
         _F64,
         _F64,
         _F64,
+        _F64,
         float64,
     ],
 ]:
     """Run the native second-order UKF hot loop."""
+    ...
+
+def ukf_smooth(
+    meas_addr: int,
+    hx: _F64,
+    gx: _F64,
+    bu: _F64,
+    hxx: _F64,
+    gxx: _F64,
+    hxu: _F64,
+    gxu: _F64,
+    huu: _F64,
+    guu: _F64,
+    hss: _F64,
+    gss: _F64,
+    steady_state: _F64,
+    params: _F64,
+    Q: _F64,
+    R: _F64,
+    obs: _F64,
+    z0: _F64,
+    P0: _F64,
+    alpha: float,
+    beta: float,
+    kappa: float,
+    jitter: float,
+    symmetrize: bool = True,
+) -> tuple[
+    int,
+    tuple[
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        _F64,
+        float64,
+    ],
+    tuple[_F64, _F64, _F64, _F64, _F64],
+]:
+    """Run the unscented Kalman filter and smoother."""
+    ...

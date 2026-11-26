@@ -117,6 +117,7 @@ cdef extern from "../core/klein_solve.h":
 cdef extern from "../kalman/kalman.h":
     ctypedef void (*meas_fn)()
 
+cdef extern from "../kalman/linear.h":
     ctypedef struct kf_inputs:
         int64_t n
         int64_t m
@@ -135,9 +136,10 @@ cdef extern from "../kalman/kalman.h":
         int symmetrize
         int joseph_cov
         double jitter
-        int return_shocks
         int store_history
+    arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
 
+cdef extern from "../kalman/extended.h":
     ctypedef struct ekf_inputs:
         meas_fn meas
         meas_fn jac
@@ -158,10 +160,10 @@ cdef extern from "../kalman/kalman.h":
         double jitter
         int symmetrize
         int joseph_cov
-        int compute_y_filt
-        int return_shocks
         int store_history
+    arena_size ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
 
+cdef extern from "../kalman/unscented.h":
     ctypedef struct ukf_inputs:
         meas_fn meas
         const double *hx
@@ -194,9 +196,6 @@ cdef extern from "../kalman/kalman.h":
         double jitter
         int symmetrize
         int store_history
-
-    arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
-    arena_size ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
     arena_size ukf_arena_size(
         int64_t n_state, int64_t n_ctrl, int64_t n_exog, int64_t n_obs,
     ) nogil

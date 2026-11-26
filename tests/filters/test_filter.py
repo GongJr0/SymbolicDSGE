@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
 from numba import cfunc, types
 from numpy import float64
@@ -19,8 +18,11 @@ from SymbolicDSGE.filters.filter import (
     run_extended,
     run_linear,
     run_unscented,
+    smooth_extended,
+    smooth_linear,
+    smooth_unscented,
 )
-from SymbolicDSGE.filters.gaussian import ExtendedKalman, LinearKalman
+from SymbolicDSGE.filters.gaussian import ExtendedKalman, LinearKalman, UnscentedKalman
 
 
 def _linear_system_1d():
@@ -32,20 +34,77 @@ def _linear_system_1d():
     R = np.array([[0.01]], dtype=float64)
     # A zero expansion point, so the state series this system reports are the
     # recursion's own output and the assertions below read as the recursion.
-    # The offset itself is covered against the oracle in
-    # tests/ckernels/test_kalman.py and end to end in tests/kalman/test_resolvers.py.
+    # The offset itself is covered on `_system` below and end to end in
+    # tests/filters/test_resolvers.py.
     ss = np.zeros(1, dtype=float64)
     return A, B, C, d, Q, R, ss
 
 
-_UKF_MEAS_SIG = types.void(
+def _system(steady_state=(1.5, -0.7, 2.0, 0.4), curvature=0.0):
+    """Four states, two observables, and three shocks."""
+    ss = np.array(steady_state, dtype=float64)
+    C = np.array([[1.0, 0.5, 0.0, -0.4], [0.0, 0.0, 0.0, 0.0]], dtype=float64)
+    d = np.array([0.3, -0.2], dtype=float64)
+    return {
+        "A": np.array(
+            [
+                [0.6, 0.1, 0.0, 0.0],
+                [0.2, 0.5, 0.1, 0.0],
+                [0.0, 0.3, 0.4, 0.1],
+                [0.1, 0.0, 0.2, 0.3],
+            ],
+            dtype=float64,
+        ),
+        "B": np.array(
+            [[1.0, 0.2, 0.0], [0.0, 0.8, 0.0], [0.3, 0.0, 0.0], [0.0, 0.5, 0.0]],
+            dtype=float64,
+        ),
+        "C": C,
+        "d": d,
+        "meas_addr": _ekf_system_meas.address,
+        "jac_addr": _ekf_system_jac.address,
+        "calib_params": np.concatenate([[curvature], ss, d, C.ravel()]),
+        "Q": np.array(
+            [[0.04, 0.01, 0.0], [0.01, 0.09, 0.0], [0.0, 0.0, 0.25]], dtype=float64
+        ),
+        "R": np.array([[0.02, 0.005], [0.005, 0.03]], dtype=float64),
+        "steady_state": ss,
+        "y": np.random.default_rng(0).normal(size=(8, 2)),
+        "x0": np.array([0.2, -0.1, 0.05, 0.3], dtype=float64),
+        "P0": np.diag(np.array([0.5, 0.4, 0.3, 0.2], dtype=float64)),
+    }
+
+
+def _kf_system(**kwargs):
+    system = _system(**kwargs)
+    for key in ("meas_addr", "jac_addr", "calib_params"):
+        system.pop(key)
+    return system
+
+
+def _ekf_system(**kwargs):
+    system = _system(**kwargs)
+    for key in ("C", "d"):
+        system.pop(key)
+    return system
+
+
+def _ill_conditioned_P0():
+    """Eigenvalues 1 through 1e14 under a fixed reflection, so no axis is aligned."""
+    v = np.array([1.0, 2.0, 3.0, 4.0], dtype=float64)
+    U = np.eye(4, dtype=float64) - 2.0 * np.outer(v, v) / (v @ v)
+    P0 = U @ np.diag(np.logspace(0.0, 14.0, 4)) @ U.T
+    return 0.5 * (P0 + P0.T)
+
+
+_MEAS_SIG = types.void(
     types.CPointer(types.float64),
     types.CPointer(types.float64),
     types.CPointer(types.float64),
 )
 
 
-@cfunc(_UKF_MEAS_SIG)
+@cfunc(_MEAS_SIG)
 def _ukf_measurement(model_vars, params, out):
     out[0] = model_vars[0] + params[0] * model_vars[1]
 
@@ -53,19 +112,45 @@ def _ukf_measurement(model_vars, params, out):
 # 1-D linear measurement h(x) = x and its (constant) jacobian, as @cfuncs for the
 # EKF address-based API. The linear measurement lets the EKF be checked against
 # the exact linear Kalman filter.
-@cfunc(_UKF_MEAS_SIG)
+@cfunc(_MEAS_SIG)
 def _ekf_lin_meas(x, params, out):
     out[0] = x[0]
 
 
-@cfunc(_UKF_MEAS_SIG)
+@cfunc(_MEAS_SIG)
 def _ekf_lin_jac(x, params, out):
     out[0] = 1.0
 
 
-@cfunc(_UKF_MEAS_SIG)
+@cfunc(_MEAS_SIG)
 def _ekf_bias_meas(x, params, out):
     out[0] = x[0] + params[0]
+
+
+# `_system`'s measurement: curvature, expansion point (4), intercepts (2), and
+# loadings (2 x 4, row-major) in calib_params.
+@cfunc(_MEAS_SIG)
+def _ekf_system_meas(x, params, out):
+    for i in range(2):
+        acc = params[5 + i]
+        for j in range(4):
+            acc += params[7 + 4 * i + j] * (x[j] - params[1 + j])
+        out[i] = acc
+    u = x[1] - params[2]
+    out[0] += params[0] * u * u
+
+
+@cfunc(_MEAS_SIG)
+def _ekf_system_jac(x, params, out):
+    for k in range(8):
+        out[k] = params[7 + k]
+    out[1] += 2.0 * params[0] * (x[1] - params[2])
+
+
+_KERNELS = {
+    "linear": (run_linear, smooth_linear, _kf_system),
+    "extended": (run_extended, smooth_extended, _ekf_system),
+}
 
 
 def _ukf_system_1d():
@@ -137,7 +222,7 @@ def test_run_linear_outputs_shapes_and_first_prediction():
     assert out.y_filt.shape == (5, 1)
     assert out.innov.shape == (5, 1)
     assert out.S.shape == (5, 1, 1)
-    assert out.eps_hat is None
+    assert out.eps_hat.shape == (5, 1)
     assert np.isfinite(out.loglik)
 
     # x0 is the prior for the first observed state, so the first prediction is
@@ -180,14 +265,14 @@ def test_run_linear_can_skip_history_storage_for_loglik_only_path():
     assert minimal.innov.shape == (0, 1)
     assert minimal.std_innov.shape == (0, 1)
     assert minimal.S.shape == (0, 1, 1)
-    assert minimal.eps_hat is None
+    assert minimal.eps_hat.shape == (0, 1)
 
 
 def test_run_linear_return_shocks():
     A, B, C, d, Q, R, ss = _linear_system_1d()
     y = np.zeros((4, 1), dtype=float64)
 
-    out = run_linear(A, B, C, d, Q, R, ss, y, return_shocks=True)
+    out = run_linear(A, B, C, d, Q, R, ss, y)
 
     assert out.eps_hat is not None
     assert out.eps_hat.shape == (4, 1)
@@ -205,6 +290,104 @@ def test_run_linear_raises_on_singular_innovation_covariance():
 
     with pytest.raises(MatrixFactorizationError):
         run_linear(A, B, C, d, Q, R, ss, y, P0=np.zeros((1, 1), dtype=float64))
+
+
+@pytest.mark.parametrize("mode", ["linear", "extended"])
+def test_symmetrize_makes_every_covariance_exactly_symmetric(mode):
+    _, smooth, build = _KERNELS[mode]
+    out = smooth(**build(), symmetrize=True)
+    fwd = out.filter_result
+
+    for P in (fwd.P_pred, fwd.P_filt, fwd.S, out.P_smooth):
+        assert np.array_equal(P, np.transpose(P, (0, 2, 1)))
+
+
+@pytest.mark.parametrize("joseph_cov", [False, True])
+@pytest.mark.parametrize("mode", ["linear", "extended"])
+def test_unsymmetrized_covariance_leaves_symmetry_on_an_ill_conditioned_prior(
+    mode, joseph_cov
+):
+    # At a well-conditioned prior the drift is rounding and may be zero; at this
+    # scale it is orders above the threshold.
+    run, _, build = _KERNELS[mode]
+    system = build() | {"P0": _ill_conditioned_P0()}
+    out = run(**system, symmetrize=False, joseph_cov=joseph_cov)
+
+    assert np.abs(out.P_filt - np.transpose(out.P_filt, (0, 2, 1))).max() > 1e-12
+
+
+@pytest.mark.parametrize("symmetrize", [False, True])
+@pytest.mark.parametrize("mode", ["linear", "extended"])
+def test_joseph_update_departs_from_the_standard_one_on_an_ill_conditioned_prior(
+    mode, symmetrize
+):
+    # The two forms are equal in exact arithmetic, so only a prior this badly
+    # conditioned separates them by more than rounding.
+    run, _, build = _KERNELS[mode]
+    system = build() | {"P0": _ill_conditioned_P0()}
+    standard = run(**system, symmetrize=symmetrize, joseph_cov=False)
+    joseph = run(**system, symmetrize=symmetrize, joseph_cov=True)
+
+    assert abs(joseph.loglik - standard.loglik) > 1e-7
+
+
+# The curvature makes the point the extended filter's jacobian is evaluated at
+# observable; the linear view has no callable to carry it.
+@pytest.mark.parametrize(
+    ("mode", "curvature"),
+    [("linear", 0.0), ("extended", 0.3)],
+    ids=["linear", "extended"],
+)
+def test_steady_state_shifts_the_state_series_and_nothing_else(mode, curvature):
+    _, smooth, build = _KERNELS[mode]
+    system = build(curvature=curvature)
+    ss = system["steady_state"]
+    shifted = smooth(**system)
+    origin = smooth(**build(steady_state=(0.0, 0.0, 0.0, 0.0), curvature=curvature))
+    fwd, fwd0 = shifted.filter_result, origin.filter_result
+
+    assert np.abs(fwd.x_pred - fwd0.x_pred - ss).max() < 1e-12
+    assert np.abs(fwd.x_filt - fwd0.x_filt - ss).max() < 1e-12
+    assert np.abs(shifted.x_smooth - origin.x_smooth - ss).max() < 1e-12
+
+    for name in ("P_pred", "P_filt", "y_pred", "y_filt", "innov", "std_innov", "S"):
+        assert np.abs(getattr(fwd, name) - getattr(fwd0, name)).max() < 1e-12, name
+    assert np.abs(fwd.eps_hat - fwd0.eps_hat).max() < 1e-12
+    assert np.abs(shifted.P_smooth - origin.P_smooth).max() < 1e-12
+    assert np.abs(shifted.eps_smooth - origin.eps_smooth).max() < 1e-12
+    assert abs(fwd.loglik - fwd0.loglik) < 1e-12
+
+
+@pytest.mark.parametrize("mode", ["linear", "extended"])
+def test_states_observables_and_shocks_stay_on_their_own_axes(mode):
+    _, smooth, build = _KERNELS[mode]
+    system = build()
+    y, R = system["y"], system["R"]
+    d = _kf_system()["d"]
+    out = smooth(**system)
+    fwd = out.filter_result
+    T = len(y)
+
+    for P in (fwd.P_pred, fwd.P_filt, out.P_smooth):
+        assert P.shape == (T, 4, 4)
+    for x in (fwd.x_pred, fwd.x_filt, out.x_smooth):
+        assert x.shape == (T, 4)
+    for v in (fwd.y_pred, fwd.y_filt, fwd.innov, fwd.std_innov):
+        assert v.shape == (T, 2)
+    assert fwd.S.shape == (T, 2, 2)
+    assert fwd.eps_hat.shape == (T, 3)
+    assert out.eps_smooth.shape == (T, 3)
+
+    # The observable that loads on no state is predicted by its intercept alone,
+    # and its innovation covariance row is its measurement noise row.
+    assert np.abs(fwd.y_pred[:, 1] - d[1]).max() < 1e-12
+    assert np.abs(fwd.innov[:, 1] - (y[:, 1] - d[1])).max() < 1e-12
+    assert np.abs(fwd.S[:, 1, :] - R[1]).max() < 1e-12
+
+    # The shock that loads on no state is never inferred, while the others are.
+    assert np.abs(fwd.eps_hat[:, 2]).max() < 1e-12
+    assert np.abs(out.eps_smooth[:, 2]).max() < 1e-12
+    assert np.abs(fwd.eps_hat[:, :2]).max() > 0.1
 
 
 def test_run_unscented_outputs_shapes_and_projected_fields():
@@ -280,20 +463,74 @@ def test_run_unscented_rejects_degenerate_inputs():
     with pytest.raises(ValueError, match="meas_addr"):
         run_unscented(**(kwargs | {"meas_addr": 0}))
 
-    with pytest.raises(ShapeMismatchError, match="hxx"):
-        run_unscented(**(kwargs | {"hxx": np.zeros((1, 1), dtype=float64)}))
 
-    with pytest.raises(MatrixFactorizationError):
-        run_unscented(
-            **(
-                kwargs
-                | {
-                    "P0": np.zeros((2, 2), dtype=float64),
-                    "Q": np.zeros((1, 1), dtype=float64),
-                    "jitter": 0.0,
-                }
-            )
-        )
+@pytest.mark.parametrize(
+    ("name", "bad"),
+    [
+        ("hx", np.zeros((1, 2), dtype=float64)),
+        ("bu", np.zeros((3, 1), dtype=float64)),
+        ("gx", np.zeros((1, 2), dtype=float64)),
+        ("hxx", np.zeros((1, 1), dtype=float64)),
+        ("gxx", np.zeros((1, 1), dtype=float64)),
+        ("hxu", np.zeros((1, 1), dtype=float64)),
+        ("gxu", np.zeros((1, 1), dtype=float64)),
+        ("huu", np.zeros((1, 1), dtype=float64)),
+        ("guu", np.zeros((1, 1), dtype=float64)),
+        ("hss", np.zeros(2, dtype=float64)),
+        ("gss", np.zeros(2, dtype=float64)),
+        ("steady_state", np.zeros(3, dtype=float64)),
+        ("Q", np.zeros((2, 2), dtype=float64)),
+        ("y", np.zeros(4, dtype=float64)),
+        ("R", np.zeros((2, 2), dtype=float64)),
+        ("z0", np.zeros(3, dtype=float64)),
+        ("P0", np.zeros((3, 3), dtype=float64)),
+    ],
+)
+def test_run_unscented_rejects_every_misshaped_argument(name, bad):
+    with pytest.raises(ShapeMismatchError, match=f"'{name}'"):
+        run_unscented(**(_ukf_system_1d() | {name: bad}))
+
+
+def test_run_unscented_embeds_a_state_block_P0_over_a_zero_second_order_block():
+    kwargs = _ukf_system_1d()
+    block = np.array([[0.4]], dtype=float64)
+    embedded = np.zeros((2, 2), dtype=float64)
+    embedded[:1, :1] = block
+
+    from_block = run_unscented(**(kwargs | {"P0": block}))
+    from_embedded = run_unscented(**(kwargs | {"P0": embedded}))
+
+    assert np.array_equal(from_block.P_filt, from_embedded.P_filt)
+    assert np.array_equal(from_block.x_filt, from_embedded.x_filt)
+    assert from_block.loglik == from_embedded.loglik
+
+
+def test_run_unscented_reports_each_kernel_failure_by_its_own_code():
+    kwargs = _ukf_system_1d()
+    cases = [
+        # The augmented dimension is 2 n_state + n_exog = 3, so this scale is zero.
+        ({"kappa": -3.0}, ErrorCode.BAD_HYPERPARAMS, HyperparameterError),
+        (
+            {"Q": np.array([[-1.0]])},
+            ErrorCode.Q_FACTORIZATION,
+            MatrixFactorizationError,
+        ),
+        (
+            {"P0": -np.eye(2, dtype=float64), "jitter": 0.0},
+            ErrorCode.P_FACTORIZATION,
+            MatrixFactorizationError,
+        ),
+        (
+            {"R": np.array([[-10.0]])},
+            ErrorCode.S_FACTORIZATION,
+            MatrixFactorizationError,
+        ),
+    ]
+    for override, code, error in cases:
+        system = kwargs | override
+        assert run_unscented(**system, _raise_on_error=False).status == int(code)
+        with pytest.raises(error):
+            run_unscented(**system)
 
 
 def test_run_extended_matches_linear_when_measurement_is_linear():
@@ -340,14 +577,14 @@ def test_extended_matches_linear_on_a_levels_model(solved_rbc_so):
     # filter that evaluates it at deviations drops `h(ss)` from every prediction.
     compiled = solved_rbc_so.compiled
     obs = list(compiled.observable_names)
-    ss = np.asarray(solved_rbc_so.policy.steady_state, dtype=np.float64)
+    ss = solved_rbc_so.policy.steady_state
 
     # Guard the premise: at ss == 0 both conventions coincide and the test below
     # cannot fail for the reason it exists.
     assert np.max(np.abs(ss)) > 1.0
 
     rng = np.random.default_rng(0)
-    y = pd.DataFrame(rng.normal(size=(24, len(obs))), columns=obs)
+    y = rng.normal(size=(24, len(obs)))
     R = np.eye(len(obs), dtype=np.float64) * 1e-4
 
     linear = LinearKalman().filter(solved_rbc_so, y, R=R)
@@ -374,7 +611,6 @@ def test_run_extended_can_skip_history_storage_for_loglik_only_path():
         R=R,
         steady_state=ss,
         y=y,
-        compute_y_filt=False,
     )
     full = run_extended(**kwargs)
     minimal = run_extended(**kwargs, _store_history=False)
@@ -389,45 +625,7 @@ def test_run_extended_can_skip_history_storage_for_loglik_only_path():
     assert minimal.innov.shape == (0, 1)
     assert minimal.std_innov.shape == (0, 1)
     assert minimal.S.shape == (0, 1, 1)
-    assert minimal.eps_hat is None
-
-
-def test_run_extended_compute_y_filt_false_and_return_shocks():
-    A, B, _, _, Q, R, ss = _linear_system_1d()
-    y = np.zeros((4, 1), dtype=float64)
-    calib = np.array([], dtype=float64)
-    out_true = run_extended(
-        meas_addr=_ekf_lin_meas.address,
-        jac_addr=_ekf_lin_jac.address,
-        A=A,
-        B=B,
-        calib_params=calib,
-        Q=Q,
-        R=R,
-        steady_state=ss,
-        y=y,
-        compute_y_filt=True,
-        return_shocks=True,
-    )
-
-    out = run_extended(
-        meas_addr=_ekf_lin_meas.address,
-        jac_addr=_ekf_lin_jac.address,
-        A=A,
-        B=B,
-        calib_params=calib,
-        Q=Q,
-        R=R,
-        steady_state=ss,
-        y=y,
-        compute_y_filt=False,
-        return_shocks=True,
-    )
-
-    assert np.array_equal(out.y_filt, np.zeros_like(out.y_filt))
-    assert np.allclose(out.loglik, out_true.loglik)
-    assert out.eps_hat is not None
-    assert out.eps_hat.shape == (4, 1)
+    assert minimal.eps_hat.shape == (0, 1)
 
 
 def _linear_ukf_pair():
@@ -563,3 +761,109 @@ def test_unscented_without_curvature_still_moves_with_the_shock_loading():
 
     assert not np.isclose(moved_ukf, base, rtol=1e-6)
     assert moved_ukf == pytest.approx(moved_kf, rel=1e-9, abs=1e-9)
+
+
+def test_unscented_keeps_states_controls_observables_and_shocks_on_their_own_axes(
+    solved_multishock, multishock_c_k_panel
+):
+    obs, y = multishock_c_k_panel
+    out = UnscentedKalman().smooth(solved_multishock, y, obs)
+    fwd = out.filter_result
+    compiled = solved_multishock.compiled
+    T, ns, nv = len(y), compiled.n_state, compiled.n_var
+    nz, m, k = 2 * ns, len(obs), len(compiled.shock_names)
+
+    for x in (fwd.x_pred, fwd.x_filt, out.x_smooth):
+        assert x.shape == (T, nv)
+    for x in (fwd.x1_pred, fwd.x2_pred, fwd.x1_filt, fwd.x2_filt):
+        assert x.shape == (T, ns)
+    for x in (out.x1_smooth, out.x2_smooth):
+        assert x.shape == (T, ns)
+    for P in (fwd.P_pred, fwd.P_filt, out.P_smooth):
+        assert P.shape == (T, nz, nz)
+    for v in (fwd.y_pred, fwd.y_filt, fwd.innov, fwd.std_innov):
+        assert v.shape == (T, m)
+    assert fwd.S.shape == (T, m, m)
+    assert fwd.eps_hat.shape == (T, k)
+    assert out.eps_smooth.shape == (T, k)
+
+
+def test_unscented_smoother_runs_the_filter_forward_and_ends_on_its_last_period(
+    solved_multishock, multishock_c_k_panel
+):
+    obs, y = multishock_c_k_panel
+    out = UnscentedKalman().smooth(solved_multishock, y, obs)
+    fwd = out.filter_result
+    filtered = UnscentedKalman().filter(solved_multishock, y, obs)
+
+    for name in (
+        "x_pred",
+        "x_filt",
+        "x1_pred",
+        "x2_pred",
+        "x1_filt",
+        "x2_filt",
+        "P_pred",
+        "P_filt",
+        "y_pred",
+        "y_filt",
+        "innov",
+        "std_innov",
+        "S",
+        "eps_hat",
+    ):
+        assert np.array_equal(getattr(fwd, name), getattr(filtered, name)), name
+    assert fwd.loglik == filtered.loglik
+
+    # Nothing comes after the last observation, so smoothing leaves it filtered.
+    assert np.array_equal(out.x_smooth[-1], fwd.x_filt[-1])
+    assert np.array_equal(out.x1_smooth[-1], fwd.x1_filt[-1])
+    assert np.array_equal(out.x2_smooth[-1], fwd.x2_filt[-1])
+    assert np.array_equal(out.P_smooth[-1], fwd.P_filt[-1])
+    assert np.array_equal(out.eps_smooth[-1], fwd.eps_hat[-1])
+
+
+def test_unscented_smoother_reduces_to_the_linear_smoother_without_curvature():
+    unscented, linear, _ = _linear_ukf_pair()
+
+    ukf = smooth_unscented(**unscented)
+    kf = smooth_linear(**linear)
+
+    np.testing.assert_allclose(ukf.x_smooth, kf.x_smooth, rtol=1e-7, atol=1e-9)
+    np.testing.assert_allclose(ukf.eps_smooth, kf.eps_smooth, rtol=1e-7, atol=1e-9)
+
+
+def test_unscented_weights_are_inert_without_curvature():
+    # The unscented transform is exact for an affine map whatever its weights.
+    unscented, _, _ = _linear_ukf_pair()
+    base = run_unscented(**unscented).loglik
+
+    for alpha, beta, kappa in ((0.5, 2.0, 0.0), (1.0, 0.0, 3.0)):
+        moved = run_unscented(
+            **(unscented | {"alpha": alpha, "beta": beta, "kappa": kappa})
+        ).loglik
+        assert abs(moved - base) < 1e-12
+
+
+def test_unscented_weights_reach_the_kernel_with_curvature(
+    solved_multishock, multishock_c_k_panel
+):
+    obs, y = multishock_c_k_panel
+    base = UnscentedKalman().filter(solved_multishock, y, obs).loglik
+
+    for alpha, beta, kappa in ((0.5, 2.0, 0.0), (1.0, 0.0, 3.0)):
+        moved = UnscentedKalman(alpha=alpha, beta=beta, kappa=kappa).filter(
+            solved_multishock, y, obs
+        )
+        assert abs(moved.loglik - base) > 1e-4
+
+
+def test_unscented_symmetrize_makes_every_covariance_exactly_symmetric(
+    solved_multishock, multishock_c_k_panel
+):
+    obs, y = multishock_c_k_panel
+    out = UnscentedKalman(symmetrize=True).smooth(solved_multishock, y, obs)
+    fwd = out.filter_result
+
+    for P in (fwd.P_pred, fwd.P_filt, fwd.S, out.P_smooth):
+        assert np.array_equal(P, np.transpose(P, (0, 2, 1)))

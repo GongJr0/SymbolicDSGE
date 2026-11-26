@@ -192,6 +192,7 @@ nav:
           - ExtendedKalman: documentation/filters/ExtendedKalman.md
           - UnscentedKalman: documentation/filters/UnscentedKalman.md
           - FilterResult: documentation/filters/FilterResult.md
+          - SmootherResult: documentation/filters/SmootherResult.md
       - Regression:
           - Overview: documentation/regression/index.md
           - Regression Results: documentation/regression/results.md

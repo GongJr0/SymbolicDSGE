@@ -324,7 +324,7 @@ def rbc_ukf_y(parsed_rbc_so):
     implementations on the same data, so it need not be model-consistent.
 
     ndarray, not a one-column frame: pandas hands back a read-only view for a
-    single column under copy-on-write, which ``ukf_hot_loop`` rejects on the
+    single column under copy-on-write, which ``ukf_forward`` rejects on the
     standalone interface path.
     """
     c_ss = float(parsed_rbc_so.calibration.parameters[Symbol("c_ss")])

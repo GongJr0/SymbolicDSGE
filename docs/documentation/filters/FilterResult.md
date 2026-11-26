@@ -24,7 +24,7 @@ __Fields:__
 | innov | `ndarray` | Observable innovations $y_t - y_{t\mid t-1}$. |
 | std_innov | `ndarray` | Innovations standardized by their covariance. |
 | S | `ndarray` | Innovation covariance over time. |
-| eps_hat | `ndarray | None` | Conditional estimates of structural shocks given observed data (present when `return_shocks=True`). |
+| eps_hat | `ndarray` | Conditional estimates of structural shocks given observed data. |
 | loglik | `float` | log likelihood ($\boldsymbol{\ell}$) of measurements. |
 
 ???+ info "State Units"
@@ -46,7 +46,7 @@ __Fields:__
 class UnscentedFilterResult(FilterResult)
 ```
 
-Returned by `UnscentedKalman.filter`. Extends `FilterResult` with the first- and second-order components of the unscented state estimate. All `FilterResult` fields are present; `eps_hat` is `None`, since shock recovery (`return_shocks`) is not supported for the UKF.
+Returned by `UnscentedKalman.filter`. Extends `FilterResult` with the first- and second-order components of the unscented state estimate.
 
 __Additional Fields:__
 

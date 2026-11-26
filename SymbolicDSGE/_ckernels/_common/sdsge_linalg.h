@@ -17,6 +17,10 @@ void sdsge_sym_inplace(f64 *P, i64 n);
 /* out(n,m) := A(n,p) @ B(p,m) */
 void sdsge_matmul(const f64 *A, const f64 *B, f64 *out, i64 n, i64 p, i64 m);
 
+/* out(n,m) := A(n,p) @ B(p,m) + C(n,m) */
+void sdsge_matmul_plus_c(const f64 *A, const f64 *B, const f64 *C, f64 *out,
+                         i64 n, i64 p, i64 m);
+
 /* out(p,m) := A(n,p)^T @ B(n,m). `out` must not alias A or B; A and B may
  * overlap each other (e.g. lagged views of one buffer). */
 void sdsge_matmul_atb(const f64 *A, const f64 *B, f64 *out, i64 n, i64 p,
@@ -36,6 +40,19 @@ void sdsge_matvec(const f64 *A, const f64 *x, f64 *out, i64 n, i64 m);
 /* out(n) := A(n,m) @ x(m) + b(n) */
 void sdsge_matvec_plus_vec(const f64 *A, const f64 *x, const f64 *b, f64 *out,
                            i64 n, i64 m);
+
+/* out(p) := A(n,p)^T @ x(n) */
+void sdsge_matvec_atb(const f64 *A, const f64 *x, f64 *out, i64 n, i64 m);
+
+/* out(p) := A(n,p)^T @ x(n) + b(p) */
+void sdsge_matvec_atb_plus_vec(const f64 *A, const f64 *x, const f64 *b,
+                               f64 *out, i64 n, i64 m);
+
+/* x(n) := alpha * L(n,n) @ x(n) for lower-triangular L, in place. */
+void sdsge_trmv_lower_inplace(const f64 *L, f64 *x, f64 alpha, i64 n);
+
+/* X(n,m) := alpha * L(n,n) @ X(n,m) for lower-triangular L, in place. */
+void sdsge_trmm_lower_inplace(const f64 *L, f64 *X, f64 alpha, i64 n, i64 m);
 
 /* out(n) := a(n) - b(n).  out may alias a or b. */
 void sdsge_vsub(const f64 *a, const f64 *b, f64 *out, i64 n);

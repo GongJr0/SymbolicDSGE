@@ -519,7 +519,7 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides(
             target="reference",
             obs_source="sim",
             obs_field="observables",
-            filter=LinearKalman(return_shocks=True),
+            filter=LinearKalman(),
             obs_columns=[
                 list(solved.compiled.observable_names).index(name) for name in requested
             ],
@@ -542,7 +542,7 @@ def test_native_lowering_reorders_linear_filter_inputs_and_overrides(
     assert native_result.status == 0
     simulated = solved.sim(T, shocks=shocks, observables=True)
     expected_y = np.column_stack([simulated.observables[name] for name in requested])
-    expected_filter = LinearKalman(return_shocks=True).filter(
+    expected_filter = LinearKalman().filter(
         solved,
         y=expected_y,
         observables=requested,

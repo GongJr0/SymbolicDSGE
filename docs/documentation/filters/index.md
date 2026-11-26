@@ -29,14 +29,14 @@ __Hierarchy and Available Options:__
 ```text
 Filter
 └── GaussianFilter          jitter, symmetrize
-    ├── LinearKalman        + joseph_cov, return_shocks
-    ├── ExtendedKalman      + joseph_cov, return_shocks
+    ├── LinearKalman        + joseph_cov
+    ├── ExtendedKalman      + joseph_cov
     └── UnscentedKalman     + alpha, beta, kappa
 ```
 
 ## Base Arguments
 
-Every `Filter` implements the `filter` method below and can extend the arguments as needed for its own computations.
+Every `Filter` implements the `filter` and `smooth` methods below and can extend the arguments as needed for its own computations.
 The arguments below are always available and are always consumed in the same way, regardless of the filter used.
 
 ```python
@@ -47,6 +47,16 @@ filter(
     R: ndarray | None = None,
     x0: Mapping[str, float] | None = None,
 ) -> FilterResult
+```
+
+```python
+smooth(
+    model: SolvedModel,
+    y: ndarray | DataFrame,
+    observables: list[str] | tuple[str, ...] | None = None,
+    R: ndarray | None = None,
+    x0: Mapping[str, float] | None = None,
+) -> SmootherResult
 ```
 
 __Inputs:__

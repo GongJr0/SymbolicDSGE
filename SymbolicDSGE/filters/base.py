@@ -9,7 +9,7 @@ from numpy import float64, ndarray
 
 from ..core.solved_model.base import SolvedModel
 from .resolvers import FilterMode
-from .filter import FilterResult
+from .filter import FilterResult, SmootherResult
 
 ResultT = TypeVar("ResultT", bound=FilterResult)
 
@@ -39,6 +39,16 @@ class Filter(ABC, Generic[ResultT]):
         R: NDArray[float64] | None = None,
         x0: dict[str, float] | list[float] | NDArray[float64] | None = None,
     ) -> ResultT: ...
+
+    @abstractmethod
+    def smooth(
+        self,
+        model: SolvedModel,
+        y: NDArray[float64],
+        observables: list[str] | tuple[str, ...] | None = None,
+        R: NDArray[float64] | None = None,
+        x0: dict[str, float] | list[float] | NDArray[float64] | None = None,
+    ) -> SmootherResult[ResultT]: ...
 
     def to_spec(self) -> dict[str, Any]:
         """Convert the filter to a specification dictionary."""

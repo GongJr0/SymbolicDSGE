@@ -68,7 +68,6 @@ typedef struct {
   int symmetrize;
   int joseph_cov;
   f64 jitter;
-  int return_shocks;
 } sdsge_mc_filter_linear_step_ctx;
 
 typedef struct {
@@ -82,7 +81,6 @@ typedef struct {
   int symmetrize;
   int joseph_cov;
   f64 jitter;
-  int return_shocks;
 } sdsge_mc_filter_extended_step_ctx;
 
 typedef struct {
@@ -184,17 +182,15 @@ void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
 int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                              f64 *SDSGE_RESTRICT scratch_arena, i64 T, i64 n,
                              i64 m, i64 k, int symmetrize, int joseph_cov,
-                             f64 jitter, int return_shocks,
-                             f64 *SDSGE_RESTRICT output_arena);
+                             f64 jitter, f64 *SDSGE_RESTRICT output_arena);
 
 int sdsge_filter_extended_step(const f64 *SDSGE_RESTRICT input_arena,
                                f64 *SDSGE_RESTRICT scratch_arena, meas_fn meas,
                                meas_fn jac, i64 T, i64 n, i64 m, i64 k,
                                i64 n_par, int symmetrize, int joseph_cov,
-                               f64 jitter, int return_shocks,
-                               f64 *SDSGE_RESTRICT output_arena);
+                               f64 jitter, f64 *SDSGE_RESTRICT output_arena);
 
-i64 sdsge_filter_unscented_step(const f64 *SDSGE_RESTRICT input_arena,
+int sdsge_filter_unscented_step(const f64 *SDSGE_RESTRICT input_arena,
                                 f64 *SDSGE_RESTRICT scratch_arena, meas_fn meas,
                                 i64 T, i64 n_state, i64 n_ctrl, i64 n_exog,
                                 i64 n_obs, i64 n_par, f64 alpha, f64 beta,

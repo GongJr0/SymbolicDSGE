@@ -159,8 +159,7 @@ arena_size sdsge_filter_linear_input_arena_size(const i64 n, const i64 m,
 }
 
 arena_offset sdsge_filter_linear_output_arena_offset(const i64 n, const i64 m,
-                                                     const i64 k, const i64 T,
-                                                     const int return_shocks) {
+                                                     const i64 k, const i64 T) {
   arena_offset off = make_offset(11, 2);
   off.foffset[0] = T * n;                      // x_pred(T, n)
   off.foffset[1] = off.foffset[0] + T * n;     // x_filt(T, n)
@@ -171,19 +170,16 @@ arena_offset sdsge_filter_linear_output_arena_offset(const i64 n, const i64 m,
   off.foffset[6] = off.foffset[5] + T * m;     // innov(T, m)
   off.foffset[7] = off.foffset[6] + T * m;     // std_innov(T, m)
   off.foffset[8] = off.foffset[7] + T * m * m; // S(T, m, m)
-  off.foffset[9] =
-      off.foffset[8] + (return_shocks ? T * k : 0); // eps_hat(T, k) or nothing
-  off.foffset[10] = off.foffset[9] + 1;             // loglik
-  off.ioffset[0] = 1;                               // bool(any_failed_sources)
-  off.ioffset[1] = 2;                               // status
+  off.foffset[9] = off.foffset[8] + T * k;     // eps_hat(T, k)
+  off.foffset[10] = off.foffset[9] + 1;        // loglik
+  off.ioffset[0] = 1;                          // bool(any_failed_sources)
+  off.ioffset[1] = 2;                          // status
   return off;
 }
 
 arena_size sdsge_filter_linear_output_arena_size(const i64 n, const i64 m,
-                                                 const i64 k, const i64 T,
-                                                 const int return_shocks) {
-  const arena_offset off =
-      sdsge_filter_linear_output_arena_offset(n, m, k, T, return_shocks);
+                                                 const i64 k, const i64 T) {
+  const arena_offset off = sdsge_filter_linear_output_arena_offset(n, m, k, T);
   return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
 }
 
@@ -211,17 +207,15 @@ arena_size sdsge_filter_extended_input_arena_size(const i64 n, const i64 m,
   return make_sizer(off.foffset[off.n_fbuf - 1], 0);
 }
 
-arena_offset
-sdsge_filter_extended_output_arena_offset(const i64 n, const i64 m, const i64 k,
-                                          const i64 T,
-                                          const int return_shocks) {
-  return sdsge_filter_linear_output_arena_offset(n, m, k, T, return_shocks);
+arena_offset sdsge_filter_extended_output_arena_offset(const i64 n, const i64 m,
+                                                       const i64 k,
+                                                       const i64 T) {
+  return sdsge_filter_linear_output_arena_offset(n, m, k, T);
 }
 
 arena_size sdsge_filter_extended_output_arena_size(const i64 n, const i64 m,
-                                                   const i64 k, const i64 T,
-                                                   const int return_shocks) {
-  return sdsge_filter_linear_output_arena_size(n, m, k, T, return_shocks);
+                                                   const i64 k, const i64 T) {
+  return sdsge_filter_linear_output_arena_size(n, m, k, T);
 }
 
 arena_offset
@@ -271,9 +265,10 @@ arena_size sdsge_filter_unscented_input_arena_size(const i64 n_state,
 
 arena_offset sdsge_filter_unscented_output_arena_offset(const i64 n_state,
                                                         const i64 n_ctrl,
+                                                        const i64 n_exog,
                                                         const i64 n_obs,
                                                         const i64 T) {
-  arena_offset off = make_offset(14, 2);
+  arena_offset off = make_offset(15, 2);
   const i64 n_var = n_state + n_ctrl;
   const i64 nz = 2 * n_state;
   off.foffset[0] = T * n_var;                          // x_pred(T, n_var)
@@ -285,11 +280,12 @@ arena_offset sdsge_filter_unscented_output_arena_offset(const i64 n_state,
   off.foffset[6] = off.foffset[5] + T * n_obs;         // innov(T, n_obs)
   off.foffset[7] = off.foffset[6] + T * n_obs;         // std_innov(T, n_obs)
   off.foffset[8] = off.foffset[7] + T * n_obs * n_obs; // S(T, n_obs, n_obs)
-  off.foffset[9] = off.foffset[8] + 1;                 // loglik
-  off.foffset[10] = off.foffset[9] + T * n_state;      // x1_pred(T, n_state)
-  off.foffset[11] = off.foffset[10] + T * n_state;     // x2_pred(T, n_state)
-  off.foffset[12] = off.foffset[11] + T * n_state;     // x1_filt(T, n_state)
-  off.foffset[13] = off.foffset[12] + T * n_state;     // x2_filt(T, n_state)
+  off.foffset[9] = off.foffset[8] + T * n_exog;        // eps_hat(T, n_exog)
+  off.foffset[10] = off.foffset[9] + 1;                // loglik
+  off.foffset[11] = off.foffset[10] + T * n_state;     // x1_pred(T, n_state)
+  off.foffset[12] = off.foffset[11] + T * n_state;     // x2_pred(T, n_state)
+  off.foffset[13] = off.foffset[12] + T * n_state;     // x1_filt(T, n_state)
+  off.foffset[14] = off.foffset[13] + T * n_state;     // x2_filt(T, n_state)
   off.ioffset[0] = 1; // bool(any_failed_sources)
   off.ioffset[1] = 2; // status
   return off;
@@ -297,10 +293,11 @@ arena_offset sdsge_filter_unscented_output_arena_offset(const i64 n_state,
 
 arena_size sdsge_filter_unscented_output_arena_size(const i64 n_state,
                                                     const i64 n_ctrl,
+                                                    const i64 n_exog,
                                                     const i64 n_obs,
                                                     const i64 T) {
-  const arena_offset off =
-      sdsge_filter_unscented_output_arena_offset(n_state, n_ctrl, n_obs, T);
+  const arena_offset off = sdsge_filter_unscented_output_arena_offset(
+      n_state, n_ctrl, n_exog, n_obs, T);
   return make_sizer(off.foffset[off.n_fbuf - 1], off.ioffset[off.n_ibuf - 1]);
 }
 

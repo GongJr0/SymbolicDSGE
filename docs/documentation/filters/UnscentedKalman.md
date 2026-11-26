@@ -67,3 +67,36 @@ __Returns:__
 ???+ note "Pruned State Layout"
     The state is carried as a stacked first- and second-order pair of length `2 * n_state`. `x1_pred`, `x2_pred`, `x1_filt`, and `x2_filt` on the result expose the two components separately.
     The `P0` specified on the `filter` call covers the first block only, which is equivalent to the `P0` on a linear or extended filter.
+
+&nbsp;
+
+```python
+smooth(
+    model: SolvedModel,
+    y: ndarray | DataFrame,
+    observables: list[str] | tuple[str, ...] | None = None,
+    R: ndarray | None = None,
+    x0: Mapping[str, float] | None = None,
+    P0: ndarray | None = None,
+) -> SmootherResult[UnscentedFilterResult]
+```
+
+Run the smoother over `y`.
+
+__Inputs:__
+
+| __Name__ | __Description__ |
+|:---------|----------------:|
+| model | Solved model at first order or higher. |
+| y | Observed data. Shape `(T, n_obs)`, or a `DataFrame` whose columns name the observables. |
+| observables | Model observables the data corresponds to. Defaults to all of them in declaration order. |
+| R | Measurement noise covariance. Shape `(n_obs, n_obs)`. Defaults to the model's `calibration.measurement_noise`. |
+| x0 | Prior state mean, in levels. Only its state block is read. Defaults to the steady state. |
+| P0 | Prior state covariance. Shape `(n_var, n_var)`. Defaults to the model's stationary covariance. |
+
+
+__Returns:__
+
+| __Type__ | __Description__ |
+|:---------|----------------:|
+| `SmootherResult` | Smoothed states, state covariance, and conditional shock estimates. The result also contains a [`FilterResult`](./FilterResult.md) representing the forward pass alone. |

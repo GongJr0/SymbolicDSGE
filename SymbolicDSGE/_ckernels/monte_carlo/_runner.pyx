@@ -213,7 +213,6 @@ cdef extern from "core_steps.h":
         int symmetrize
         int joseph_cov
         double jitter
-        int return_shocks
 
     ctypedef struct sdsge_mc_filter_extended_step_ctx:
         meas_fn measurement
@@ -226,7 +225,6 @@ cdef extern from "core_steps.h":
         int symmetrize
         int joseph_cov
         double jitter
-        int return_shocks
 
     ctypedef struct sdsge_mc_filter_unscented_step_ctx:
         meas_fn measurement
@@ -933,7 +931,6 @@ def filter_linear_step(
     bint symmetrize,
     bint joseph_cov,
     double jitter,
-    bint return_shocks,
 ):
     """Bind a linear Kalman filter with resolved scalar settings."""
     cdef NativeStep step = NativeStep()
@@ -948,7 +945,6 @@ def filter_linear_step(
     step._ctx_store.filter_linear.symmetrize = symmetrize
     step._ctx_store.filter_linear.joseph_cov = joseph_cov
     step._ctx_store.filter_linear.jitter = jitter
-    step._ctx_store.filter_linear.return_shocks = return_shocks
     step._bind(
         name,
         sdsge_mc_filter_linear_runner,
@@ -970,7 +966,6 @@ def filter_extended_step(
     bint symmetrize,
     bint joseph_cov,
     double jitter,
-    bint return_shocks,
 ):
     """Bind an extended Kalman filter with resolved callbacks and settings."""
     cdef NativeStep step = NativeStep()
@@ -990,7 +985,6 @@ def filter_extended_step(
     step._ctx_store.filter_extended.symmetrize = symmetrize
     step._ctx_store.filter_extended.joseph_cov = joseph_cov
     step._ctx_store.filter_extended.jitter = jitter
-    step._ctx_store.filter_extended.return_shocks = return_shocks
     step._bind(
         name,
         sdsge_mc_filter_extended_runner,

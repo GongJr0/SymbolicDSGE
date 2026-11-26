@@ -174,104 +174,6 @@
   end
 
 % ---------------------------------------------------------------------------
-% 3. KALMAN FILTER
-% ---------------------------------------------------------------------------
-% State space (declaration order, deviations from ys):
-%     x_t = A_decl x_{t-1} + R_decl e_t,   e_t ~ N(0, Sigma_e)
-%     y_t = d + Z x_t + w_t,               w_t ~ N(0, H)
-%
-% Measurement block is the yaml's observables section:
-%     OutGap = x
-%     Infl   = 4*Pi + pi_star
-%     Rate   = 4*r + (r_star + pi_star)
-% with unit measurement standard deviations and zero measurement correlations,
-% so H is the identity.
-%
-% TIMING UNDER TEST: the observation at t pairs with the state at t. A one-period
-% slip moves the loglik by far more than any tolerance, which is why this golden
-% settles dating in a way no matrix comparison does. The per-period densities are
-% dumped alongside the total so a slip is located rather than merely detected.
-
-  Z = zeros(3, n_endo);
-  Z(1, idx_x)  = 1.0;
-  Z(2, idx_Pi) = 4.0;
-  Z(3, idx_r)  = 4.0;
-  d = [0.0; pi_star; r_star + pi_star];
-  H = eye(3);
-
-  % Data are the observables implied by the stochastic path above, dumped so
-  % both sides filter identical numbers rather than regenerating a path. One row
-  % per simulated period.
-  T_kf    = size(stoch_dynare, 1);
-  kf_data = (d * ones(1, T_kf) + Z * stoch_dynare')';   % (T_kf, 3)
-
-  % --- P0, both defensible choices ---------------------------------------
-  % (a) unconditional covariance by doubling, no control-package dependency
-  Q  = Sigma_e;
-  RQ = R_decl * Q * R_decl';
-  P_uncond = RQ;
-  Ak = A_decl;
-  for iter = 1:60
-    P_uncond = P_uncond + Ak * P_uncond * Ak';
-    Ak = Ak * Ak;
-  end
-  P_uncond = 0.5 * (P_uncond + P_uncond');   % symmetrize drift
-
-  % (b) the yaml's own P0: diag 1.0 on every variable. The two libraries do not
-  % mean the same thing by that. kalman_filter.m documents its P argument as
-  % Var_0(alpha_1), the covariance of the state the FIRST observation updates.
-  % Ours is the covariance one period earlier, and the filter predicts before it
-  % updates, so ours reaches the first update at A*P0*A' + RQR. Both readings are
-  % dumped. They agree under P_uncond, which is a fixed point of that map, and
-  % nowhere else, so a test that only ever uses P_uncond cannot see the gap.
-  P_fixed_dynare = eye(n_endo);
-  P_fixed_ours   = A_decl * eye(n_endo) * A_decl' + RQ;
-  % ------------------------------------------------------------------------
-
-  % Dynare's filter takes the data with the constant already removed and one
-  % column per period. Zflag = 1 passes Z as a matrix rather than an index
-  % vector, which is what lets a measurement block with loadings other than 1
-  % go through at all.
-  Y_kf = (kf_data - ones(T_kf, 1) * d')';
-
-  % riccati_tol = 0 keeps the full recursion for every period. At Dynare's
-  % default the gain freezes once it stops moving, which is a fine thing for an
-  % estimation loop to do and the wrong thing for a golden.
-  run_dynare_kf = @(P0) kalman_filter( ...
-      Y_kf, 1, T_kf, zeros(n_endo, 1), P0, ...
-      1e-10, 0, false, 0, ...
-      A_decl, Q, R_decl, H, Z, ...
-      n_endo, size(Z, 1), n_exo, 1, 0, {}, false, false);
-
-  % kalman_filter returns MINUS the log-likelihood, 2*pi constant already in,
-  % and LIKK holds the same quantity period by period.
-  [neg_uncond,       likk_uncond]       = run_dynare_kf(P_uncond);
-  [neg_fixed_dynare, likk_fixed_dynare] = run_dynare_kf(P_fixed_dynare);
-  [neg_fixed_ours,   likk_fixed_ours]   = run_dynare_kf(P_fixed_ours);
-
-  kf_loglik_uncond       = -neg_uncond;
-  kf_loglik_fixed_dynare = -neg_fixed_dynare;
-  kf_loglik_fixed_ours   = -neg_fixed_ours;
-
-  kf_likk_uncond       = -likk_uncond(:)';
-  kf_likk_fixed_dynare = -likk_fixed_dynare(:)';
-  kf_likk_fixed_ours   = -likk_fixed_ours(:)';
-
-  assert(abs(sum(kf_likk_uncond) - kf_loglik_uncond) < 1e-10, ...
-         'per-period densities do not sum to the total');
-
-  % Datafile for post82_kf.mod. Column vectors named for the varobs block there.
-  obs_names = {'OutGap', 'Infl', 'Rate'};
-  fid = fopen('post82_kf_data.m', 'w');
-  fprintf(fid, '%% Written by make_post82_first_order_goldens.m. Do not edit.\n');
-  for jj = 1:numel(obs_names)
-    fprintf(fid, '%s = [\n', obs_names{jj});
-    fprintf(fid, '%.17g\n', kf_data(:, jj));
-    fprintf(fid, '];\n');
-  end
-  fclose(fid);
-
-% ---------------------------------------------------------------------------
 % SAVE
 % ---------------------------------------------------------------------------
 
@@ -282,9 +184,6 @@
        'x0_states', 'shock_block', ...
        'det_dynare', 'stoch_dynare', ...
        'irf_eg', 'irf_ez', 'irf_er', ...
-       'kf_data', 'P_uncond', 'P_fixed_dynare', 'P_fixed_ours', 'Z', 'd', 'H', ...
-       'kf_loglik_uncond', 'kf_loglik_fixed_dynare', 'kf_loglik_fixed_ours', ...
-       'kf_likk_uncond', 'kf_likk_fixed_dynare', 'kf_likk_fixed_ours', ...
        'dynare_decl_columns', 'dynare_exo_columns');
 
   dump = @(name, M) dlmwrite(name, M, 'precision', '%.17g');
@@ -304,23 +203,11 @@
   dump('post82_fo_irf_eg.csv',    irf_eg);
   dump('post82_fo_irf_ez.csv',    irf_ez);
   dump('post82_fo_irf_er.csv',    irf_er);
-  dump('post82_fo_kf_data.csv',   kf_data);
-  dump('post82_fo_kf_Z.csv',      Z);
-  dump('post82_fo_kf_d.csv',      d);
-  dump('post82_fo_kf_H.csv',      H);
-  dump('post82_fo_kf_P_uncond.csv',      P_uncond);
-  dump('post82_fo_kf_P_fixed_ours.csv',  P_fixed_ours);
-  dump('post82_fo_kf_likk.csv', [kf_likk_uncond; kf_likk_fixed_dynare; kf_likk_fixed_ours]);
-  dump('post82_fo_kf_loglik.csv', [kf_loglik_uncond, kf_loglik_fixed_dynare, ...
-                                   kf_loglik_fixed_ours]);
 
   printf('\n--- post82 first order goldens ---\n');
   printf('decl order: %s\n', strjoin(dynare_decl_columns', ','));
   printf('exo  order: %s\n', strjoin(dynare_exo_columns', ','));
   printf('state_var : %s\n', mat2str(state_var'));
   printf('impact of e_r on r: %.17g\n', impact_r_er);
-  printf('loglik  P0 uncond      : %.17g\n', kf_loglik_uncond);
-  printf('loglik  P0 = I, dynare : %.17g\n', kf_loglik_fixed_dynare);
-  printf('loglik  P0 = I, ours   : %.17g\n', kf_loglik_fixed_ours);
   printf('written: post82_first_order_goldens.mat + post82_fo_*.csv\n');
   printf('written: post82_kf_data.m, the datafile post82_kf.mod reads\n');

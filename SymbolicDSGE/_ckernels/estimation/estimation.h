@@ -7,7 +7,10 @@
 #include "../core/klein_preproc.h"     /* sdsge_residual_fn */
 #include "../core/klein_qz.h"          /* klein_zgges_fn */
 #include "../core/klein_solve.h"       /* klein specs, sdsge_solve1/2 */
+#include "../kalman/extended.h"        /* ekf_inputs */
 #include "../kalman/kalman.h"          /* meas_fn */
+#include "../kalman/linear.h"          /* kf_inputs */
+#include "../kalman/unscented.h"       /* ukf_inputs */
 #include "../optim/optim.h"            /* sdsge_objective_fn */
 #include "prior_program.h"             /* transform codes, dispatch */
 

@@ -66,6 +66,7 @@ dev = [
     "pytest-xdist>=3.8.0",
     "mkdocs-charts-plugin>=0.0.13",
     "ruff>=0.17.5",
+    "filterpy>=2.0.0",
 ]
 
 jupyter = [

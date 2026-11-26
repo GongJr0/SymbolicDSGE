@@ -15,22 +15,18 @@
 #define KF_ERR_S_FACTORIZATION -1108
 #define KF_ERR_BAD_HYPERPARAMS -1109
 
-/* Kalman hot-loop helpers. Parity oracle: the numba `*_into` kernels in
- * SymbolicDSGE/kalman/filter.py. All matrices are C-contiguous, row-major, f64.
- * Buffers are caller-allocated; nothing here aliases (inputs and outputs are
- * always distinct). The dense primitives these build on are in
- * _common/sdsge_linalg. */
+/* Function Ptr for Non-Linear Measurement Function */
+typedef void (*meas_fn)(const f64 *SDSGE_RESTRICT x,
+                        const f64 *SDSGE_RESTRICT params, f64 *out);
+
+/* Kalman hot-loop helpers. All matrices are C-contiguous, row-major, f64.
+ * Buffers are caller-allocated; nothing aliases. The dense primitives these
+ * build on are in _common/sdsge_linalg. */
 
 /* Kalman-specific dense helpers. */
 
 /* out(m) := A[row, :] - x(m), where A has m columns */
 void kf_row_minus_vec(const f64 *A, i64 row, const f64 *x, f64 *out, i64 m);
-
-/* Solve (L L^T) x = B[row, :] for the single row; writes x into out[row, :].
- * `n` is the Cholesky dimension (= column count of B and out); fbuf/bbuf are
- * scratch of length n. */
-void kf_chol_solve_row(const f64 *L, const f64 *B, i64 row, f64 *fbuf,
-                       f64 *bbuf, f64 *out, i64 n);
 
 /* ---- Kalman-specific composition helpers ---- */
 
@@ -38,17 +34,26 @@ void kf_chol_solve_row(const f64 *L, const f64 *B, i64 row, f64 *fbuf,
 void kf_predict_cov(const f64 *A, const f64 *P_prev, const f64 *BQBT,
                     f64 *temp_nn, f64 *out, i64 n);
 
-/* out(m,m) := C P_pred C^T + R, via temp_mn(m,n) */
-void kf_measurement_cov(const f64 *C, const f64 *P_pred, const f64 *R,
-                        f64 *temp_mn, f64 *out, i64 n, i64 m);
+/* out(m,m) := C(m,n) @ PCt(n,m) + R, with PCt = P_pred C^T */
+void kf_measurement_cov(const f64 *C, const f64 *PCt, const f64 *R, f64 *out,
+                        i64 n, i64 m);
 
 /* out(n,m) := P_pred(n,n) @ C(m,n)^T */
 void kf_pc_t(const f64 *P_pred, const f64 *C, f64 *out, i64 n, i64 m);
 
-/* out K(n,m): solve (L L^T) K[r,:] = PCt[r,:] per row; L is the m×m chol of S.
- * fbuf/bbuf are scratch of length m. */
-void kf_gain_from_pc_t(const f64 *L, const f64 *PCt, f64 *fbuf, f64 *bbuf,
-                       f64 *out, i64 n, i64 m);
+/* PCt(n,m) := PCt L^{-T} in place, the whitened gain W with K = W L^{-1};
+ * L is the m×m chol of S. */
+void kf_whiten_pc_t(const f64 *L, f64 *PCt, i64 n, i64 m);
+
+/* out K(n,m) := W(n,m) L^{-1}, the gain from its whitened form. */
+void kf_gain_from_whitened(const f64 *L, const f64 *W, f64 *out, i64 n, i64 m);
+
+/* out G(m,n) := L^{-1} C(m,n), the whitened measurement. */
+void kf_whiten_meas(const f64 *L, const f64 *C, f64 *out, i64 m, i64 n);
+
+/* out(n,n) := P_pred - W(n,m) W^T. Each product is formed once and
+ * subtracted from both mirrored entries. */
+void kf_cov_downdate(const f64 *P_pred, const f64 *W, f64 *out, i64 n, i64 m);
 
 /* out(n) := x_pred(n) + K(n,m) @ v(m) */
 void kf_state_update(const f64 *x_pred, const f64 *K, const f64 *v, f64 *out,
@@ -63,12 +68,6 @@ void kf_identity_minus(const f64 *A, f64 *out, i64 n);
 void kf_joseph_cov(const f64 *K, const f64 *C, const f64 *P_pred, const f64 *R,
                    f64 *KC, f64 *I_minus_KC, f64 *temp_nn, f64 *temp_nm,
                    f64 *out, i64 n, i64 m);
-
-/* Simplified covariance update:
- *   out(n,n) := P_pred - K(n,m) (P_pred C^T)^T
- * PCt is P_pred C^T, computed before the gain. */
-void kf_simple_cov(const f64 *K, const f64 *PCt, const f64 *P_pred, f64 *out,
-                   i64 n, i64 m);
 
 /* out(n,n) := sym(B(n,k) Q(k,k) B^T), via temp_nk(n,k) */
 void kf_build_bqbt(const f64 *B, const f64 *Q, f64 *temp_nk, f64 *out, i64 n,
@@ -99,152 +98,5 @@ int kf_stationary_covariance(const f64 *A, const f64 *B, const f64 *Q, f64 tol,
 /* out(k,m) := Q(k,k) @ (B^T C^T)(k,m), via temp_km(k,m) */
 void kf_build_shock_projection(const f64 *B, const f64 *C, const f64 *Q,
                                f64 *temp_km, f64 *out, i64 n, i64 k, i64 m);
-
-/* ---- Linear Kalman filter hot loop ---- */
-
-/* Model + data inputs. All matrices C-contiguous, row-major, f64. */
-typedef struct {
-  i64 n;                   /* state dimension */
-  i64 m;                   /* observation dimension */
-  i64 k;                   /* shock dimension */
-  i64 T;                   /* number of time steps */
-  const f64 *A;            /* (n, n) state transition */
-  const f64 *B;            /* (n, k) shock loading */
-  const f64 *C;            /* (m, n) observation */
-  const f64 *d;            /* (m,)   observation intercept */
-  const f64 *Q;            /* (k, k) shock covariance */
-  const f64 *R;            /* (m, m) measurement covariance */
-  const f64 *steady_state; /* (n,) steady state of model variables */
-  const f64 *y;            /* (T, m) observations */
-  const f64 *x0;           /* (n,)   initial state mean */
-  const f64 *P0;     /* (n, n) initial state covariance (pre-symmetrized) */
-  int symmetrize;    /* symmetrize P/S each step (0/1) */
-  int joseph_cov;    /* use Joseph form for P update (0/1) */
-  f64 jitter;        /* diagonal jitter for the Cholesky */
-  int return_shocks; /* compute eps_hat (0/1) */
-  int store_history; /* fill the per-step history arrays (0/1) */
-} kf_inputs;
-
-/* Caller-allocated outputs. When store_history is 0 the history arrays may be
- * NULL / zero-length; eps_hat is written only when return_shocks &&
- * store_history. loglik is always written. */
-typedef struct {
-  f64 *x_pred, *x_filt;   /* (T, n) */
-  f64 *P_pred, *P_filt;   /* (T, n, n) */
-  f64 *y_pred, *y_filt;   /* (T, m) */
-  f64 *innov, *std_innov; /* (T, m)  innovations v */
-  f64 *S;                 /* (T, m, m) innovation covariances */
-  f64 *eps_hat;           /* (T, k) or NULL */
-  f64 *loglik;            /* scalar out */
-} kf_outputs;
-
-/* Run the linear Kalman filter. Returns KF_OK, KF_ERR_S_FACTORIZATION
- * (non-PD innovation covariance) */
-arena_size kf_arena_size(const i64 n, const i64 m, const i64 k);
-int kf_hot_loop(const kf_inputs *in, f64 *SDSGE_RESTRICT arena,
-                kf_outputs *out);
-
-/* Function Ptr for Non-Linear Measurement Function */
-typedef void (*meas_fn)(const f64 *SDSGE_RESTRICT x,
-                        const f64 *SDSGE_RESTRICT params, f64 *out);
-
-/* Extended Kalman Filter */
-typedef struct {
-  meas_fn meas;
-  meas_fn jac;
-  const f64 *A, *B;
-  const f64 *calib_params;
-  const f64 *Q, *R, *steady_state, *y;
-  const f64 *x0; /* (n,)   initial state mean */
-  const f64 *P0; /* (n, n) initial state covariance (pre-symmetrized) */
-  i64 T, n, m, k, n_par;
-  f64 jitter;
-  int symmetrize, joseph_cov, compute_y_filt, return_shocks, store_history;
-} ekf_inputs;
-
-typedef struct {
-  f64 *x_pred, *x_filt;   /* (hT, n) */
-  f64 *P_pred, *P_filt;   /* (hT, n, n) */
-  f64 *y_pred, *y_filt;   /* (hT, m) */
-  f64 *innov, *std_innov; /* (hT, m) */
-  f64 *S;                 /* (hT, m, m) */
-  f64 *eps_hat;           /* (shock_hT, k) */
-  f64 *loglik;            /* scalar out */
-} ekf_outputs;
-
-/* Run the extended Kalman filter: linear transition, nonlinear measurement
- * via the meas/jac cfunc pointers (relinearized each step). Returns KF_OK,
- * KF_ERR_S_FACTORIZATION */
-arena_size ekf_arena_size(const i64 n, const i64 m, const i64 k);
-int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
-                 ekf_outputs *out);
-
-/* Unscented Kalman Filter */
-
-typedef struct {
-  meas_fn meas;
-  const f64 *hx;
-  const f64 *gx;
-  const f64 *bu;
-  const f64 *hxx;
-  const f64 *gxx;
-  const f64 *hxu;
-  const f64 *gxu;
-  const f64 *huu;
-  const f64 *guu;
-  const f64 *hss;
-  const f64 *gss;
-  const f64 *steady_state;
-  const f64 *params;
-  const f64 *Q;
-  const f64 *R;
-  const f64 *obs;
-  const f64 *z0;
-  const f64 *P0;
-  i64 T;
-
-  i64 n_state;
-  i64 n_ctrl;
-  i64 n_exog;
-  i64 n_obs;
-  i64 n_params;
-
-  f64 alpha;
-  f64 beta;
-  f64 kappa;
-
-  f64 jitter;
-  int symmetrize;
-  int store_history;
-} ukf_inputs;
-
-typedef struct {
-  f64 *x1_pred; /* (T, n_state) */
-  f64 *x2_pred; /* (T, n_state) */
-  f64 *x1_filt; /* (T, n_state) */
-  f64 *x2_filt; /* (T, n_state) */
-
-  f64 *x_pred; /* (T, n_state + n_ctrl) */
-  f64 *x_filt; /* (T, n_state + n_ctrl) */
-
-  f64 *P_pred; /* (T, 2*n_state, 2*n_state) */
-  f64 *P_filt; /* (T, 2*n_state, 2*n_state) */
-
-  f64 *y_pred;    /* (T, n_obs) */
-  f64 *y_filt;    /* (T, n_obs) */
-  f64 *innov;     /* (T, n_obs) */
-  f64 *std_innov; /* (T, n_obs) */
-  f64 *S;         /* (T, n_obs, n_obs) */
-
-  f64 *loglik;
-} ukf_outputs;
-
-/* Run the unscented Kalman filter: second-order transition, nonlinear
- * measurements. Returns KF_OK, KF_ERR_P_FACTORIZATION, KF_ERR_Q_FACTORIZATION,
- * KF_ERR_S_FACTORIZATION, or KF_ERR_BAD_HYPERPARAMS. */
-arena_size ukf_arena_size(const i64 n_state, const i64 n_ctrl, const i64 n_exog,
-                          const i64 n_obs);
-i64 ukf_hot_loop(const ukf_inputs *in, f64 *SDSGE_RESTRICT arena,
-                 ukf_outputs *out);
 
 #endif /* SDSGE_KALMAN_H */
