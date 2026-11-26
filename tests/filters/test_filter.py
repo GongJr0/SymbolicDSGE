@@ -19,6 +19,7 @@ from SymbolicDSGE.filters.filter import (
     run_extended,
     run_linear,
     run_unscented,
+    smooth_linear,
 )
 from SymbolicDSGE.filters.gaussian import ExtendedKalman, LinearKalman
 
@@ -32,10 +33,51 @@ def _linear_system_1d():
     R = np.array([[0.01]], dtype=float64)
     # A zero expansion point, so the state series this system reports are the
     # recursion's own output and the assertions below read as the recursion.
-    # The offset itself is covered against the oracle in
-    # tests/ckernels/test_kalman.py and end to end in tests/kalman/test_resolvers.py.
+    # The offset itself is covered on `_linear_system_nmk` below and end to end in
+    # tests/filters/test_resolvers.py.
     ss = np.zeros(1, dtype=float64)
     return A, B, C, d, Q, R, ss
+
+
+def _linear_system_nmk():
+    """Four states, two observables, and three shocks, so no two axes share a length.
+
+    The third shock loads on no state and is uncorrelated with the other two, and
+    the second observable loads on no state, so the filter's output on each is known.
+    """
+    return {
+        "A": np.array(
+            [
+                [0.6, 0.1, 0.0, 0.0],
+                [0.2, 0.5, 0.1, 0.0],
+                [0.0, 0.3, 0.4, 0.1],
+                [0.1, 0.0, 0.2, 0.3],
+            ],
+            dtype=float64,
+        ),
+        "B": np.array(
+            [[1.0, 0.2, 0.0], [0.0, 0.8, 0.0], [0.3, 0.0, 0.0], [0.0, 0.5, 0.0]],
+            dtype=float64,
+        ),
+        "C": np.array([[1.0, 0.5, 0.0, -0.4], [0.0, 0.0, 0.0, 0.0]], dtype=float64),
+        "d": np.array([0.3, -0.2], dtype=float64),
+        "Q": np.array(
+            [[0.04, 0.01, 0.0], [0.01, 0.09, 0.0], [0.0, 0.0, 0.25]], dtype=float64
+        ),
+        "R": np.array([[0.02, 0.005], [0.005, 0.03]], dtype=float64),
+        "steady_state": np.array([1.5, -0.7, 2.0, 0.4], dtype=float64),
+        "y": np.random.default_rng(0).normal(size=(8, 2)),
+        "x0": np.array([0.2, -0.1, 0.05, 0.3], dtype=float64),
+        "P0": np.diag(np.array([0.5, 0.4, 0.3, 0.2], dtype=float64)),
+    }
+
+
+def _ill_conditioned_P0():
+    """Eigenvalues 1 through 1e14 under a fixed reflection, so no axis is aligned."""
+    v = np.array([1.0, 2.0, 3.0, 4.0], dtype=float64)
+    U = np.eye(4, dtype=float64) - 2.0 * np.outer(v, v) / (v @ v)
+    P0 = U @ np.diag(np.logspace(0.0, 14.0, 4)) @ U.T
+    return 0.5 * (P0 + P0.T)
 
 
 _UKF_MEAS_SIG = types.void(
@@ -205,6 +247,87 @@ def test_run_linear_raises_on_singular_innovation_covariance():
 
     with pytest.raises(MatrixFactorizationError):
         run_linear(A, B, C, d, Q, R, ss, y, P0=np.zeros((1, 1), dtype=float64))
+
+
+def test_symmetrize_makes_every_covariance_exactly_symmetric():
+    out = smooth_linear(**_linear_system_nmk(), symmetrize=True)
+    fwd = out.filter_result
+
+    for P in (fwd.P_pred, fwd.P_filt, fwd.S, out.P_smooth):
+        assert np.array_equal(P, np.transpose(P, (0, 2, 1)))
+
+
+@pytest.mark.parametrize("joseph_cov", [False, True])
+def test_unsymmetrized_covariance_leaves_symmetry_on_an_ill_conditioned_prior(
+    joseph_cov,
+):
+    # At a well-conditioned prior the drift is rounding and may be zero; at this
+    # scale it is orders above the threshold.
+    system = _linear_system_nmk() | {"P0": _ill_conditioned_P0()}
+    out = run_linear(**system, symmetrize=False, joseph_cov=joseph_cov)
+
+    assert np.abs(out.P_filt - np.transpose(out.P_filt, (0, 2, 1))).max() > 1e-12
+
+
+@pytest.mark.parametrize("symmetrize", [False, True])
+def test_joseph_update_departs_from_the_standard_one_on_an_ill_conditioned_prior(
+    symmetrize,
+):
+    # The two forms are equal in exact arithmetic, so only a prior this badly
+    # conditioned separates them by more than rounding.
+    system = _linear_system_nmk() | {"P0": _ill_conditioned_P0()}
+    standard = run_linear(**system, symmetrize=symmetrize, joseph_cov=False)
+    joseph = run_linear(**system, symmetrize=symmetrize, joseph_cov=True)
+
+    assert abs(joseph.loglik - standard.loglik) > 1e-7
+
+
+def test_steady_state_shifts_the_state_series_and_nothing_else():
+    system = _linear_system_nmk()
+    ss = system["steady_state"]
+    shifted = smooth_linear(**system)
+    origin = smooth_linear(**(system | {"steady_state": np.zeros(4, dtype=float64)}))
+    fwd, fwd0 = shifted.filter_result, origin.filter_result
+
+    assert np.abs(fwd.x_pred - fwd0.x_pred - ss).max() < 1e-12
+    assert np.abs(fwd.x_filt - fwd0.x_filt - ss).max() < 1e-12
+    assert np.abs(shifted.x_smooth - origin.x_smooth - ss).max() < 1e-12
+
+    for name in ("P_pred", "P_filt", "y_pred", "y_filt", "innov", "std_innov", "S"):
+        assert np.abs(getattr(fwd, name) - getattr(fwd0, name)).max() < 1e-12, name
+    assert np.abs(fwd.eps_hat - fwd0.eps_hat).max() < 1e-12
+    assert np.abs(shifted.P_smooth - origin.P_smooth).max() < 1e-12
+    assert np.abs(shifted.eps_smooth - origin.eps_smooth).max() < 1e-12
+    assert abs(fwd.loglik - fwd0.loglik) < 1e-12
+
+
+def test_states_observables_and_shocks_stay_on_their_own_axes():
+    system = _linear_system_nmk()
+    y, d, R = system["y"], system["d"], system["R"]
+    out = smooth_linear(**system)
+    fwd = out.filter_result
+    T = len(y)
+
+    for P in (fwd.P_pred, fwd.P_filt, out.P_smooth):
+        assert P.shape == (T, 4, 4)
+    for x in (fwd.x_pred, fwd.x_filt, out.x_smooth):
+        assert x.shape == (T, 4)
+    for v in (fwd.y_pred, fwd.y_filt, fwd.innov, fwd.std_innov):
+        assert v.shape == (T, 2)
+    assert fwd.S.shape == (T, 2, 2)
+    assert fwd.eps_hat.shape == (T, 3)
+    assert out.eps_smooth.shape == (T, 3)
+
+    # The observable that loads on no state is predicted by its intercept alone,
+    # and its innovation covariance row is its measurement noise row.
+    assert np.abs(fwd.y_pred[:, 1] - d[1]).max() < 1e-12
+    assert np.abs(fwd.innov[:, 1] - (y[:, 1] - d[1])).max() < 1e-12
+    assert np.abs(fwd.S[:, 1, :] - R[1]).max() < 1e-12
+
+    # The shock that loads on no state is never inferred, while the others are.
+    assert np.abs(fwd.eps_hat[:, 2]).max() < 1e-12
+    assert np.abs(out.eps_smooth[:, 2]).max() < 1e-12
+    assert np.abs(fwd.eps_hat[:, :2]).max() > 0.1
 
 
 def test_run_unscented_outputs_shapes_and_projected_fields():

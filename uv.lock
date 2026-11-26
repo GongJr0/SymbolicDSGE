@@ -1045,6 +1045,22 @@ wheels = [
 ]
 
 [[package]]
+name = "filterpy"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bd/ff/23359f8204ea52c06ccc3d865dadf5b30c110789eb940c44be2a9455f845/filterpy-2.0.0.tar.gz", hash = "sha256:aadfffd65af3435244be6b50b8d373697deb9186a1d134e882430b59ea0a8553", size = 129177, upload-time = "2026-10-26T19:20:15.012Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/1e/6e6eee6502254e9e2d9d8677967779542500c00923345acdd806280d51a7/filterpy-2.0.0-py3-none-any.whl", hash = "sha256:c5028eaf31a7181d2d5565a5447e9b1cda746c99b317f62d89018fc791ef1f7e", size = 111361, upload-time = "2026-10-26T19:20:13.798Z" },
+]
+
+[[package]]
 name = "fonttools"
 version = "4.66.1"
 source = { registry = "https://pypi.org/simple" }
@@ -4070,6 +4086,7 @@ dev = [
     { name = "black", extra = ["jupyter"] },
     { name = "cython" },
     { name = "cython-lint" },
+    { name = "filterpy" },
     { name = "httpx2" },
     { name = "matplotlib-stubs" },
     { name = "mike" },
@@ -4122,6 +4139,7 @@ dev = [
     { name = "black", extras = ["jupyter"], specifier = ">=26.10.1" },
     { name = "cython", specifier = ">=3.3.1" },
     { name = "cython-lint", specifier = ">=0.22.1" },
+    { name = "filterpy", specifier = ">=2.0.0" },
     { name = "httpx2", specifier = ">=2.16.2" },
     { name = "matplotlib-stubs", specifier = ">=0.3.11" },
     { name = "mike", specifier = ">=2.1.3" },
