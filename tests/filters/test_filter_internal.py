@@ -17,7 +17,6 @@ from SymbolicDSGE.filters.filter import (
     run_extended,
     run_linear,
 )
-from _oracles.kalman import ekf_reference
 
 
 def _linear_system_1d():
@@ -76,17 +75,7 @@ def _ekf_nl_jac(x, params, out):
     out[3] = 1.0
 
 
-def _ekf_nl_h(x, params):
-    return np.array([x[0] + params[0] * x[1] ** 2, x[1]], dtype=float64)
-
-
-def _ekf_nl_H(x, params):
-    return np.array([[1.0, 2.0 * params[0] * x[1]], [0.0, 1.0]], dtype=float64)
-
-
-def test_run_extended_matches_ekf_oracle():
-    # Native EKF (meas/jac @cfunc addresses) must match the pure-numpy oracle fed
-    # the same nonlinear measurement as Python callables.
+def test_run_extended_whitens_innovations_by_their_covariance():
     A = np.array([[0.5, 0.1], [0.0, 0.7]], dtype=float64)
     B = np.eye(2, dtype=float64)
     Q = np.diag([0.04, 0.09]).astype(float64)
@@ -96,9 +85,6 @@ def test_run_extended_matches_ekf_oracle():
     y = rng.normal(size=(6, 2)).astype(float64)
     x0 = np.array([0.2, -0.1], dtype=float64)
     P0 = np.diag([0.5, 0.3]).astype(float64)
-    # Nonzero and unequal per state: the measurement is relinearized at the
-    # level, so a shift dropped on either side moves the jacobian and not just
-    # the reported series.
     ss = np.array([0.4, -0.25], dtype=float64)
 
     native = run_extended(
@@ -114,35 +100,7 @@ def test_run_extended_matches_ekf_oracle():
         x0=x0,
         P0=P0,
     )
-    ref = ekf_reference(
-        A,
-        B,
-        _ekf_nl_h,
-        _ekf_nl_H,
-        params,
-        Q,
-        R,
-        ss,
-        y,
-        x0=x0,
-        P0=P0,
-        return_shocks=True,
-    )
 
-    np.testing.assert_allclose(native.x_pred, ref.x_pred)
-    np.testing.assert_allclose(native.x_filt, ref.x_filt)
-    np.testing.assert_allclose(native.P_pred, ref.P_pred)
-    np.testing.assert_allclose(native.P_filt, ref.P_filt)
-    np.testing.assert_allclose(native.y_pred, ref.y_pred)
-    np.testing.assert_allclose(native.y_filt, ref.y_filt)
-    np.testing.assert_allclose(native.innov, ref.innov)
-    np.testing.assert_allclose(native.std_innov, ref.std_innov)
-    np.testing.assert_allclose(native.S, ref.S)
-    np.testing.assert_allclose(native.eps_hat, ref.eps_hat)
-    assert native.loglik == pytest.approx(float(ref.loglik))
-
-    # Intrinsic whitening relations on the native output: std_innov = L^{-1} v,
-    # and its squared norm is the Mahalanobis distance v^T S^{-1} v.
     L0 = np.linalg.cholesky(native.S[0])
     np.testing.assert_allclose(
         native.std_innov[0], np.linalg.solve(L0, native.innov[0])

@@ -19,6 +19,7 @@ from SymbolicDSGE.filters.filter import (
     run_extended,
     run_linear,
     run_unscented,
+    smooth_extended,
     smooth_linear,
 )
 from SymbolicDSGE.filters.gaussian import ExtendedKalman, LinearKalman
@@ -33,18 +34,17 @@ def _linear_system_1d():
     R = np.array([[0.01]], dtype=float64)
     # A zero expansion point, so the state series this system reports are the
     # recursion's own output and the assertions below read as the recursion.
-    # The offset itself is covered on `_linear_system_nmk` below and end to end in
+    # The offset itself is covered on `_system` below and end to end in
     # tests/filters/test_resolvers.py.
     ss = np.zeros(1, dtype=float64)
     return A, B, C, d, Q, R, ss
 
 
-def _linear_system_nmk():
-    """Four states, two observables, and three shocks, so no two axes share a length.
-
-    The third shock loads on no state and is uncorrelated with the other two, and
-    the second observable loads on no state, so the filter's output on each is known.
-    """
+def _system(steady_state=(1.5, -0.7, 2.0, 0.4), curvature=0.0):
+    """Four states, two observables, and three shocks."""
+    ss = np.array(steady_state, dtype=float64)
+    C = np.array([[1.0, 0.5, 0.0, -0.4], [0.0, 0.0, 0.0, 0.0]], dtype=float64)
+    d = np.array([0.3, -0.2], dtype=float64)
     return {
         "A": np.array(
             [
@@ -59,17 +59,34 @@ def _linear_system_nmk():
             [[1.0, 0.2, 0.0], [0.0, 0.8, 0.0], [0.3, 0.0, 0.0], [0.0, 0.5, 0.0]],
             dtype=float64,
         ),
-        "C": np.array([[1.0, 0.5, 0.0, -0.4], [0.0, 0.0, 0.0, 0.0]], dtype=float64),
-        "d": np.array([0.3, -0.2], dtype=float64),
+        "C": C,
+        "d": d,
+        "meas_addr": _ekf_system_meas.address,
+        "jac_addr": _ekf_system_jac.address,
+        "calib_params": np.concatenate([[curvature], ss, d, C.ravel()]),
         "Q": np.array(
             [[0.04, 0.01, 0.0], [0.01, 0.09, 0.0], [0.0, 0.0, 0.25]], dtype=float64
         ),
         "R": np.array([[0.02, 0.005], [0.005, 0.03]], dtype=float64),
-        "steady_state": np.array([1.5, -0.7, 2.0, 0.4], dtype=float64),
+        "steady_state": ss,
         "y": np.random.default_rng(0).normal(size=(8, 2)),
         "x0": np.array([0.2, -0.1, 0.05, 0.3], dtype=float64),
         "P0": np.diag(np.array([0.5, 0.4, 0.3, 0.2], dtype=float64)),
     }
+
+
+def _kf_system(**kwargs):
+    system = _system(**kwargs)
+    for key in ("meas_addr", "jac_addr", "calib_params"):
+        system.pop(key)
+    return system
+
+
+def _ekf_system(**kwargs):
+    system = _system(**kwargs)
+    for key in ("C", "d"):
+        system.pop(key)
+    return system
 
 
 def _ill_conditioned_P0():
@@ -80,14 +97,14 @@ def _ill_conditioned_P0():
     return 0.5 * (P0 + P0.T)
 
 
-_UKF_MEAS_SIG = types.void(
+_MEAS_SIG = types.void(
     types.CPointer(types.float64),
     types.CPointer(types.float64),
     types.CPointer(types.float64),
 )
 
 
-@cfunc(_UKF_MEAS_SIG)
+@cfunc(_MEAS_SIG)
 def _ukf_measurement(model_vars, params, out):
     out[0] = model_vars[0] + params[0] * model_vars[1]
 
@@ -95,19 +112,45 @@ def _ukf_measurement(model_vars, params, out):
 # 1-D linear measurement h(x) = x and its (constant) jacobian, as @cfuncs for the
 # EKF address-based API. The linear measurement lets the EKF be checked against
 # the exact linear Kalman filter.
-@cfunc(_UKF_MEAS_SIG)
+@cfunc(_MEAS_SIG)
 def _ekf_lin_meas(x, params, out):
     out[0] = x[0]
 
 
-@cfunc(_UKF_MEAS_SIG)
+@cfunc(_MEAS_SIG)
 def _ekf_lin_jac(x, params, out):
     out[0] = 1.0
 
 
-@cfunc(_UKF_MEAS_SIG)
+@cfunc(_MEAS_SIG)
 def _ekf_bias_meas(x, params, out):
     out[0] = x[0] + params[0]
+
+
+# `_system`'s measurement: curvature, expansion point (4), intercepts (2), and
+# loadings (2 x 4, row-major) in calib_params.
+@cfunc(_MEAS_SIG)
+def _ekf_system_meas(x, params, out):
+    for i in range(2):
+        acc = params[5 + i]
+        for j in range(4):
+            acc += params[7 + 4 * i + j] * (x[j] - params[1 + j])
+        out[i] = acc
+    u = x[1] - params[2]
+    out[0] += params[0] * u * u
+
+
+@cfunc(_MEAS_SIG)
+def _ekf_system_jac(x, params, out):
+    for k in range(8):
+        out[k] = params[7 + k]
+    out[1] += 2.0 * params[0] * (x[1] - params[2])
+
+
+_KERNELS = {
+    "linear": (run_linear, smooth_linear, _kf_system),
+    "extended": (run_extended, smooth_extended, _ekf_system),
+}
 
 
 def _ukf_system_1d():
@@ -249,8 +292,10 @@ def test_run_linear_raises_on_singular_innovation_covariance():
         run_linear(A, B, C, d, Q, R, ss, y, P0=np.zeros((1, 1), dtype=float64))
 
 
-def test_symmetrize_makes_every_covariance_exactly_symmetric():
-    out = smooth_linear(**_linear_system_nmk(), symmetrize=True)
+@pytest.mark.parametrize("mode", ["linear", "extended"])
+def test_symmetrize_makes_every_covariance_exactly_symmetric(mode):
+    _, smooth, build = _KERNELS[mode]
+    out = smooth(**build(), symmetrize=True)
     fwd = out.filter_result
 
     for P in (fwd.P_pred, fwd.P_filt, fwd.S, out.P_smooth):
@@ -258,35 +303,47 @@ def test_symmetrize_makes_every_covariance_exactly_symmetric():
 
 
 @pytest.mark.parametrize("joseph_cov", [False, True])
+@pytest.mark.parametrize("mode", ["linear", "extended"])
 def test_unsymmetrized_covariance_leaves_symmetry_on_an_ill_conditioned_prior(
-    joseph_cov,
+    mode, joseph_cov
 ):
     # At a well-conditioned prior the drift is rounding and may be zero; at this
     # scale it is orders above the threshold.
-    system = _linear_system_nmk() | {"P0": _ill_conditioned_P0()}
-    out = run_linear(**system, symmetrize=False, joseph_cov=joseph_cov)
+    run, _, build = _KERNELS[mode]
+    system = build() | {"P0": _ill_conditioned_P0()}
+    out = run(**system, symmetrize=False, joseph_cov=joseph_cov)
 
     assert np.abs(out.P_filt - np.transpose(out.P_filt, (0, 2, 1))).max() > 1e-12
 
 
 @pytest.mark.parametrize("symmetrize", [False, True])
+@pytest.mark.parametrize("mode", ["linear", "extended"])
 def test_joseph_update_departs_from_the_standard_one_on_an_ill_conditioned_prior(
-    symmetrize,
+    mode, symmetrize
 ):
     # The two forms are equal in exact arithmetic, so only a prior this badly
     # conditioned separates them by more than rounding.
-    system = _linear_system_nmk() | {"P0": _ill_conditioned_P0()}
-    standard = run_linear(**system, symmetrize=symmetrize, joseph_cov=False)
-    joseph = run_linear(**system, symmetrize=symmetrize, joseph_cov=True)
+    run, _, build = _KERNELS[mode]
+    system = build() | {"P0": _ill_conditioned_P0()}
+    standard = run(**system, symmetrize=symmetrize, joseph_cov=False)
+    joseph = run(**system, symmetrize=symmetrize, joseph_cov=True)
 
     assert abs(joseph.loglik - standard.loglik) > 1e-7
 
 
-def test_steady_state_shifts_the_state_series_and_nothing_else():
-    system = _linear_system_nmk()
+# The curvature makes the point the extended filter's jacobian is evaluated at
+# observable; the linear view has no callable to carry it.
+@pytest.mark.parametrize(
+    ("mode", "curvature"),
+    [("linear", 0.0), ("extended", 0.3)],
+    ids=["linear", "extended"],
+)
+def test_steady_state_shifts_the_state_series_and_nothing_else(mode, curvature):
+    _, smooth, build = _KERNELS[mode]
+    system = build(curvature=curvature)
     ss = system["steady_state"]
-    shifted = smooth_linear(**system)
-    origin = smooth_linear(**(system | {"steady_state": np.zeros(4, dtype=float64)}))
+    shifted = smooth(**system)
+    origin = smooth(**build(steady_state=(0.0, 0.0, 0.0, 0.0), curvature=curvature))
     fwd, fwd0 = shifted.filter_result, origin.filter_result
 
     assert np.abs(fwd.x_pred - fwd0.x_pred - ss).max() < 1e-12
@@ -301,10 +358,13 @@ def test_steady_state_shifts_the_state_series_and_nothing_else():
     assert abs(fwd.loglik - fwd0.loglik) < 1e-12
 
 
-def test_states_observables_and_shocks_stay_on_their_own_axes():
-    system = _linear_system_nmk()
-    y, d, R = system["y"], system["d"], system["R"]
-    out = smooth_linear(**system)
+@pytest.mark.parametrize("mode", ["linear", "extended"])
+def test_states_observables_and_shocks_stay_on_their_own_axes(mode):
+    _, smooth, build = _KERNELS[mode]
+    system = build()
+    y, R = system["y"], system["R"]
+    d = _kf_system()["d"]
+    out = smooth(**system)
     fwd = out.filter_result
     T = len(y)
 
