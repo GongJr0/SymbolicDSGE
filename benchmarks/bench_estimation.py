@@ -30,10 +30,17 @@ from scipy.io import loadmat
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = Path(__file__).resolve().parent
 FIXTURES = ROOT / "tests" / "fixtures" / "models"
+DYNARE_FIXTURES = ROOT / "tests" / "fixtures" / "dynare"
 sys.path.insert(0, str(ROOT))
 
-from SymbolicDSGE import DSGESolver, ModelParser, Shock
-from SymbolicDSGE.core.compiled_model import CompiledModel
+from SymbolicDSGE import (
+    solve_model,
+    parse_config,
+    ModelConfig,
+    CompiledModel,
+    Shock,
+    LinearKalman,
+)
 from SymbolicDSGE.estimation.results import OptimizationResult
 from SymbolicDSGE.estimation import Estimator, make_prior
 
@@ -65,8 +72,6 @@ class CaseSpec:
     routines: dict[str, Routine]
     seed: int = 0
     native_to_dynare_observable: tuple[tuple[str, str], ...] = ()
-    dynare_remove: tuple[str, ...] = ()
-    zero_r_replacements: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -162,8 +167,8 @@ OPTIMIZER_PROFILES = {
 CASES = {
     "ls2004": CaseSpec(
         label="Lubik-Schorfheide 2004",
-        yaml_name="POST82.yaml",
-        mod_name="post82_kf.mod",
+        yaml_name="ls2004.yaml",
+        mod_name="ls2004.mod",
         data_file="post82_estimation_data",
         routines={
             "mle": Routine(
@@ -195,10 +200,6 @@ CASES = {
                 ),
             ),
         },
-        dynare_remove=(
-            "calib_smoother(datafile = post82_kf_data, filtered_vars, filter_step_ahead = [1]);",
-        ),
-        zero_r_replacements=(("sig_me  = 1.00;", "sig_me  = 0.00;"),),
     ),
     "sw2007": CaseSpec(
         label="SW2007",
@@ -236,9 +237,6 @@ CASES = {
             ),
         },
         seed=2007,
-        dynare_remove=(
-            "calib_smoother(datafile = sw2007_kf_data, filtered_vars, filter_step_ahead = [1]);",
-        ),
     ),
     "g2015": CaseSpec(
         label="Gali 2015",
@@ -373,22 +371,19 @@ def _matlab_matrix(values: np.ndarray) -> str:
 
 @dataclass
 class NativeCase:
-    solver: DSGESolver
+    config: ModelConfig
     compiled: CompiledModel
     y: np.ndarray
     observable_names: tuple[str, ...]
 
 
 def _prepare(spec: CaseSpec, periods: int) -> NativeCase:
-    model, kalman = ModelParser(FIXTURES / spec.yaml_name).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled, order=1)
+    model = parse_config(FIXTURES / spec.yaml_name)
+    solved = solve_model(model)
+    comp = solved.compiled
     sim = solved.sim(
         T=periods,
-        shocks={
-            ",".join(compiled.shock_names): Shock("norm", multivar=True, seed=spec.seed)
-        },
+        shocks=[Shock("norm", spec.seed).joint(*comp.shock_names)],
         observables=True,
     )
     if sim.y is None:
@@ -396,16 +391,14 @@ def _prepare(spec: CaseSpec, periods: int) -> NativeCase:
     observable_names = tuple(sim.observable_names)
     y = np.asarray(sim.y, dtype=np.float64)
     return NativeCase(
-        solver=solver,
-        compiled=compiled,
+        config=model,
+        compiled=comp,
         y=y,
         observable_names=observable_names,
     )
 
 
-def _make_estimator(
-    case: CaseSpec, native: NativeCase, routine: str, zero_r: bool
-) -> Estimator:
+def _make_estimator(case: CaseSpec, native: NativeCase, routine: str) -> Estimator:
     spec = case.routines[routine]
     priors = {
         prior.name: make_prior(
@@ -414,25 +407,15 @@ def _make_estimator(
             transform=prior.transform,
         )
         for prior in spec.priors
-    } or None
+    }
     return Estimator(
+        config=native.config,
         compiled=native.compiled,
+        estimated_params=priors or list(spec.names),
         y=native.y,
         observables=list(native.observable_names),
-        filter_mode="linear",
-        estimated_params=list(spec.names),
-        priors=priors,
+        filter=LinearKalman(joseph_cov=False, symmetrize=False),
         ss_seed=np.zeros(len(native.compiled.var_names), dtype=np.float64),
-        R=(
-            np.zeros(
-                (len(native.observable_names), len(native.observable_names)),
-                dtype=np.float64,
-            )
-            if zero_r
-            else None
-        ),
-        joseph_cov=False,
-        symmetrize=False,
     )
 
 
@@ -455,24 +438,24 @@ def _native(
     routine: str,
     warmup: int,
     reps: int,
-    zero_r: bool,
     optimizer: OptimizerProfile,
 ) -> dict:
-    estimator = _make_estimator(case, native, routine, zero_r)
+    estimator = _make_estimator(case, native, routine)
     spec = case.routines[routine]
-    theta0 = np.asarray(spec.theta0, dtype=np.float64)
+    theta0 = dict(zip(spec.names, spec.theta0))
+    bounds = dict(zip(spec.names, spec.bounds))
     optimizer_kwargs = optimizer.native_kwargs(len(spec.names))
     if routine == "mle":
         fn = lambda: estimator.mle(
             theta0=theta0,
-            bounds=spec.bounds,
+            bounds=bounds,
             method=optimizer.native_method,
             **optimizer_kwargs,
         )
     else:
         fn = lambda: estimator.map(
             theta0=theta0,
-            bounds=spec.bounds,
+            bounds=bounds,
             method=optimizer.native_method,
             **optimizer_kwargs,
         )
@@ -481,26 +464,16 @@ def _native(
         contextlib.redirect_stdout(sink),
     ):
         times, result = _time(fn, warmup, reps)
-    theta = np.asarray(result.x, dtype=np.float64)
-    loglik = float(estimator.loglik(theta))
-    logprior = float(estimator.logprior(theta))
+    theta = np.array([result.theta[name] for name in spec.names], dtype=np.float64)
+    loglik = float(estimator.loglik(result.theta))
+    logprior = float(estimator.logprior(result.theta))
     probes = np.asarray(spec.probes, dtype=np.float64).T
-    target = np.array(
-        [
-            (
-                estimator.loglik(probes[:, i])
-                if routine == "mle"
-                else estimator.logpost(probes[:, i])
-            )
-            for i in range(probes.shape[1])
-        ],
-        dtype=np.float64,
-    )
+    probe_params = [dict(zip(spec.names, probe)) for probe in probes.T]
     objective = estimator.loglik if routine == "mle" else estimator.logpost
+    target = np.array([objective(params) for params in probe_params], dtype=np.float64)
     objective_times, _ = _time(
         lambda: np.array(
-            [objective(probes[:, i]) for i in range(probes.shape[1])],
-            dtype=np.float64,
+            [objective(params) for params in probe_params], dtype=np.float64
         ),
         warmup,
         reps,
@@ -513,7 +486,7 @@ def _native(
         "logprior": logprior,
         "terminal_target": loglik + logprior,
         "nfev": int(result.nfev),
-        "nit": -1 if result.nit is None else int(result.nit),
+        "nit": int(result.nit),
         "success": bool(result.success),
         "probes": probes,
         "probe_target": target,
@@ -551,15 +524,9 @@ def _write_model(
     routine: str,
     path: Path,
     periods: int,
-    zero_r: bool,
     optimizer: OptimizerProfile,
 ) -> None:
-    source = (FIXTURES / case.mod_name).read_text(encoding="utf-8")
-    for statement in case.dynare_remove:
-        source = source.replace(statement, "")
-    if zero_r:
-        for old, new in case.zero_r_replacements:
-            source = source.replace(old, new)
+    source = (DYNARE_FIXTURES / case.mod_name).read_text(encoding="utf-8")
     estimated = _dynare_estimated_params(case.routines[routine])
     source += (
         "\nestimated_params;\n" + estimated + "\nend;\n"
@@ -586,7 +553,6 @@ def _run_dynare(
     dynare_path: str,
     matlab_bin: str,
     octave_bin: str,
-    zero_r: bool,
     optimizer: OptimizerProfile,
 ) -> Path:
     root = Path(dynare_path).resolve().parent
@@ -604,7 +570,6 @@ def _run_dynare(
             routine,
             workdir / f"{model_name}.mod",
             y.shape[0],
-            zero_r,
             optimizer,
         )
         _write_data(
@@ -714,11 +679,6 @@ def main() -> int:
             "7 and 8 are Nelder-Mead (default: 4)."
         ),
     )
-    parser.add_argument(
-        "--zero-r",
-        action="store_true",
-        help="Override the calibrated measurement covariance with R = 0 on both sides.",
-    )
     args = parser.parse_args()
     if args.periods < 1 or args.warmup < 0 or args.reps < 1:
         parser.error(
@@ -766,7 +726,6 @@ def main() -> int:
                     routine,
                     args.warmup,
                     args.reps,
-                    args.zero_r,
                     optimizer,
                 )
                 np.savez(output_dir / f"native_{routine}.npz", **native)
@@ -787,7 +746,6 @@ def main() -> int:
                             args.dynare_matlab_path,
                             args.matlab_bin,
                             args.octave_bin,
-                            args.zero_r,
                             optimizer,
                         ),
                         squeeze_me=True,
@@ -818,7 +776,6 @@ def main() -> int:
                         "periods": args.periods,
                         "warmup": args.warmup,
                         "reps": args.reps,
-                        "zero_r": args.zero_r,
                         "optimizer": {
                             "dynare_mode_compute": optimizer.dynare_mode_compute,
                             "native_method": optimizer.native_method,
