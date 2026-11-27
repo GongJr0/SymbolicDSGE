@@ -24,6 +24,7 @@ from ..core.model_parser import ModelParser
 from ..core.solved_model import SolvedModel
 from ..core.solver import solve_model
 from ..core.shock import Shock, ShockPath
+from ..filters.resolvers import FilterMode
 from ..estimation.estimator import Estimator
 from ..estimation.results import MCMCResult, MLEResult, MAPResult
 from ..estimation.spec import (
@@ -609,7 +610,7 @@ def _load_mc_filters(
                 f"{name}.retained_reps",
                 int(meta["n_retained"]),
             ),
-            filter_mode=str(meta["filter_mode"]),
+            mode=FilterMode(meta["filter_mode"]),
             **fields,
         )
     return out

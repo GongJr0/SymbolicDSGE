@@ -142,7 +142,7 @@ def test_the_result_carries_the_mode_that_selected_the_kernel(
     y = _observations(solved_post82)
     result = _run(solved_post82, y, filter=filter)
 
-    assert result.filter_outputs["filt"].filter_mode == filter.mode
+    assert result.filter_outputs["filt"].mode == filter.mode
 
 
 def test_the_mode_defaults_the_way_the_planner_defaults_it(
@@ -152,14 +152,14 @@ def test_the_mode_defaults_the_way_the_planner_defaults_it(
     y = _observations(solved_post82)
     result = _run(solved_post82, y)
 
-    assert result.filter_outputs["filt"].filter_mode == "linear"
+    assert result.filter_outputs["filt"].mode == "linear"
 
 
 def test_unscented_reports_its_own_mode(solved_rbc_so: SolvedModel) -> None:
     y = _observations(solved_rbc_so)
     result = _run(solved_rbc_so, y, filter=UnscentedKalman())
 
-    assert result.filter_outputs["filt"].filter_mode == "unscented"
+    assert result.filter_outputs["filt"].mode == "unscented"
 
 
 # --------------------------------------------------------------------------
@@ -440,8 +440,8 @@ def test_filters_are_keyed_by_step_name(solved_post82: SolvedModel) -> None:
     result = pipeline.run({"reference": solved_post82}, n_rep=N_REP, verbosity=0)
 
     assert set(result.filter_outputs) == {"kf", "ekf"}
-    assert result.filter_outputs["kf"].filter_mode == "linear"
-    assert result.filter_outputs["ekf"].filter_mode == "extended"
+    assert result.filter_outputs["kf"].mode == "linear"
+    assert result.filter_outputs["ekf"].mode == "extended"
 
 
 def test_a_pipeline_without_filters_reports_no_filter_outputs(

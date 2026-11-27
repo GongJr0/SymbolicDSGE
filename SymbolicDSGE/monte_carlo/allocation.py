@@ -365,7 +365,7 @@ def _resolve_filter_input_asize(
     T, n_obs = _resolve_filter_shape(step, source_indices, plans, steps, model)
     comp = model.compiled
     asz = (
-        a.filter_arena_size if step.op_type == OpType.FILTER else a.smoother_arena_size
+        a.filter_arena_size if step.op_type is OpType.FILTER else a.smoother_arena_size
     )
     return _asize(
         asz(

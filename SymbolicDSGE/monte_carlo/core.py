@@ -13,6 +13,7 @@ from .._ckernels.monte_carlo._runner import NativeRunResult, run
 from .._diag_tests.result import MCTestResult
 from ..core.solved_model import SolvedModel
 from ..regression.result import MCRegressionResult
+from ..filters.resolvers import FilterMode
 
 from .allocation import (
     FieldLayout,
@@ -538,7 +539,7 @@ def _compile_filters(
             n_rep=n_rep,
             n_retained=arena.retained_reps.size,
             retained_reps=arena.retained_reps,
-            filter_mode=mode,
+            mode=FilterMode(mode),
             x_pred=x_pred,
             x_filt=x_filt,
             y_pred=y_pred,

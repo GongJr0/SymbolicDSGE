@@ -129,7 +129,7 @@ def serialize_filter_results(
             "std_innov": result.std_innov,
             "loglik": result.loglik,
         }
-        if result.filter_mode == "unscented":
+        if result.mode == "unscented":
             # Write through the property to narrow the type.
             # Populate private fields to restore exact behavior on load
             fields["_x1_pred"] = result.x1_pred
@@ -140,7 +140,7 @@ def serialize_filter_results(
         meta = MCFilterResultMeta(
             n_rep=int(result.n_rep),
             n_retained=int(result.n_retained),
-            filter_mode=result.filter_mode,
+            filter_mode=result.mode,
             shapes={name: list(arr.shape) for name, arr in fields.items()},
         )
         out[name] = (meta, fields)

@@ -111,7 +111,7 @@ def test_a_filter_round_trips_every_field_it_produced(
     before, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     _assert_same(before["filt"], after["filt"])
-    assert after["filt"].filter_mode == filter.mode
+    assert after["filt"].mode == filter.mode
 
 
 def test_the_unscented_pruned_state_survives_the_bundle(
@@ -155,7 +155,7 @@ def test_the_mode_is_read_back_rather_than_inferred(
 
     _, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
-    assert after["filt"].filter_mode == "extended"
+    assert after["filt"].mode == "extended"
     # Nothing mode-specific was produced, so the optional block stays absent and
     # only the shared fields come back populated.
     assert all(getattr(after["filt"], name, None) is None for name in _OPTIONAL)
@@ -298,8 +298,8 @@ def test_filters_round_trip_keyed_by_step_name(
     before, after = _roundtrip(solved_post82, pipeline, tmp_path)
 
     assert set(after) == {"kf", "ekf"}
-    assert after["kf"].filter_mode == "linear"
-    assert after["ekf"].filter_mode == "extended"
+    assert after["kf"].mode == "linear"
+    assert after["ekf"].mode == "extended"
     for name in after:
         _assert_same(before[name], after[name])
 

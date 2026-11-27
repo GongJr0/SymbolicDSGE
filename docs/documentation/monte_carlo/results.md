@@ -60,7 +60,7 @@ class MCFilterResult(
     n_rep: int,
     n_retained: int,
     retained_reps: ndarray,
-    filter_mode: str,
+    mode: FilterMode,
     x_pred: ndarray,
     x_filt: ndarray,
     P_pred: ndarray,
@@ -88,7 +88,7 @@ __Fields and Properties:__
 | n_rep | `#!python int` | Total number of replications. |
 | n_retained | `#!python int` | Number of replications whose output the step's arena kept. |
 | retained_reps | `#!python ndarray` | Replication indices behind each row of the stacked histories. |
-| filter_mode | `#!python str` | Kernel the step ran: `"linear"`, `"extended"` or `"unscented"`. |
+| mode | `#!python FilterMode` | Kernel the step ran: enum of `"linear"`, `"extended"` or `"unscented"`. |
 | x_pred | `#!python ndarray` | Predicted $x$ states over time. Shape `(n_retained, T, n_var)`. |
 | x_filt | `#!python ndarray` | Filtered $x$ states over time. Shape `(n_retained, T, n_var)`. |
 | P_pred | `#!python ndarray` | Predicted state covariance $P$ over time. Shape `(n_retained, T, n_var, n_var)`. |
@@ -115,7 +115,7 @@ __Unscented-Only Fields:__
     `idx` counts the retained replications, which are stored compactly, so it is not the replication's index in the run. `retained_reps[idx]` is that index; the two coincide only when the run retained everything.
 
 ???+ note "Unscented shapes and fields"
-    An unscented step tracks a pruned state, so its covariance histories carry the stacked first- and second-order state: `P_pred` and `P_filt` are shaped `(n_retained, T, 2 * n_state, 2 * n_state)`. Shock recovery is not supported for the UKF, so `eps_hat` is `None`. The four pruned-state fields are only recorded under `filter_mode="unscented"`; reading one off a linear or extended result raises `AttributeError`.
+    An unscented step tracks a pruned state, so its covariance histories carry the stacked first- and second-order state: `P_pred` and `P_filt` are shaped `(n_retained, T, 2 * n_state, 2 * n_state)`. The four pruned-state fields are only recorded under `mode="unscented"`; reading one off a linear or extended result raises `AttributeError`.
 
 &nbsp;
 
