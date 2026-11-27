@@ -1,5 +1,6 @@
 function bench_fixture_linear_kf_dynare(workdir, model_file, obs_names, data_file, warmup, reps, output_path)
-% Benchmark Dynare's direct Kalman likelihood and smoother for one fixture.
+% Benchmark Dynare's direct Kalman likelihood, its public smoother entry, and
+% its smoother recursion for one fixture.
 
   if nargin ~= 7
     error('Expected workdir, model file, observables, data file, warmup, reps, and output path.');
@@ -84,31 +85,68 @@ function bench_fixture_linear_kf_dynare(workdir, model_file, obs_names, data_fil
     likelihood_times(i) = toc(started);
   end
 
+  % Call to result: the public smoother entry, which calib_smoother expands
+  % to. It rebuilds the dataset, solves the model and P0, smooths, and stores
+  % the results in oo_.
   options_.datafile = data_file(1:end-2);
   options_.first_obs = 1;
   options_.nobs = periods;
   options_.prefilter = 0;
   options_.filtered_vars = 1;
   options_.filter_step_ahead = 1;
+  options_.filter_covariance = true;
+  options_.smoothed_state_uncertainty = true;
   var_list_ = {};
   for i = 1:warmup
     [oo_, M_, options_, bayestopt_] = evaluate_smoother( ...
         'calibration', var_list_, M_, oo_, options_, bayestopt_, estim_params_);
   end
-  smoother_times = zeros(reps, 1);
+  call_times = zeros(reps, 1);
   for i = 1:reps
     started = tic;
     [oo_, M_, options_, bayestopt_] = evaluate_smoother( ...
         'calibration', var_list_, M_, oo_, options_, bayestopt_, estim_params_);
-    smoother_times(i) = toc(started);
+    call_times(i) = toc(started);
   end
 
-  updated = zeros(numel(oo_.UpdatedVariables.(endo_names{1})), n_endo);
-  filtered = zeros(numel(oo_.FilteredVariables.(endo_names{1})), n_endo);
+  exo_names = cellstr(M_.exo_names);
+  updated = zeros(periods, n_endo);
+  smoothed = zeros(periods, n_endo);
   for i = 1:n_endo
     updated(:, i) = oo_.UpdatedVariables.(endo_names{i})(:);
-    filtered(:, i) = oo_.FilteredVariables.(endo_names{i})(:);
+    smoothed(:, i) = oo_.SmoothedVariables.(endo_names{i})(:);
   end
+  smoothed_shocks = zeros(periods, n_exo);
+  for i = 1:n_exo
+    smoothed_shocks(:, i) = oo_.SmoothedShocks.(exo_names{i})(:);
+  end
+  state_uncertainty = oo_.Smoother.State_uncertainty;
+
+  % Recursion throughput: the same smoother on the inputs built above, with P0
+  % passed in. The flags are decomposition, state uncertainty, filter
+  % covariance, and smoother_redux.
+  data_index = repmat({(1:n_obs)'}, 1, periods);
+  run_smoother = @() missing_DiffuseKalmanSmootherH1_Z( ...
+      zeros(n_endo, 1), A, Z, R, Q, H, zeros(n_endo), P0, Y, ...
+      n_obs, n_endo, periods, data_index, 1, ...
+      options_.kalman_tol, options_.diffuse_kalman_tol, ...
+      false, true, true, false, options_.varobs, false);
+  for i = 1:warmup
+    run_smoother();
+  end
+  throughput_times = zeros(reps, 1);
+  for i = 1:reps
+    started = tic;
+    run_smoother();
+    throughput_times(i) = toc(started);
+  end
+  [alphahat, ~, etahat, atilde, ~, ~, ~, ~, V] = run_smoother();
+  ys = oo_.steady_state(:)';
+  direct_updated = atilde' + ys;
+  direct_smoothed = alphahat' + ys;
+  direct_shocks = etahat';
+  direct_state_uncertainty = V;
+
   loglik = -negloglik;
   state_names = endo_names;
   declared_endo_nbr = M_.orig_endo_nbr;
@@ -117,8 +155,10 @@ function bench_fixture_linear_kf_dynare(workdir, model_file, obs_names, data_fil
   observable_nbr = n_obs;
   shock_nbr = M_.exo_nbr;
   parameter_nbr = M_.param_nbr;
-  save('-v7', output_path, 'likelihood_times', 'smoother_times', 'loglik', ...
-       'updated', 'filtered', 'state_names', 'declared_endo_nbr', ...
-       'filter_state_nbr', 'predetermined_nbr', 'observable_nbr', ...
-       'shock_nbr', 'parameter_nbr');
+  save('-v7', output_path, 'likelihood_times', 'call_times', 'throughput_times', ...
+       'loglik', 'updated', 'smoothed', 'smoothed_shocks', 'state_uncertainty', ...
+       'direct_updated', 'direct_smoothed', 'direct_shocks', ...
+       'direct_state_uncertainty', 'state_names', 'exo_names', ...
+       'declared_endo_nbr', 'filter_state_nbr', 'predetermined_nbr', ...
+       'observable_nbr', 'shock_nbr', 'parameter_nbr');
 end
