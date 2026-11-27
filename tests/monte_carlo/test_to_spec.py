@@ -14,6 +14,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     raw_model_data_step,
     filter_step,
     simulation_step,
+    smoother_step,
     standardize_step,
     transform_step,
     wald_test_step,
@@ -37,6 +38,9 @@ def _simulation_pipeline() -> MCPipeline:
         filter_step(
             "filter", target="reference", obs_source="dgp", obs_field="observables"
         ),
+        smoother_step(
+            "smoother", target="reference", obs_source="dgp", obs_field="observables"
+        ),
         standardize_step("s", source="dgp", field="observables"),
         jarque_bera_test_step("jb", source="s", field="payload"),
         wald_test_step(
@@ -56,12 +60,15 @@ def test_to_spec_structure_and_sources() -> None:
     assert [step.meta["step_type"] for step in spec.steps] == [
         "simulation",
         "filter",
+        "smoother",
         "standardize",
         "jarque_bera",
         "wald",
     ]
 
     by_name = {step.meta["name"]: step.meta for step in spec.steps}
+    assert by_name["filter"]["op_type"] == "filter"
+    assert by_name["smoother"]["op_type"] == "smoother"
     # source legs are their own objects, not flattened into kwargs
     assert by_name["jb"]["source_args"] == [
         {

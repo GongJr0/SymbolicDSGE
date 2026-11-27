@@ -1,4 +1,4 @@
-"""Filter outputs across a bundle write and read.
+"""Filter and smoother outputs across a bundle write and read.
 
 A filter step is the only result kind whose arrays are neither one shape nor one
 rank: the covariance blocks are 4-D, ``loglik`` is one value per replication,
@@ -17,10 +17,15 @@ from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.filters import LinearKalman, ExtendedKalman, UnscentedKalman
 from SymbolicDSGE.filters.base import Filter
 from SymbolicDSGE.monte_carlo import MCPipeline
-from SymbolicDSGE.monte_carlo.mc_constructs import MCFilterResult
+from SymbolicDSGE.monte_carlo.mc_constructs import (
+    MCFilterResult,
+    MCPipelineResult,
+    MCSmootherResult,
+)
 from SymbolicDSGE.monte_carlo.step_factories import (
     raw_model_data_step,
     filter_step,
+    smoother_step,
 )
 
 T = 6
@@ -56,14 +61,14 @@ def _pipeline(solved: SolvedModel, *filters: object) -> MCPipeline:
     )
 
 
-def _roundtrip(
+def _reload(
     solved: SolvedModel,
     pipeline: MCPipeline,
     tmp_path,
     *,
     as_parquet: bool = True,
-) -> tuple[dict[str, MCFilterResult], dict[str, MCFilterResult]]:
-    """Run, bundle, reload; return the run's filters beside the reloaded ones."""
+) -> tuple[MCPipelineResult, MCPipelineResult]:
+    """Run, bundle, reload; return the run's result beside the reloaded one."""
     result = pipeline.run({"reference": solved}, n_rep=N_REP, verbosity=0)
     target = (
         BundleBuilder(created_by="filter-roundtrip")
@@ -72,20 +77,56 @@ def _roundtrip(
     )
     loaded = load_bundle(target)
     assert loaded.mc is not None and loaded.mc.result is not None
-    return dict(result.filter_outputs), dict(loaded.mc.result.filter_outputs)
+    return result, loaded.mc.result
+
+
+def _roundtrip(
+    solved: SolvedModel,
+    pipeline: MCPipeline,
+    tmp_path,
+    *,
+    as_parquet: bool = True,
+) -> tuple[dict[str, MCFilterResult], dict[str, MCFilterResult]]:
+    """Run, bundle, reload; return the run's filters beside the reloaded ones."""
+    before, after = _reload(solved, pipeline, tmp_path, as_parquet=as_parquet)
+    return dict(before.filter_outputs), dict(after.filter_outputs)
+
+
+def _smoother_roundtrip(
+    solved: SolvedModel,
+    pipeline: MCPipeline,
+    tmp_path,
+    *,
+    as_parquet: bool = True,
+) -> tuple[dict[str, MCSmootherResult], dict[str, MCSmootherResult]]:
+    """Run, bundle, reload; return the run's smoothers beside the reloaded ones."""
+    before, after = _reload(solved, pipeline, tmp_path, as_parquet=as_parquet)
+    return dict(before.smoother_outputs), dict(after.smoother_outputs)
+
+
+def _assert_value(name: str, original: object, restored: object) -> None:
+    if original is None or isinstance(original, (str, int)):
+        assert restored == original, name
+        return
+    assert isinstance(original, np.ndarray), name
+    assert isinstance(restored, np.ndarray), name
+    assert restored.shape == original.shape, name
+    assert restored.dtype == original.dtype, name
+    np.testing.assert_array_equal(restored, original, err_msg=name)
 
 
 def _assert_same(before: MCFilterResult, after: MCFilterResult) -> None:
     """Every field, by whatever equality its type has. Nothing is skipped."""
     for name in before.__dataclass_fields__:
-        original, restored = getattr(before, name), getattr(after, name)
-        if original is None or isinstance(original, (str, int)):
-            assert restored == original, name
-            continue
-        assert restored is not None, name
-        assert restored.shape == original.shape, name
-        assert restored.dtype == original.dtype, name
-        np.testing.assert_array_equal(restored, original, err_msg=name)
+        _assert_value(name, getattr(before, name), getattr(after, name))
+
+
+def _assert_same_smoother(before: MCSmootherResult, after: MCSmootherResult) -> None:
+    """The forward pass by :func:`_assert_same`, then every smoothed field."""
+    _assert_same(before.filter_result, after.filter_result)
+    for name in before.__dataclass_fields__:
+        if name != "filter_result":
+            _assert_value(name, getattr(before, name), getattr(after, name))
 
 
 # --------------------------------------------------------------------------
@@ -380,5 +421,151 @@ def test_a_pipeline_without_filters_reloads_with_none(
     pipeline = _pipeline(solved_post82)
 
     _, after = _roundtrip(solved_post82, pipeline, tmp_path)
+
+    assert after == {}
+
+
+def test_prefixed_step_names_roundtrip(solved_post82: SolvedModel, tmp_path) -> None:
+    """Check that a step named after another's field prefix keeps its own members"""
+    pipeline = _pipeline(
+        solved_post82,
+        filter_step(
+            "a", target="reference", obs_source="data", obs_field="observables"
+        ),
+        filter_step(
+            "a_std", target="reference", obs_source="data", obs_field="observables"
+        ),
+    )
+
+    before, after = _roundtrip(solved_post82, pipeline, tmp_path)
+
+    assert set(after) == {"a", "a_std"}
+    for name in after:
+        _assert_same(before[name], after[name])
+
+
+# --------------------------------------------------------------------------
+# Smoother steps
+# --------------------------------------------------------------------------
+
+_SMOOTHED = ("x_smooth", "P_smooth", "eps_smooth")
+_PRUNED_SMOOTHED = ("x1_smooth", "x2_smooth")
+
+
+def _smoother(name: str = "sm", **kwargs: object):
+    return smoother_step(
+        name,
+        target="reference",
+        obs_source="data",
+        obs_field="observables",
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
+def test_smoother_roundtrip(
+    solved_post82: SolvedModel, filter: Filter, tmp_path
+) -> None:
+    """Check that every forward and smoothed field survives the bundle"""
+    pipeline = _pipeline(solved_post82, _smoother(filter=filter))
+
+    before, after = _smoother_roundtrip(solved_post82, pipeline, tmp_path)
+
+    _assert_same_smoother(before["sm"], after["sm"])
+    assert after["sm"].mode == filter.mode
+
+
+def test_ukf_smoother_roundtrip(solved_rbc_so: SolvedModel, tmp_path) -> None:
+    """Check that the pruned forward and smoothed states survive the bundle"""
+    pipeline = _pipeline(solved_rbc_so, _smoother(filter=UnscentedKalman()))
+
+    before, after = _smoother_roundtrip(solved_rbc_so, pipeline, tmp_path)
+
+    _assert_same_smoother(before["sm"], after["sm"])
+    for name in _PRUNED_SMOOTHED:
+        np.testing.assert_array_equal(
+            getattr(after["sm"], name), getattr(before["sm"], name)
+        )
+    for name in _PRUNED:
+        np.testing.assert_array_equal(
+            getattr(after["sm"].filter_result, name),
+            getattr(before["sm"].filter_result, name),
+        )
+
+
+def test_smoother_csv_roundtrip(solved_post82: SolvedModel, tmp_path) -> None:
+    """Check that smoother fields survive CSV members"""
+    pipeline = _pipeline(solved_post82, _smoother())
+
+    before, after = _smoother_roundtrip(
+        solved_post82, pipeline, tmp_path, as_parquet=False
+    )
+
+    for name in _SMOOTHED:
+        np.testing.assert_allclose(
+            getattr(after["sm"], name), getattr(before["sm"], name)
+        )
+    for name in (*_REQUIRED, "eps_hat"):
+        np.testing.assert_allclose(
+            getattr(after["sm"].filter_result, name),
+            getattr(before["sm"].filter_result, name),
+        )
+
+
+@pytest.mark.parametrize("name", _PRUNED_SMOOTHED)
+def test_reloaded_smoother_pruned_state(
+    solved_post82: SolvedModel, name: str, tmp_path
+) -> None:
+    """Check that a reloaded linear smoother still refuses the pruned state"""
+    pipeline = _pipeline(solved_post82, _smoother())
+
+    _, after = _smoother_roundtrip(solved_post82, pipeline, tmp_path)
+
+    with pytest.raises(AttributeError, match="only available for unscented"):
+        getattr(after["sm"], name)
+
+
+def test_smoother_empty_roundtrip(solved_post82: SolvedModel, tmp_path) -> None:
+    """Check that a smoother retaining nothing restores its axes from the meta"""
+    comp = solved_post82.compiled
+    pipeline = _pipeline(solved_post82, _smoother(n_retain=0))
+
+    _, after = _smoother_roundtrip(solved_post82, pipeline, tmp_path)
+
+    assert (after["sm"].n_rep, after["sm"].n_retained) == (N_REP, 0)
+    assert after["sm"].retained_reps.shape == (0,)
+    assert after["sm"].x_smooth.shape == (0, T, comp.n_var)
+    assert after["sm"].P_smooth.shape == (0, T, comp.n_var, comp.n_var)
+    assert after["sm"].eps_smooth.shape == (0, T, comp.n_exog)
+
+
+def test_kalman_steps_roundtrip_apart(solved_post82: SolvedModel, tmp_path) -> None:
+    """Check that filters and smoothers reload into their own mappings"""
+    pipeline = _pipeline(
+        solved_post82,
+        filter_step(
+            "kf", target="reference", obs_source="data", obs_field="observables"
+        ),
+        _smoother("ks", n_retain=2),
+    )
+
+    before, after = _reload(solved_post82, pipeline, tmp_path)
+
+    assert set(after.filter_outputs) == {"kf"}
+    assert set(after.smoother_outputs) == {"ks"}
+    _assert_same(before.filter_outputs["kf"], after.filter_outputs["kf"])
+    _assert_same_smoother(before.smoother_outputs["ks"], after.smoother_outputs["ks"])
+
+
+def test_no_smoothers_reload_empty(solved_post82: SolvedModel, tmp_path) -> None:
+    """Check that a pipeline without smoothers reloads an empty mapping"""
+    pipeline = _pipeline(
+        solved_post82,
+        filter_step(
+            "kf", target="reference", obs_source="data", obs_field="observables"
+        ),
+    )
+
+    _, after = _smoother_roundtrip(solved_post82, pipeline, tmp_path)
 
     assert after == {}

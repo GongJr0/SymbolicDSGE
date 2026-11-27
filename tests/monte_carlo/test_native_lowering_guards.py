@@ -22,6 +22,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     raw_model_data_step,
     filter_step,
     simulation_step,
+    smoother_step,
     wald_test_step,
 )
 
@@ -204,8 +205,9 @@ def test_wald_targets_must_match_the_source_width(
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("factory", [filter_step, smoother_step])
 def test_filter_rejects_a_datagen_whose_width_it_cannot_match(
-    solved_post82: SolvedModel,
+    solved_post82: SolvedModel, factory
 ) -> None:
     """Unnamed raw observables must line up positionally, so the count must match."""
     n_obs = len(solved_post82.compiled.observable_names)
@@ -213,8 +215,8 @@ def test_filter_rejects_a_datagen_whose_width_it_cannot_match(
         raw_model_data_step(
             "data", observables=np.zeros((N_REP, T, n_obs + 1), dtype=np.float64)
         ),
-        filter_step(
-            "filter", target="reference", obs_source="data", obs_field="observables"
+        factory(
+            "kalman", target="reference", obs_source="data", obs_field="observables"
         ),
     ]
 
@@ -224,10 +226,13 @@ def test_filter_rejects_a_datagen_whose_width_it_cannot_match(
         _lower(steps, reference=solved_post82)
 
 
-def test_an_unknown_filter_mode_is_rejected(solved_post82: SolvedModel) -> None:
+@pytest.mark.parametrize("factory", [filter_step, smoother_step])
+def test_an_unknown_filter_mode_is_rejected(
+    solved_post82: SolvedModel, factory
+) -> None:
     """The interface resolves the mode before lowering picks a kernel for it."""
-    step = filter_step(
-        "filter", target="reference", obs_source="sim", obs_field="observables"
+    step = factory(
+        "kalman", target="reference", obs_source="sim", obs_field="observables"
     )
     steps = [
         simulation_step("sim", target="reference", T=T, observables=True),
