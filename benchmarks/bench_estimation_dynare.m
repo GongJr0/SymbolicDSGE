@@ -5,6 +5,7 @@ function bench_estimation_dynare(workdir, model_name, probes, include_prior, war
   dynare(model_name, 'noclearall', 'nograph');
 
   global M_ options_ oo_ estim_params_ bayestopt_ dataset_ dataset_info
+  options_.riccati_tol = 0;
   M0 = M_; options0 = options_; oo0 = oo_; estim_params0 = estim_params_;
   bayestopt0 = bayestopt_; dataset0 = dataset_; dataset_info0 = dataset_info;
   probe_target = zeros(1, size(probes, 2));

@@ -1,228 +1,152 @@
-"""Run first-order models through linear Kalman filters.
+"""Run first-order models through linear Kalman filters and smoothers.
 
-The timed workloads are SymbolicDSGE's public likelihood-only and retained
-history filter entries, Dynare's direct ``kalman_filter`` likelihood entry,
-and Dynare's generated ``calib_smoother`` entry. Parsing, compilation or
-preprocessing, solution, data generation, and warmup are outside the timer.
+Three workloads are timed on each side.
+
+Likelihood only, recursion throughput: SymbolicDSGE's ``run_linear`` with
+history storage off against Dynare's ``kalman_filter``. Both take the same
+model inputs and a stationary ``P0`` computed outside the timer.
+
+Smoother, call to result: SymbolicDSGE's public ``LinearKalman.smooth`` against
+Dynare's ``evaluate_smoother``, which is what ``calib_smoother`` runs. Each is
+timed from the call to the result in the library's own form, so each side's
+own input resolution, ``P0`` solve, and result packaging are inside the timer.
+Dynare's entry also rebuilds its dataset and solves the model again.
+
+Smoother, recursion throughput: SymbolicDSGE's ``smooth_linear`` against
+Dynare's ``missing_DiffuseKalmanSmootherH1_Z``. Both take precomputed inputs
+and ``P0``, and each stores its histories its own way.
+
+Parsing, compilation or preprocessing, solution, data generation, and warmup
+are outside every timer.
 """
 
 from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext
 import json
 import shutil
-import subprocess
-import sys
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from scipy.io import loadmat
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_DIR = Path(__file__).resolve().parent
-FIXTURES = ROOT / "tests" / "fixtures" / "models"
+from _cases import (
+    CASES,
+    Case,
+    Prepared,
+    add_common_args,
+    check_case_table,
+    check_common_args,
+    dynare_observable_names,
+    output_root,
+    prepare,
+    quoted_matlab,
+    run_dynare,
+    time_calls,
+    write_dynare_data,
+)
+from SymbolicDSGE import LinearKalman
+from SymbolicDSGE.filters.filter import (
+    FilterResult,
+    SmootherResult,
+    run_linear,
+    smooth_linear,
+)
+from SymbolicDSGE.filters.resolvers import LinearRunArgs, _resolve_linear_args
 
-sys.path.insert(0, str(ROOT))
-from SymbolicDSGE import DSGESolver, ModelParser, SolvedModel, Shock
-from SymbolicDSGE.estimation import backend
-from SymbolicDSGE.kalman.filter import FilterResult, KalmanFilter
-
-
-@dataclass(frozen=True)
-class CaseSpec:
-    label: str
-    yaml_name: str
-    mod_name: str
-    seed: int
-    dynare_data_file: str = "fixture_kf_data.m"
-    native_to_dynare_observable: tuple[tuple[str, str], ...] = ()
-    native_to_dynare_state: tuple[tuple[str, str], ...] = ()
-
-
-CASES = {
-    "ls2004": CaseSpec(
-        label="Lubik-Schorfheide 2004",
-        yaml_name="POST82.yaml",
-        mod_name="post82_kf.mod",
-        seed=1982,
-        dynare_data_file="post82_kf_data.m",
-    ),
-    "sw2007": CaseSpec(
-        label="SW2007",
-        yaml_name="sw2007.yaml",
-        mod_name="sw2007.mod",
-        seed=2007,
-        dynare_data_file="sw2007_kf_data.m",
-        native_to_dynare_state=(
-            ("rep_dy", "dy"),
-            ("rep_dc", "dc"),
-            ("rep_dinve", "dinve"),
-            ("rep_dw", "dw"),
-        ),
-    ),
-    "g2015": CaseSpec(
-        label="Gali 2015",
-        yaml_name="gali_2015.yaml",
-        mod_name="gali_2015.mod",
-        seed=2015,
-        native_to_dynare_observable=(
-            ("obs_pi_ann", "pi_ann"),
-            ("obs_i_ann", "i_ann"),
-        ),
-    ),
-    "gm2005": CaseSpec(
-        label="Gali-Monacelli 2005",
-        yaml_name="gali_monacelli_2005.yaml",
-        mod_name="gali_monacelli_2005.mod",
-        seed=2005,
-        native_to_dynare_observable=(("obs_pi", "pi"), ("obs_r", "r")),
-    ),
-    "i2004": CaseSpec(
-        label="Ireland 2004",
-        yaml_name="ireland_2004.yaml",
-        mod_name="ireland_2004.mod",
-        seed=2004,
-        native_to_dynare_observable=(
-            ("obs_gobs", "gobs"),
-            ("obs_piobs", "piobs"),
-        ),
+#: Native variable names that Dynare reports under another name.
+STATE_MAP: dict[str, tuple[tuple[str, str], ...]] = {
+    "sw2007": (
+        ("rep_dy", "dy"),
+        ("rep_dc", "dc"),
+        ("rep_dinve", "dinve"),
+        ("rep_dw", "dw"),
     ),
 }
+check_case_table("STATE_MAP", STATE_MAP, total=False)
+
+#: Smoother fields compared against Dynare, in table order.
+_SMOOTHER_FIELDS = ("updated", "smoothed", "P_smoothed", "eps_smoothed")
 
 
 @dataclass
-class NativeCase:
-    solved: SolvedModel
-    A: np.ndarray
-    B: np.ndarray
-    C: np.ndarray
-    d: np.ndarray
-    Q: np.ndarray
-    R: np.ndarray
-    y: np.ndarray
-    observable_names: tuple[str, ...]
-    state_names: tuple[str, ...]
+class KalmanCase:
+    prepared: Prepared
+    run_args: LinearRunArgs
+
+    @property
+    def state_names(self) -> tuple[str, ...]:
+        return tuple(self.prepared.solved.compiled.var_names)
+
+    @property
+    def shock_names(self) -> tuple[str, ...]:
+        return tuple(self.prepared.solved.compiled.shock_names)
 
 
-def _quoted_matlab(value: Path | str) -> str:
-    return str(value).replace("\\", "/").replace("'", "''")
+def _prepare_kalman(case: Case, periods: int) -> KalmanCase:
+    prepared = prepare(case, periods)
+    run_args = _resolve_linear_args(
+        prepared.solved,
+        prepared.y,
+        prepared.observable_names,
+        symmetrize=False,
+    )
+    return KalmanCase(prepared=prepared, run_args=run_args)
 
 
 def _max_abs(left: np.ndarray | float, right: np.ndarray | float) -> float:
     return float(np.max(np.abs(np.asarray(left) - np.asarray(right))))
 
 
-def _prepare(spec: CaseSpec, periods: int) -> NativeCase:
-    model, kalman = ModelParser(FIXTURES / spec.yaml_name).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled, order=1)
-
-    base_params = backend.extract_base_params(compiled)
-    Q = backend.build_Q(compiled, base_params)
-    sim = solved.sim(
-        T=periods,
-        shocks={
-            ",".join(compiled.shock_names): Shock("norm", multivar=True, seed=spec.seed)
-        },
-        observables=True,
-    )
-    if sim.y is None:
-        raise RuntimeError("Simulation did not return observables.")
-    observable_names = tuple(sim.observable_names)
-    y = sim.y
-    C, d = compiled.build_affine_measurement_matrices(
-        base_params,
-        list(observable_names),
-        solved.policy.steady_state,
-    )
-    return NativeCase(
-        solved=solved,
-        A=solved.policy.A,
-        B=solved.policy.B,
-        C=C,
-        d=d,
-        Q=Q,
-        R=backend.build_R(compiled, kalman, list(observable_names), base_params),
-        y=y,
-        observable_names=observable_names,
-        state_names=tuple(compiled.var_names),
-    )
-
-
-def _write_dynare_data(
-    observable_names: tuple[str, ...], y_values: np.ndarray, path: Path
-) -> None:
-    lines = ["% Generated by bench_linear_kf.py. Do not edit."]
-    for column, name in enumerate(observable_names):
-        values = "\n".join(f"{value:.17g}" for value in y_values[:, column])
-        lines.extend((f"{name} = [", values, "];"))
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _time(fn, warmup: int, reps: int) -> tuple[np.ndarray, FilterResult]:
-    for _ in range(warmup):
-        fn()
-    times = np.empty(reps, dtype=np.float64)
-    result = None
-    for index in range(reps):
-        started = time.perf_counter()
-        result = fn()
-        times[index] = time.perf_counter() - started
-    assert result is not None
-    return times, result
-
-
-def _time_native(
-    spec: CaseSpec, case: NativeCase, warmup: int, reps: int, use_joseph: bool
-) -> dict:
-    def loglik_only() -> FilterResult:
-        return KalmanFilter.run(
-            case.A,
-            case.B,
-            case.C,
-            case.d,
-            case.Q,
-            case.R,
-            case.y,
-            P0=None,
-            _store_history=False,
-            symmetrize=False,
-            joseph_cov=use_joseph,
-        )
-
-    def filter_history() -> FilterResult:
-        return case.solved.kalman(
-            case.y,
-            filter_mode="linear",
-            observables=list(case.observable_names),
-            P0=None,
-            symmetrize=False,
-            joseph_cov=False,
-        )
-
-    loglik_times, loglik_result = _time(loglik_only, warmup, reps)
-    history_times, history_result = _time(filter_history, warmup, reps)
+def _smoother_fields(result: SmootherResult[FilterResult]) -> dict[str, np.ndarray]:
     return {
-        "loglik_times": loglik_times,
-        "history_times": history_times,
-        "loglik": float(loglik_result.loglik),
-        "x_pred": history_result.x_pred,
-        "x_filt": history_result.x_filt,
+        "updated": result.filter_result.x_filt,
+        "smoothed": result.x_smooth,
+        "P_smoothed": result.P_smooth,
+        "eps_smoothed": result.eps_smooth,
     }
 
 
-def _native_model_info(spec: CaseSpec, case: NativeCase) -> dict[str, int]:
-    compiled = case.solved.compiled
+def _time_native(kalman: KalmanCase, warmup: int, reps: int, use_joseph: bool) -> dict:
+    prepared = kalman.prepared
+    loglik_args = {**kalman.run_args, "joseph_cov": use_joseph}
+    smoother = LinearKalman(symmetrize=False, joseph_cov=False)
+
+    def loglik_only() -> FilterResult:
+        return run_linear(**loglik_args, _store_history=False)
+
+    def smoother_call() -> SmootherResult[FilterResult]:
+        return smoother.smooth(
+            prepared.solved, prepared.y, list(prepared.observable_names)
+        )
+
+    def smoother_throughput() -> SmootherResult[FilterResult]:
+        return smooth_linear(**kalman.run_args)
+
+    loglik_times, loglik_result = time_calls(loglik_only, warmup, reps)
+    call_times, call_result = time_calls(smoother_call, warmup, reps)
+    throughput_times, throughput_result = time_calls(smoother_throughput, warmup, reps)
+    return {
+        "loglik_times": loglik_times,
+        "call_times": call_times,
+        "throughput_times": throughput_times,
+        "loglik": float(loglik_result.loglik),
+        **{f"call_{k}": v for k, v in _smoother_fields(call_result).items()},
+        **{
+            f"throughput_{k}": v for k, v in _smoother_fields(throughput_result).items()
+        },
+    }
+
+
+def _native_model_info(kalman: KalmanCase) -> dict[str, int]:
+    compiled = kalman.prepared.solved.compiled
     return {
         "declared_variables": compiled.n_var,
-        "filter_state_dimension": case.A.shape[0],
+        "filter_state_dimension": kalman.run_args["A"].shape[0],
         "predetermined_variables": compiled.n_state,
-        "observables": len(case.observable_names),
+        "observables": len(kalman.prepared.observable_names),
         "shocks": compiled.n_exog,
         "parameters": compiled.n_par,
     }
@@ -232,8 +156,9 @@ def _save_native(result: dict, output_dir: Path, model_info: dict[str, int]) -> 
     np.savez(output_dir / "native.npz", **result)
     metadata = {
         "runtime": "SymbolicDSGE native",
-        "loglik_only_entry_point": "KalmanFilter.run(_store_history=False)",
-        "filter_history_entry_point": "FirstOrderSolvedModel.kalman",
+        "loglik_only_entry_point": "run_linear(_store_history=False), P0 precomputed",
+        "smoother_call_entry_point": "LinearKalman.smooth",
+        "smoother_throughput_entry_point": "smooth_linear, inputs and P0 precomputed",
         "repetitions": int(result["loglik_times"].size),
         "model_dimensions": model_info,
     }
@@ -244,80 +169,106 @@ def _matlab_cellstr(values: tuple[str, ...]) -> str:
     return "{" + ", ".join(f"'{value}'" for value in values) + "}"
 
 
-def _dynare_observable_names(
-    spec: CaseSpec, native_observable_names: tuple[str, ...]
-) -> tuple[str, ...]:
-    observable_map = dict(spec.native_to_dynare_observable)
-    return tuple(observable_map.get(name, name) for name in native_observable_names)
-
-
 def _run_dynare(
     runtime: str,
-    spec: CaseSpec,
+    case_name: str,
+    kalman: KalmanCase,
     output_dir: Path,
-    native_observable_names: tuple[str, ...],
-    y_values: np.ndarray,
-    warmup: int,
-    reps: int,
-    dynare_matlab_path: str,
-    matlab_bin: str,
-    octave_bin: str,
+    args: argparse.Namespace,
 ) -> Path:
-    dynare_root = Path(dynare_matlab_path).resolve().parent
-    mex_platform = "matlab" if runtime == "matlab" else "octave"
-    if not (dynare_root / "mex" / mex_platform).is_dir():
-        raise RuntimeError(
-            f"Dynare at {dynare_root} has no {mex_platform} MEX directory."
-        )
-    runner = SCRIPT_DIR / "bench_linear_kf_dynare.m"
+    case = CASES[case_name]
+    prepared = kalman.prepared
     result_path = output_dir / f"dynare_{runtime}.mat"
     with tempfile.TemporaryDirectory(
         prefix=f"dynare-{runtime}-", dir=output_dir
     ) as temporary_dir:
         workdir = Path(temporary_dir)
-        shutil.copy2(FIXTURES / spec.mod_name, workdir / spec.mod_name)
-        data_file = spec.dynare_data_file
-        dynare_observable_names = _dynare_observable_names(
-            spec, native_observable_names
+        model_file = f"{case.model}.mod"
+        data_file = f"{case_name}_data.m"
+        shutil.copy2(case.mod_path, workdir / model_file)
+        observable_names = dynare_observable_names(case, prepared.observable_names)
+        write_dynare_data(observable_names, prepared.y, workdir / data_file)
+        run_dynare(
+            runtime,
+            f"bench_linear_kf_dynare('{quoted_matlab(workdir)}', '{model_file}', "
+            f"{_matlab_cellstr(observable_names)}, '{data_file}', {args.warmup}, "
+            f"{args.reps}, '{quoted_matlab(result_path)}');",
+            args,
+            case_name,
         )
-        _write_dynare_data(dynare_observable_names, y_values, workdir / data_file)
-        expression = (
-            f"addpath('{_quoted_matlab(dynare_matlab_path)}'); "
-            f"addpath('{_quoted_matlab(runner.parent)}'); "
-            f"bench_linear_kf_dynare('{_quoted_matlab(workdir)}', "
-            f"'{spec.mod_name}', {_matlab_cellstr(dynare_observable_names)}, "
-            f"'{data_file}', {warmup}, {reps}, '{_quoted_matlab(result_path)}');"
-        )
-        command = (
-            [matlab_bin, "-batch", expression]
-            if runtime == "matlab"
-            else [octave_bin, "--quiet", "--eval", expression]
-        )
-        subprocess.run(command, check=True, cwd=SCRIPT_DIR, stdout=subprocess.DEVNULL)
     return result_path
 
 
+#: The .mat keys each Dynare smoother path saves: updated, smoothed, shocks, and
+#: smoothed state uncertainty.
+_DYNARE_KEYS = {
+    "call": ("updated", "smoothed", "smoothed_shocks", "state_uncertainty"),
+    "throughput": (
+        "direct_updated",
+        "direct_smoothed",
+        "direct_shocks",
+        "direct_state_uncertainty",
+    ),
+}
+
+
+def _dynare_fields(
+    raw: dict, row: str, states: np.ndarray, shocks: np.ndarray, periods: int
+) -> dict[str, np.ndarray]:
+    """One Dynare smoother path's outputs, cut to the native states and shocks."""
+    updated, smoothed, shocks_key, uncertainty = _DYNARE_KEYS[row]
+    n_endo = int(np.asarray(raw["filter_state_nbr"]))
+    P = np.moveaxis(
+        np.asarray(raw[uncertainty], dtype=np.float64).reshape(n_endo, n_endo, periods),
+        2,
+        0,
+    )
+    return {
+        "updated": np.asarray(raw[updated], dtype=np.float64)[:, states],
+        "smoothed": np.asarray(raw[smoothed], dtype=np.float64)[:, states],
+        "P_smoothed": P[:, states][:, :, states],
+        "eps_smoothed": np.asarray(raw[shocks_key], dtype=np.float64).reshape(
+            periods, -1
+        )[:, shocks],
+    }
+
+
 def _report_dynare(
-    spec: CaseSpec, result_path: Path, case: NativeCase, native: dict
+    case_name: str, result_path: Path, kalman: KalmanCase, native: dict
 ) -> dict:
     raw = loadmat(result_path, squeeze_me=True)
-    dynare_names = np.atleast_1d(raw["state_names"]).astype(str).reshape(-1)
-    index = {name: position for position, name in enumerate(dynare_names)}
-    state_map = dict(spec.native_to_dynare_state)
-    state_indices = np.asarray(
-        [index[state_map.get(name, name)] for name in case.state_names],
+    periods = kalman.prepared.y.shape[0]
+    dynare_states = np.atleast_1d(raw["state_names"]).astype(str).reshape(-1)
+    dynare_shocks = np.atleast_1d(raw["exo_names"]).astype(str).reshape(-1)
+    state_index = {name: position for position, name in enumerate(dynare_states)}
+    shock_index = {name: position for position, name in enumerate(dynare_shocks)}
+    state_map = dict(STATE_MAP.get(case_name, ()))
+    states = np.asarray(
+        [state_index[state_map.get(name, name)] for name in kalman.state_names],
         dtype=np.intp,
     )
-    updated = np.asarray(raw["updated"], dtype=np.float64)[:, state_indices]
-    filtered = np.asarray(raw["filtered"], dtype=np.float64)[:, state_indices]
-    likelihood_times = np.asarray(raw["likelihood_times"], dtype=np.float64).reshape(-1)
-    smoother_times = np.asarray(raw["smoother_times"], dtype=np.float64).reshape(-1)
+    shocks = np.asarray(
+        [shock_index[name] for name in kalman.shock_names], dtype=np.intp
+    )
+    deltas = {}
+    for row in _DYNARE_KEYS:
+        dynare = _dynare_fields(raw, row, states, shocks, periods)
+        deltas[row] = {
+            field: _max_abs(native[f"{row}_{field}"], dynare[field])
+            for field in _SMOOTHER_FIELDS
+        }
     return {
-        "likelihood_median_seconds": float(np.median(likelihood_times)),
-        "smoother_median_seconds": float(np.median(smoother_times)),
+        "likelihood_median_seconds": float(
+            np.median(np.asarray(raw["likelihood_times"], dtype=np.float64))
+        ),
+        "call_median_seconds": float(
+            np.median(np.asarray(raw["call_times"], dtype=np.float64))
+        ),
+        "throughput_median_seconds": float(
+            np.median(np.asarray(raw["throughput_times"], dtype=np.float64))
+        ),
         "max_abs_loglik": _max_abs(native["loglik"], float(np.asarray(raw["loglik"]))),
-        "max_abs_updated": _max_abs(native["x_filt"], updated),
-        "max_abs_filtered": _max_abs(native["x_pred"][1:], filtered[:-1]),
+        "deltas": deltas,
         "model_info": {
             "declared_variables": int(np.asarray(raw["declared_endo_nbr"])),
             "filter_state_dimension": int(np.asarray(raw["filter_state_nbr"])),
@@ -333,20 +284,41 @@ def _us(seconds: float) -> str:
     return f"{seconds * 1e6:12.2f}"
 
 
+def _print_smoother_table(
+    title: str, row: str, native: dict, reports: dict[str, dict]
+) -> None:
+    native_median = float(np.median(native[f"{row}_times"]))
+    print(f"\n{title}:")
+    header = f"{'runtime':<34} {'median':>12} {'speedup':>10}" + "".join(
+        f" {'max |delta ' + field + '|':>24}" for field in _SMOOTHER_FIELDS
+    )
+    print(header)
+    print("-" * len(header))
+    zeros = "".join(f" {'0.000e+00':>24}" for _ in _SMOOTHER_FIELDS)
+    print(f"{'SymbolicDSGE':<34} {_us(native_median)} {'1.00x':>10}{zeros}")
+    for runtime, report in reports.items():
+        median = report[f"{row}_median_seconds"]
+        deltas = "".join(
+            f" {report['deltas'][row][field]:24.3e}" for field in _SMOOTHER_FIELDS
+        )
+        print(
+            f"{'Dynare-' + runtime:<34} {_us(median)} {median / native_median:9.2f}x{deltas}"
+        )
+
+
 def _print_tables(
     args: argparse.Namespace,
-    spec: CaseSpec,
-    case: NativeCase,
+    case: Case,
+    kalman: KalmanCase,
     native: dict,
     reports: dict[str, dict],
 ) -> None:
     loglik_median = float(np.median(native["loglik_times"]))
-    history_median = float(np.median(native["history_times"]))
     print(
-        f"{spec.label} linear KF: periods={args.periods} warmup={args.warmup} reps={args.reps}\n"
+        f"{case.label} linear KF: periods={args.periods} warmup={args.warmup} reps={args.reps}\n"
         "Setup is outside the timer: parse, compile or preprocess, solve, input generation, and warmup. Times are microseconds per call.\n"
     )
-    native_info = _native_model_info(spec, case)
+    native_info = _native_model_info(kalman)
     dynare_info = next(iter(reports.values()))["model_info"] if reports else None
     print("Model dimensions:")
     header = f"{'quantity':<29} {'SymbolicDSGE':>14} {'Dynare':>14}"
@@ -371,107 +343,52 @@ def _print_tables(
     print()
 
     header = (
-        f"{'runtime':<39} {'median':>12} {'speedup':>10} {'max |delta loglik|':>20}"
+        f"{'runtime':<34} {'median':>12} {'speedup':>10} {'max |delta loglik|':>20}"
     )
-    print("Loglikelihood Only:")
+    print("Loglikelihood only, recursion throughput:")
     print(header)
     print("-" * len(header))
-    print(
-        f"{'SymbolicDSGE-loglikonly':<39} {_us(loglik_median)} {'1.00x':>10} {'0.000e+00':>20}"
-    )
+    print(f"{'SymbolicDSGE':<34} {_us(loglik_median)} {'1.00x':>10} {'0.000e+00':>20}")
     for runtime, report in reports.items():
         median = report["likelihood_median_seconds"]
         print(
-            f"{'Dynare-' + runtime + '-loglikonly':<39} {_us(median)} {median / loglik_median:9.2f}x {report['max_abs_loglik']:20.3e}"
+            f"{'Dynare-' + runtime:<34} {_us(median)} {median / loglik_median:9.2f}x {report['max_abs_loglik']:20.3e}"
         )
 
-    print("\nRetained Results:")
-    print(
-        "SymbolicDSGE retains FilterResult histories. Dynare's closest public alternative is calib_smoother, which also computes smoothed paths; this table is informative but not an equivalent workload."
+    _print_smoother_table("Smoother, call to result", "call", native, reports)
+    _print_smoother_table(
+        "Smoother, recursion throughput", "throughput", native, reports
     )
-    header = f"{'runtime':<39} {'median':>12} {'speedup':>10} {'max |delta updated|':>20} {'max |delta filtered|':>21}"
-    print(header)
-    print("-" * len(header))
-    print(
-        f"{'SymbolicDSGE-filterhistory':<39} {_us(history_median)} {'1.00x':>10} {'0.000e+00':>20} {'0.000e+00':>21}"
-    )
-    for runtime, report in reports.items():
-        median = report["smoother_median_seconds"]
-        print(
-            f"{'Dynare-' + runtime + '-smoother':<39} {_us(median)} {median / history_median:9.2f}x {report['max_abs_updated']:20.3e} {report['max_abs_filtered']:21.3e}"
-        )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--periods", type=int, default=120)
-    parser.add_argument("--warmup", type=int, default=3)
-    parser.add_argument("--reps", type=int, default=30)
-    parser.add_argument(
-        "--cases", nargs="+", choices=tuple(CASES), default=tuple(CASES)
-    )
-    parser.add_argument(
-        "--runtimes",
-        nargs="+",
-        choices=["native", "matlab", "octave"],
-        default=["native"],
-    )
-    parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--dynare-matlab-path", default="")
-    parser.add_argument("--matlab-bin", default="matlab")
-    parser.add_argument("--octave-bin", default="octave")
+    add_common_args(parser, warmup=3, reps=30)
     parser.add_argument("--use-joseph", action="store_true")
     args = parser.parse_args()
-    if args.periods < 1 or args.warmup < 0 or args.reps < 1:
-        parser.error(
-            "periods and reps must be positive, and warmup must be nonnegative"
-        )
-    if set(args.runtimes) - {"native"} and not args.dynare_matlab_path:
-        parser.error("--dynare-matlab-path is required for Dynare runtimes")
+    check_common_args(parser, args)
 
-    output_context = (
-        nullcontext(
-            (
-                args.output_dir
-                if args.output_dir.is_absolute()
-                else SCRIPT_DIR / args.output_dir
-            ).resolve()
-        )
-        if args.output_dir is not None
-        else tempfile.TemporaryDirectory(prefix="symbolicdsge-linear-kf-")
-    )
-    with output_context as output_path:
+    with output_root(args, "symbolicdsge-linear-kf-") as output_path:
         root_output = Path(output_path)
         root_output.mkdir(parents=True, exist_ok=True)
         for case_name in args.cases:
-            spec = CASES[case_name]
+            case = CASES[case_name]
             output_dir = root_output / case_name
             output_dir.mkdir(exist_ok=True)
-            case = _prepare(spec, args.periods)
-            native = _time_native(spec, case, args.warmup, args.reps, args.use_joseph)
-            _save_native(native, output_dir, _native_model_info(spec, case))
+            kalman = _prepare_kalman(case, args.periods)
+            native = _time_native(kalman, args.warmup, args.reps, args.use_joseph)
+            _save_native(native, output_dir, _native_model_info(kalman))
             reports = {
                 runtime: _report_dynare(
-                    spec,
-                    _run_dynare(
-                        runtime,
-                        spec,
-                        output_dir,
-                        case.observable_names,
-                        case.y,
-                        args.warmup,
-                        args.reps,
-                        args.dynare_matlab_path,
-                        args.matlab_bin,
-                        args.octave_bin,
-                    ),
-                    case,
+                    case_name,
+                    _run_dynare(runtime, case_name, kalman, output_dir, args),
+                    kalman,
                     native,
                 )
                 for runtime in args.runtimes
                 if runtime != "native"
             }
-            _print_tables(args, spec, case, native, reports)
+            _print_tables(args, case, kalman, native, reports)
             if case_name != args.cases[-1]:
                 print()
     return 0

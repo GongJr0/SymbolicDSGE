@@ -3,9 +3,10 @@
 The timed entries are the public ``Estimator.mcmc`` method and Dynare's
 ``dynare_estimation`` sampling phase. Dynare's posterior-mode setup, native
 parse/compile/solve, the shared mode and proposal covariance, data generation,
-and optional warmup chains are outside the timer. Both samplers use adaptive
-random-walk MH, but their RNGs and adaptation schedules differ, so this reports
-marginal posterior summaries rather than path parity.
+and optional warmup chains are outside the timer. Both samplers run fixed
+proposal random-walk MH with a proposal standard deviation of
+``2.38 / sqrt(d) * --proposal-scale`` on the same covariance. Only their RNGs
+differ, so this reports marginal posterior summaries rather than path parity.
 
 The MAP is found once per case, before either timer starts, and both runtimes
 begin every chain from it. The native side takes it as ``theta0`` under
@@ -28,9 +29,8 @@ of ``--prior-scale`` times its magnitude.
 The .mod files reach the same set from the other side. A coefficient the .mod
 computes as a model-local is a derived calibration entry in the yaml, so both
 runtimes rebuild it from the same base parameters and a draw moves the same
-coefficients on either side. The temporary copy of the .mod only drops the
-statements listed in ``dynare_remove`` and appends the estimation block, and
-nothing is written back to the fixture.
+coefficients on either side. The temporary copy of the .mod only appends the
+estimation block, and nothing is written back to the fixture.
 
 Raw outputs are discarded unless ``--output-dir`` is supplied. Relative output
 paths are resolved from this benchmark's directory.
@@ -40,30 +40,37 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-from contextlib import nullcontext
+import itertools
 import json
 import os
-import subprocess
-import sys
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from scipy.io import loadmat, savemat
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_DIR = Path(__file__).resolve().parent
-FIXTURES = ROOT / "tests" / "fixtures" / "models"
-sys.path.insert(0, str(ROOT))
-
-from SymbolicDSGE import DSGESolver, ModelParser, Shock
+from _cases import (
+    CASES,
+    Prepared,
+    add_common_args,
+    check_common_args,
+    dynare_observable_names,
+    output_root,
+    prepare,
+    quoted_matlab,
+    run_dynare,
+    time_calls,
+    write_dynare_data,
+)
+from SymbolicDSGE import LinearKalman
+from SymbolicDSGE._ckernels.estimation import ess_rhat, mcse_quantile
 from SymbolicDSGE.estimation import Estimator, make_prior
 
 PRIOR_DISTRIBUTION = "normal"
 PRIOR_TRANSFORM = "identity"
 DYNARE_PRIOR_DENSITY = "normal_pdf"
+QUANTILES = (0.05, 0.50, 0.95)
 
 # The shared proposal covariance comes from a finite-difference Hessian at the
 # mode, and this scales its step. The shipped default is too wide for sw2007,
@@ -74,17 +81,6 @@ HESSIAN_STEP_SCALE = 0.5
 
 
 @dataclass(frozen=True)
-class CaseSpec:
-    label: str
-    yaml_name: str
-    mod_name: str
-    data_file: str
-    seed: int = 0
-    native_to_dynare_observable: tuple[tuple[str, str], ...] = ()
-    dynare_remove: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
 class Targets:
     """The estimated parameters, their calibrated values, and prior widths."""
 
@@ -92,85 +88,24 @@ class Targets:
     values: tuple[float, ...]
     stds: tuple[float, ...]
 
-    def value_of(self, name: str) -> float:
-        return self.values[self.names.index(name)]
 
-
-CASES = {
-    "ls2004": CaseSpec(
-        label="Lubik-Schorfheide 2004",
-        yaml_name="POST82.yaml",
-        mod_name="post82_kf.mod",
-        data_file="post82_mcmc_data",
-        dynare_remove=(
-            "calib_smoother(datafile = post82_kf_data, filtered_vars, filter_step_ahead = [1]);",
-        ),
-    ),
-    "sw2007": CaseSpec(
-        label="SW2007",
-        yaml_name="sw2007.yaml",
-        mod_name="sw2007.mod",
-        data_file="sw2007_mcmc_data",
-        seed=2007,
-        dynare_remove=(
-            "calib_smoother(datafile = sw2007_kf_data, filtered_vars, filter_step_ahead = [1]);",
-        ),
-    ),
-    "g2015": CaseSpec(
-        label="Gali 2015",
-        yaml_name="gali_2015.yaml",
-        mod_name="gali_2015.mod",
-        data_file="gali_2015_mcmc_data",
-        seed=2015,
-        native_to_dynare_observable=(
-            ("obs_pi_ann", "pi_ann"),
-            ("obs_i_ann", "i_ann"),
-        ),
-    ),
-    "gm2005": CaseSpec(
-        label="Gali-Monacelli 2005",
-        yaml_name="gali_monacelli_2005.yaml",
-        mod_name="gali_monacelli_2005.mod",
-        data_file="gali_monacelli_2005_mcmc_data",
-        seed=2005,
-        native_to_dynare_observable=(("obs_pi", "pi"), ("obs_r", "r")),
-    ),
-    "i2004": CaseSpec(
-        label="Ireland 2004",
-        yaml_name="ireland_2004.yaml",
-        mod_name="ireland_2004.mod",
-        data_file="ireland_2004_mcmc_data",
-        seed=2004,
-        native_to_dynare_observable=(
-            ("obs_gobs", "gobs"),
-            ("obs_piobs", "piobs"),
-        ),
-    ),
-}
-
-
-def _estimation_targets(compiled, prior_scale: float) -> Targets:
+def _estimation_targets(prepared: Prepared, prior_scale: float) -> Targets:
     """Every structural parameter of the model, with a prior built from its
     calibrated value.
 
-    Shock standard deviations, shock correlations and the measurement-error
-    entries of R are left out: they carry a role-authoritative constraining
-    transform on this side and reach Dynare through stderr and corr entries
-    rather than by name, so estimating them would compare two different
-    parameterizations. A parameter calibrated at zero takes ``prior_scale``
-    itself as its prior standard deviation, since scaling would leave it with
-    no width at all.
+    Shock and measurement-noise covariance parameters are left out: they carry
+    a role-authoritative constraining transform on this side and reach Dynare
+    through stderr and corr entries rather than by name, so estimating them
+    would compare two different parameterizations. A parameter calibrated at
+    zero takes ``prior_scale`` itself as its prior standard deviation, since
+    scaling would leave it with no width at all.
     """
-    calibration = compiled.config.calibration
-    excluded = {
-        symbol.name
-        for mapping in (calibration.shock_std, calibration.shock_corr)
-        for symbol in (mapping or {}).values()
-        if symbol is not None
-    }
-    excluded |= set(getattr(compiled.kalman, "R_param_names", None) or ())
+    calibration = prepared.config.calibration
+    excluded = calibration.shocks.param_names
+    if calibration.measurement_noise is not None:
+        excluded |= calibration.measurement_noise.param_names
     names = tuple(
-        str(param) for param in compiled.calib_params if str(param) not in excluded
+        name for name in prepared.solved.compiled.calib_params if name not in excluded
     )
     values = tuple(float(calibration.parameters[name]) for name in names)
     return Targets(
@@ -183,35 +118,7 @@ def _estimation_targets(compiled, prior_scale: float) -> Targets:
     )
 
 
-def _dynare_observables(
-    case: CaseSpec, native_observables: tuple[str, ...]
-) -> tuple[str, ...]:
-    names = dict(case.native_to_dynare_observable)
-    return tuple(names.get(name, name) for name in native_observables)
-
-
-def _quoted_matlab(value: Path | str) -> str:
-    return str(value).replace("\\", "/").replace("'", "''")
-
-
-def _prepare(case: CaseSpec, periods: int):
-    model, kalman = ModelParser(FIXTURES / case.yaml_name).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled, order=1)
-    sim = solved.sim(
-        T=periods,
-        shocks={
-            ",".join(compiled.shock_names): Shock("norm", multivar=True, seed=case.seed)
-        },
-        observables=True,
-    )
-    if sim.y is None:
-        raise RuntimeError("Simulation did not return observables.")
-    return compiled, solved, sim.y, tuple(sim.observable_names)
-
-
-def _make_estimator(targets: Targets, compiled, solved, y: np.ndarray, observables):
+def _make_estimator(targets: Targets, prepared: Prepared) -> Estimator:
     priors = {
         name: make_prior(
             distribution=PRIOR_DISTRIBUTION,
@@ -222,22 +129,19 @@ def _make_estimator(targets: Targets, compiled, solved, y: np.ndarray, observabl
             targets.names, targets.values, targets.stds, strict=True
         )
     }
+    compiled = prepared.solved.compiled
     return Estimator(
+        config=prepared.config,
         compiled=compiled,
-        y=y,
-        observables=list(observables),
-        filter_mode="linear",
-        estimated_params=list(targets.names),
-        priors=priors,
+        estimated_params=priors,
+        y=prepared.y,
+        observables=list(prepared.observable_names),
+        filter=LinearKalman(joseph_cov=False, symmetrize=False),
         ss_seed=np.zeros(len(compiled.var_names), dtype=np.float64),
-        joseph_cov=False,
-        symmetrize=False,
     )
 
 
-def _posterior_mode(
-    targets: Targets, compiled, solved, y, observables, hessian_step_scale: float
-):
+def _posterior_mode(targets: Targets, prepared: Prepared, hessian_step_scale: float):
     """The MAP both runtimes start from and the covariance both propose with,
     found once and outside every timer.
 
@@ -246,7 +150,7 @@ def _posterior_mode(
     the same optimization once per rep against a Dynare that reads its own from
     a file.
     """
-    estimator = _make_estimator(targets, compiled, solved, y, observables)
+    estimator = _make_estimator(targets, prepared)
     with (
         open(os.devnull, "w", encoding="utf-8") as sink,
         contextlib.redirect_stdout(sink),
@@ -276,34 +180,21 @@ def _proposal_covariance(targets: Targets, mode) -> np.ndarray:
 
 
 def _run_native(
-    targets: Targets,
-    compiled,
-    solved,
-    y: np.ndarray,
-    observables: tuple[str, ...],
-    draws: int,
-    burn_in: int,
-    warmup: int,
-    reps: int,
-    seed: int,
-    proposal_scale: float,
-    adapt: bool,
-    adapt_start: int,
-    mode,
+    targets: Targets, prepared: Prepared, mode, args: argparse.Namespace
 ) -> dict[str, np.ndarray | float]:
-    estimator = _make_estimator(targets, compiled, solved, y, observables)
+    estimator = _make_estimator(targets, prepared)
     proposal_cov = _proposal_covariance(targets, mode)
+    seeds = itertools.count(args.seed)
 
-    def run(chain_seed: int):
+    def run():
         return estimator.mcmc(
-            n_draws=draws,
-            burn_in=burn_in,
-            theta0=mode.x,
+            n_draws=args.draws,
+            burn_in=args.burn_in,
+            theta0=mode.theta,
             compute_map=False,
-            random_state=chain_seed,
-            proposal_scale=proposal_scale,
-            adapt=adapt,
-            adapt_start=adapt_start,
+            random_state=next(seeds),
+            proposal_scale=args.proposal_scale,
+            adapt=False,
             proposal_cov=proposal_cov,
         )
 
@@ -311,27 +202,13 @@ def _run_native(
         open(os.devnull, "w", encoding="utf-8") as sink,
         contextlib.redirect_stdout(sink),
     ):
-        for i in range(warmup):
-            run(seed + i)
-        times = np.empty(reps, dtype=np.float64)
-        result = None
-        for i in range(reps):
-            started = time.perf_counter()
-            result = run(seed + warmup + i)
-            times[i] = time.perf_counter() - started
-    assert result is not None
+        times, result = time_calls(run, args.warmup, args.reps)
+    order = [result.param_names.index(name) for name in targets.names]
     return {
         "times": times,
-        "samples": result.samples,
-        "accept_rate": float(result.accept_rate),
+        "samples": result.samples[0][:, order],
+        "accept_rate": float(result.accept_rate[0]),
     }
-
-
-def _write_data(path: Path, observables: tuple[str, ...], y: np.ndarray) -> None:
-    lines: list[str] = []
-    for column, name in enumerate(observables):
-        lines.extend((f"{name} = [", *(f"{v:.17g}" for v in y[:, column]), "];"))
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_shared_mode(path: Path, targets: Targets, mode) -> None:
@@ -364,16 +241,23 @@ def _dynare_estimated_params(targets: Targets) -> str:
     )
 
 
-def _write_model(case: CaseSpec, path: Path, periods: int, targets: Targets) -> None:
-    source = (FIXTURES / case.mod_name).read_text(encoding="utf-8")
-    for statement in case.dynare_remove:
-        source = source.replace(statement, "")
+def _write_model(
+    case_name: str,
+    path: Path,
+    data_file: str,
+    periods: int,
+    targets: Targets,
+    proposal_scale: float,
+) -> None:
+    jscale = 2.38 / np.sqrt(len(targets.names)) * proposal_scale
+    source = CASES[case_name].mod_path.read_text(encoding="utf-8")
     source += (
         "\nestimated_params;\n"
         + _dynare_estimated_params(targets)
         + "\nend;\n"
-        + f"estimation(datafile = {case.data_file}, nobs = {periods}, "
-        + "mode_compute = 4, cova_compute = 0, mh_replic = 0);\n"
+        + f"estimation(datafile = {data_file}, nobs = {periods}, "
+        + "mode_compute = 4, cova_compute = 0, mh_replic = 0, "
+        + f"mh_jscale = {jscale:.17g});\n"
     )
     path.write_text(source, encoding="utf-8")
 
@@ -381,128 +265,74 @@ def _write_model(case: CaseSpec, path: Path, periods: int, targets: Targets) -> 
 def _run_dynare(
     runtime: str,
     case_name: str,
-    case: CaseSpec,
     targets: Targets,
-    y: np.ndarray,
-    observables: tuple[str, ...],
-    output_dir: Path,
-    draws: int,
-    burn_in: int,
-    warmup: int,
-    reps: int,
-    seed: int,
-    adapt: bool,
-    adapt_start: int,
+    prepared: Prepared,
     mode,
-    dynare_path: str,
-    matlab_bin: str,
-    octave_bin: str,
+    output_dir: Path,
+    args: argparse.Namespace,
 ) -> Path:
-    root = Path(dynare_path).resolve().parent
-    platform = "matlab" if runtime == "matlab" else "octave"
-    if not (root / "mex" / platform).is_dir():
-        raise RuntimeError(f"Dynare at {root} has no {platform} MEX directory.")
     result_path = output_dir / f"dynare_{runtime}.mat"
     with tempfile.TemporaryDirectory(
         prefix=f"dynare-mcmc-{runtime}-", dir=output_dir
     ) as tmp:
         workdir = Path(tmp)
         model_name = f"{case_name}_mcmc"
-        _write_model(case, workdir / f"{model_name}.mod", y.shape[0], targets)
-        _write_data(
-            workdir / f"{case.data_file}.m", _dynare_observables(case, observables), y
+        data_file = f"{case_name}_data"
+        _write_model(
+            case_name,
+            workdir / f"{model_name}.mod",
+            data_file,
+            prepared.y.shape[0],
+            targets,
+            args.proposal_scale,
+        )
+        write_dynare_data(
+            dynare_observable_names(CASES[case_name], prepared.observable_names),
+            prepared.y,
+            workdir / f"{data_file}.m",
         )
         shared_mode_path = workdir / "shared_mode.mat"
         _write_shared_mode(shared_mode_path, targets, mode)
-        expression = (
-            f"addpath('{_quoted_matlab(dynare_path)}'); "
-            f"addpath('{_quoted_matlab(SCRIPT_DIR)}', '-begin'); "
-            f"bench_mcmc_dynare('{_quoted_matlab(workdir)}', '{model_name}', "
-            f"{draws}, {burn_in}, {warmup}, {reps}, {seed}, {int(adapt)}, {adapt_start}, "
-            f"'{_quoted_matlab(shared_mode_path)}', '{_quoted_matlab(result_path)}');"
+        run_dynare(
+            runtime,
+            f"bench_mcmc_dynare('{quoted_matlab(workdir)}', '{model_name}', "
+            f"{args.draws}, {args.burn_in}, {args.warmup}, {args.reps}, "
+            f"{args.seed}, '{quoted_matlab(shared_mode_path)}', "
+            f"'{quoted_matlab(result_path)}');",
+            args,
+            f"{case_name} MCMC",
         )
-        command = (
-            [matlab_bin, "-batch", expression]
-            if runtime == "matlab"
-            else [octave_bin, "--quiet", "--eval", expression]
-        )
-        completed = subprocess.run(
-            command,
-            cwd=SCRIPT_DIR,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if completed.returncode:
-            raise RuntimeError(
-                f"Dynare {runtime} MCMC failed:\n{completed.stderr.strip()}"
-            )
     return result_path
 
 
-def _summary(samples: np.ndarray) -> dict[str, np.ndarray]:
-    std = np.std(samples, axis=0, ddof=1)
-    ess = _effective_sample_size(samples)
-    mcse = np.full(ess.shape, np.nan, dtype=np.float64)
-    positive_ess = ess > 0.0
-    mcse[positive_ess] = std[positive_ess] / np.sqrt(ess[positive_ess])
-    quantiles = (0.05, 0.50, 0.95)
-    quantile_values = np.quantile(samples, quantiles, axis=0)
-    quantile_mcse = _quantile_mcse(samples, quantiles)
-    return {
-        "std": std,
-        "mean": np.mean(samples, axis=0),
-        "q05": quantile_values[0],
-        "q50": quantile_values[1],
-        "q95": quantile_values[2],
-        "q05_mcse": quantile_mcse[0],
-        "q50_mcse": quantile_mcse[1],
-        "q95_mcse": quantile_mcse[2],
+def _scores(samples: np.ndarray) -> dict[str, np.ndarray]:
+    """ESS and the MCSEs of the mean and of each of ``QUANTILES`` for one chain,
+    masked and clipped the way ``MCMCResult`` reports them.
+    """
+    chain = samples[None]
+    ess, _, status = ess_rhat(chain)
+    n_draws = samples.shape[0]
+    ess = np.clip(np.where(status == 0, ess, np.nan), 0.0, n_draws * np.log10(n_draws))
+    scores = {
         "ess": ess,
-        "mcse": mcse,
+        "mcse": np.std(samples, axis=0, ddof=1) / np.sqrt(ess),
     }
+    for q in QUANTILES:
+        scores[f"q{round(q * 100):02d}_mcse"] = mcse_quantile(chain, q)
+    return scores
 
 
-def _effective_sample_size(samples: np.ndarray) -> np.ndarray:
-    """Geyer's initial-positive-sequence ESS for each single-chain column."""
-    n_draws, n_params = samples.shape
-    ess = np.zeros(n_params, dtype=np.float64)
-    if n_draws < 3:
-        return ess
-
-    n_fft = 1 << (2 * n_draws - 1).bit_length()
-    for index in range(n_params):
-        centered = samples[:, index] - np.mean(samples[:, index])
-        autocov = np.fft.irfft(np.abs(np.fft.rfft(centered, n=n_fft)) ** 2, n=n_fft)[
-            :n_draws
-        ]
-        autocov /= np.arange(n_draws, 0, -1, dtype=np.float64)
-        if autocov[0] <= np.finfo(np.float64).eps:
-            continue
-        rho = autocov / autocov[0]
-        pair_sum = rho[1:-1:2] + rho[2::2]
-        nonpositive = np.flatnonzero(pair_sum <= 0.0)
-        if nonpositive.size:
-            pair_sum = pair_sum[: nonpositive[0]]
-        tau = 1.0 + 2.0 * float(np.sum(pair_sum))
-        ess[index] = min(float(n_draws), float(n_draws) / tau)
-    return ess
-
-
-def _quantile_mcse(samples: np.ndarray, quantiles: tuple[float, ...]) -> np.ndarray:
-    """Estimate quantile MCSEs with square-root-sized contiguous batches."""
-    n_draws, n_params = samples.shape
-    n_batches = int(np.sqrt(n_draws))
-    batch_size = n_draws // n_batches if n_batches else 0
-    mcse = np.full((len(quantiles), n_params), np.nan, dtype=np.float64)
-    if n_batches < 2 or batch_size < 2:
-        return mcse
-
-    batches = samples[: n_batches * batch_size].reshape(n_batches, batch_size, n_params)
-    for index, quantile in enumerate(quantiles):
-        batch_quantiles = np.quantile(batches, quantile, axis=1)
-        mcse[index] = np.std(batch_quantiles, axis=0, ddof=1) / np.sqrt(n_batches)
-    return mcse
+def _summary(samples: np.ndarray) -> dict[str, np.ndarray]:
+    quantile_values = np.quantile(samples, QUANTILES, axis=0)
+    return {
+        "std": np.std(samples, axis=0, ddof=1),
+        "mean": np.mean(samples, axis=0),
+        **{
+            f"q{round(q * 100):02d}": values
+            for q, values in zip(QUANTILES, quantile_values, strict=True)
+        },
+        **_scores(samples),
+    }
 
 
 def _normalized_delta(
@@ -521,7 +351,7 @@ def _normalized_delta(
 
 
 def _print_report(
-    case: CaseSpec,
+    label: str,
     estimated_params: tuple[str, ...],
     draws: int,
     burn_in: int,
@@ -529,40 +359,36 @@ def _print_report(
     dynare: dict,
 ):
     print(
-        f"{case.label} MCMC: {len(estimated_params)} estimated parameters, "
+        f"{label} MCMC: {len(estimated_params)} estimated parameters, "
         f"retained draws={draws} burn-in={burn_in} reps={len(native['times'])}"
     )
     print(
         "Both runtimes start from one MAP and propose from the covariance found "
         "at it, both outside every timer, so neither timed call builds a "
-        "Hessian. Their update schedules and RNGs differ, so posterior "
-        "summaries are descriptive."
+        "Hessian. Only their RNGs differ."
     )
-    native_median = float(np.median(native["times"]))
-    native_ess = _effective_sample_size(native["samples"])
+    native_summary = _summary(native["samples"])
+    summaries = {
+        runtime: _summary(result["samples"]) for runtime, result in dynare.items()
+    }
     header = (
         f"{'runtime':<18} {'median s':>12} {'draws / s':>12} "
         f"{'acceptance':>12} {'min ESS':>12} {'min ESS / s':>14}"
     )
     print("\n" + header)
     print("-" * len(header))
-    print(
-        f"{'SymbolicDSGE':<18} {native_median:12.3f} {draws / native_median:12.1f} "
-        f"{native['accept_rate']:12.3f} {np.min(native_ess):12.1f} "
-        f"{np.min(native_ess) / native_median:14.1f}"
-    )
-    for runtime, result in dynare.items():
+    rows = [("SymbolicDSGE", native, native_summary)] + [
+        ("Dynare-" + runtime, result, summaries[runtime])
+        for runtime, result in dynare.items()
+    ]
+    for name, result, summary in rows:
         median = float(np.median(result["times"]))
-        ess = _effective_sample_size(result["samples"])
+        min_ess = float(np.min(summary["ess"]))
         print(
-            f"{'Dynare-' + runtime:<18} {median:12.3f} {draws / median:12.1f} "
-            f"{result['accept_rate']:12.3f} {np.min(ess):12.1f} "
-            f"{np.min(ess) / median:14.1f}"
+            f"{name:<18} {median:12.3f} {draws / median:12.1f} "
+            f"{result['accept_rate']:12.3f} {min_ess:12.1f} {min_ess / median:14.1f}"
         )
 
-    native_summary = _summary(native["samples"])
-    for runtime, result in dynare.items():
-        result["summary"] = _summary(result["samples"])
     print(
         "\nPosterior comparisons: std is absolute; mean and quantiles are "
         "|delta| / combined MCSE"
@@ -575,8 +401,7 @@ def _print_report(
     print(header)
     print("-" * len(header))
     for index, name in enumerate(estimated_params):
-        for runtime, result in dynare.items():
-            summary = result["summary"]
+        for runtime, summary in summaries.items():
             normalized = {
                 key: _normalized_delta(
                     native_summary[key],
@@ -599,112 +424,40 @@ def _print_report(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--periods", type=int, default=120)
+    add_common_args(parser, warmup=0, reps=1)
     parser.add_argument("--draws", type=int, default=1_000)
     parser.add_argument("--burn-in", type=int, default=500)
-    parser.add_argument("--warmup", type=int, default=0)
-    parser.add_argument("--reps", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--native-proposal-scale", type=float, default=0.1)
+    parser.add_argument("--proposal-scale", type=float, default=1)
     parser.add_argument("--prior-scale", type=float, default=0.05)
-    parser.add_argument("--no-native-adapt", action="store_true")
-    parser.add_argument("--adapt-start", type=int, default=100)
     parser.add_argument("--hessian-step-scale", type=float, default=HESSIAN_STEP_SCALE)
-    parser.add_argument(
-        "--cases", nargs="+", choices=tuple(CASES), default=tuple(CASES)
-    )
-    parser.add_argument(
-        "--runtimes",
-        nargs="+",
-        choices=["native", "matlab", "octave"],
-        default=["native"],
-    )
-    parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--dynare-matlab-path", default="")
-    parser.add_argument("--matlab-bin", default="matlab")
-    parser.add_argument("--octave-bin", default="octave")
     args = parser.parse_args()
-    if (
-        args.periods < 1
-        or args.draws < 1
-        or args.burn_in < 0
-        or args.warmup < 0
-        or args.reps < 1
-    ):
-        parser.error(
-            "periods, draws, and reps must be positive, and burn-in and warmup nonnegative"
-        )
-    if args.native_proposal_scale <= 0:
-        parser.error("--native-proposal-scale must be positive")
+    check_common_args(parser, args)
+    if args.draws < 1 or args.burn_in < 0:
+        parser.error("draws must be positive, and burn-in nonnegative")
+    if args.proposal_scale <= 0:
+        parser.error("--proposal-scale must be positive")
     if args.prior_scale <= 0:
         parser.error("--prior-scale must be positive")
-    if args.adapt_start < 0:
-        parser.error("--adapt-start must be nonnegative")
     if args.hessian_step_scale <= 0:
         parser.error("--hessian-step-scale must be positive")
-    if set(args.runtimes) - {"native"} and not args.dynare_matlab_path:
-        parser.error("--dynare-matlab-path is required for Dynare runtimes")
 
-    context = (
-        nullcontext(
-            args.output_dir.resolve()
-            if args.output_dir and args.output_dir.is_absolute()
-            else (SCRIPT_DIR / args.output_dir).resolve()
-        )
-        if args.output_dir
-        else tempfile.TemporaryDirectory(prefix="symbolicdsge-mcmc-")
-    )
-    with context as root:
-        root_output = Path(root)
+    with output_root(args, "symbolicdsge-mcmc-") as output_path:
+        root_output = Path(output_path)
         root_output.mkdir(parents=True, exist_ok=True)
         for case_name in args.cases:
-            case = CASES[case_name]
             output_dir = root_output / case_name
             output_dir.mkdir(exist_ok=True)
-            compiled, solved, y, observables = _prepare(case, args.periods)
-            targets = _estimation_targets(compiled, args.prior_scale)
-            mode = _posterior_mode(
-                targets, compiled, solved, y, observables, args.hessian_step_scale
-            )
-            native = _run_native(
-                targets,
-                compiled,
-                solved,
-                y,
-                observables,
-                args.draws,
-                args.burn_in,
-                args.warmup,
-                args.reps,
-                args.seed,
-                args.native_proposal_scale,
-                not args.no_native_adapt,
-                args.adapt_start,
-                mode,
-            )
+            prepared = prepare(CASES[case_name], args.periods)
+            targets = _estimation_targets(prepared, args.prior_scale)
+            mode = _posterior_mode(targets, prepared, args.hessian_step_scale)
+            native = _run_native(targets, prepared, mode, args)
             np.savez(output_dir / "native.npz", **native)
             dynare: dict[str, dict] = {}
             for runtime in (item for item in args.runtimes if item != "native"):
                 raw = loadmat(
                     _run_dynare(
-                        runtime,
-                        case_name,
-                        case,
-                        targets,
-                        y,
-                        observables,
-                        output_dir,
-                        args.draws,
-                        args.burn_in,
-                        args.warmup,
-                        args.reps,
-                        args.seed,
-                        not args.no_native_adapt,
-                        args.adapt_start,
-                        mode,
-                        args.dynare_matlab_path,
-                        args.matlab_bin,
-                        args.octave_bin,
+                        runtime, case_name, targets, prepared, mode, output_dir, args
                     ),
                     squeeze_me=False,
                 )
@@ -717,7 +470,7 @@ def main() -> int:
                     "accept_rate": float(np.asarray(raw["accept_rate"]).squeeze()),
                 }
             _print_report(
-                case,
+                CASES[case_name].label,
                 targets.names,
                 args.draws,
                 args.burn_in,
@@ -735,10 +488,8 @@ def main() -> int:
                         "warmup": args.warmup,
                         "reps": args.reps,
                         "seed": args.seed,
-                        "native_proposal_scale": args.native_proposal_scale,
+                        "proposal_scale": args.proposal_scale,
                         "prior_scale": args.prior_scale,
-                        "native_adapt": not args.no_native_adapt,
-                        "adapt_start": args.adapt_start,
                         "hessian_step_scale": args.hessian_step_scale,
                     },
                     indent=2,

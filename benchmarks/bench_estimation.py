@@ -13,13 +13,9 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-from contextlib import nullcontext
 import json
 import os
-import subprocess
-import sys
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -27,14 +23,22 @@ from typing import Literal
 import numpy as np
 from scipy.io import loadmat
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_DIR = Path(__file__).resolve().parent
-FIXTURES = ROOT / "tests" / "fixtures" / "models"
-sys.path.insert(0, str(ROOT))
-
-from SymbolicDSGE import DSGESolver, ModelParser, Shock
-from SymbolicDSGE.core.compiled_model import CompiledModel
-from SymbolicDSGE.estimation.results import OptimizationResult
+from _cases import (
+    CASES,
+    Case,
+    Prepared,
+    add_common_args,
+    check_case_table,
+    check_common_args,
+    dynare_observable_names,
+    output_root,
+    prepare,
+    quoted_matlab,
+    run_dynare,
+    time_calls,
+    write_dynare_data,
+)
+from SymbolicDSGE import LinearKalman
 from SymbolicDSGE.estimation import Estimator, make_prior
 
 
@@ -54,19 +58,6 @@ class Prior:
     parameters: tuple[tuple[str, float], ...]
     transform: str
     dynare_density: str
-
-
-@dataclass(frozen=True)
-class CaseSpec:
-    label: str
-    yaml_name: str
-    mod_name: str
-    data_file: str
-    routines: dict[str, Routine]
-    seed: int = 0
-    native_to_dynare_observable: tuple[tuple[str, str], ...] = ()
-    dynare_remove: tuple[str, ...] = ()
-    zero_r_replacements: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -159,254 +150,166 @@ OPTIMIZER_PROFILES = {
 }
 
 
-CASES = {
-    "ls2004": CaseSpec(
-        label="Lubik-Schorfheide 2004",
-        yaml_name="POST82.yaml",
-        mod_name="post82_kf.mod",
-        data_file="post82_estimation_data",
-        routines={
-            "mle": Routine(
-                ("psi_pi", "rho_r"),
-                (2.0, 0.8),
-                ((1.0, 5.0), (0.0, 0.99)),
-                ((2.0, 0.8), (2.5, 0.75)),
-            ),
-            "map": Routine(
-                ("psi_pi", "rho_r"),
-                (2.0, 0.8),
-                ((1.0, 5.0), (0.0, 0.99)),
-                ((2.0, 0.8), (2.5, 0.75)),
-                priors=(
-                    Prior(
-                        name="psi_pi",
-                        distribution="normal",
-                        parameters=(("mean", 2.0), ("std", 0.5)),
-                        transform="identity",
-                        dynare_density="normal_pdf",
-                    ),
-                    Prior(
-                        name="rho_r",
-                        distribution="normal",
-                        parameters=(("mean", 0.8), ("std", 0.1)),
-                        transform="identity",
-                        dynare_density="normal_pdf",
-                    ),
-                ),
-            ),
-        },
-        dynare_remove=(
-            "calib_smoother(datafile = post82_kf_data, filtered_vars, filter_step_ahead = [1]);",
+ROUTINES: dict[str, dict[str, Routine]] = {
+    "ls2004": {
+        "mle": Routine(
+            ("psi_pi", "rho_r"),
+            (2.0, 0.8),
+            ((1.0, 5.0), (0.0, 0.99)),
+            ((2.0, 0.8), (2.5, 0.75)),
         ),
-        zero_r_replacements=(("sig_me  = 1.00;", "sig_me  = 0.00;"),),
-    ),
-    "sw2007": CaseSpec(
-        label="SW2007",
-        yaml_name="sw2007.yaml",
-        mod_name="sw2007.mod",
-        data_file="sw2007_estimation_data",
-        routines={
-            "mle": Routine(
-                ("crpi", "crr"),
-                (1.488, 0.8762),
-                ((1.0, 3.0), (0.0, 0.99)),
-                ((1.488, 0.8762), (1.7, 0.8)),
-            ),
-            "map": Routine(
-                ("crpi", "crr"),
-                (1.488, 0.8762),
-                ((1.0, 3.0), (0.0, 0.99)),
-                ((1.488, 0.8762), (1.7, 0.8)),
-                priors=(
-                    Prior(
-                        name="crpi",
-                        distribution="normal",
-                        parameters=(("mean", 1.5), ("std", 0.25)),
-                        transform="identity",
-                        dynare_density="normal_pdf",
-                    ),
-                    Prior(
-                        name="crr",
-                        distribution="normal",
-                        parameters=(("mean", 0.8762), ("std", 0.1)),
-                        transform="identity",
-                        dynare_density="normal_pdf",
-                    ),
+        "map": Routine(
+            ("psi_pi", "rho_r"),
+            (2.0, 0.8),
+            ((1.0, 5.0), (0.0, 0.99)),
+            ((2.0, 0.8), (2.5, 0.75)),
+            priors=(
+                Prior(
+                    name="psi_pi",
+                    distribution="normal",
+                    parameters=(("mean", 2.0), ("std", 0.5)),
+                    transform="identity",
+                    dynare_density="normal_pdf",
+                ),
+                Prior(
+                    name="rho_r",
+                    distribution="normal",
+                    parameters=(("mean", 0.8), ("std", 0.1)),
+                    transform="identity",
+                    dynare_density="normal_pdf",
                 ),
             ),
-        },
-        seed=2007,
-        dynare_remove=(
-            "calib_smoother(datafile = sw2007_kf_data, filtered_vars, filter_step_ahead = [1]);",
         ),
-    ),
-    "g2015": CaseSpec(
-        label="Gali 2015",
-        yaml_name="gali_2015.yaml",
-        mod_name="gali_2015.mod",
-        data_file="gali_2015_estimation_data",
-        routines={
-            "mle": Routine(
-                ("phi_pi", "rho_a"),
-                (1.5, 0.9),
-                ((1.01, 3.0), (0.0, 0.99)),
-                ((1.5, 0.9), (1.75, 0.8)),
-            ),
-            "map": Routine(
-                ("phi_pi", "rho_a"),
-                (1.5, 0.9),
-                ((1.01, 3.0), (0.0, 0.99)),
-                ((1.5, 0.9), (1.75, 0.8)),
-                priors=(
-                    Prior(
-                        name="phi_pi",
-                        distribution="normal",
-                        parameters=(("mean", 1.5), ("std", 0.25)),
-                        transform="identity",
-                        dynare_density="normal_pdf",
-                    ),
-                    Prior(
-                        name="rho_a",
-                        distribution="normal",
-                        parameters=(("mean", 0.9), ("std", 0.1)),
-                        transform="identity",
-                        dynare_density="normal_pdf",
-                    ),
-                ),
-            ),
-        },
-        seed=2015,
-        native_to_dynare_observable=(
-            ("obs_pi_ann", "pi_ann"),
-            ("obs_i_ann", "i_ann"),
+    },
+    "sw2007": {
+        "mle": Routine(
+            ("crpi", "crr"),
+            (1.488, 0.8762),
+            ((1.0, 3.0), (0.0, 0.99)),
+            ((1.488, 0.8762), (1.7, 0.8)),
         ),
-    ),
-    "gm2005": CaseSpec(
-        label="Gali-Monacelli 2005",
-        yaml_name="gali_monacelli_2005.yaml",
-        mod_name="gali_monacelli_2005.mod",
-        data_file="gali_monacelli_2005_estimation_data",
-        routines={
-            "mle": Routine(
-                ("phi", "rhoa"),
-                (3.0, 0.9),
-                ((1.0, 10.0), (0.0, 0.99)),
-                ((3.0, 0.9), (2.5, 0.8)),
-            ),
-            "map": Routine(
-                ("phi", "rhoa"),
-                (3.0, 0.9),
-                ((1.0, 10.0), (0.0, 0.99)),
-                ((3.0, 0.9), (2.5, 0.8)),
-                priors=(
-                    Prior(
-                        name="phi",
-                        distribution="normal",
-                        parameters=(("mean", 3.0), ("std", 0.5)),
-                        transform="identity",
-                        dynare_density="normal_pdf",
-                    ),
-                    Prior(
-                        name="rhoa",
-                        distribution="normal",
-                        parameters=(("mean", 0.9), ("std", 0.1)),
-                        transform="identity",
-                        dynare_density="normal_pdf",
-                    ),
+        "map": Routine(
+            ("crpi", "crr"),
+            (1.488, 0.8762),
+            ((1.0, 3.0), (0.0, 0.99)),
+            ((1.488, 0.8762), (1.7, 0.8)),
+            priors=(
+                Prior(
+                    name="crpi",
+                    distribution="normal",
+                    parameters=(("mean", 1.5), ("std", 0.25)),
+                    transform="identity",
+                    dynare_density="normal_pdf",
+                ),
+                Prior(
+                    name="crr",
+                    distribution="normal",
+                    parameters=(("mean", 0.8762), ("std", 0.1)),
+                    transform="identity",
+                    dynare_density="normal_pdf",
                 ),
             ),
-        },
-        seed=2005,
-        native_to_dynare_observable=(("obs_pi", "pi"), ("obs_r", "r")),
-    ),
-    "i2004": CaseSpec(
-        label="Ireland 2004",
-        yaml_name="ireland_2004.yaml",
-        mod_name="ireland_2004.mod",
-        data_file="ireland_2004_estimation_data",
-        routines={
-            "mle": Routine(
-                ("rho_a", "rho_e"),
-                (0.9048, 0.9907),
-                ((0.0, 0.99), (0.0, 0.999)),
-                ((0.9048, 0.9907), (0.8, 0.95)),
-            ),
-            "map": Routine(
-                ("rho_a", "rho_e"),
-                (0.9048, 0.9907),
-                ((0.0, 0.99), (0.0, 0.999)),
-                ((0.9048, 0.9907), (0.8, 0.95)),
-                priors=(
-                    Prior(
-                        name="rho_a",
-                        distribution="normal",
-                        parameters=(("mean", 0.9), ("std", 0.05)),
-                        transform="identity",
-                        dynare_density="normal_pdf",
-                    ),
-                    Prior(
-                        name="rho_e",
-                        distribution="normal",
-                        parameters=(("mean", 0.9907), ("std", 0.05)),
-                        transform="identity",
-                        dynare_density="normal_pdf",
-                    ),
-                ),
-            ),
-        },
-        seed=2004,
-        native_to_dynare_observable=(
-            ("obs_gobs", "gobs"),
-            ("obs_piobs", "piobs"),
         ),
-    ),
+    },
+    "g2015": {
+        "mle": Routine(
+            ("phi_pi", "rho_a"),
+            (1.5, 0.9),
+            ((1.01, 3.0), (0.0, 0.99)),
+            ((1.5, 0.9), (1.75, 0.8)),
+        ),
+        "map": Routine(
+            ("phi_pi", "rho_a"),
+            (1.5, 0.9),
+            ((1.01, 3.0), (0.0, 0.99)),
+            ((1.5, 0.9), (1.75, 0.8)),
+            priors=(
+                Prior(
+                    name="phi_pi",
+                    distribution="normal",
+                    parameters=(("mean", 1.5), ("std", 0.25)),
+                    transform="identity",
+                    dynare_density="normal_pdf",
+                ),
+                Prior(
+                    name="rho_a",
+                    distribution="normal",
+                    parameters=(("mean", 0.9), ("std", 0.1)),
+                    transform="identity",
+                    dynare_density="normal_pdf",
+                ),
+            ),
+        ),
+    },
+    "gm2005": {
+        "mle": Routine(
+            ("phi", "rhoa"),
+            (3.0, 0.9),
+            ((1.0, 10.0), (0.0, 0.99)),
+            ((3.0, 0.9), (2.5, 0.8)),
+        ),
+        "map": Routine(
+            ("phi", "rhoa"),
+            (3.0, 0.9),
+            ((1.0, 10.0), (0.0, 0.99)),
+            ((3.0, 0.9), (2.5, 0.8)),
+            priors=(
+                Prior(
+                    name="phi",
+                    distribution="normal",
+                    parameters=(("mean", 3.0), ("std", 0.5)),
+                    transform="identity",
+                    dynare_density="normal_pdf",
+                ),
+                Prior(
+                    name="rhoa",
+                    distribution="normal",
+                    parameters=(("mean", 0.9), ("std", 0.1)),
+                    transform="identity",
+                    dynare_density="normal_pdf",
+                ),
+            ),
+        ),
+    },
+    "i2004": {
+        "mle": Routine(
+            ("rho_a", "rho_e"),
+            (0.9048, 0.9907),
+            ((0.0, 0.99), (0.0, 0.999)),
+            ((0.9048, 0.9907), (0.8, 0.95)),
+        ),
+        "map": Routine(
+            ("rho_a", "rho_e"),
+            (0.9048, 0.9907),
+            ((0.0, 0.99), (0.0, 0.999)),
+            ((0.9048, 0.9907), (0.8, 0.95)),
+            priors=(
+                Prior(
+                    name="rho_a",
+                    distribution="normal",
+                    parameters=(("mean", 0.9), ("std", 0.05)),
+                    transform="identity",
+                    dynare_density="normal_pdf",
+                ),
+                Prior(
+                    name="rho_e",
+                    distribution="normal",
+                    parameters=(("mean", 0.9907), ("std", 0.05)),
+                    transform="identity",
+                    dynare_density="normal_pdf",
+                ),
+            ),
+        ),
+    },
 }
-
-
-def _quoted_matlab(value: Path | str) -> str:
-    return str(value).replace("\\", "/").replace("'", "''")
+check_case_table("ROUTINES", ROUTINES, total=True)
 
 
 def _matlab_matrix(values: np.ndarray) -> str:
     return "[" + "; ".join(" ".join(f"{x:.17g}" for x in row) for row in values) + "]"
 
 
-@dataclass
-class NativeCase:
-    solver: DSGESolver
-    compiled: CompiledModel
-    y: np.ndarray
-    observable_names: tuple[str, ...]
-
-
-def _prepare(spec: CaseSpec, periods: int) -> NativeCase:
-    model, kalman = ModelParser(FIXTURES / spec.yaml_name).get_all()
-    solver = DSGESolver(model, kalman)
-    compiled = solver.compile()
-    solved = solver.solve(compiled=compiled, order=1)
-    sim = solved.sim(
-        T=periods,
-        shocks={
-            ",".join(compiled.shock_names): Shock("norm", multivar=True, seed=spec.seed)
-        },
-        observables=True,
-    )
-    if sim.y is None:
-        raise RuntimeError("Simulation did not return observables.")
-    observable_names = tuple(sim.observable_names)
-    y = np.asarray(sim.y, dtype=np.float64)
-    return NativeCase(
-        solver=solver,
-        compiled=compiled,
-        y=y,
-        observable_names=observable_names,
-    )
-
-
-def _make_estimator(
-    case: CaseSpec, native: NativeCase, routine: str, zero_r: bool
-) -> Estimator:
-    spec = case.routines[routine]
+def _make_estimator(prepared: Prepared, spec: Routine) -> Estimator:
     priors = {
         prior.name: make_prior(
             distribution=prior.distribution,
@@ -414,65 +317,42 @@ def _make_estimator(
             transform=prior.transform,
         )
         for prior in spec.priors
-    } or None
+    }
+    compiled = prepared.solved.compiled
     return Estimator(
-        compiled=native.compiled,
-        y=native.y,
-        observables=list(native.observable_names),
-        filter_mode="linear",
-        estimated_params=list(spec.names),
-        priors=priors,
-        ss_seed=np.zeros(len(native.compiled.var_names), dtype=np.float64),
-        R=(
-            np.zeros(
-                (len(native.observable_names), len(native.observable_names)),
-                dtype=np.float64,
-            )
-            if zero_r
-            else None
-        ),
-        joseph_cov=False,
-        symmetrize=False,
+        config=prepared.config,
+        compiled=compiled,
+        estimated_params=priors or list(spec.names),
+        y=prepared.y,
+        observables=list(prepared.observable_names),
+        filter=LinearKalman(joseph_cov=False, symmetrize=False),
+        ss_seed=np.zeros(len(compiled.var_names), dtype=np.float64),
     )
 
 
-def _time(fn, warmup: int, reps: int) -> tuple[np.ndarray, OptimizationResult]:
-    for _ in range(warmup):
-        fn()
-    times = np.empty(reps, dtype=np.float64)
-    result = None
-    for i in range(reps):
-        started = time.perf_counter()
-        result = fn()
-        times[i] = time.perf_counter() - started
-    assert result is not None
-    return times, result
-
-
 def _native(
-    case: CaseSpec,
-    native: NativeCase,
+    prepared: Prepared,
+    spec: Routine,
     routine: str,
     warmup: int,
     reps: int,
-    zero_r: bool,
     optimizer: OptimizerProfile,
 ) -> dict:
-    estimator = _make_estimator(case, native, routine, zero_r)
-    spec = case.routines[routine]
-    theta0 = np.asarray(spec.theta0, dtype=np.float64)
+    estimator = _make_estimator(prepared, spec)
+    theta0 = dict(zip(spec.names, spec.theta0))
+    bounds = dict(zip(spec.names, spec.bounds))
     optimizer_kwargs = optimizer.native_kwargs(len(spec.names))
     if routine == "mle":
         fn = lambda: estimator.mle(
             theta0=theta0,
-            bounds=spec.bounds,
+            bounds=bounds,
             method=optimizer.native_method,
             **optimizer_kwargs,
         )
     else:
         fn = lambda: estimator.map(
             theta0=theta0,
-            bounds=spec.bounds,
+            bounds=bounds,
             method=optimizer.native_method,
             **optimizer_kwargs,
         )
@@ -480,27 +360,17 @@ def _native(
         open(os.devnull, "w", encoding="utf-8") as sink,
         contextlib.redirect_stdout(sink),
     ):
-        times, result = _time(fn, warmup, reps)
-    theta = np.asarray(result.x, dtype=np.float64)
-    loglik = float(estimator.loglik(theta))
-    logprior = float(estimator.logprior(theta))
+        times, result = time_calls(fn, warmup, reps)
+    theta = np.array([result.theta[name] for name in spec.names], dtype=np.float64)
+    loglik = float(estimator.loglik(result.theta))
+    logprior = float(estimator.logprior(result.theta))
     probes = np.asarray(spec.probes, dtype=np.float64).T
-    target = np.array(
-        [
-            (
-                estimator.loglik(probes[:, i])
-                if routine == "mle"
-                else estimator.logpost(probes[:, i])
-            )
-            for i in range(probes.shape[1])
-        ],
-        dtype=np.float64,
-    )
+    probe_params = [dict(zip(spec.names, probe)) for probe in probes.T]
     objective = estimator.loglik if routine == "mle" else estimator.logpost
-    objective_times, _ = _time(
+    target = np.array([objective(params) for params in probe_params], dtype=np.float64)
+    objective_times, _ = time_calls(
         lambda: np.array(
-            [objective(probes[:, i]) for i in range(probes.shape[1])],
-            dtype=np.float64,
+            [objective(params) for params in probe_params], dtype=np.float64
         ),
         warmup,
         reps,
@@ -513,25 +383,11 @@ def _native(
         "logprior": logprior,
         "terminal_target": loglik + logprior,
         "nfev": int(result.nfev),
-        "nit": -1 if result.nit is None else int(result.nit),
+        "nit": int(result.nit),
         "success": bool(result.success),
         "probes": probes,
         "probe_target": target,
     }
-
-
-def _dynare_observable_names(
-    case: CaseSpec, native_observable_names: tuple[str, ...]
-) -> tuple[str, ...]:
-    observable_map = dict(case.native_to_dynare_observable)
-    return tuple(observable_map.get(name, name) for name in native_observable_names)
-
-
-def _write_data(observable_names: tuple[str, ...], y: np.ndarray, path: Path) -> None:
-    lines = ["% Generated by bench_estimation.py. Do not edit."]
-    for column, name in enumerate(observable_names):
-        lines.extend((f"{name} = [", *(f"{v:.17g}" for v in y[:, column]), "];"))
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _dynare_estimated_params(spec: Routine) -> str:
@@ -547,27 +403,19 @@ def _dynare_estimated_params(spec: Routine) -> str:
 
 
 def _write_model(
-    case: CaseSpec,
-    routine: str,
+    case: Case,
+    spec: Routine,
     path: Path,
+    data_file: str,
     periods: int,
-    zero_r: bool,
     optimizer: OptimizerProfile,
 ) -> None:
-    source = (FIXTURES / case.mod_name).read_text(encoding="utf-8")
-    for statement in case.dynare_remove:
-        source = source.replace(statement, "")
-    if zero_r:
-        for old, new in case.zero_r_replacements:
-            source = source.replace(old, new)
-    estimated = _dynare_estimated_params(case.routines[routine])
+    source = case.mod_path.read_text(encoding="utf-8")
     source += (
-        "\nestimated_params;\n" + estimated + "\nend;\n"
-        f"estimation(datafile = {case.data_file}, nobs = "
-        + str(periods)
-        + f", mode_compute = {optimizer.dynare_mode_compute}, "
-        + f"optim = ({optimizer.dynare_optim()}), mh_replic = 0, "
-        + "cova_compute = 0);\n"
+        "\nestimated_params;\n" + _dynare_estimated_params(spec) + "\nend;\n"
+        f"estimation(datafile = {data_file}, nobs = {periods}, "
+        f"mode_compute = {optimizer.dynare_mode_compute}, "
+        f"optim = ({optimizer.dynare_optim()}), mh_replic = 0, cova_compute = 0);\n"
     )
     path.write_text(source, encoding="utf-8")
 
@@ -575,65 +423,43 @@ def _write_model(
 def _run_dynare(
     runtime: str,
     case_name: str,
-    case: CaseSpec,
+    spec: Routine,
     routine: str,
-    native_observable_names: tuple[str, ...],
-    y: np.ndarray,
+    prepared: Prepared,
     probes: np.ndarray,
     output_dir: Path,
-    warmup: int,
-    reps: int,
-    dynare_path: str,
-    matlab_bin: str,
-    octave_bin: str,
-    zero_r: bool,
+    args: argparse.Namespace,
     optimizer: OptimizerProfile,
 ) -> Path:
-    root = Path(dynare_path).resolve().parent
-    platform = "matlab" if runtime == "matlab" else "octave"
-    if not (root / "mex" / platform).is_dir():
-        raise RuntimeError(f"Dynare at {root} has no {platform} MEX directory.")
+    case = CASES[case_name]
     result_path = output_dir / f"dynare_{routine}_{runtime}.mat"
     with tempfile.TemporaryDirectory(
         prefix=f"dynare-{routine}-{runtime}-", dir=output_dir
     ) as tmp:
         workdir = Path(tmp)
         model_name = f"{case_name}_estimation_{routine}"
+        data_file = f"{case_name}_data"
         _write_model(
             case,
-            routine,
+            spec,
             workdir / f"{model_name}.mod",
-            y.shape[0],
-            zero_r,
+            data_file,
+            prepared.y.shape[0],
             optimizer,
         )
-        _write_data(
-            _dynare_observable_names(case, native_observable_names),
-            y,
-            workdir / f"{case.data_file}.m",
+        write_dynare_data(
+            dynare_observable_names(case, prepared.observable_names),
+            prepared.y,
+            workdir / f"{data_file}.m",
         )
-        expression = (
-            f"addpath('{_quoted_matlab(dynare_path)}'); addpath('{_quoted_matlab(SCRIPT_DIR)}'); "
-            f"bench_estimation_dynare('{_quoted_matlab(workdir)}', '{model_name}', "
-            f"{_matlab_matrix(probes)}, {int(routine == 'map')}, {warmup}, {reps}, "
-            f"'{_quoted_matlab(result_path)}');"
+        run_dynare(
+            runtime,
+            f"bench_estimation_dynare('{quoted_matlab(workdir)}', '{model_name}', "
+            f"{_matlab_matrix(probes)}, {int(routine == 'map')}, {args.warmup}, "
+            f"{args.reps}, '{quoted_matlab(result_path)}');",
+            args,
+            f"{case_name} {routine}",
         )
-        command = (
-            [matlab_bin, "-batch", expression]
-            if runtime == "matlab"
-            else [octave_bin, "--quiet", "--eval", expression]
-        )
-        completed = subprocess.run(
-            command,
-            cwd=SCRIPT_DIR,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if completed.returncode:
-            raise RuntimeError(
-                f"Dynare {runtime} failed for {routine}:\n{completed.stderr.strip()}"
-            )
     return result_path
 
 
@@ -682,28 +508,13 @@ def _print_table(routine: str, native: dict, dynare: dict[str, dict]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--periods", type=int, default=120)
-    parser.add_argument("--warmup", type=int, default=1)
-    parser.add_argument("--reps", type=int, default=5)
-    parser.add_argument(
-        "--cases", nargs="+", choices=tuple(CASES), default=tuple(CASES)
-    )
+    add_common_args(parser, warmup=1, reps=5)
     parser.add_argument(
         "--routines",
         nargs="+",
-        choices=sorted({name for case in CASES.values() for name in case.routines}),
+        choices=sorted({name for table in ROUTINES.values() for name in table}),
         default=["mle", "map"],
     )
-    parser.add_argument(
-        "--runtimes",
-        nargs="+",
-        choices=["native", "matlab", "octave"],
-        default=["native"],
-    )
-    parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--dynare-matlab-path", default="")
-    parser.add_argument("--matlab-bin", default="matlab")
-    parser.add_argument("--octave-bin", default="octave")
     parser.add_argument(
         "--dynare-mode-compute",
         type=int,
@@ -714,41 +525,23 @@ def main() -> int:
             "7 and 8 are Nelder-Mead (default: 4)."
         ),
     )
-    parser.add_argument(
-        "--zero-r",
-        action="store_true",
-        help="Override the calibrated measurement covariance with R = 0 on both sides.",
-    )
     args = parser.parse_args()
-    if args.periods < 1 or args.warmup < 0 or args.reps < 1:
-        parser.error(
-            "periods and reps must be positive, and warmup must be nonnegative"
-        )
-    if set(args.runtimes) - {"native"} and not args.dynare_matlab_path:
-        parser.error("--dynare-matlab-path is required for Dynare runtimes")
+    check_common_args(parser, args)
     optimizer = OPTIMIZER_PROFILES[args.dynare_mode_compute]
-    context = (
-        nullcontext(
-            args.output_dir.resolve()
-            if args.output_dir and args.output_dir.is_absolute()
-            else (SCRIPT_DIR / args.output_dir).resolve()
-        )
-        if args.output_dir
-        else tempfile.TemporaryDirectory(prefix="symbolicdsge-estimation-")
-    )
-    with context as output_path:
+    with output_root(args, "symbolicdsge-estimation-") as output_path:
         root_output = Path(output_path)
         root_output.mkdir(parents=True, exist_ok=True)
         for case_index, case_name in enumerate(args.cases):
             case = CASES[case_name]
-            unknown_routines = set(args.routines) - set(case.routines)
+            routines = ROUTINES[case_name]
+            unknown_routines = set(args.routines) - set(routines)
             if unknown_routines:
                 parser.error(
                     f"{case_name} does not define: {', '.join(sorted(unknown_routines))}"
                 )
             output_dir = root_output / case_name
             output_dir.mkdir(exist_ok=True)
-            native_case = _prepare(case, args.periods)
+            prepared = prepare(case, args.periods)
             print(
                 f"{case.label} estimation: periods={args.periods} warmup={args.warmup} reps={args.reps}"
             )
@@ -761,12 +554,11 @@ def main() -> int:
             )
             for routine in args.routines:
                 native = _native(
-                    case,
-                    native_case,
+                    prepared,
+                    routines[routine],
                     routine,
                     args.warmup,
                     args.reps,
-                    args.zero_r,
                     optimizer,
                 )
                 np.savez(output_dir / f"native_{routine}.npz", **native)
@@ -776,18 +568,12 @@ def main() -> int:
                         _run_dynare(
                             runtime,
                             case_name,
-                            case,
+                            routines[routine],
                             routine,
-                            native_case.observable_names,
-                            native_case.y,
+                            prepared,
                             native["probes"],
                             output_dir,
-                            args.warmup,
-                            args.reps,
-                            args.dynare_matlab_path,
-                            args.matlab_bin,
-                            args.octave_bin,
-                            args.zero_r,
+                            args,
                             optimizer,
                         ),
                         squeeze_me=True,
@@ -818,7 +604,6 @@ def main() -> int:
                         "periods": args.periods,
                         "warmup": args.warmup,
                         "reps": args.reps,
-                        "zero_r": args.zero_r,
                         "optimizer": {
                             "dynare_mode_compute": optimizer.dynare_mode_compute,
                             "native_method": optimizer.native_method,

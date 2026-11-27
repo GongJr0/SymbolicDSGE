@@ -1,22 +1,15 @@
-function bench_mcmc_dynare(workdir, model_name, draws, burn_in, warmup, reps, seed, adapt, adapt_start, shared_mode_path, output_path)
+function bench_mcmc_dynare(workdir, model_name, draws, burn_in, warmup, reps, seed, shared_mode_path, output_path)
   previous_dir = pwd;
   restore_dir = onCleanup(@() cd(previous_dir));
   cd(workdir);
   dynare(model_name, 'noclearall', 'nograph');
-
-  addpath(fileparts(mfilename('fullpath')), '-begin');
-  sampler_path = which('posterior_sampler_iteration');
-  expected_sampler_path = fullfile(fileparts(mfilename('fullpath')), 'posterior_sampler_iteration.m');
-  if ~strcmpi(sampler_path, expected_sampler_path)
-    error('The benchmark-local Haario sampler dispatcher is not active.');
-  end
 
   global M_ options_ oo_ estim_params_ bayestopt_ dataset_ dataset_info
   apply_shared_mode(M_, shared_mode_path);
   M0 = M_; options0 = options_; oo0 = oo_; estim_params0 = estim_params_;
   bayestopt0 = bayestopt_; dataset0 = dataset_; dataset_info0 = dataset_info;
   for i = 1:warmup
-    run_chain(M0, options0, oo0, estim_params0, bayestopt0, dataset0, dataset_info0, draws, burn_in, seed + i - 1, adapt, adapt_start);
+    run_chain(M0, options0, oo0, estim_params0, bayestopt0, dataset0, dataset_info0, draws, burn_in, seed + i - 1);
   end
 
   times = zeros(reps, 1);
@@ -24,7 +17,7 @@ function bench_mcmc_dynare(workdir, model_name, draws, burn_in, warmup, reps, se
   accept_rate = NaN;
   for i = 1:reps
     started = tic;
-    [samples, accept_rate] = run_chain(M0, options0, oo0, estim_params0, bayestopt0, dataset0, dataset_info0, draws, burn_in, seed + warmup + i - 1, adapt, adapt_start);
+    [samples, accept_rate] = run_chain(M0, options0, oo0, estim_params0, bayestopt0, dataset0, dataset_info0, draws, burn_in, seed + warmup + i - 1);
     times(i) = toc(started);
   end
   save('-v7', output_path, 'times', 'samples', 'accept_rate');
@@ -61,8 +54,8 @@ function apply_shared_mode(M_, shared_mode_path)
   save('-v7', mode_path, 'xparam1', 'hh', 'parameter_names', 'fval');
 end
 
-function [samples, accept_rate] = run_chain(M0, options0, oo0, estim_params0, bayestopt0, dataset0, dataset_info0, draws, burn_in, seed, adapt, adapt_start)
-  global M_ options_ oo_ estim_params_ bayestopt_ dataset_ dataset_info amh_t0
+function [samples, accept_rate] = run_chain(M0, options0, oo0, estim_params0, bayestopt0, dataset0, dataset_info0, draws, burn_in, seed)
+  global M_ options_ oo_ estim_params_ bayestopt_ dataset_ dataset_info
   M_ = M0; options_ = options0; oo_ = oo0; estim_params_ = estim_params0;
   bayestopt_ = bayestopt0; dataset_ = dataset0; dataset_info = dataset_info0;
   total_steps = draws + burn_in;
@@ -76,11 +69,6 @@ function [samples, accept_rate] = run_chain(M0, options0, oo0, estim_params0, ba
   options_.nodiagnostic = true;
   options_.mh_tune_jscale.status = false;
   options_.posterior_sampler_options.posterior_sampling_method = 'random_walk_metropolis_hastings';
-  if adapt
-    amh_t0 = adapt_start;
-  else
-    amh_t0 = Inf;
-  end
   rng(seed, 'twister');
   metropolis_dir = fullfile(M_.dname, 'metropolis');
   if exist(metropolis_dir, 'dir')
