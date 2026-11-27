@@ -49,6 +49,7 @@ from ..monte_carlo.serialize import (
     serialize_run_meta,
     serialize_datagen_results,
     serialize_filter_results,
+    serialize_smoother_results,
     serialize_test_results,
     serialize_regression_results,
     serialize_transform_results,
@@ -94,10 +95,13 @@ _MC_DATA = "montecarlo/data/{ref}.{ext}"
 _MC_RESULT_META = "montecarlo/result/meta.json"
 
 _MC_DATAGEN_STEPS = "montecarlo/result/datagen/datagen_steps.json"
-_MC_DATAGEN = "montecarlo/result/datagen/{ref}_{field}.{ext}"
+_MC_DATAGEN = "montecarlo/result/datagen/{ref}.{field}.{ext}"
 
 _MC_FILTER_STEPS = "montecarlo/result/filters/filter_steps.json"
-_MC_FILTER = "montecarlo/result/filters/{ref}_{field}.{ext}"
+_MC_FILTER = "montecarlo/result/filters/{ref}.{field}.{ext}"
+
+_MC_SMOOTHER_STEPS = "montecarlo/result/smoothers/smoother_steps.json"
+_MC_SMOOTHER = "montecarlo/result/smoothers/{ref}.{field}.{ext}"
 
 _MC_TEST_STEPS = "montecarlo/result/tests/test_steps.json"
 _MC_TEST = "montecarlo/result/tests/test_traces.{ext}"
@@ -106,7 +110,7 @@ _MC_REGRESSION_STEPS = "montecarlo/result/regressions/regression_steps.json"
 _MC_REGRESSION = "montecarlo/result/regressions/regression_traces.{ext}"
 
 _MC_TRANSFORM_STEPS = "montecarlo/result/transforms/transform_steps.json"
-_MC_TRANSFORM = "montecarlo/result/transforms/{ref}_{field}.{ext}"
+_MC_TRANSFORM = "montecarlo/result/transforms/{ref}.{field}.{ext}"
 
 #: Fill for the rows a shorter column contributes to a shared block. Negative so
 #: it can never be read as a rep index; no reader looks past ``n_retained``.
@@ -545,18 +549,21 @@ class BundleBuilder:
         )
         datagen = serialize_datagen_results(result.datagen_outputs)
         filters = serialize_filter_results(result.filter_outputs)
+        smoothers = serialize_smoother_results(result.smoother_outputs)
         tests = serialize_test_results(result.test_summaries)
         regressions = serialize_regression_results(result.regression_summaries)
         transforms = serialize_transform_results(result.transform_outputs)
 
         self._add_step_metas(_MC_DATAGEN_STEPS, "mc_datagen_steps", datagen)
         self._add_step_metas(_MC_FILTER_STEPS, "mc_filter_steps", filters)
+        self._add_step_metas(_MC_SMOOTHER_STEPS, "mc_smoother_steps", smoothers)
         self._add_step_metas(_MC_TEST_STEPS, "mc_test_steps", tests)
         self._add_step_metas(_MC_REGRESSION_STEPS, "mc_regression_steps", regressions)
         self._add_step_metas(_MC_TRANSFORM_STEPS, "mc_transform_steps", transforms)
 
         self._add_trace_arrays(_MC_DATAGEN, "mc_datagen_trace", datagen, encoding)
         self._add_trace_arrays(_MC_FILTER, "mc_filter_trace", filters, encoding)
+        self._add_trace_arrays(_MC_SMOOTHER, "mc_smoother_trace", smoothers, encoding)
         self._add_trace_block(
             _MC_TEST.format(ext=encoding.ext), "mc_test_traces", tests, encoding
         )
