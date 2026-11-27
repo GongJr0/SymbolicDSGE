@@ -853,6 +853,9 @@ class MCPipelineResult:
     filter_outputs : Mapping[str, MCFilterResult]
         MCFilterResult per filter step, containing the retained replications' filter
         outputs.
+    smoother_outputs : Mapping[str, MCSmootherResult]
+        MCSmootherResult per smoother step, containing the retained replications'
+        smoother outputs.
     transform_outputs : Mapping[str, NDF]
         Mapping of step name to transformed data (NDF) for each transform step.
     test_summaries : Mapping[str, MCTestResult]
@@ -881,6 +884,7 @@ class MCPipelineResult:
     datagen_outputs: Mapping[str, MCDataGenResult]
     filter_outputs: Mapping[str, MCFilterResult] = dcf(default_factory=dict)
     transform_outputs: Mapping[str, NDF] = dcf(default_factory=dict)
+    smoother_outputs: Mapping[str, MCSmootherResult] = dcf(default_factory=dict)
     test_summaries: Mapping[str, MCTestResult] = dcf(default_factory=dict)
     regression_summaries: Mapping[str, MCRegressionResult] = dcf(default_factory=dict)
     failures: tuple[MCFailure, ...] = ()
