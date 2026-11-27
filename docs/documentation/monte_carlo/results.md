@@ -60,7 +60,7 @@ class MCFilterResult(
     n_rep: int,
     n_retained: int,
     retained_reps: ndarray,
-    filter_mode: str,
+    mode: FilterMode,
     x_pred: ndarray,
     x_filt: ndarray,
     P_pred: ndarray,
@@ -68,10 +68,10 @@ class MCFilterResult(
     y_pred: ndarray,
     y_filt: ndarray,
     S: ndarray,
+    eps_hat: ndarray,
     innov: ndarray,
     std_innov: ndarray,
     loglik: ndarray,
-    eps_hat: ndarray | None = None,
     _x1_pred: ndarray | None = None,
     _x2_pred: ndarray | None = None,
     _x1_filt: ndarray | None = None,
@@ -88,18 +88,18 @@ __Fields and Properties:__
 | n_rep | `#!python int` | Total number of replications. |
 | n_retained | `#!python int` | Number of replications whose output the step's arena kept. |
 | retained_reps | `#!python ndarray` | Replication indices behind each row of the stacked histories. |
-| filter_mode | `#!python str` | Kernel the step ran: `"linear"`, `"extended"` or `"unscented"`. |
+| mode | `#!python FilterMode` | Kernel the step ran: enum of `"linear"`, `"extended"` or `"unscented"`. |
 | x_pred | `#!python ndarray` | Predicted $x$ states over time. Shape `(n_retained, T, n_var)`. |
 | x_filt | `#!python ndarray` | Filtered $x$ states over time. Shape `(n_retained, T, n_var)`. |
-| P_pred | `#!python ndarray` | Predicted state covariance $P$ over time. Shape `(n_retained, T, n_var, n_var)`. |
-| P_filt | `#!python ndarray` | Filtered state covariance $P$ over time. Shape `(n_retained, T, n_var, n_var)`. |
+| P_pred | `#!python ndarray` | Predicted state covariance $P$ over time. Shape `(n_retained, T, n_var, n_var)` or `(n_retained, T, 2*n_state, 2*n_state)` for unscented filters. |
+| P_filt | `#!python ndarray` | Filtered state covariance $P$ over time. Shape `(n_retained, T, n_var, n_var)` or `(n_retained, T, 2*n_state, 2*n_state)` for unscented filters. |
 | y_pred | `#!python ndarray` | Predicted observables over time. Shape `(n_retained, T, n_obs)`. |
 | y_filt | `#!python ndarray` | Filtered observables over time. Shape `(n_retained, T, n_obs)`. |
 | S | `#!python ndarray` | Innovation covariance over time. Shape `(n_retained, T, n_obs, n_obs)`. |
+| eps_hat | `#!python ndarray` | Conditional estimates of structural shocks given observed data, shape `(n_retained, T, n_shock)`. |
 | innov | `#!python ndarray` | Observable innovations $y_t - y_{t\mid t-1}$. Shape `(n_retained, T, n_obs)`. |
 | std_innov | `#!python ndarray` | Innovations standardized by their covariance. Shape `(n_retained, T, n_obs)`. |
 | loglik | `#!python ndarray` | Per-replication log likelihood ($\boldsymbol{\ell}$) of measurements. Shape `(n_retained,)`. |
-| eps_hat | `#!python ndarray \| None` | Conditional estimates of structural shocks given observed data, shape `(n_retained, T, n_shock)`. `None` when the step ran without `return_shocks`. |
 | `replication(idx)` | `#!python FilterResult \| UnscentedFilterResult` | One retained replication's filter output as a single-run result. |
 
 __Unscented-Only Fields:__
@@ -112,10 +112,53 @@ __Unscented-Only Fields:__
 | x2_filt | `#!python ndarray` | Second-order component of the filtered state over time. Shape `(n_retained, T, n_state)`. |
 
 ???+ note "Retained indexing"
-    `idx` counts the retained replications, which are stored compactly, so it is not the replication's index in the run. `retained_reps[idx]` is that index; the two coincide only when the run retained everything.
+    `idx` counts the retained replications, which are stored compactly; it is not the replication's index in the run. `retained_reps[idx]` is that index; the two coincide only when the run retained everything.
 
-???+ note "Unscented shapes and fields"
-    An unscented step tracks a pruned state, so its covariance histories carry the stacked first- and second-order state: `P_pred` and `P_filt` are shaped `(n_retained, T, 2 * n_state, 2 * n_state)`. Shock recovery is not supported for the UKF, so `eps_hat` is `None`. The four pruned-state fields are only recorded under `filter_mode="unscented"`; reading one off a linear or extended result raises `AttributeError`.
+???+ warning "Unscented only fields"
+    The pruned-state fields are only recorded under `mode="unscented"`; reading one off a linear or extended result raises `AttributeError`.
+
+&nbsp;
+
+```python
+@dataclass(frozen=True)
+class MCSmootherResult(
+    filter_result: MCFilterResult,
+    x_smooth: ndarray,
+    P_smooth: ndarray,
+    eps_smooth: ndarray,
+    _x1_smooth: ndarray | None = None,
+    _x2_smooth: ndarray | None = None,
+)
+```
+
+`MCSmootherResult` stacks the `SmootherResult` or `UnscentedSmootherResult` a smoother step produces on each retained replication into one container, adding a leading replication axis to every history. The smoother outputs contain a full filter result and add the smoothed counterparts on top. `MCPipelineResult.smoother_outputs` maps each smoother step name to one.
+
+__Fields and Properties:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| n_rep | `#!python int` | Total number of replications. |
+| n_retained | `#!python int` | Number of replications whose output the step's arena kept. |
+| retained_reps | `#!python ndarray` | Replication indices behind each row of the stacked histories. |
+| mode | `#!python FilterMode` | Kernel the step ran: enum of `"linear"`, `"extended"` or `"unscented"`. |
+| filter_result | `#!python MCFilterResult` | Filter result the smoother contains. |
+| x_smooth | `#!python ndarray` | Smoothed state estimates over time. Shape `(n_retained, T, n_var)`. |
+| P_smooth | `#!python ndarray` | Smoothed state covariance over time. Shape `(n_retained, T, n_var, n_var)` or `(n_retained, T, 2*n_state, 2*n_state)` for unscented filters. |
+| eps_smooth | `#!python ndarray` | Smoothed shock estimates over time. Shape `(n_retained, T, n_shock)`. |
+| `replication(idx)` | `#!python SmootherResult \| UnscentedSmootherResult` | One retained replication's smoother output as a single-run result. |
+
+__Unscented-Only Fields:__
+
+| __Name__ | __Type__ | __Description__ |
+|:---------|:--------:|----------------:|
+| x1_smooth | `#!python ndarray` | First-order component of the smoothed state over time. Shape `(n_retained, T, n_state)`. |
+| x2_smooth | `#!python ndarray` | Second-order component of the smoothed state over time. Shape `(n_retained, T, n_state)`. |
+
+???+ note "Retained indexing"
+    `idx` counts the retained replications, which are stored compactly; it is not the replication's index in the run. `retained_reps[idx]` is that index; the two coincide only when the run retained everything.
+
+???+ warning "Unscented only fields"
+    The pruned-state fields are only recorded under `mode="unscented"`; reading one off a linear or extended result raises `AttributeError`.
 
 &nbsp;
 

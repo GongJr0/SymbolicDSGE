@@ -24,6 +24,7 @@ from .._ckernels.monte_carlo._runner import (
     DEFAULT_WINDOW,
 )
 from ..core.solved_model import SolvedModel
+from ..core.compiled_model import CompiledModel
 from ..core.shock.spec import _normalized_spec
 from .defaults import (
     DEFAULT_FILTER_MODE,
@@ -110,6 +111,10 @@ def resolve_output_specs(
                     )
             case OpType.FILTER:
                 fields, offsets = _resolve_filter_fields(
+                    step, indices, plans, steps, models
+                )
+            case OpType.SMOOTHER:
+                fields, offsets = _resolve_smoother_fields(
                     step, indices, plans, steps, models
                 )
             case OpType.REGRESSION:
@@ -263,7 +268,7 @@ def _resolve_input_asize(
                     int(step.kwargs.get("window", DEFAULT_WINDOW)),
                 )
             )
-        case OpType.FILTER:
+        case OpType.FILTER | OpType.SMOOTHER:
             return _resolve_filter_input_asize(
                 step, source_indices, plans, steps, models
             )
@@ -335,7 +340,7 @@ def _resolve_filter_shape(
 ) -> tuple[int, int]:
     """Resolve selected observations and check their width against model names."""
     if len(step.source_args) != 1 or len(source_indices) != 1:
-        raise ValueError(f"Filter step {step.name!r} must have one source argument.")
+        raise ValueError(f"Step {step.name!r} must have one source argument.")
     T, n_obs = _selected_source_shape(
         plans, steps, source_indices[0], step.source_args[0]
     )
@@ -343,7 +348,7 @@ def _resolve_filter_shape(
     expected = len(names) if names is not None else model.compiled.n_obs
     if n_obs != expected:
         raise ValueError(
-            f"Filter step {step.name!r} selects {n_obs} observation columns "
+            f"Step {step.name!r} selects {n_obs} observation columns "
             f"but requires {expected} for its observable names."
         )
     return T, n_obs
@@ -359,8 +364,11 @@ def _resolve_filter_input_asize(
     model = get_target_model(step, models)
     T, n_obs = _resolve_filter_shape(step, source_indices, plans, steps, model)
     comp = model.compiled
+    asz = (
+        a.filter_arena_size if step.op_type is OpType.FILTER else a.smoother_arena_size
+    )
     return _asize(
-        a.filter_arena_size(
+        asz(
             _filter_mode(step),
             comp.n_state,
             comp.n_ctrl,
@@ -639,21 +647,16 @@ def _resolve_datagen_fields(
             )
 
 
-def _resolve_filter_fields(
-    step: MCStep,
-    source_indices: Sequence[int],
-    plans: BufferPlan,
-    steps: Sequence[MCStep],
-    models: Mapping[str, SolvedModel] | None,
-) -> tuple[dict[str, _FieldSpec], o.ArenaOffset]:
-    model = get_target_model(step, models)
-    T, n_obs = _resolve_filter_shape(step, source_indices, plans, steps, model)
-    comp = model.compiled
+def _filter_forward_fields(
+    mode: str,
+    T: int,
+    n_obs: int,
+    comp: CompiledModel,
+) -> dict[str, _FieldSpec]:
     n_var = comp.n_var
-    mode = _filter_mode(step)
     match mode:
         case "linear" | "extended":
-            fields = {
+            return {
                 "x_pred": _field((T, n_var)),
                 "x_filt": _field((T, n_var)),
                 "P_pred": _field((T, n_var, n_var)),
@@ -666,19 +669,11 @@ def _resolve_filter_fields(
                 "eps_hat": _field((T, comp.n_exog)),
                 "loglik": _field(()),
             }
-            return _with_int_flags(fields), o.filter_output_offsets(
-                mode,
-                comp.n_state,
-                comp.n_ctrl,
-                comp.n_exog,
-                n_obs,
-                T,
-            )
         case "unscented":
             n_state = comp.n_state
             n_z = 2 * n_state
             n_exog = comp.n_exog
-            fields = {
+            return {
                 "x_pred": _field((T, n_var)),
                 "x_filt": _field((T, n_var)),
                 "P_pred": _field((T, n_z, n_z)),
@@ -695,11 +690,72 @@ def _resolve_filter_fields(
                 "x1_filt": _field((T, n_state)),
                 "x2_filt": _field((T, n_state)),
             }
-            return _with_int_flags(fields), o.filter_output_offsets(
-                mode, n_state, comp.n_ctrl, n_exog, n_obs, T
-            )
         case _:
             raise ValueError(f"Unrecognized filter mode {mode!r}.")
+
+
+def _resolve_filter_fields(
+    step: MCStep,
+    source_indices: Sequence[int],
+    plans: BufferPlan,
+    steps: Sequence[MCStep],
+    models: Mapping[str, SolvedModel] | None,
+) -> tuple[dict[str, _FieldSpec], o.ArenaOffset]:
+    model = get_target_model(step, models)
+    T, n_obs = _resolve_filter_shape(step, source_indices, plans, steps, model)
+    comp = model.compiled
+    mode = _filter_mode(step)
+
+    fields = _filter_forward_fields(mode, T, n_obs, comp)
+    return _with_int_flags(fields), o.filter_output_offsets(
+        mode,
+        comp.n_state,
+        comp.n_ctrl,
+        comp.n_exog,
+        n_obs,
+        T,
+    )
+
+
+def _resolve_smoother_fields(
+    step: MCStep,
+    source_indices: Sequence[int],
+    plans: BufferPlan,
+    steps: Sequence[MCStep],
+    models: Mapping[str, SolvedModel] | None,
+) -> tuple[dict[str, _FieldSpec], o.ArenaOffset]:
+    model = get_target_model(step, models)
+    T, n_obs = _resolve_filter_shape(step, source_indices, plans, steps, model)
+    comp = model.compiled
+    mode = _filter_mode(step)
+    fields = _filter_forward_fields(mode, T, n_obs, comp)
+
+    match mode:
+        case "linear" | "extended":
+            fields = fields | {
+                "x_smooth": _field((T, comp.n_var)),
+                "P_smooth": _field((T, comp.n_var, comp.n_var)),
+                "eps_smooth": _field((T, comp.n_exog)),
+            }
+        case "unscented":
+            n_z = 2 * comp.n_state
+            fields = fields | {
+                "x1_smooth": _field((T, comp.n_state)),
+                "x2_smooth": _field((T, comp.n_state)),
+                "x_smooth": _field((T, comp.n_var)),
+                "P_smooth": _field((T, n_z, n_z)),
+                "eps_smooth": _field((T, comp.n_exog)),
+            }
+        case _:
+            raise ValueError(f"Unrecognized smoother mode {mode!r}.")
+    return _with_int_flags(fields), o.smoother_output_offsets(
+        mode,
+        comp.n_state,
+        comp.n_ctrl,
+        comp.n_exog,
+        n_obs,
+        T,
+    )
 
 
 def _resolve_transform_fields(

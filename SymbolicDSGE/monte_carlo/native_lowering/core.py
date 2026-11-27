@@ -131,7 +131,7 @@ def _lower_step(
             return _lower_datagen_step(step, models, n_rep)
         case OpType.TRANSFORM:
             return _lower_transform_step(step, source_indices, steps, plan)
-        case OpType.FILTER:
+        case OpType.FILTER | OpType.SMOOTHER:
             return lower_filter_step(step, source_indices, steps, plan, models)
         case OpType.REGRESSION:
             return lower_regression_step(step, source_indices, steps, plan)

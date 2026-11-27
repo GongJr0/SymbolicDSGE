@@ -215,7 +215,8 @@ nav:
               - Core:
                   - DGP Simulation: documentation/monte_carlo/operations/core/simulation.md
                   - Raw Model Data: documentation/monte_carlo/operations/core/raw_model_data.md
-                  - Reference Filtering: documentation/monte_carlo/operations/core/filter.md
+                  - Filter: documentation/monte_carlo/operations/core/filter.md
+                  - Smoother: documentation/monte_carlo/operations/core/smoother.md
                   - Payload: documentation/monte_carlo/operations/core/payload.md
                   - Passthrough: documentation/monte_carlo/operations/core/passthrough.md
               - Tests:

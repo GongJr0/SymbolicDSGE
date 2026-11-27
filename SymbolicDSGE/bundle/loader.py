@@ -24,6 +24,7 @@ from ..core.model_parser import ModelParser
 from ..core.solved_model import SolvedModel
 from ..core.solver import solve_model
 from ..core.shock import Shock, ShockPath
+from ..filters.resolvers import FilterMode
 from ..estimation.estimator import Estimator
 from ..estimation.results import MCMCResult, MLEResult, MAPResult
 from ..estimation.spec import (
@@ -37,6 +38,7 @@ from ..estimation.spec import (
 from .._diag_tests.result import MCTestResult
 from ..regression.result import MCRegressionResult
 from ..monte_carlo.spec import (
+    MCFilterResultMeta,
     MCRegressionResultMeta,
     MCRegressionResultSpec,
     MCTestResultMeta,
@@ -52,6 +54,7 @@ from ..monte_carlo.mc_constructs import (
     MCFilterResult,
     MCMeta,
     MCPipelineResult,
+    MCSmootherResult,
     failed_step_counts,
 )
 from .container import BundleArchive
@@ -575,6 +578,49 @@ _FILTER_OPTIONAL_FIELDS = (
     "_x2_filt",
 )
 
+_SMOOTHER_FIELDS = (
+    "x_smooth",
+    "P_smooth",
+    "eps_smooth",
+)
+
+_SMOOTHER_OPTIONAL_FIELDS = (
+    "_x1_smooth",
+    "_x2_smooth",
+)
+
+
+def _load_mc_filter(
+    name: str,
+    meta: MCFilterResultMeta,
+    columns: dict[tuple[str, str], dict[str, NDArray[Any]]],
+) -> MCFilterResult:
+    """Rebuild one filter step's result from its meta and its columns."""
+    shapes = meta["shapes"]
+    fields = {
+        key: _mc_array(
+            columns.get((name, key), {}),
+            f"{name}.{key}",
+            tuple(int(size) for size in shapes[key]),
+        )
+        for key in (*_FILTER_FIELDS, *_FILTER_OPTIONAL_FIELDS)
+        if key in shapes
+    }
+    missing = [key for key in _FILTER_FIELDS if key not in fields]
+    if missing:
+        raise ValueError(f"Step {name!r} is missing required fields {missing!r}.")
+    return MCFilterResult(
+        n_rep=int(meta["n_rep"]),
+        n_retained=int(meta["n_retained"]),
+        retained_reps=_int_trace(
+            columns.get((name, "retained_reps"), {}),
+            f"{name}.retained_reps",
+            int(meta["n_retained"]),
+        ),
+        mode=FilterMode(meta["filter_mode"]),
+        **fields,
+    )
+
 
 def _load_mc_filters(
     archive: BundleArchive, manifest: Manifest
@@ -586,32 +632,48 @@ def _load_mc_filters(
     columns = _mc_array_columns(archive, manifest, "mc_filter_trace")
     out: dict[str, MCFilterResult] = {}
     for name, meta in metas.items():
-        shapes = meta["shapes"]
-        fields = {
-            key: _mc_array(
-                columns.get((name, key), {}),
-                f"{name}.{key}",
-                tuple(int(size) for size in shapes[key]),
-            )
-            for key in (*_FILTER_FIELDS, *_FILTER_OPTIONAL_FIELDS)
-            if key in shapes
-        }
-        missing = [key for key in _FILTER_FIELDS if key not in fields]
-        if missing:
-            raise ValueError(
-                f"Filter step {name!r} is missing required fields {missing!r}."
-            )
-        out[name] = MCFilterResult(
-            n_rep=int(meta["n_rep"]),
-            n_retained=int(meta["n_retained"]),
-            retained_reps=_int_trace(
-                columns.get((name, "retained_reps"), {}),
-                f"{name}.retained_reps",
-                int(meta["n_retained"]),
-            ),
-            filter_mode=str(meta["filter_mode"]),
-            **fields,
+        out[name] = _load_mc_filter(name, cast(MCFilterResultMeta, meta), columns)
+    return out
+
+
+def _load_mc_smoother(
+    name: str,
+    meta: MCFilterResultMeta,
+    columns: dict[tuple[str, str], dict[str, NDArray[Any]]],
+) -> MCSmootherResult:
+    """Rebuild one smoother step's result from its meta and its columns."""
+    shapes = meta["shapes"]
+    fields = {
+        key: _mc_array(
+            columns.get((name, key), {}),
+            f"{name}.{key}",
+            tuple(int(size) for size in shapes[key]),
         )
+        for key in (*_SMOOTHER_FIELDS, *_SMOOTHER_OPTIONAL_FIELDS)
+        if key in shapes
+    }
+    missing = [key for key in _SMOOTHER_FIELDS if key not in fields]
+    if missing:
+        raise ValueError(f"Step {name!r} is missing required fields {missing!r}.")
+
+    fwd_res = _load_mc_filter(name, meta, columns)
+    return MCSmootherResult(
+        filter_result=fwd_res,
+        **fields,
+    )
+
+
+def _load_mc_smoothers(
+    archive: BundleArchive, manifest: Manifest
+) -> dict[str, MCSmootherResult]:
+    """Each smoother step's arrays, rebuilt at the shapes its meta recorded."""
+    metas = _mc_json(archive, manifest, "mc_smoother_steps")
+    if not metas:
+        return {}
+    columns = _mc_array_columns(archive, manifest, "mc_smoother_trace")
+    out: dict[str, MCSmootherResult] = {}
+    for name, meta in metas.items():
+        out[name] = _load_mc_smoother(name, cast(MCFilterResultMeta, meta), columns)
     return out
 
 
@@ -690,6 +752,7 @@ def _load_mc_result(
         n_successful=int(run["n_successful"]),
         datagen_outputs=_load_mc_datagen(archive, manifest),
         filter_outputs=_load_mc_filters(archive, manifest),
+        smoother_outputs=_load_mc_smoothers(archive, manifest),
         test_summaries=_load_mc_tests(archive, manifest),
         transform_outputs=_load_mc_transforms(archive, manifest),
         regression_summaries=_load_mc_regressions(archive, manifest),

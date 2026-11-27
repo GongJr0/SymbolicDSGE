@@ -19,6 +19,10 @@ typedef union {
   sdsge_mc_filter_extended_step_ctx filter_extended;
   sdsge_mc_filter_unscented_step_ctx filter_unscented;
 
+  sdsge_mc_smoother_linear_step_ctx smoother_linear;
+  sdsge_mc_smoother_extended_step_ctx smoother_extended;
+  sdsge_mc_smoother_unscented_step_ctx smoother_unscented;
+
   // regression.h
   sdsge_mc_ols_step_ctx ols;
 

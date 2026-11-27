@@ -19,21 +19,23 @@ from numpy import ndarray
 from ..core.shock.generators import ShockParameters, ShockPathParameters
 
 # --- LAST BREAK ---
-# V18: Breakage from POSTPROC steps being removed from MCPipeline. (#654)
-# POSTPROC steps are no longer a part of MC pipelines, the V18 reader refuses
-# to load older bundles containing them instead of ignoring the steps. Member
-# kinds referring to POSTPROCs are also removed from the manifest schema.
+# V19: Breakage from a new SMOOTHER step in MCPipeline. (#659)
+# With addition of a new step kind, older readers would fail on
+# any v19 bundle containing smoother steps.
+#
+# This breaks the backward compatibility of V19 bundles; older
+# bundles continue to read correctly on a current reader.
 # ------
 
 #: Bundle format version. Bump on every manifest or member change.
-SDSGE_FORMAT_VERSION = 18
+SDSGE_FORMAT_VERSION = 19
 
 #: Oldest bundle format this reader can reconstruct.
 SDSGE_MIN_READABLE_VERSION = 18
 
 #: Most recent format change requiring a newer reader. Written into the
 #: manifest so older readers reject bundles they cannot interpret.
-SDSGE_LAST_BREAKING_VERSION = 18
+SDSGE_LAST_BREAKING_VERSION = 19
 
 MemberKind = Literal[
     "model_config",
@@ -58,6 +60,8 @@ MemberKind = Literal[
     "mc_datagen_trace",
     "mc_filter_steps",
     "mc_filter_trace",
+    "mc_smoother_steps",
+    "mc_smoother_trace",
     "mc_test_steps",
     "mc_test_traces",
     "mc_regression_steps",

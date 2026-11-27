@@ -13,11 +13,10 @@ static arena_size kf_cache_size(const i64 n, const i64 m, const i64 T) {
   return make_sizer(2 * T * n * m, 0);
 }
 arena_size kf_arena_size(const i64 n, const i64 m, const i64 k) {
-  return make_sizer(2 * n + 7 * m    /* vectors + triangular-solve scratch */
-                        + 6 * n * n  /* covariance work, retained capacity */
+  return make_sizer(2 * n + 5 * m    /* vectors */
+                        + 6 * n * n  /* covariance work */
                         + 2 * m * m  /* S_buf, L */
-                        + 3 * n * m  /* gain work, retained capacity */
-                        + m * n      /* temp_mn */
+                        + 3 * n * m  /* gain work */
                         + n * k      /* temp_nk */
                         + 2 * k * m, /* M, temp_km */
                     0);

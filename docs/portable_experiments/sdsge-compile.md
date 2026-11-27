@@ -29,13 +29,16 @@ my-experiment/
     │   └── posterior.parquet|.csv          # optional, MCMC only
     └── montecarlo/
         ├── pipeline.json
-        ├── custom/{step}.pkl               # custom ops, cloudpickled
+        ├── func/{step}.pkl                 # custom ops, cloudpickled
         ├── data/{step}.parquet|.csv        # raw_model_data arrays
         └── result/                         # optional; present with a run
             ├── meta.json                   # the run's own metadata + run_config
+            ├── datagen/{datagen_steps.json, {step}.{field}.parquet|.csv}
+            ├── filters/{filter_steps.json, {step}.{field}.parquet|.csv}
+            ├── smoothers/{smoother_steps.json, {step}.{field}.parquet|.csv}
             ├── tests/{test_steps.json, test_traces.parquet|.csv}
             ├── regressions/{regression_steps.json, regression_traces.parquet|.csv}
-            └── transforms/{transform_steps.json, {step}_{field}.parquet|.csv}
+            └── transforms/{transform_steps.json, {step}.{field}.parquet|.csv}
 
 ```
 

@@ -20,6 +20,9 @@ def shock_scratch_arena_size(
 def filter_arena_size(
     kind: str, n_state: int, n_ctrl: int, n_exog: int, n_obs: int, T: int, n_par: int
 ) -> tuple[int, int]: ...
+def smoother_arena_size(
+    kind: str, n_state: int, n_ctrl: int, n_exog: int, n_obs: int, T: int, n_par: int
+) -> tuple[int, int]: ...
 def diagnostic_arena_size(
     kind: str, n: int, p: int = 0, lags: int = 0
 ) -> tuple[int, int]: ...

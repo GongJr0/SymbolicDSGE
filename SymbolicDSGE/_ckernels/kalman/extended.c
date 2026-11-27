@@ -15,11 +15,10 @@ static arena_size ekf_cache_size(const i64 n, const i64 m, const i64 T) {
 
 arena_size ekf_arena_size(const i64 n, const i64 m, const i64 k) {
   return make_sizer(
-      2 * n + 6 * m   /* vectors + triangular-solve scratch */
+      2 * n + 4 * m   /* vectors */
           + 6 * n * n /* P_pred, P_filt, KC, I_minus_KC, temp_nn, BQBT */
           + 2 * m * m /* S_buf, L */
           + 4 * n * m /* PCt, K, temp_nm, H_buf */
-          + m * n     /* temp_mn */
           + n * k     /* temp_nk */
           + 2 * k * m /* M, temp_km */
           + n,        /* x_lvl holds x in levels for the measurement */
@@ -48,8 +47,7 @@ static int ekf_hot_loop(const ekf_inputs *in, f64 *SDSGE_RESTRICT arena,
   f64 *K = PCt + n * m;
   f64 *temp_nm = K + n * m;
   f64 *H_buf = temp_nm + n * m;
-  f64 *temp_mn = H_buf + m * n;
-  f64 *temp_nk = temp_mn + m * n;
+  f64 *temp_nk = H_buf + m * n;
   f64 *M = temp_nk + n * k;
   f64 *temp_km = M + k * m;
   f64 *x_lvl = temp_km + k * m;

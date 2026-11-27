@@ -188,9 +188,9 @@ arena_size ukf_arena_size(const i64 n_state, const i64 n_ctrl, const i64 n_exog,
   const i64 nv = n_state + n_ctrl;
 
   return make_sizer(3 * nz + 4 * nz * nz + na * na + n_exog * n_exog +
-                        n_sig * na + n_sig * nz + n_sig * n_obs + 6 * n_obs +
-                        2 * n_obs * n_obs + 2 * nz * n_obs + n_sig * nv +
-                        2 * nv + 2 * nv * n_obs + na +
+                        n_sig * na + n_sig * nz + n_sig * n_obs + 4 * n_obs +
+                        2 * n_obs * n_obs + nz * n_obs + n_sig * nv + 2 * nv +
+                        nv * n_obs + na +
                         sdsge_second_order_step_scratch(n_state, n_exog),
                     0);
 }

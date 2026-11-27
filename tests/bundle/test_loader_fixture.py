@@ -38,6 +38,9 @@ def test_load_bundle_fixture_end_to_end():
     # monte carlo: runnable pipeline + document + traces
     assert isinstance(loaded.mc, LoadedMC)
     assert loaded.mc.pipeline is not None
+    # the fixture predates smoother steps, so it reloads with none
+    assert loaded.mc.result is not None
+    assert loaded.mc.result.smoother_outputs == {}
     # shock pool: the tabulated entry lifts back into a table, the native one
     # beside it still rides inline
     (datagen,) = [

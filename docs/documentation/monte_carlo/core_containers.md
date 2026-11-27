@@ -147,6 +147,7 @@ class MCPipelineResult(
     n_successful: int,
     datagen_outputs: MCDataGenResult,
     filter_outputs: Mapping[str, MCFilterResult] = {},
+    smoother_outputs: Mapping[str, MCSmootherResult] = {},
     transform_outputs: Mapping[str, ndarray] = {},
     test_summaries: Mapping[str, MCTestResult] = {},
     regression_summaries: Mapping[str, MCRegressionResult] = {},
@@ -166,6 +167,7 @@ __Fields and Properties:__
 | n_successful | `#!python int` | Number of completed replications. |
 | datagen_outputs | `#!python MCDataGenResult` | The single datagen step's retained states, shocks and observables. A field the step never produced is reported as a `NaN` block rather than omitted. |
 | filter_outputs | `#!python Mapping[str, MCFilterResult]` | Per-filter retained output, keyed by step name. |
+| smoother_outputs | `#!python Mapping[str, MCSmootherResult]` | Per-smoother retained output, keyed by step name. |
 | transform_outputs | `#!python Mapping[str, ndarray]` | Retained transform output stacked across replications, keyed by step name, each shaped `(n_retained, *output_shape)`. |
 | test_summaries | `#!python Mapping[str, MCTestResult]` | Per-test aggregate result containers. |
 | regression_summaries | `#!python Mapping[str, MCRegressionResult]` | Per-regression aggregate result containers. |

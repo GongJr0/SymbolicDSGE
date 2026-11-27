@@ -12,6 +12,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     jarque_bera_test_step,
     raw_model_data_step,
     simulation_step,
+    smoother_step,
     standardize_step,
 )
 
@@ -51,7 +52,7 @@ def test_dgp_only_simulation_and_filter_omit_reference(
 
 
 @pytest.mark.parametrize("target", ["reference", "dgp"])
-@pytest.mark.parametrize("kind", ["simulation", "filter"])
+@pytest.mark.parametrize("kind", ["simulation", "filter", "smoother"])
 def test_missing_target_model_raises_intentional_error(
     target: Literal["reference", "dgp"], kind: str
 ) -> None:
@@ -59,9 +60,10 @@ def test_missing_target_model_raises_intentional_error(
         pipeline = MCPipeline(simulation_step("sim", target=target, T=20))
         name = "sim"
     else:
+        factory = filter_step if kind == "filter" else smoother_step
         pipeline = MCPipeline(
             raw_model_data_step("raw", observables=np.zeros((20, 1))),
-            filter_step("kf", target=target, obs_source="raw", obs_field="observables"),
+            factory("kf", target=target, obs_source="raw", obs_field="observables"),
         )
         name = "kf"
 

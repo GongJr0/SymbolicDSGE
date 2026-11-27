@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace, fields
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 import numpy as np
 
@@ -20,13 +20,16 @@ from ..._ckernels.monte_carlo._runner import (
     filter_extended_step,
     filter_linear_step,
     filter_unscented_step,
+    smoother_extended_step,
+    smoother_linear_step,
+    smoother_unscented_step,
 )
 from ...core.solver_backend import SecondOrderSolution
 from ...core.solved_model import SolvedModel
 from ...core.resolvers import shock_covariance
 from ..allocation import BufferPlan, get_target_model
 from ..defaults import DEFAULT_FILTER_MODE
-from ..mc_constructs import MCStep
+from ..mc_constructs import MCStep, OpType
 from .utils import (
     NDF,
     NDI,
@@ -37,6 +40,21 @@ from .utils import (
     _static_binding,
     _source_binding,
 )
+
+_STEP_CONSTRUCTOR: dict[str, dict[OpType, Callable[..., NativeStep]]] = {
+    "linear": {
+        OpType.FILTER: filter_linear_step,
+        OpType.SMOOTHER: smoother_linear_step,
+    },
+    "extended": {
+        OpType.FILTER: filter_extended_step,
+        OpType.SMOOTHER: smoother_extended_step,
+    },
+    "unscented": {
+        OpType.FILTER: filter_unscented_step,
+        OpType.SMOOTHER: smoother_unscented_step,
+    },
+}
 
 
 def lower_filter_step(
@@ -49,7 +67,7 @@ def lower_filter_step(
     """Compile a resolved filter configuration and its staged observations."""
     source_names, requested_names = _filter_observable_names(step, models)
     if len(source_indices) != 1 or len(step.source_args) != 1:
-        raise ValueError(f"Filter step {step.name!r} must have one source argument.")
+        raise ValueError(f"Step {step.name!r} must have one source argument.")
     source_binding = _source_binding(
         source_indices[0],
         steps,
@@ -79,7 +97,7 @@ def lower_filter_step(
 
     if len(canonical_names) != source_n_obs:
         raise ValueError(
-            "Selected source columns do not match the filter observable names."
+            "Selected source column count do not match the observable names."
         )
     source_columns = source_binding.columns[
         _filter_source_columns(source_names, canonical_names)
@@ -91,9 +109,15 @@ def lower_filter_step(
     n_par = model.compiled.n_par
     n_obs = len(canonical_names)
     before_y: tuple[NDF, ...]
-    input_offsets = _offsets.filter_offsets(
-        mode, n_state, n_ctrl, n_exog, n_obs, T, n_par
-    ).foffset
+
+    if step.op_type is OpType.FILTER:
+        input_offsets = _offsets.filter_offsets(
+            mode, n_state, n_ctrl, n_exog, n_obs, T, n_par
+        ).foffset
+    else:  # step.op_type == OpType.SMOOTHER
+        input_offsets = _offsets.smoother_offsets(
+            mode, n_state, n_ctrl, n_exog, n_obs, T, n_par
+        ).foffset
 
     R = _build_R(model, step.kwargs.get("R"), canonical_names)
     Q = shock_covariance(model.config)
@@ -116,7 +140,7 @@ def lower_filter_step(
             source_binding, source_columns, input_offsets[len(before_y)], n_obs
         )
         return (
-            filter_linear_step(
+            _STEP_CONSTRUCTOR[mode][step.op_type](
                 step.name,
                 T,
                 n_var,
@@ -145,7 +169,7 @@ def lower_filter_step(
             source_binding, source_columns, input_offsets[len(before_y)], n_obs
         )
         return (
-            filter_extended_step(
+            _STEP_CONSTRUCTOR[mode][step.op_type](
                 step.name,
                 measurement_addr,
                 jacobian_addr,
@@ -195,7 +219,7 @@ def lower_filter_step(
             source_binding, source_columns, input_offsets[len(before_y)], n_obs
         )
         return (
-            filter_unscented_step(
+            _STEP_CONSTRUCTOR[mode][step.op_type](
                 step.name,
                 measurement_addr,
                 T,

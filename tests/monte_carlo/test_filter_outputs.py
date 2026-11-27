@@ -8,20 +8,28 @@ mode-specific presence rules are decided.
 
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
 import pytest
 
 from SymbolicDSGE._ckernels.monte_carlo._arenas import resolve_retention
 from SymbolicDSGE.core.solved_model import SolvedModel
 from SymbolicDSGE.filters.base import Filter
-from SymbolicDSGE.filters.filter import FilterResult, UnscentedFilterResult
+from SymbolicDSGE.filters.filter import (
+    FilterResult,
+    SmootherResult,
+    UnscentedFilterResult,
+    UnscentedSmootherResult,
+)
 from SymbolicDSGE.filters.gaussian import LinearKalman, ExtendedKalman, UnscentedKalman
-from SymbolicDSGE.monte_carlo import MCPipeline
-from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult
+from SymbolicDSGE.monte_carlo import MCPipeline, MCStep
+from SymbolicDSGE.monte_carlo.mc_constructs import MCPipelineResult, MCSmootherResult
 from SymbolicDSGE.monte_carlo.step_factories import (
     add_payload_step,
     raw_model_data_step,
     filter_step,
+    smoother_step,
     transform_step,
 )
 
@@ -110,6 +118,7 @@ def _run(
     *,
     n_rep: int = N_REP,
     name: str = "filt",
+    factory: Callable[..., MCStep] = filter_step,
     **filter_kwargs: object,
 ) -> MCPipelineResult:
     pipeline = MCPipeline(
@@ -118,7 +127,7 @@ def _run(
             observables=y,
             observable_names=tuple(solved.compiled.observable_names),
         ),
-        filter_step(
+        factory(
             name,
             target="reference",
             obs_source="data",
@@ -142,7 +151,7 @@ def test_the_result_carries_the_mode_that_selected_the_kernel(
     y = _observations(solved_post82)
     result = _run(solved_post82, y, filter=filter)
 
-    assert result.filter_outputs["filt"].filter_mode == filter.mode
+    assert result.filter_outputs["filt"].mode == filter.mode
 
 
 def test_the_mode_defaults_the_way_the_planner_defaults_it(
@@ -152,14 +161,14 @@ def test_the_mode_defaults_the_way_the_planner_defaults_it(
     y = _observations(solved_post82)
     result = _run(solved_post82, y)
 
-    assert result.filter_outputs["filt"].filter_mode == "linear"
+    assert result.filter_outputs["filt"].mode == "linear"
 
 
 def test_unscented_reports_its_own_mode(solved_rbc_so: SolvedModel) -> None:
     y = _observations(solved_rbc_so)
     result = _run(solved_rbc_so, y, filter=UnscentedKalman())
 
-    assert result.filter_outputs["filt"].filter_mode == "unscented"
+    assert result.filter_outputs["filt"].mode == "unscented"
 
 
 # --------------------------------------------------------------------------
@@ -440,8 +449,8 @@ def test_filters_are_keyed_by_step_name(solved_post82: SolvedModel) -> None:
     result = pipeline.run({"reference": solved_post82}, n_rep=N_REP, verbosity=0)
 
     assert set(result.filter_outputs) == {"kf", "ekf"}
-    assert result.filter_outputs["kf"].filter_mode == "linear"
-    assert result.filter_outputs["ekf"].filter_mode == "extended"
+    assert result.filter_outputs["kf"].mode == "linear"
+    assert result.filter_outputs["ekf"].mode == "extended"
 
 
 def test_a_pipeline_without_filters_reports_no_filter_outputs(
@@ -460,6 +469,7 @@ def test_a_pipeline_without_filters_reports_no_filter_outputs(
     result = pipeline.run({"reference": solved_post82}, n_rep=N_REP, verbosity=0)
 
     assert result.filter_outputs == {}
+    assert result.smoother_outputs == {}
 
 
 def test_filter_reads_observations_from_payload(solved_post82: SolvedModel) -> None:
@@ -507,3 +517,211 @@ def test_filter_reads_observations_from_payload(solved_post82: SolvedModel) -> N
                 atol=1e-12,
                 err_msg=f"replication {rep}, field {field}",
             )
+
+
+# --------------------------------------------------------------------------
+# Smoother steps
+# --------------------------------------------------------------------------
+
+_SMOOTHED = ("x_smooth", "P_smooth", "eps_smooth")
+_UNSCENTED_SMOOTHED = ("x1_smooth", "x2_smooth")
+
+
+def _smooth(solved: SolvedModel, y: np.ndarray, **kwargs: object) -> MCSmootherResult:
+    result = _run(solved, y, name="smooth", factory=smoother_step, **kwargs)
+    return result.smoother_outputs["smooth"]
+
+
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
+def test_smoother_mode(solved_post82: SolvedModel, filter: Filter) -> None:
+    """Check that a smoother reports the mode its forward pass ran under"""
+    sm = _smooth(solved_post82, _observations(solved_post82), filter=filter)
+
+    assert sm.mode == filter.mode
+    assert sm.filter_result.mode == filter.mode
+
+
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
+def test_smoother_shapes(solved_post82: SolvedModel, filter: Filter) -> None:
+    """Check that the forward and smoothed fields keep their planned shapes"""
+    comp = solved_post82.compiled
+    dims = {"T": T, "n_var": comp.n_var, "n_obs": len(comp.observable_names)}
+
+    sm = _smooth(solved_post82, _observations(solved_post82), filter=filter)
+
+    for field, axes in _SHARED_FIELDS:
+        expected = (N_REP, *(dims[axis] for axis in axes))
+        assert getattr(sm.filter_result, field).shape == expected, field
+    assert sm.x_smooth.shape == (N_REP, T, comp.n_var)
+    assert sm.P_smooth.shape == (N_REP, T, comp.n_var, comp.n_var)
+    assert sm.eps_smooth.shape == (N_REP, T, comp.n_exog)
+
+
+def test_ukf_smoother_shapes(solved_rbc_so: SolvedModel) -> None:
+    """Check that the unscented smoother keeps the augmented covariance frame"""
+    comp = solved_rbc_so.compiled
+    n_z = 2 * comp.n_state
+
+    sm = _smooth(solved_rbc_so, _observations(solved_rbc_so), filter=UnscentedKalman())
+
+    assert sm.x_smooth.shape == (N_REP, T, comp.n_var)
+    assert sm.P_smooth.shape == (N_REP, T, n_z, n_z)
+    assert sm.eps_smooth.shape == (N_REP, T, comp.n_exog)
+    for field in _UNSCENTED_SMOOTHED:
+        assert getattr(sm, field).shape == (N_REP, T, comp.n_state), field
+    for field in _UNSCENTED_ONLY:
+        assert getattr(sm.filter_result, field).shape == (N_REP, T, comp.n_state), field
+
+
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
+@pytest.mark.parametrize("field", _UNSCENTED_SMOOTHED)
+def test_smoother_pruned_state_unavailable(
+    solved_post82: SolvedModel, filter: Filter, field: str
+) -> None:
+    """Check that the pruned smoothed state raises off the unscented path"""
+    sm = _smooth(solved_post82, _observations(solved_post82), filter=filter)
+
+    with pytest.raises(AttributeError, match="only available for unscented"):
+        getattr(sm, field)
+
+
+@pytest.mark.parametrize("filter", [LinearKalman(), ExtendedKalman()])
+def test_smoother_replication_parity(
+    solved_post82: SolvedModel, filter: Filter
+) -> None:
+    """Check that each replication matches the one-shot smoother on its own data"""
+    y = _observations(solved_post82)
+
+    sm = _smooth(solved_post82, y, filter=filter)
+
+    for rep in range(N_REP):
+        one = sm.replication(rep)
+        expected = filter.smooth(solved_post82, y=y[rep])
+        assert type(one) is SmootherResult
+        assert type(one.filter_result) is FilterResult
+        for field in _SMOOTHED:
+            np.testing.assert_allclose(
+                getattr(one, field),
+                getattr(expected, field),
+                rtol=1e-9,
+                atol=1e-12,
+                err_msg=f"{field} on replication {rep}",
+            )
+        assert float(one.filter_result.loglik) == pytest.approx(
+            float(expected.filter_result.loglik)
+        )
+
+
+def test_ukf_smoother_replication_parity(solved_rbc_so: SolvedModel) -> None:
+    """Check that each unscented replication matches the one-shot smoother"""
+    y = _observations(solved_rbc_so)
+
+    sm = _smooth(solved_rbc_so, y, filter=UnscentedKalman())
+
+    for rep in range(N_REP):
+        one = sm.replication(rep)
+        expected = UnscentedKalman().smooth(solved_rbc_so, y=y[rep])
+        assert isinstance(one, UnscentedSmootherResult)
+        assert isinstance(one.filter_result, UnscentedFilterResult)
+        for field in (*_SMOOTHED, *_UNSCENTED_SMOOTHED):
+            np.testing.assert_allclose(
+                getattr(one, field),
+                getattr(expected, field),
+                rtol=1e-9,
+                atol=1e-12,
+                err_msg=f"{field} on replication {rep}",
+            )
+
+
+def test_smoother_partial_retention(solved_post82: SolvedModel) -> None:
+    """Check that each retained row holds the replication it was sampled from"""
+    n_rep, n_retain = PARTIAL_N_REP, PARTIAL_N_RETAIN
+    y = _observations(solved_post82, n_rep=n_rep)
+
+    sm = _smooth(solved_post82, y, n_rep=n_rep, n_retain=n_retain)
+
+    retained_reps, _ = resolve_retention(n_retain, n_rep)
+    assert (sm.n_rep, sm.n_retained) == (n_rep, n_retain)
+    np.testing.assert_array_equal(sm.retained_reps, retained_reps)
+    for idx, rep in enumerate(retained_reps):
+        np.testing.assert_allclose(
+            sm.x_smooth[idx],
+            LinearKalman().smooth(solved_post82, y=y[rep]).x_smooth,
+            rtol=1e-9,
+            atol=1e-12,
+        )
+    with pytest.raises(IndexError, match="retained replications"):
+        sm.replication(n_retain)
+
+
+def test_smoother_empty_retention(solved_post82: SolvedModel) -> None:
+    """Check that a smoother retaining nothing still reports its planned axes"""
+    comp = solved_post82.compiled
+
+    sm = _smooth(solved_post82, _observations(solved_post82), n_retain=0)
+
+    assert sm.n_retained == 0
+    assert sm.x_smooth.shape == (0, T, comp.n_var)
+    assert sm.P_smooth.shape == (0, T, comp.n_var, comp.n_var)
+    assert sm.eps_smooth.shape == (0, T, comp.n_exog)
+
+
+def test_smoother_outputs_keyed_apart(solved_post82: SolvedModel) -> None:
+    """Check that filters and smoothers land in their own mappings"""
+    y = _observations(solved_post82)
+    pipeline = MCPipeline(
+        raw_model_data_step(
+            "data",
+            observables=y,
+            observable_names=tuple(solved_post82.compiled.observable_names),
+        ),
+        filter_step(
+            "kf", target="reference", obs_source="data", obs_field="observables"
+        ),
+        smoother_step(
+            "ks", target="reference", obs_source="data", obs_field="observables"
+        ),
+    )
+
+    result = pipeline.run({"reference": solved_post82}, n_rep=N_REP, verbosity=0)
+
+    assert set(result.filter_outputs) == {"kf"}
+    assert set(result.smoother_outputs) == {"ks"}
+    forward = result.smoother_outputs["ks"].filter_result
+    for field, _ in _SHARED_FIELDS:
+        np.testing.assert_array_equal(
+            getattr(forward, field),
+            getattr(result.filter_outputs["kf"], field),
+            err_msg=field,
+        )
+
+
+def test_smoother_field_feeds_downstream(solved_post82: SolvedModel) -> None:
+    """Check that a downstream step reads a smoothed field"""
+    y = _observations(solved_post82)
+    pipeline = MCPipeline(
+        raw_model_data_step(
+            "data",
+            observables=y,
+            observable_names=tuple(solved_post82.compiled.observable_names),
+        ),
+        smoother_step(
+            "ks", target="reference", obs_source="data", obs_field="observables"
+        ),
+        transform_step(
+            "shifted",
+            _add_one,
+            source="ks",
+            field="x_smooth",
+            output_shape=(T, solved_post82.compiled.n_var),
+        ),
+    )
+
+    result = pipeline.run(
+        {"reference": solved_post82}, n_rep=N_REP, verbosity=0, fail_fast=True
+    )
+
+    np.testing.assert_array_equal(
+        result.transform_outputs["shifted"],
+        result.smoother_outputs["ks"].x_smooth + 1,
+    )

@@ -20,7 +20,13 @@ from numpy.typing import NDArray
 from .._ckernels.monte_carlo._status import MCStatus
 
 from ..core.sim_result import SimResult, OccBinDiagnostics
-from ..filters.filter import FilterResult, UnscentedFilterResult
+from ..filters.resolvers import FilterMode
+from ..filters.filter import (
+    FilterResult,
+    SmootherResult,
+    UnscentedFilterResult,
+    UnscentedSmootherResult,
+)
 from .._diag_tests.result import MCTestResult
 from .._diag_tests.status import TestStatus
 from ..regression.enums import RegressionStatus
@@ -35,14 +41,12 @@ CompiledColumnSelector = Sequence[int] | slice | None
 
 
 class OpType(StrEnum):
-    """Operation role a pipeline step fills.
-
-    Determines when a step runs and what contract it is held to.
-    """
+    """Operation role a pipeline step fills."""
 
     DATAGEN = "datagen"
     TRANSFORM = "transform"
     FILTER = "filter"
+    SMOOTHER = "smoother"
     TEST = "test"
     REGRESSION = "regression"
 
@@ -568,16 +572,18 @@ class MCFilterResult:
         Number of replications whose output the step's arena kept.
     retained_reps : NDI
         Replication indices behind each row of the stacked histories.
-    filter_mode : str
+    mode : FilterMode
         Kernel the step ran: ``"linear"``, ``"extended"`` or ``"unscented"``.
     x_pred : NDF
         Predicted states over time, shape ``(n_retained, T, n_var)``.
     x_filt : NDF
         Filtered states over time, shape ``(n_retained, T, n_var)``.
     P_pred : NDF
-        Predicted state covariance over time, shape ``(n_retained, T, n_var, n_var)``.
+        Predicted state covariance over time, shape ``(n_retained, T, n_var, n_var)``,
+        or ``(n_retained, T, 2*n_state, 2*n_state)`` for unscented filter steps.
     P_filt : NDF
-        Filtered state covariance over time, shape ``(n_retained, T, n_var, n_var)``.
+        Filtered state covariance over time, shape ``(n_retained, T, n_var, n_var)``,
+        or ``(n_retained, T, 2*n_state, 2*n_state)`` for unscented filter steps.
     y_pred : NDF
         Predicted observables over time, shape ``(n_retained, T, n_obs)``.
     y_filt : NDF
@@ -610,8 +616,8 @@ class MCFilterResult:
     n_rep: int
     n_retained: int
     retained_reps: NDI
+    mode: FilterMode
 
-    filter_mode: str
     # Shared
     x_pred: NDF
     x_filt: NDF
@@ -646,7 +652,7 @@ class MCFilterResult:
                 f"retained replications."
             )
 
-        if self.filter_mode == "unscented":
+        if self.mode == FilterMode.UNSCENTED:
             return UnscentedFilterResult(
                 x_pred=self.x_pred[idx],
                 x_filt=self.x_filt[idx],
@@ -723,6 +729,112 @@ class MCFilterResult:
         return self._x2_filt
 
 
+@dataclass(frozen=True, eq=False, repr=False)
+class MCSmootherResult:
+    """Stacked smoother output across the replications a run retained.
+
+    Stacks the smoother result a smoother step produces on each replication into one
+    container, adding a leading replication axis to every history. The pipeline
+    result maps each smoother step name to one of these.
+
+    Attributes
+    ----------
+    n_rep : int
+        Total number of replications.
+    n_retained : int
+        Number of replications whose output the step's arena kept.
+    retained_reps : NDI
+        Replication indices behind each row of the stacked histories.
+    mode : FilterMode
+        Kernel the step ran: ``"linear"``, ``"extended"`` or ``"unscented"``.
+    filter_result : MCFilterResult
+        Filter result corresponding to the forward pass of the smoother runs.
+    x_smooth : NDF
+        Smoothed states over time, shape ``(n_retained, T, n_var)``.
+    P_smooth : NDF
+        Smoothed state covariance over time, shape ``(n_retained, T, n_var, n_var)``
+        or ``(n_retained, T, 2*n_state, 2*n_state)`` for unscented.
+    eps_smooth : NDF
+        Smoothed shocks over time, shape ``(n_retained, T, n_shock)``.
+    x1_smooth : NDF
+        First-order component of the smoothed state over time, shape
+        ``(n_retained, T, n_state)``. Unscented smoother steps only; raises for any other smoother mode.
+    x2_smooth : NDF
+        Second-order component of the smoothed state over time, shape
+        ``(n_retained, T, n_state)``. Unscented smoother steps only; raises for any other smoother mode.
+    """
+
+    filter_result: MCFilterResult
+
+    x_smooth: NDF
+    P_smooth: NDF
+    eps_smooth: NDF
+
+    _x1_smooth: NDF | None = None
+    _x2_smooth: NDF | None = None
+
+    def replication(self, idx: int) -> SmootherResult | UnscentedSmootherResult:
+        fwd_res = self.filter_result.replication(idx)
+
+        if self.mode == FilterMode.UNSCENTED:
+            return UnscentedSmootherResult(
+                filter_result=cast(UnscentedFilterResult, fwd_res),
+                x_smooth=self.x_smooth[idx],
+                P_smooth=self.P_smooth[idx],
+                eps_smooth=self.eps_smooth[idx],
+                x1_smooth=self.x1_smooth[idx],
+                x2_smooth=self.x2_smooth[idx],
+            )
+        return SmootherResult(
+            filter_result=fwd_res,
+            x_smooth=self.x_smooth[idx],
+            P_smooth=self.P_smooth[idx],
+            eps_smooth=self.eps_smooth[idx],
+        )
+
+    @property
+    def n_rep(self) -> int:
+        """Total number of replications."""
+        return self.filter_result.n_rep
+
+    @property
+    def n_retained(self) -> int:
+        """Number of replications whose output the step's arena kept."""
+        return self.filter_result.n_retained
+
+    @property
+    def retained_reps(self) -> NDI:
+        """Replication indices behind each row of the stacked histories."""
+        return self.filter_result.retained_reps
+
+    @property
+    def mode(self) -> FilterMode:
+        """Kernel the step ran: ``"linear"``, ``"extended"`` or ``"unscented"``."""
+        return self.filter_result.mode
+
+    @cached_property
+    def x1_smooth(self) -> NDF:
+        """First-order component of the smoothed state over time.
+
+        Shape ``(n_retained, T, n_state)``. Unscented smoother steps only; raises for
+        any other smoother mode.
+        """
+        if self._x1_smooth is None:
+            raise AttributeError("x1_smooth is only available for unscented smoothers.")
+        return self._x1_smooth
+
+    @cached_property
+    def x2_smooth(self) -> NDF:
+        """Second-order component of the smoothed state over time.
+
+        Shape ``(n_retained, T, n_state)``. Unscented smoother steps only; raises for
+        any other smoother mode.
+        """
+        if self._x2_smooth is None:
+            raise AttributeError("x2_smooth is only available for unscented smoothers.")
+        return self._x2_smooth
+
+
 @dataclass(frozen=True)
 class MCPipelineResult:
     """Result container for a Monte Carlo run, including all retained per-replication outputs.
@@ -741,6 +853,9 @@ class MCPipelineResult:
     filter_outputs : Mapping[str, MCFilterResult]
         MCFilterResult per filter step, containing the retained replications' filter
         outputs.
+    smoother_outputs : Mapping[str, MCSmootherResult]
+        MCSmootherResult per smoother step, containing the retained replications'
+        smoother outputs.
     transform_outputs : Mapping[str, NDF]
         Mapping of step name to transformed data (NDF) for each transform step.
     test_summaries : Mapping[str, MCTestResult]
@@ -769,6 +884,7 @@ class MCPipelineResult:
     datagen_outputs: Mapping[str, MCDataGenResult]
     filter_outputs: Mapping[str, MCFilterResult] = dcf(default_factory=dict)
     transform_outputs: Mapping[str, NDF] = dcf(default_factory=dict)
+    smoother_outputs: Mapping[str, MCSmootherResult] = dcf(default_factory=dict)
     test_summaries: Mapping[str, MCTestResult] = dcf(default_factory=dict)
     regression_summaries: Mapping[str, MCRegressionResult] = dcf(default_factory=dict)
     failures: tuple[MCFailure, ...] = ()

@@ -46,6 +46,7 @@ from SymbolicDSGE.monte_carlo.step_factories import (
     filter_step,
     regression_step,
     simulation_step,
+    smoother_step,
     standardize_step,
     wald_test_step,
 )
@@ -867,9 +868,10 @@ def test_output_specs_for_non_ols_regressions(solved_test, kind: str) -> None:
     )
 
 
+@pytest.mark.parametrize("factory", (filter_step, smoother_step))
 @pytest.mark.parametrize("filter", (LinearKalman(), ExtendedKalman()))
 def test_output_shape_resolution_includes_linear_filter_fields(
-    solved_test, filter: Filter
+    solved_test, filter: Filter, factory
 ) -> None:
     """A filter step's fields are sized off the model, not off its input.
 
@@ -884,7 +886,8 @@ def test_output_shape_resolution_includes_linear_filter_fields(
     observables = np.zeros((2, periods, len(names)), dtype=np.float64)
     pipeline = MCPipeline(
         raw_model_data_step(observables=observables, observable_names=names),
-        filter_step(
+        factory(
+            "kf",
             target="reference",
             obs_source="datagen",
             obs_field="observables",
@@ -903,9 +906,18 @@ def test_output_shape_resolution_includes_linear_filter_fields(
     # states, so its state width is ``n_var``.
     n_state = compiled.n_var
     n_obs = len(names)
+    smoothed = (
+        (
+            ("x_smooth", (periods, n_state), np.float64),
+            ("P_smooth", (periods, n_state, n_state), np.float64),
+            ("eps_smooth", (periods, compiled.n_exog), np.float64),
+        )
+        if factory is smoother_step
+        else ()
+    )
     _assert_output_plan(
-        specs["filter"],
-        "filter",
+        specs["kf"],
+        "kf",
         ("x_pred", (periods, n_state), np.float64),
         ("x_filt", (periods, n_state), np.float64),
         ("P_pred", (periods, n_state, n_state), np.float64),
@@ -917,6 +929,7 @@ def test_output_shape_resolution_includes_linear_filter_fields(
         ("S", (periods, n_obs, n_obs), np.float64),
         ("eps_hat", (periods, compiled.n_exog), np.float64),
         ("loglik", (), np.float64),
+        *smoothed,
     )
 
 
@@ -979,8 +992,9 @@ def test_output_plan_carries_step_retention_count(solved_test) -> None:
     assert specs["datagen"].n_retain == 2
 
 
+@pytest.mark.parametrize("factory", (filter_step, smoother_step))
 def test_output_shape_resolution_includes_unscented_filter_fields(
-    solved_rbc_so,
+    solved_rbc_so, factory
 ) -> None:
     reference = solved_rbc_so
     compiled = reference.compiled
@@ -994,7 +1008,8 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
             observables=np.zeros((T, n_obs), dtype=np.float64),
             observable_names=reference.compiled.observable_names,
         ),
-        filter_step(
+        factory(
+            "ukf",
             target="reference",
             obs_source="datagen",
             obs_field="observables",
@@ -1008,9 +1023,20 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
     n_state = reference.compiled.n_state
     n_z = 2 * n_state
     n_exog = reference.compiled.n_exog
+    smoothed = (
+        (
+            ("x1_smooth", (T, n_state), np.float64),
+            ("x2_smooth", (T, n_state), np.float64),
+            ("x_smooth", (T, n_var), np.float64),
+            ("P_smooth", (T, n_z, n_z), np.float64),
+            ("eps_smooth", (T, n_exog), np.float64),
+        )
+        if factory is smoother_step
+        else ()
+    )
     _assert_output_plan(
-        specs["filter"],
-        "filter",
+        specs["ukf"],
+        "ukf",
         ("x_pred", (T, n_var), np.float64),
         ("x_filt", (T, n_var), np.float64),
         ("P_pred", (T, n_z, n_z), np.float64),
@@ -1026,6 +1052,7 @@ def test_output_shape_resolution_includes_unscented_filter_fields(
         ("x2_pred", (T, n_state), np.float64),
         ("x1_filt", (T, n_state), np.float64),
         ("x2_filt", (T, n_state), np.float64),
+        *smoothed,
     )
 
 

@@ -7,7 +7,12 @@ from typing import Any, Mapping
 import numpy as np
 from numpy.typing import NDArray
 
-from .mc_constructs import MCDataGenResult, MCFilterResult, MCPipelineResult
+from .mc_constructs import (
+    MCDataGenResult,
+    MCFilterResult,
+    MCPipelineResult,
+    MCSmootherResult,
+)
 from .._diag_tests.result import MCTestResult
 from ..regression.result import MCRegressionResult
 from .spec import (
@@ -110,40 +115,76 @@ def serialize_datagen_results(
     return out
 
 
+def _serialize_filter_result(
+    result: MCFilterResult,
+) -> tuple[MCFilterResultMeta, dict[str, NDArray[Any]]]:
+    fields: dict[str, NDArray[Any]] = {
+        "retained_reps": result.retained_reps,
+        "x_pred": result.x_pred,
+        "x_filt": result.x_filt,
+        "y_pred": result.y_pred,
+        "y_filt": result.y_filt,
+        "P_pred": result.P_pred,
+        "P_filt": result.P_filt,
+        "S": result.S,
+        "eps_hat": result.eps_hat,
+        "innov": result.innov,
+        "std_innov": result.std_innov,
+        "loglik": result.loglik,
+    }
+    if result.mode == "unscented":
+        # Write through the property to narrow the type.
+        # Populate private fields to restore exact behavior on load
+        fields["_x1_pred"] = result.x1_pred
+        fields["_x1_filt"] = result.x1_filt
+        fields["_x2_pred"] = result.x2_pred
+        fields["_x2_filt"] = result.x2_filt
+
+    meta = MCFilterResultMeta(
+        n_rep=int(result.n_rep),
+        n_retained=int(result.n_retained),
+        filter_mode=result.mode,
+        shapes={name: list(arr.shape) for name, arr in fields.items()},
+    )
+    return (meta, fields)
+
+
+def _serialize_smoother_result(
+    result: MCSmootherResult,
+) -> tuple[MCFilterResultMeta, dict[str, NDArray[Any]]]:
+    meta, fwd_fields = _serialize_filter_result(result.filter_result)
+    smoother_fields: dict[str, NDArray[Any]] = {
+        "x_smooth": result.x_smooth,
+        "P_smooth": result.P_smooth,
+        "eps_smooth": result.eps_smooth,
+    }
+    if result.mode == "unscented":
+        smoother_fields["_x1_smooth"] = result.x1_smooth
+        smoother_fields["_x2_smooth"] = result.x2_smooth
+    fields = {**fwd_fields, **smoother_fields}
+    meta["shapes"] = {
+        **meta["shapes"],
+        **{name: list(arr.shape) for name, arr in smoother_fields.items()},
+    }
+
+    return (meta, fields)
+
+
 def serialize_filter_results(
     filters: Mapping[str, MCFilterResult],
 ) -> dict[str, tuple[MCFilterResultMeta, dict[str, NDArray[Any]]]]:
-    out: dict[str, tuple[MCFilterResultMeta, dict[str, NDArray[Any]]]] = {}
+    out = {}
     for name, result in filters.items():
-        fields: dict[str, NDArray[Any]] = {
-            "retained_reps": result.retained_reps,
-            "x_pred": result.x_pred,
-            "x_filt": result.x_filt,
-            "y_pred": result.y_pred,
-            "y_filt": result.y_filt,
-            "P_pred": result.P_pred,
-            "P_filt": result.P_filt,
-            "S": result.S,
-            "eps_hat": result.eps_hat,
-            "innov": result.innov,
-            "std_innov": result.std_innov,
-            "loglik": result.loglik,
-        }
-        if result.filter_mode == "unscented":
-            # Write through the property to narrow the type.
-            # Populate private fields to restore exact behavior on load
-            fields["_x1_pred"] = result.x1_pred
-            fields["_x1_filt"] = result.x1_filt
-            fields["_x2_pred"] = result.x2_pred
-            fields["_x2_filt"] = result.x2_filt
+        out[name] = _serialize_filter_result(result)
+    return out
 
-        meta = MCFilterResultMeta(
-            n_rep=int(result.n_rep),
-            n_retained=int(result.n_retained),
-            filter_mode=result.filter_mode,
-            shapes={name: list(arr.shape) for name, arr in fields.items()},
-        )
-        out[name] = (meta, fields)
+
+def serialize_smoother_results(
+    smoothers: Mapping[str, MCSmootherResult],
+) -> dict[str, tuple[MCFilterResultMeta, dict[str, NDArray[Any]]]]:
+    out = {}
+    for name, result in smoothers.items():
+        out[name] = _serialize_smoother_result(result)
     return out
 
 

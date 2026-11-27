@@ -13,6 +13,7 @@ from .._ckernels.monte_carlo._runner import NativeRunResult, run
 from .._diag_tests.result import MCTestResult
 from ..core.solved_model import SolvedModel
 from ..regression.result import MCRegressionResult
+from ..filters.resolvers import FilterMode
 
 from .allocation import (
     FieldLayout,
@@ -28,6 +29,7 @@ from .spec import PipelineSpec
 from .mc_constructs import (
     MCDataGenResult,
     MCFilterResult,
+    MCSmootherResult,
     MCFailure,
     MCPipelineResult,
     MCMeta,
@@ -168,6 +170,7 @@ class MCPipeline:
         regressions = []
         transforms = []
         filters = []
+        smoothers = []
         datagens = []
         for s in self.steps:
             if s.op_type is OpType.DATAGEN:
@@ -180,12 +183,15 @@ class MCPipeline:
                 transforms.append(s.name)
             elif s.op_type is OpType.FILTER:
                 filters.append(s)
+            elif s.op_type is OpType.SMOOTHER:
+                smoothers.append(s)
 
         datagen_result = _compile_datagen(datagens, prep, n_rep)
         test_summaries = _compile_tests(tests, prep, n_rep)
         regression_summaries = _compile_regressions(regressions, prep, n_rep)
         payload_columns = _resolve_payloads(transforms, prep)
         filter_outputs = _compile_filters(filters, prep, n_rep)
+        smoother_outputs = _compile_smoothers(smoothers, prep, n_rep)
 
         step_names = tuple(step.name for step in prep.steps)
         if verbosity == 2:
@@ -241,6 +247,7 @@ class MCPipeline:
             meta=meta,
             datagen_outputs=datagen_result,
             filter_outputs=filter_outputs,
+            smoother_outputs=smoother_outputs,
             n_successful=int(
                 np.count_nonzero((prep.allocation.step_status_by_rep == 0).all(axis=1))
             ),
@@ -489,6 +496,61 @@ def _compile_datagen(
     return results
 
 
+def _build_filter_result(
+    step: MCStep, arena: StepArenas, layout: Mapping[str, FieldLayout], n_rep: int
+) -> MCFilterResult:
+    mode = _filter_mode(step)
+
+    x_pred = _read_float_field(arena, layout, "x_pred")
+    x_filt = _read_float_field(arena, layout, "x_filt")
+    y_pred = _read_float_field(arena, layout, "y_pred")
+    y_filt = _read_float_field(arena, layout, "y_filt")
+
+    P_pred = _read_float_field(arena, layout, "P_pred")
+    P_filt = _read_float_field(arena, layout, "P_filt")
+
+    S = _read_float_field(arena, layout, "S")
+    eps_hat = _read_float_field(arena, layout, "eps_hat")
+
+    innov = _read_float_field(arena, layout, "innov")
+    std_innov = _read_float_field(arena, layout, "std_innov")
+
+    loglik = _read_float_field(arena, layout, "loglik")
+
+    if mode == "unscented":
+        x1_pred = _read_float_field(arena, layout, "x1_pred")
+        x2_pred = _read_float_field(arena, layout, "x2_pred")
+        x1_filt = _read_float_field(arena, layout, "x1_filt")
+        x2_filt = _read_float_field(arena, layout, "x2_filt")
+    else:
+        x1_pred = None
+        x2_pred = None
+        x1_filt = None
+        x2_filt = None
+
+    return MCFilterResult(
+        n_rep=n_rep,
+        n_retained=arena.retained_reps.size,
+        retained_reps=arena.retained_reps,
+        mode=FilterMode(mode),
+        x_pred=x_pred,
+        x_filt=x_filt,
+        y_pred=y_pred,
+        y_filt=y_filt,
+        P_pred=P_pred,
+        P_filt=P_filt,
+        S=S,
+        innov=innov,
+        std_innov=std_innov,
+        loglik=loglik,
+        eps_hat=eps_hat,
+        _x1_pred=x1_pred,
+        _x2_pred=x2_pred,
+        _x1_filt=x1_filt,
+        _x2_filt=x2_filt,
+    )
+
+
 def _compile_filters(
     filter_steps: Sequence[MCStep], lowered: LoweredMCRun, n_rep: int
 ) -> dict[str, MCFilterResult]:
@@ -503,57 +565,42 @@ def _compile_filters(
 
     for step in filter_steps:
         name = step.name
+        layout = lowered.plan[name].out_fields
+        arena = arenas[name]
+        summaries[name] = _build_filter_result(step, arena, layout, n_rep)
+    return summaries
+
+
+def _compile_smoothers(
+    smoother_steps: Sequence[MCStep], lowered: LoweredMCRun, n_rep: int
+) -> dict[str, MCSmootherResult]:
+    """Read each smoother step's retained fields out of its arena."""
+    summaries: dict[str, MCSmootherResult] = {}
+    arenas = lowered.allocation.steps
+
+    for step in smoother_steps:
+        name = step.name
         mode = _filter_mode(step)
         layout = lowered.plan[name].out_fields
         arena = arenas[name]
-
-        x_pred = _read_float_field(arena, layout, "x_pred")
-        x_filt = _read_float_field(arena, layout, "x_filt")
-        y_pred = _read_float_field(arena, layout, "y_pred")
-        y_filt = _read_float_field(arena, layout, "y_filt")
-
-        P_pred = _read_float_field(arena, layout, "P_pred")
-        P_filt = _read_float_field(arena, layout, "P_filt")
-
-        S = _read_float_field(arena, layout, "S")
-        eps_hat = _read_float_field(arena, layout, "eps_hat")
-
-        innov = _read_float_field(arena, layout, "innov")
-        std_innov = _read_float_field(arena, layout, "std_innov")
-
-        loglik = _read_float_field(arena, layout, "loglik")
-
+        fwd_res = _build_filter_result(step, arena, layout, n_rep)
+        x_smooth = _read_float_field(arena, layout, "x_smooth")
+        P_smooth = _read_float_field(arena, layout, "P_smooth")
+        eps_smooth = _read_float_field(arena, layout, "eps_smooth")
         if mode == "unscented":
-            x1_pred = _read_float_field(arena, layout, "x1_pred")
-            x2_pred = _read_float_field(arena, layout, "x2_pred")
-            x1_filt = _read_float_field(arena, layout, "x1_filt")
-            x2_filt = _read_float_field(arena, layout, "x2_filt")
+            x1_smooth = _read_float_field(arena, layout, "x1_smooth")
+            x2_smooth = _read_float_field(arena, layout, "x2_smooth")
         else:
-            x1_pred = None
-            x2_pred = None
-            x1_filt = None
-            x2_filt = None
+            x1_smooth = None
+            x2_smooth = None
 
-        summaries[name] = MCFilterResult(
-            n_rep=n_rep,
-            n_retained=arena.retained_reps.size,
-            retained_reps=arena.retained_reps,
-            filter_mode=mode,
-            x_pred=x_pred,
-            x_filt=x_filt,
-            y_pred=y_pred,
-            y_filt=y_filt,
-            P_pred=P_pred,
-            P_filt=P_filt,
-            S=S,
-            innov=innov,
-            std_innov=std_innov,
-            loglik=loglik,
-            eps_hat=eps_hat,
-            _x1_pred=x1_pred,
-            _x2_pred=x2_pred,
-            _x1_filt=x1_filt,
-            _x2_filt=x2_filt,
+        summaries[name] = MCSmootherResult(
+            filter_result=fwd_res,
+            x_smooth=x_smooth,
+            P_smooth=P_smooth,
+            eps_smooth=eps_smooth,
+            _x1_smooth=x1_smooth,
+            _x2_smooth=x2_smooth,
         )
     return summaries
 

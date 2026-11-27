@@ -203,6 +203,81 @@ def filter_step(
     )
 
 
+def smoother_step(
+    name: str = "smoother",
+    n_retain: int = -1,
+    *,
+    target: str,
+    obs_source: str,
+    obs_field: str,
+    obs_columns: ColumnSelector = None,
+    filter: Filter = LinearKalman(),
+    observables: list[str] | None = None,
+    x0: dict[str, float] | list[float] | NDArray[np.float64] | None = None,
+    P0: NDF | None = None,
+    R: NDF | None = None,
+) -> MCStep:
+    """SMOOTHER step to run a Kalman smoother on the target model.
+
+    Parameters
+    ----------
+    name : str
+        Step name, used to reference the step in later steps and results.
+    n_retain : int
+        Number of samples to retain. -1 means all, 0 means none.
+    target : str
+        Model role supplying filter components; the selected model must be supplied to the run.
+    obs_source : str
+        Producer step supplying the observed data.
+    obs_field : str
+        Two-dimensional output field to read from the producer.
+    obs_columns : ColumnSelector
+        Columns to select from that field; ``None`` selects all columns.
+    filter : Filter
+        Filter object to use for the smoothing step. Can be any subclass of :class:`Filter` that's compatible with the target model.
+    observables : list[str] | None
+        Target-model observable names corresponding to the selected data columns, in order; ``None`` uses the model's full observation order.
+    x0 : dict[str, float | np.float64] | list[float | np.float64] | NDF | None
+        Initial state for the filter.
+    P0 : NDF | None
+        Initial state covariance matrix for the filter. If ``None``, the steady-state covariance is used.
+    R : NDArray | None
+        Measurement noise covariance matrix for the Kalman filter. If None, the `calibration.measurement_noise`
+        is used. If both are omitted, the call will raise.
+
+    Returns
+    -------
+    MCStep
+        Step object to include in a :class:`MCPipeline`.
+
+    """
+    filter_kwargs = {
+        "observables": observables,
+        "x0": x0,
+        "P0": P0,
+        "R": R,
+    } | filter.to_spec()
+    return MCStep(
+        name=name,
+        op_type=OpType.SMOOTHER,
+        kwargs={
+            "target": target,
+            "filter_mode": filter.mode.value,
+            **filter_kwargs,
+        },
+        step_type="smoother",
+        n_retain=n_retain,
+        source_args=(
+            _compile_source_args(
+                arg="observables",
+                source=obs_source,
+                field=obs_field,
+                columns=obs_columns,
+            ),
+        ),
+    )
+
+
 def add_payload_step(
     name: str,
     payload: (
