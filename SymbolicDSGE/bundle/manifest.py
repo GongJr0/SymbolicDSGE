@@ -20,10 +20,10 @@ from ..core.shock.generators import ShockParameters, ShockPathParameters
 
 # --- LAST BREAK ---
 # V19: Breakage from a new SMOOTHER step in MCPipeline. (#659)
-# The addition of a new step king makes older readers fail on any
-# v19 bundle containing smoother steps.
+# With addition of a new step kind, older readers would fail on
+# any v19 bundle containing smoother steps.
 #
-# This breaks the backward comptibility of V19 bundles, however older
+# This breaks the backward compatibility of V19 bundles; older
 # bundles continue to read correctly on a current reader.
 # ------
 
