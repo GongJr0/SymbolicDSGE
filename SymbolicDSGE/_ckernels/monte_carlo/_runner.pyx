@@ -213,6 +213,8 @@ cdef extern from "core_steps.h":
         int symmetrize
         int joseph_cov
         double jitter
+    ctypedef sdsge_mc_filter_linear_step_ctx \
+        sdsge_mc_smoother_linear_step_ctx
 
     ctypedef struct sdsge_mc_filter_extended_step_ctx:
         meas_fn measurement
@@ -225,6 +227,8 @@ cdef extern from "core_steps.h":
         int symmetrize
         int joseph_cov
         double jitter
+    ctypedef sdsge_mc_filter_extended_step_ctx \
+        sdsge_mc_smoother_extended_step_ctx
 
     ctypedef struct sdsge_mc_filter_unscented_step_ctx:
         meas_fn measurement
@@ -239,6 +243,8 @@ cdef extern from "core_steps.h":
         double kappa
         int symmetrize
         double jitter
+    ctypedef sdsge_mc_filter_unscented_step_ctx \
+        sdsge_mc_smoother_unscented_step_ctx
 
     int sdsge_mc_filter_linear_runner(
         int64_t rep_idx,
@@ -259,6 +265,33 @@ cdef extern from "core_steps.h":
     ) noexcept nogil
 
     int sdsge_mc_filter_unscented_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
+    int sdsge_mc_smoother_linear_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
+    int sdsge_mc_smoother_extended_runner(
+        int64_t rep_idx,
+        double *float_in_work,
+        double *float_out,
+        int64_t *int_work,
+        int64_t *int_out,
+        const void *ctx,
+    ) noexcept nogil
+
+    int sdsge_mc_smoother_unscented_runner(
         int64_t rep_idx,
         double *float_in_work,
         double *float_out,
@@ -572,6 +605,9 @@ cdef extern from "mc_step_ctx.h":
         sdsge_mc_filter_linear_step_ctx filter_linear
         sdsge_mc_filter_extended_step_ctx filter_extended
         sdsge_mc_filter_unscented_step_ctx filter_unscented
+        sdsge_mc_smoother_linear_step_ctx smoother_linear
+        sdsge_mc_smoother_extended_step_ctx smoother_extended
+        sdsge_mc_smoother_unscented_step_ctx smoother_unscented
         sdsge_mc_ols_step_ctx ols
         sdsge_mc_ridge_step_ctx ridge
         sdsge_mc_ridge_gs_step_ctx ridge_gs
@@ -935,7 +971,7 @@ def filter_linear_step(
     """Bind a linear Kalman filter with resolved scalar settings."""
     cdef NativeStep step = NativeStep()
 
-    if T < 0 or n_var <= 0 or n_obs <= 0 or n_exog < 0:
+    if T <= 0 or n_var <= 0 or n_obs <= 0 or n_exog < 0:
         raise ValueError("Native linear filter dimensions must be valid.")
 
     step._ctx_store.filter_linear.T = T
@@ -970,7 +1006,7 @@ def filter_extended_step(
     """Bind an extended Kalman filter with resolved callbacks and settings."""
     cdef NativeStep step = NativeStep()
 
-    if T < 0 or n_var <= 0 or n_obs <= 0 or n_exog < 0 or n_par < 0:
+    if T <= 0 or n_var <= 0 or n_obs <= 0 or n_exog < 0 or n_par < 0:
         raise ValueError("Native extended filter dimensions must be valid.")
     if measurement_addr == 0 or jacobian_addr == 0:
         raise ValueError("Native extended filtering requires both callback addresses.")
@@ -1012,7 +1048,7 @@ def filter_unscented_step(
     """Bind an unscented Kalman filter with resolved callback and settings."""
     cdef NativeStep step = NativeStep()
 
-    if T < 0 or n_state <= 0 or n_ctrl < 0 or n_exog < 0 or n_obs <= 0:
+    if T <= 0 or n_state <= 0 or n_ctrl < 0 or n_exog < 0 or n_obs <= 0:
         raise ValueError("Native unscented filter dimensions must be valid.")
     if n_par < 0 or measurement_addr == 0:
         raise ValueError("Native unscented filtering requires a callback address.")
@@ -1032,6 +1068,122 @@ def filter_unscented_step(
     step._bind(
         name,
         sdsge_mc_filter_unscented_runner,
+        None,
+        0,
+    )
+    return step
+
+
+def smoother_linear_step(
+    str name,
+    int64_t T,
+    int64_t n_var,
+    int64_t n_obs,
+    int64_t n_exog,
+    bint symmetrize,
+    bint joseph_cov,
+    double jitter,
+):
+    """Bind a linear Kalman smoother with resolved scalar settings."""
+    cdef NativeStep step = NativeStep()
+
+    if T <= 0 or n_var <= 0 or n_obs <= 0 or n_exog < 0:
+        raise ValueError("Native linear smoother dimensions must be valid.")
+
+    step._ctx_store.smoother_linear.T = T
+    step._ctx_store.smoother_linear.n = n_var
+    step._ctx_store.smoother_linear.m = n_obs
+    step._ctx_store.smoother_linear.k = n_exog
+    step._ctx_store.smoother_linear.symmetrize = symmetrize
+    step._ctx_store.smoother_linear.joseph_cov = joseph_cov
+    step._ctx_store.smoother_linear.jitter = jitter
+    step._bind(
+        name,
+        sdsge_mc_smoother_linear_runner,
+        None,
+        0,
+    )
+    return step
+
+
+def smoother_extended_step(
+    str name,
+    uintptr_t measurement_addr,
+    uintptr_t jacobian_addr,
+    int64_t T,
+    int64_t n_var,
+    int64_t n_obs,
+    int64_t n_exog,
+    int64_t n_par,
+    bint symmetrize,
+    bint joseph_cov,
+    double jitter,
+):
+    """Bind an extended Kalman smoother with resolved callbacks and settings."""
+    cdef NativeStep step = NativeStep()
+
+    if T <= 0 or n_var <= 0 or n_obs <= 0 or n_exog < 0 or n_par < 0:
+        raise ValueError("Native extended smoother dimensions must be valid.")
+    if measurement_addr == 0 or jacobian_addr == 0:
+        raise ValueError("Native extended smoothing requires both callback addresses.")
+
+    step._ctx_store.smoother_extended.measurement = <meas_fn><void *>measurement_addr
+    step._ctx_store.smoother_extended.jacobian = <meas_fn><void *>jacobian_addr
+    step._ctx_store.smoother_extended.T = T
+    step._ctx_store.smoother_extended.n = n_var
+    step._ctx_store.smoother_extended.m = n_obs
+    step._ctx_store.smoother_extended.k = n_exog
+    step._ctx_store.smoother_extended.n_par = n_par
+    step._ctx_store.smoother_extended.symmetrize = symmetrize
+    step._ctx_store.smoother_extended.joseph_cov = joseph_cov
+    step._ctx_store.smoother_extended.jitter = jitter
+    step._bind(
+        name,
+        sdsge_mc_smoother_extended_runner,
+        None,
+        0,
+    )
+    return step
+
+
+def smoother_unscented_step(
+    str name,
+    uintptr_t measurement_addr,
+    int64_t T,
+    int64_t n_state,
+    int64_t n_ctrl,
+    int64_t n_exog,
+    int64_t n_obs,
+    int64_t n_par,
+    double alpha,
+    double beta,
+    double kappa,
+    bint symmetrize,
+    double jitter,
+):
+    """Bind an unscented Kalman smoother with resolved callback and settings."""
+    cdef NativeStep step = NativeStep()
+
+    if T <= 0 or n_state <= 0 or n_ctrl < 0 or n_exog < 0 or n_obs <= 0:
+        raise ValueError("Native unscented smoother dimensions must be valid.")
+    if n_par < 0 or measurement_addr == 0:
+        raise ValueError("Native unscented smoother requires a callback address.")
+
+    step._ctx_store.smoother_unscented.measurement = <meas_fn><void *>measurement_addr
+    step._ctx_store.smoother_unscented.T = T
+    step._ctx_store.smoother_unscented.n_state = n_state
+    step._ctx_store.smoother_unscented.n_ctrl = n_ctrl
+    step._ctx_store.smoother_unscented.n_exog = n_exog
+    step._ctx_store.smoother_unscented.n_obs = n_obs
+    step._ctx_store.smoother_unscented.n_par = n_par
+    step._ctx_store.smoother_unscented.alpha = alpha
+    step._ctx_store.smoother_unscented.beta = beta
+    step._ctx_store.smoother_unscented.kappa = kappa
+    step._ctx_store.smoother_unscented.symmetrize = symmetrize
+    step._ctx_store.smoother_unscented.jitter = jitter
+    step._bind(
+        name,
+        sdsge_mc_smoother_unscented_runner,
         None,
         0,
     )
