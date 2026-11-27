@@ -37,5 +37,16 @@ def filter_output_offsets(
     n_obs: int,
     T: int,
 ) -> ArenaOffset: ...
+def smoother_offsets(
+    kind: str, n_state: int, n_ctrl: int, n_exog: int, n_obs: int, T: int, n_par: int
+) -> ArenaOffset: ...
+def smoother_output_offsets(
+    kind: str,
+    n_state: int,
+    n_ctrl: int,
+    n_exog: int,
+    n_obs: int,
+    T: int,
+) -> ArenaOffset: ...
 def diagnostic_offsets(kind: str, n: int, p: int = 0, lags: int = 0) -> ArenaOffset: ...
 def diagnostic_output_offsets() -> ArenaOffset: ...

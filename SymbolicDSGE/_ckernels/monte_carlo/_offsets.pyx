@@ -62,6 +62,26 @@ cdef extern from "layout.h":
             int64_t n_state, int64_t n_ctrl, int64_t n_exog,
             int64_t n_obs, int64_t T
             )
+    arena_offset sdsge_smoother_linear_input_arena_offset(
+            int64_t n, int64_t m, int64_t k, int64_t T
+            )
+    arena_offset sdsge_smoother_linear_output_arena_offset(
+            int64_t n, int64_t m, int64_t k, int64_t T
+            )
+    arena_offset sdsge_smoother_extended_input_arena_offset(
+            int64_t n, int64_t m, int64_t k, int64_t T, int64_t n_par
+            )
+    arena_offset sdsge_smoother_extended_output_arena_offset(
+            int64_t n, int64_t m, int64_t k, int64_t T
+            )
+    arena_offset sdsge_smoother_unscented_input_arena_offset(
+            int64_t n_state, int64_t n_ctrl, int64_t n_exog, int64_t n_obs,
+            int64_t T, int64_t n_par
+            )
+    arena_offset sdsge_smoother_unscented_output_arena_offset(
+            int64_t n_state, int64_t n_ctrl, int64_t n_exog,
+            int64_t n_obs, int64_t T
+            )
 
     # Regression Steps
     # One layout for all of them: the kind picks the scratch and decides whether
@@ -363,6 +383,53 @@ def filter_output_offsets(
         return _offset(sdsge_filter_unscented_output_arena_offset(
             n_state, n_ctrl, n_exog, n_obs, T))
     raise ValueError(f"Unsupported native filter kind: {kind!r}.")
+
+
+def smoother_offsets(
+    str kind,
+    int64_t n_state,
+    int64_t n_ctrl,
+    int64_t n_exog,
+    int64_t n_obs,
+    int64_t T,
+    int64_t n_par,
+):
+    """Return the packed-input boundaries for a smoother.
+
+    The Kalman work block sits past the last entry. Only the kernel reads
+    inside it and it sizes itself, so it is not a buffer here.
+    """
+    if kind == "linear":
+        return _offset(sdsge_smoother_linear_input_arena_offset(
+            n_state + n_ctrl, n_obs, n_exog, T))
+    if kind == "extended":
+        return _offset(sdsge_smoother_extended_input_arena_offset(
+            n_state + n_ctrl, n_obs, n_exog, T, n_par))
+    if kind == "unscented":
+        return _offset(sdsge_smoother_unscented_input_arena_offset(
+            n_state, n_ctrl, n_exog, n_obs, T, n_par))
+    raise ValueError(f"Unsupported native smoother kind: {kind!r}.")
+
+
+def smoother_output_offsets(
+    str kind,
+    int64_t n_state,
+    int64_t n_ctrl,
+    int64_t n_exog,
+    int64_t n_obs,
+    int64_t T,
+):
+    """Return the output boundaries for a smoother."""
+    if kind == "linear":
+        return _offset(sdsge_smoother_linear_output_arena_offset(
+            n_state + n_ctrl, n_obs, n_exog, T))
+    if kind == "extended":
+        return _offset(sdsge_smoother_extended_output_arena_offset(
+            n_state + n_ctrl, n_obs, n_exog, T))
+    if kind == "unscented":
+        return _offset(sdsge_smoother_unscented_output_arena_offset(
+            n_state, n_ctrl, n_exog, n_obs, T))
+    raise ValueError(f"Unsupported native smoother kind: {kind!r}.")
 
 
 def diagnostic_offsets(str kind, int64_t n, int64_t p=0, int64_t lags=0):

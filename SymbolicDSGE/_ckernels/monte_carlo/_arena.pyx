@@ -70,15 +70,30 @@ cdef extern from "layout.h":
     arena_size sdsge_filter_unscented_input_arena_size(int64_t n_state, int64_t n_ctrl,
                                                        int64_t n_exog, int64_t n_obs,
                                                        int64_t T, int64_t n_par) nogil
+    arena_size sdsge_smoother_linear_input_arena_size(int64_t n, int64_t m,
+                                                      int64_t k, int64_t T) nogil
+    arena_size sdsge_smoother_extended_input_arena_size(int64_t n, int64_t m, int64_t k,
+                                                        int64_t T, int64_t n_par) nogil
+    arena_size sdsge_smoother_unscented_input_arena_size(int64_t n_state,
+                                                         int64_t n_ctrl,
+                                                         int64_t n_exog,
+                                                         int64_t n_obs,
+                                                         int64_t T,
+                                                         int64_t n_par
+                                                         ) nogil
 
 
 cdef extern from "linear.h":
     arena_size kf_arena_size(int64_t n, int64_t m, int64_t k) nogil
+    arena_size kf_smooth_arena_size(int64_t n, int64_t m, int64_t k, int64_t T) nogil
 cdef extern from "extended.h":
     arena_size ekf_arena_size(int64_t n, int64_t m, int64_t k) nogil
+    arena_size ekf_smooth_arena_size(int64_t n, int64_t m, int64_t k, int64_t T) nogil
 cdef extern from "unscented.h":
     arena_size ukf_arena_size(int64_t n_state, int64_t n_ctrl,
                               int64_t n_exog, int64_t n_obs) nogil
+    arena_size ukf_smooth_arena_size(int64_t n_state, int64_t n_ctrl,
+                                     int64_t n_exog, int64_t n_obs, int64_t T) nogil
 
 cdef extern from "diag.h":
     arena_size sdsge_bg_arena_size(int64_t n, int64_t k, int64_t lags) nogil
@@ -256,6 +271,35 @@ def filter_arena_size(
         scratch = ukf_arena_size(n_state, n_ctrl, n_exog, n_obs)
     else:
         raise ValueError(f"Unsupported native filter kind: {kind!r}.")
+    return _size(add_arena(input_size, scratch))
+
+
+def smoother_arena_size(
+    str kind,
+    int64_t n_state,
+    int64_t n_ctrl,
+    int64_t n_exog,
+    int64_t n_obs,
+    int64_t T,
+    int64_t n_par,
+):
+    """Return the complete packed-input and smoother-work requirement."""
+    cdef arena_size scratch
+    cdef arena_size input_size
+    if kind == "linear":
+        input_size = sdsge_smoother_linear_input_arena_size(n_state + n_ctrl, n_obs,
+                                                            n_exog, T)
+        scratch = kf_smooth_arena_size(n_state + n_ctrl, n_obs, n_exog, T)
+    elif kind == "extended":
+        input_size = sdsge_smoother_extended_input_arena_size(n_state + n_ctrl, n_obs,
+                                                              n_exog, T, n_par)
+        scratch = ekf_smooth_arena_size(n_state + n_ctrl, n_obs, n_exog, T)
+    elif kind == "unscented":
+        input_size = sdsge_smoother_unscented_input_arena_size(n_state, n_ctrl, n_exog,
+                                                               n_obs, T, n_par)
+        scratch = ukf_smooth_arena_size(n_state, n_ctrl, n_exog, n_obs, T)
+    else:
+        raise ValueError(f"Unsupported native smoother kind: {kind!r}.")
     return _size(add_arena(input_size, scratch))
 
 
