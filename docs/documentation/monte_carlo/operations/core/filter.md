@@ -2,7 +2,7 @@
 tags:
     - doc
 ---
-# Filtering
+# Filter
 
 ```python
 filter_step(
@@ -49,5 +49,5 @@ __Downstream Fields:__
 | `x_pred`, `x_filt` | Predicted and filtered model variable paths. |
 | `y_pred`, `y_filt` | Predicted and filtered observable paths. |
 | `innov`, `std_innov` | Raw and standardized innovations. |
-| `eps_hat` | Shock estimates for modes that support `return_shocks=True`. |
+| `eps_hat` | Shock estimates. |
 | `x1_pred`, `x2_pred`, `x1_filt`, `x2_filt` | Unscented first and second state blocks. |

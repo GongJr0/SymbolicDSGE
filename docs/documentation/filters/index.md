@@ -10,7 +10,7 @@ from SymbolicDSGE import LinearKalman, ExtendedKalman, UnscentedKalman
 
 Filters are a collection of algorithms used for state-path estimation in DSGE (and other state-space) models. They are used to recover the model's latent state variables conditional on the provided data and the specific method of filtration. Alongside their use as standalone estimators, filters are also integral to parameter estimation routines where they are used as the likelihood engine for a model's parameters.
 
-In SymbolicDSGE, filters feed parameter estimation via [`Estimator`](../Estimator.md) and are available for use in [`Monte Carlo`](../monte_carlo/index.md) pipelines via [`filter_step`](../monte_carlo/operations/core/filter.md). Each `Filter` class also acts as a standalone filter working on `SolvedModel` instances:
+In SymbolicDSGE, filters feed parameter estimation via [`Estimator`](../Estimator.md) and are available for use in [`Monte Carlo`](../monte_carlo/index.md) pipelines via [`filter_step`](../monte_carlo/operations/core/filter.md)/[`smoother_step`](../monte_carlo/operations/core/smoother.md). Each `Filter` class also acts as a standalone filter working on `SolvedModel` instances:
 
 ```python
 result = LinearKalman(joseph_cov=True).filter(solved, y, observables=["Infl", "Rate"])
