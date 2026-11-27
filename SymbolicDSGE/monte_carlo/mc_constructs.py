@@ -35,14 +35,12 @@ CompiledColumnSelector = Sequence[int] | slice | None
 
 
 class OpType(StrEnum):
-    """Operation role a pipeline step fills.
-
-    Determines when a step runs and what contract it is held to.
-    """
+    """Operation role a pipeline step fills."""
 
     DATAGEN = "datagen"
     TRANSFORM = "transform"
     FILTER = "filter"
+    SMOOTHER = "smoother"
     TEST = "test"
     REGRESSION = "regression"
 
