@@ -69,6 +69,7 @@ typedef struct {
   int joseph_cov;
   f64 jitter;
 } sdsge_mc_filter_linear_step_ctx;
+typedef sdsge_mc_filter_linear_step_ctx sdsge_mc_smoother_linear_step_ctx;
 
 typedef struct {
   meas_fn measurement;
@@ -82,6 +83,7 @@ typedef struct {
   int joseph_cov;
   f64 jitter;
 } sdsge_mc_filter_extended_step_ctx;
+typedef sdsge_mc_filter_extended_step_ctx sdsge_mc_smoother_extended_step_ctx;
 
 typedef struct {
   meas_fn measurement;
@@ -97,6 +99,7 @@ typedef struct {
   int symmetrize;
   f64 jitter;
 } sdsge_mc_filter_unscented_step_ctx;
+typedef sdsge_mc_filter_unscented_step_ctx sdsge_mc_smoother_unscented_step_ctx;
 
 /* Generic-runner adapters. They preserve the canonical arena layouts of the
  * direct kernels below and write one status code when ``int_out`` is non-NULL.
@@ -145,8 +148,30 @@ int sdsge_mc_filter_unscented_runner(i64 rep_idx,
                                      i64 *SDSGE_RESTRICT int_out,
                                      const void *ctx);
 
+int sdsge_mc_smoother_linear_runner(const i64 rep_idx,
+                                    f64 *SDSGE_RESTRICT float_in_work,
+                                    f64 *SDSGE_RESTRICT float_out,
+                                    i64 *SDSGE_RESTRICT int_work,
+                                    i64 *SDSGE_RESTRICT int_out,
+                                    const void *ctx_ptr);
+
+int sdsge_mc_smoother_extended_runner(const i64 rep_idx,
+                                      f64 *SDSGE_RESTRICT float_in_work,
+                                      f64 *SDSGE_RESTRICT float_out,
+                                      i64 *SDSGE_RESTRICT int_work,
+                                      i64 *SDSGE_RESTRICT int_out,
+                                      const void *ctx_ptr);
+
+int sdsge_mc_smoother_unscented_runner(const i64 rep_idx,
+                                       f64 *SDSGE_RESTRICT float_in_work,
+                                       f64 *SDSGE_RESTRICT float_out,
+                                       i64 *SDSGE_RESTRICT int_work,
+                                       i64 *SDSGE_RESTRICT int_out,
+                                       const void *ctx_ptr);
+
 /* Payload materialization. ``input_batched`` selects input[rep_idx] from a
- * leading replication axis; otherwise the same input span is copied each time.
+ * leading replication axis; otherwise the same input span is copied each
+ * time.
  */
 void sdsge_add_payload_step(const f64 *SDSGE_RESTRICT input, i64 n,
                             int input_batched, i64 rep_idx,
@@ -196,5 +221,25 @@ int sdsge_filter_unscented_step(const f64 *SDSGE_RESTRICT input_arena,
                                 i64 n_obs, i64 n_par, f64 alpha, f64 beta,
                                 f64 kappa, int symmetrize, f64 jitter,
                                 f64 *SDSGE_RESTRICT output_arena);
+
+int sdsge_smoother_linear_step(const f64 *SDSGE_RESTRICT input_arena,
+                               f64 *SDSGE_RESTRICT scratch_arena, const i64 T,
+                               const i64 n, const i64 m, const i64 k,
+                               const int symmetrize, const int joseph_cov,
+                               const f64 jitter,
+                               f64 *SDSGE_RESTRICT output_arena);
+
+int sdsge_smoother_extended_step(
+    const f64 *SDSGE_RESTRICT input_arena, f64 *SDSGE_RESTRICT scratch_arena,
+    const meas_fn meas, const meas_fn jac, const i64 T, const i64 n,
+    const i64 m, const i64 k, const i64 n_par, const int symmetrize,
+    const int joseph_cov, const f64 jitter, f64 *SDSGE_RESTRICT output_arena);
+
+int sdsge_smoother_unscented_step(
+    const f64 *SDSGE_RESTRICT input_arena, f64 *SDSGE_RESTRICT scratch_arena,
+    const meas_fn meas, const i64 T, const i64 n_state, const i64 n_ctrl,
+    const i64 n_exog, const i64 n_obs, const i64 n_par, const f64 alpha,
+    const f64 beta, const f64 kappa, const int symmetrize, const f64 jitter,
+    f64 *SDSGE_RESTRICT output_arena);
 
 #endif /* SDSGE_MC_CORE_STEPS */

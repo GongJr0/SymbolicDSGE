@@ -163,6 +163,64 @@ int sdsge_mc_filter_unscented_runner(const i64 rep_idx,
   return sdsge_mc_finish_status(status, int_out);
 }
 
+int sdsge_mc_smoother_linear_runner(const i64 rep_idx,
+                                    f64 *SDSGE_RESTRICT float_in_work,
+                                    f64 *SDSGE_RESTRICT float_out,
+                                    i64 *SDSGE_RESTRICT int_work,
+                                    i64 *SDSGE_RESTRICT int_out,
+                                    const void *ctx_ptr) {
+  const sdsge_mc_smoother_linear_step_ctx *ctx = ctx_ptr;
+  const i64 input_size =
+      sdsge_smoother_linear_input_arena_size(ctx->n, ctx->m, ctx->k, ctx->T)
+          .n_float;
+  (void)rep_idx;
+  (void)int_work;
+  const int status = sdsge_smoother_linear_step(
+      float_in_work, float_in_work + input_size, ctx->T, ctx->n, ctx->m, ctx->k,
+      ctx->symmetrize, ctx->joseph_cov, ctx->jitter, float_out);
+  return sdsge_mc_finish_status(status, int_out);
+}
+
+int sdsge_mc_smoother_extended_runner(const i64 rep_idx,
+                                      f64 *SDSGE_RESTRICT float_in_work,
+                                      f64 *SDSGE_RESTRICT float_out,
+                                      i64 *SDSGE_RESTRICT int_work,
+                                      i64 *SDSGE_RESTRICT int_out,
+                                      const void *ctx_ptr) {
+  const sdsge_mc_smoother_extended_step_ctx *ctx = ctx_ptr;
+  const i64 input_size = sdsge_smoother_extended_input_arena_size(
+                             ctx->n, ctx->m, ctx->k, ctx->T, ctx->n_par)
+                             .n_float;
+  (void)rep_idx;
+  (void)int_work;
+  const int status = sdsge_smoother_extended_step(
+      float_in_work, float_in_work + input_size, ctx->measurement,
+      ctx->jacobian, ctx->T, ctx->n, ctx->m, ctx->k, ctx->n_par,
+      ctx->symmetrize, ctx->joseph_cov, ctx->jitter, float_out);
+  return sdsge_mc_finish_status(status, int_out);
+}
+
+int sdsge_mc_smoother_unscented_runner(const i64 rep_idx,
+                                       f64 *SDSGE_RESTRICT float_in_work,
+                                       f64 *SDSGE_RESTRICT float_out,
+                                       i64 *SDSGE_RESTRICT int_work,
+                                       i64 *SDSGE_RESTRICT int_out,
+                                       const void *ctx_ptr) {
+  const sdsge_mc_filter_unscented_step_ctx *ctx = ctx_ptr;
+  const i64 input_size = sdsge_smoother_unscented_input_arena_size(
+                             ctx->n_state, ctx->n_ctrl, ctx->n_exog, ctx->n_obs,
+                             ctx->T, ctx->n_par)
+                             .n_float;
+  (void)rep_idx;
+  (void)int_work;
+  const int status = sdsge_smoother_unscented_step(
+      float_in_work, float_in_work + input_size, ctx->measurement, ctx->T,
+      ctx->n_state, ctx->n_ctrl, ctx->n_exog, ctx->n_obs, ctx->n_par,
+      ctx->alpha, ctx->beta, ctx->kappa, ctx->symmetrize, ctx->jitter,
+      float_out);
+  return sdsge_mc_finish_status(status, int_out);
+}
+
 void sdsge_add_payload_step(const f64 *SDSGE_RESTRICT input, const i64 n,
                             const int input_batched, const i64 rep_idx,
                             f64 *SDSGE_RESTRICT output) {
@@ -276,6 +334,106 @@ void sdsge_simulate_order2_step(f64 *SDSGE_RESTRICT arena,
   }
 }
 
+static void fill_kf_inputs(kf_inputs *in, const f64 *SDSGE_RESTRICT input_arena,
+                           const arena_offset *off) {
+  in->A = input_arena;
+  in->B = input_arena + off->foffset[0];
+  in->C = input_arena + off->foffset[1];
+  in->d = input_arena + off->foffset[2];
+  in->Q = input_arena + off->foffset[3];
+  in->R = input_arena + off->foffset[4];
+  in->steady_state = input_arena + off->foffset[5];
+  in->y = input_arena + off->foffset[6];
+  in->x0 = input_arena + off->foffset[7];
+  in->P0 = input_arena + off->foffset[8];
+}
+
+static void fill_kf_outputs(kf_outputs *out, f64 *SDSGE_RESTRICT output_arena,
+                            const arena_offset *off) {
+  out->x_pred = output_arena;
+  out->x_filt = output_arena + off->foffset[0];
+  out->P_pred = output_arena + off->foffset[1];
+  out->P_filt = output_arena + off->foffset[2];
+  out->y_pred = output_arena + off->foffset[3];
+  out->y_filt = output_arena + off->foffset[4];
+  out->innov = output_arena + off->foffset[5];
+  out->std_innov = output_arena + off->foffset[6];
+  out->S = output_arena + off->foffset[7];
+  out->eps_hat = output_arena + off->foffset[8];
+  out->loglik = output_arena + off->foffset[9];
+}
+
+static void fill_ekf_inputs(ekf_inputs *in,
+                            const f64 *SDSGE_RESTRICT input_arena,
+                            const arena_offset *off) {
+  in->A = input_arena;
+  in->B = input_arena + off->foffset[0];
+  in->calib_params = input_arena + off->foffset[1];
+  in->Q = input_arena + off->foffset[2];
+  in->R = input_arena + off->foffset[3];
+  in->steady_state = input_arena + off->foffset[4];
+  in->y = input_arena + off->foffset[5];
+  in->x0 = input_arena + off->foffset[6];
+  in->P0 = input_arena + off->foffset[7];
+}
+
+static void fill_ekf_outputs(ekf_outputs *out, f64 *SDSGE_RESTRICT output_arena,
+                             const arena_offset *off) {
+  out->x_pred = output_arena;
+  out->x_filt = output_arena + off->foffset[0];
+  out->P_pred = output_arena + off->foffset[1];
+  out->P_filt = output_arena + off->foffset[2];
+  out->y_pred = output_arena + off->foffset[3];
+  out->y_filt = output_arena + off->foffset[4];
+  out->innov = output_arena + off->foffset[5];
+  out->std_innov = output_arena + off->foffset[6];
+  out->S = output_arena + off->foffset[7];
+  out->eps_hat = output_arena + off->foffset[8];
+  out->loglik = output_arena + off->foffset[9];
+}
+
+static void fill_ukf_inputs(ukf_inputs *in,
+                            const f64 *SDSGE_RESTRICT input_arena,
+                            const arena_offset *off) {
+  in->hx = input_arena;
+  in->gx = input_arena + off->foffset[0];
+  in->bu = input_arena + off->foffset[1];
+  in->hxx = input_arena + off->foffset[2];
+  in->gxx = input_arena + off->foffset[3];
+  in->hxu = input_arena + off->foffset[4];
+  in->gxu = input_arena + off->foffset[5];
+  in->huu = input_arena + off->foffset[6];
+  in->guu = input_arena + off->foffset[7];
+  in->hss = input_arena + off->foffset[8];
+  in->gss = input_arena + off->foffset[9];
+  in->steady_state = input_arena + off->foffset[10];
+  in->params = input_arena + off->foffset[11];
+  in->Q = input_arena + off->foffset[12];
+  in->R = input_arena + off->foffset[13];
+  in->obs = input_arena + off->foffset[14];
+  in->z0 = input_arena + off->foffset[15];
+  in->P0 = input_arena + off->foffset[16];
+}
+
+static void fill_ukf_outputs(ukf_outputs *out, f64 *SDSGE_RESTRICT output_arena,
+                             const arena_offset *off) {
+  out->x_pred = output_arena;
+  out->x_filt = output_arena + off->foffset[0];
+  out->P_pred = output_arena + off->foffset[1];
+  out->P_filt = output_arena + off->foffset[2];
+  out->y_pred = output_arena + off->foffset[3];
+  out->y_filt = output_arena + off->foffset[4];
+  out->innov = output_arena + off->foffset[5];
+  out->std_innov = output_arena + off->foffset[6];
+  out->S = output_arena + off->foffset[7];
+  out->eps_hat = output_arena + off->foffset[8];
+  out->loglik = output_arena + off->foffset[9];
+  out->x1_pred = output_arena + off->foffset[10];
+  out->x2_pred = output_arena + off->foffset[11];
+  out->x1_filt = output_arena + off->foffset[12];
+  out->x2_filt = output_arena + off->foffset[13];
+}
+
 int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                              f64 *SDSGE_RESTRICT scratch_arena, const i64 T,
                              const i64 n, const i64 m, const i64 k,
@@ -284,49 +442,21 @@ int sdsge_filter_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                              f64 *SDSGE_RESTRICT output_arena) {
   const arena_offset in_off =
       sdsge_filter_linear_input_arena_offset(n, m, k, T);
-  const f64 *A = input_arena;
-  const f64 *B = input_arena + in_off.foffset[0];
-  const f64 *C = input_arena + in_off.foffset[1];
-  const f64 *d = input_arena + in_off.foffset[2];
-  const f64 *Q = input_arena + in_off.foffset[3];
-  const f64 *R = input_arena + in_off.foffset[4];
-  const f64 *steady_state = input_arena + in_off.foffset[5];
-  const f64 *y = input_arena + in_off.foffset[6];
-  const f64 *x0 = input_arena + in_off.foffset[7];
-  const f64 *P0 = input_arena + in_off.foffset[8];
+  kf_inputs in = {.n = n,
+                  .m = m,
+                  .k = k,
+                  .T = T,
+                  .symmetrize = symmetrize,
+                  .joseph_cov = joseph_cov,
+                  .jitter = jitter,
+                  .store_history = 1};
+  fill_kf_inputs(&in, input_arena, &in_off);
 
   const arena_offset out_off =
       sdsge_filter_linear_output_arena_offset(n, m, k, T);
-  kf_outputs out = {.x_pred = output_arena};
-  out.x_filt = output_arena + out_off.foffset[0];
-  out.P_pred = output_arena + out_off.foffset[1];
-  out.P_filt = output_arena + out_off.foffset[2];
-  out.y_pred = output_arena + out_off.foffset[3];
-  out.y_filt = output_arena + out_off.foffset[4];
-  out.innov = output_arena + out_off.foffset[5];
-  out.std_innov = output_arena + out_off.foffset[6];
-  out.S = output_arena + out_off.foffset[7];
-  out.eps_hat = output_arena + out_off.foffset[8];
-  out.loglik = output_arena + out_off.foffset[9];
+  kf_outputs out;
+  fill_kf_outputs(&out, output_arena, &out_off);
 
-  const kf_inputs in = {.n = n,
-                        .m = m,
-                        .k = k,
-                        .T = T,
-                        .A = A,
-                        .B = B,
-                        .C = C,
-                        .d = d,
-                        .Q = Q,
-                        .R = R,
-                        .y = y,
-                        .x0 = x0,
-                        .P0 = P0,
-                        .steady_state = steady_state,
-                        .symmetrize = symmetrize,
-                        .joseph_cov = joseph_cov,
-                        .jitter = jitter,
-                        .store_history = 1};
   return kf_forward(&in, scratch_arena, &out);
 }
 
@@ -337,50 +467,24 @@ int sdsge_filter_extended_step(
     const int joseph_cov, const f64 jitter, f64 *SDSGE_RESTRICT output_arena) {
   const arena_offset in_off =
       sdsge_filter_extended_input_arena_offset(n, m, k, T, n_par);
-  const f64 *A = input_arena;
-  const f64 *B = input_arena + in_off.foffset[0];
-  const f64 *params = input_arena + in_off.foffset[1];
-  const f64 *Q = input_arena + in_off.foffset[2];
-  const f64 *R = input_arena + in_off.foffset[3];
-  const f64 *steady_state = input_arena + in_off.foffset[4];
-  const f64 *y = input_arena + in_off.foffset[5];
-  const f64 *x0 = input_arena + in_off.foffset[6];
-  const f64 *P0 = input_arena + in_off.foffset[7];
+  ekf_inputs in = {.meas = meas,
+                   .jac = jac,
+                   .T = T,
+                   .n = n,
+                   .m = m,
+                   .k = k,
+                   .n_par = n_par,
+                   .jitter = jitter,
+                   .symmetrize = symmetrize,
+                   .joseph_cov = joseph_cov,
+                   .store_history = 1};
+  fill_ekf_inputs(&in, input_arena, &in_off);
 
   const arena_offset out_off =
       sdsge_filter_extended_output_arena_offset(n, m, k, T);
-  ekf_outputs out = {.x_pred = output_arena};
-  out.x_filt = output_arena + out_off.foffset[0];
-  out.P_pred = output_arena + out_off.foffset[1];
-  out.P_filt = output_arena + out_off.foffset[2];
-  out.y_pred = output_arena + out_off.foffset[3];
-  out.y_filt = output_arena + out_off.foffset[4];
-  out.innov = output_arena + out_off.foffset[5];
-  out.std_innov = output_arena + out_off.foffset[6];
-  out.S = output_arena + out_off.foffset[7];
-  out.eps_hat = output_arena + out_off.foffset[8];
-  out.loglik = output_arena + out_off.foffset[9];
+  ekf_outputs out;
+  fill_ekf_outputs(&out, output_arena, &out_off);
 
-  const ekf_inputs in = {.meas = meas,
-                         .jac = jac,
-                         .A = A,
-                         .B = B,
-                         .calib_params = params,
-                         .Q = Q,
-                         .R = R,
-                         .y = y,
-                         .x0 = x0,
-                         .P0 = P0,
-                         .steady_state = steady_state,
-                         .T = T,
-                         .n = n,
-                         .m = m,
-                         .k = k,
-                         .n_par = n_par,
-                         .jitter = jitter,
-                         .symmetrize = symmetrize,
-                         .joseph_cov = joseph_cov,
-                         .store_history = 1};
   return ekf_forward(&in, scratch_arena, &out);
 }
 
@@ -392,74 +496,26 @@ int sdsge_filter_unscented_step(
     f64 *SDSGE_RESTRICT output_arena) {
   const arena_offset in_off = sdsge_filter_unscented_input_arena_offset(
       n_state, n_ctrl, n_exog, n_obs, T, n_par);
-  const f64 *hx = input_arena;
-  const f64 *gx = input_arena + in_off.foffset[0];
-  const f64 *bu = input_arena + in_off.foffset[1];
-  const f64 *hxx = input_arena + in_off.foffset[2];
-  const f64 *gxx = input_arena + in_off.foffset[3];
-  const f64 *hxu = input_arena + in_off.foffset[4];
-  const f64 *gxu = input_arena + in_off.foffset[5];
-  const f64 *huu = input_arena + in_off.foffset[6];
-  const f64 *guu = input_arena + in_off.foffset[7];
-  const f64 *hss = input_arena + in_off.foffset[8];
-  const f64 *gss = input_arena + in_off.foffset[9];
-  const f64 *steady_state = input_arena + in_off.foffset[10];
-  const f64 *params = input_arena + in_off.foffset[11];
-  const f64 *Q = input_arena + in_off.foffset[12];
-  const f64 *R = input_arena + in_off.foffset[13];
-  const f64 *obs = input_arena + in_off.foffset[14];
-  const f64 *z0 = input_arena + in_off.foffset[15];
-  const f64 *P0 = input_arena + in_off.foffset[16];
+  ukf_inputs in = {.meas = meas,
+                   .T = T,
+                   .n_state = n_state,
+                   .n_ctrl = n_ctrl,
+                   .n_exog = n_exog,
+                   .n_obs = n_obs,
+                   .n_params = n_par,
+                   .alpha = alpha,
+                   .beta = beta,
+                   .kappa = kappa,
+                   .jitter = jitter,
+                   .symmetrize = symmetrize,
+                   .store_history = 1};
+  fill_ukf_inputs(&in, input_arena, &in_off);
 
   const arena_offset out_off = sdsge_filter_unscented_output_arena_offset(
       n_state, n_ctrl, n_exog, n_obs, T);
-  ukf_outputs out = {.x_pred = output_arena};
-  out.x_filt = output_arena + out_off.foffset[0];
-  out.P_pred = output_arena + out_off.foffset[1];
-  out.P_filt = output_arena + out_off.foffset[2];
-  out.y_pred = output_arena + out_off.foffset[3];
-  out.y_filt = output_arena + out_off.foffset[4];
-  out.innov = output_arena + out_off.foffset[5];
-  out.std_innov = output_arena + out_off.foffset[6];
-  out.S = output_arena + out_off.foffset[7];
-  out.eps_hat = output_arena + out_off.foffset[8];
-  out.loglik = output_arena + out_off.foffset[9];
-  out.x1_pred = output_arena + out_off.foffset[10];
-  out.x2_pred = output_arena + out_off.foffset[11];
-  out.x1_filt = output_arena + out_off.foffset[12];
-  out.x2_filt = output_arena + out_off.foffset[13];
+  ukf_outputs out;
+  fill_ukf_outputs(&out, output_arena, &out_off);
 
-  const ukf_inputs in = {.meas = meas,
-                         .hx = hx,
-                         .gx = gx,
-                         .bu = bu,
-                         .hxx = hxx,
-                         .gxx = gxx,
-                         .hxu = hxu,
-                         .gxu = gxu,
-                         .huu = huu,
-                         .guu = guu,
-                         .hss = hss,
-                         .gss = gss,
-                         .steady_state = steady_state,
-                         .params = params,
-                         .Q = Q,
-                         .R = R,
-                         .obs = obs,
-                         .z0 = z0,
-                         .P0 = P0,
-                         .T = T,
-                         .n_state = n_state,
-                         .n_ctrl = n_ctrl,
-                         .n_exog = n_exog,
-                         .n_obs = n_obs,
-                         .n_params = n_par,
-                         .alpha = alpha,
-                         .beta = beta,
-                         .kappa = kappa,
-                         .jitter = jitter,
-                         .symmetrize = symmetrize,
-                         .store_history = 1};
   return ukf_forward(&in, scratch_arena, &out);
 }
 
@@ -469,7 +525,28 @@ int sdsge_smoother_linear_step(const f64 *SDSGE_RESTRICT input_arena,
                                const int symmetrize, const int joseph_cov,
                                const f64 jitter,
                                f64 *SDSGE_RESTRICT output_arena) {
-  return 0;
+  const arena_offset in_off =
+      sdsge_smoother_linear_input_arena_offset(n, m, k, T);
+  kf_inputs in = {.n = n,
+                  .m = m,
+                  .k = k,
+                  .T = T,
+                  .symmetrize = symmetrize,
+                  .joseph_cov = joseph_cov,
+                  .jitter = jitter,
+                  .store_history = 1};
+  fill_kf_inputs(&in, input_arena, &in_off);
+
+  const arena_offset out_off =
+      sdsge_smoother_linear_output_arena_offset(n, m, k, T);
+  kf_outputs fwd_out;
+  fill_kf_outputs(&fwd_out, output_arena, &out_off);
+
+  kf_smooth_outputs out = {.fwd_out = &fwd_out,
+                           .x_smooth = output_arena + out_off.foffset[10],
+                           .P_smooth = output_arena + out_off.foffset[11],
+                           .eps_smooth = output_arena + out_off.foffset[12]};
+  return kf_smooth(&in, scratch_arena, &out);
 }
 
 int sdsge_smoother_extended_step(
@@ -477,7 +554,31 @@ int sdsge_smoother_extended_step(
     const meas_fn meas, const meas_fn jac, const i64 T, const i64 n,
     const i64 m, const i64 k, const i64 n_par, const int symmetrize,
     const int joseph_cov, const f64 jitter, f64 *SDSGE_RESTRICT output_arena) {
-  return 0;
+  const arena_offset in_off =
+      sdsge_smoother_extended_input_arena_offset(n, m, k, T, n_par);
+  ekf_inputs in = {.meas = meas,
+                   .jac = jac,
+                   .T = T,
+                   .n = n,
+                   .m = m,
+                   .k = k,
+                   .n_par = n_par,
+                   .jitter = jitter,
+                   .symmetrize = symmetrize,
+                   .joseph_cov = joseph_cov,
+                   .store_history = 1};
+  fill_ekf_inputs(&in, input_arena, &in_off);
+
+  const arena_offset out_off =
+      sdsge_smoother_extended_output_arena_offset(n, m, k, T);
+  ekf_outputs fwd_out;
+  fill_ekf_outputs(&fwd_out, output_arena, &out_off);
+
+  ekf_smooth_outputs out = {.fwd_out = &fwd_out,
+                            .x_smooth = output_arena + out_off.foffset[10],
+                            .P_smooth = output_arena + out_off.foffset[11],
+                            .eps_smooth = output_arena + out_off.foffset[12]};
+  return ekf_smooth(&in, scratch_arena, &out);
 }
 
 int sdsge_smoother_unscented_step(
@@ -486,5 +587,33 @@ int sdsge_smoother_unscented_step(
     const i64 n_exog, const i64 n_obs, const i64 n_par, const f64 alpha,
     const f64 beta, const f64 kappa, const int symmetrize, const f64 jitter,
     f64 *SDSGE_RESTRICT output_arena) {
-  return 0;
+  const arena_offset in_off = sdsge_smoother_unscented_input_arena_offset(
+      n_state, n_ctrl, n_exog, n_obs, T, n_par);
+  ukf_inputs in = {.meas = meas,
+                   .T = T,
+                   .n_state = n_state,
+                   .n_ctrl = n_ctrl,
+                   .n_exog = n_exog,
+                   .n_obs = n_obs,
+                   .n_params = n_par,
+                   .alpha = alpha,
+                   .beta = beta,
+                   .kappa = kappa,
+                   .jitter = jitter,
+                   .symmetrize = symmetrize,
+                   .store_history = 1};
+  fill_ukf_inputs(&in, input_arena, &in_off);
+
+  const arena_offset out_off = sdsge_smoother_unscented_output_arena_offset(
+      n_state, n_ctrl, n_exog, n_obs, T);
+  ukf_outputs fwd_out;
+  fill_ukf_outputs(&fwd_out, output_arena, &out_off);
+
+  ukf_smooth_outputs out = {.fwd_out = &fwd_out,
+                            .x1_smooth = output_arena + out_off.foffset[14],
+                            .x2_smooth = output_arena + out_off.foffset[15],
+                            .x_smooth = output_arena + out_off.foffset[16],
+                            .P_smooth = output_arena + out_off.foffset[17],
+                            .eps_smooth = output_arena + out_off.foffset[18]};
+  return ukf_smooth(&in, scratch_arena, &out);
 }
