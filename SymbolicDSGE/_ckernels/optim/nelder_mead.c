@@ -86,9 +86,6 @@ i64 sdsge_neldermead(sdsge_objective_fn obj, void *obj_ctx, i64 n,
   const f64 rho = 1.0, chi = 2.0, psi = 0.5, sigma = 0.5;
   const f64 nonzdelt = 0.05, zdelt = 0.00025;
 
-  /* One workspace allocation; the eval loop allocates nothing. Layout:
-   * sim[(N+1)*N] | fsim[N+1] | xbar[N] | xr[N] | xt[N] | lb[N] | ub[N] |
-   * tmprow[N]. */
   const size_t nd = (size_t)N;
 
   f64 *sim = work;

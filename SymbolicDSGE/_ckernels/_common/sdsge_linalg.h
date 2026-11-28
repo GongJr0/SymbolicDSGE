@@ -106,33 +106,13 @@ void sdsge_sort_f64(f64 *arr, i64 n);
  */
 f64 sdsge_median_f64(f64 *arr, i64 n);
 
-/* LU Types and Functions */
-typedef struct {
-  f64 *lu;
-  i64 *piv;
-  i64 n;
-  i64 err;
-} f64_lu;
-
+/* LU Functions */
 i64 sdsge_lu_factor_inplace(f64 *SDSGE_RESTRICT A, i64 *SDSGE_RESTRICT pivot,
                             const i64 n);
-
-f64_lu sdsge_lu_factor(const f64 *SDSGE_RESTRICT A, const i64 n);
-
-void sdsge_lu_free(f64_lu *lu);
 
 void sdsge_lu_solve(const f64 *SDSGE_RESTRICT LU, const i64 *SDSGE_RESTRICT piv,
                     const f64 *SDSGE_RESTRICT B, f64 *SDSGE_RESTRICT X,
                     const i64 n, const i64 m);
-
-/* Solve A(n,n) X = B(n,m) via LU with partial pivoting (X may not alias B).
- * Returns SDSGE_LU_SUCCESS, SDSGE_LU_SINGULAR, or SDSGE_LU_ALLOC_FAIL. */
-i64 sdsge_solve(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
-                const i64 n, const i64 m, f64 *SDSGE_RESTRICT X);
-
-/* Ainv(n,n) := A(n,n)^-1 via LU. Same return codes as sdsge_solve. */
-i64 sdsge_inv(const f64 *SDSGE_RESTRICT A, const i64 n,
-              f64 *SDSGE_RESTRICT Ainv);
 
 /* Status codes are SDSGE_LU_* and SDSGE_NOT_PD from sdsge_common.h, shared with
  * the complex factorization. */

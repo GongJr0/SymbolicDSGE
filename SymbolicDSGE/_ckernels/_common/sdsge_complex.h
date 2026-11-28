@@ -10,13 +10,6 @@ typedef struct {
   f64 im;
 } c128;
 
-typedef struct {
-  c128 *lu;
-  i64 *piv;
-  i64 n;
-  i64 err;
-} c128_lu;
-
 /* Arithmetic. Defined `static inline` in the header so every translation unit
  * inlines them; math.h (fabs/hypot/log1p) comes in via sdsge_common.h. */
 
@@ -73,24 +66,16 @@ void c128_matmul(const c128 *SDSGE_RESTRICT A, const c128 *SDSGE_RESTRICT B,
                  const i64 m, const i64 n, const i64 p,
                  c128 *SDSGE_RESTRICT out);
 
-c128_lu c128_lu_factor(const c128 *A, const i64 n);
 i64 c128_lu_factor_inplace(c128 *SDSGE_RESTRICT A, i64 *SDSGE_RESTRICT pivot,
                            const i64 n);
-void c128_lu_free(c128_lu *lu);
 
 /* Solve (L U) X = B for X(n,m) from a factorization (LU(n,n),
- * piv(n)) produced by c128_lu_factor[_inplace]. B(n,m) is the
+ * piv(n)) produced by c128_lu_factor_inplace. B(n,m) is the
  * RHS; X(n,m) is the output and must not alias B/LU. m == 1 is a
  * vector solve; B == identity gives the inverse. */
 void c128_lu_solve(const c128 *SDSGE_RESTRICT LU, const i64 *SDSGE_RESTRICT piv,
                    const c128 *SDSGE_RESTRICT B, c128 *SDSGE_RESTRICT X,
                    const i64 n, const i64 m);
-
-i64 c128_solve(const c128 *SDSGE_RESTRICT A, const c128 *SDSGE_RESTRICT B,
-               const i64 n, const i64 m, c128 *SDSGE_RESTRICT X);
-
-i64 c128_inv(const c128 *SDSGE_RESTRICT A, const i64 n,
-             c128 *SDSGE_RESTRICT Ainv);
 
 /* Second-Order Perturbation Arithmetic */
 static inline c128 c128_real_scale(const c128 a, const f64 s) {

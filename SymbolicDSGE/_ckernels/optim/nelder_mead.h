@@ -2,7 +2,7 @@
 #define SDSGE_OPTIM_NELDER_MEAD_H
 
 #include "../_common/sdsge_common.h" /* i64, f64, SDSGE_RESTRICT */
-#include "optim.h" /* sdsge_objective_fn, SDSGE_OPTIM_EALLOC, _EINVAL */
+#include "optim.h"                   /* sdsge_objective_fn, _EINVAL */
 
 /* Native Nelder-Mead simplex driver (issue #335): a faithful transpilation of
  * scipy's BSD-3 `_minimize_neldermead` (scipy/optimize/_optimize.py). Gradient

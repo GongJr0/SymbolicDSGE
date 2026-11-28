@@ -57,8 +57,8 @@ typedef double f64;
 /* LU status, shared by the real (sdsge_linalg.h) and complex (sdsge_complex.h)
  * factorizations: one failure vocabulary for one algorithm. */
 #define SDSGE_LU_SUCCESS 0
-#define SDSGE_LU_ALLOC_FAIL -102
 #define SDSGE_LU_SINGULAR -103
+#define SDSGE_LU_BADARG -104
 
 /* Inline min/max for i64 and f64. */
 static inline i64 min_i64(i64 a, i64 b) { return (a < b) ? a : b; }
