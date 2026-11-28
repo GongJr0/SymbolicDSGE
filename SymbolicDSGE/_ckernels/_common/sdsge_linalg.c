@@ -34,8 +34,8 @@ void sdsge_matmul(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
 
 void sdsge_matmul_plus_c(const f64 *SDSGE_RESTRICT A,
                          const f64 *SDSGE_RESTRICT B,
-                         const f64 *SDSGE_RESTRICT C,
-                         f64 *SDSGE_RESTRICT out, i64 n, i64 p, i64 m) {
+                         const f64 *SDSGE_RESTRICT C, f64 *SDSGE_RESTRICT out,
+                         i64 n, i64 p, i64 m) {
   for (i64 i = 0; i < n; ++i) {
     for (i64 j = 0; j < m; ++j) {
       f64 s = 0.0;
@@ -367,7 +367,7 @@ f64 sdsge_median_f64(f64 *SDSGE_RESTRICT arr, i64 n) {
 i64 sdsge_lu_factor_inplace(f64 *SDSGE_RESTRICT A, i64 *SDSGE_RESTRICT pivot,
                             const i64 n) {
   if (!A || !pivot || n <= 0) {
-    return SDSGE_LU_ALLOC_FAIL;
+    return SDSGE_LU_BADARG;
   }
 
   for (i64 k = 0; k < n; ++k) {
@@ -408,46 +408,6 @@ i64 sdsge_lu_factor_inplace(f64 *SDSGE_RESTRICT A, i64 *SDSGE_RESTRICT pivot,
   return SDSGE_LU_SUCCESS;
 }
 
-f64_lu sdsge_lu_factor(const f64 *SDSGE_RESTRICT A, const i64 n) {
-  f64_lu result;
-  result.lu = NULL;
-  result.piv = NULL;
-  result.n = n;
-  result.err = SDSGE_LU_SUCCESS;
-
-  if (!A || n <= 0) {
-    result.err = SDSGE_LU_ALLOC_FAIL;
-    return result;
-  }
-
-  result.lu = (f64 *)malloc(sizeof(f64) * n * n);
-  result.piv = (i64 *)malloc(sizeof(i64) * n);
-  if (!result.lu || !result.piv) {
-    result.err = SDSGE_LU_ALLOC_FAIL;
-    free(result.lu);
-    free(result.piv);
-    result.lu = NULL;
-    result.piv = NULL;
-    return result;
-  }
-
-  memcpy(result.lu, A, sizeof(f64) * n * n);
-  result.err = sdsge_lu_factor_inplace(result.lu, result.piv, n);
-  return result;
-}
-
-void sdsge_lu_free(f64_lu *lu) {
-  if (!lu) {
-    return;
-  }
-  free(lu->lu);
-  free(lu->piv);
-  lu->lu = NULL;
-  lu->piv = NULL;
-  lu->n = 0;
-  lu->err = 0;
-}
-
 void sdsge_lu_solve(const f64 *SDSGE_RESTRICT LU, const i64 *SDSGE_RESTRICT piv,
                     const f64 *SDSGE_RESTRICT B, f64 *SDSGE_RESTRICT X,
                     const i64 n, const i64 m) {
@@ -484,35 +444,4 @@ void sdsge_lu_solve(const f64 *SDSGE_RESTRICT LU, const i64 *SDSGE_RESTRICT piv,
       X[i * m + j] *= inv_Uii;
     }
   }
-}
-
-i64 sdsge_solve(const f64 *SDSGE_RESTRICT A, const f64 *SDSGE_RESTRICT B,
-                const i64 n, const i64 m, f64 *SDSGE_RESTRICT X) {
-  f64_lu lu = sdsge_lu_factor(A, n);
-  if (lu.err != SDSGE_LU_SUCCESS) {
-    i64 err = lu.err;
-    sdsge_lu_free(&lu);
-    return err;
-  }
-  sdsge_lu_solve(lu.lu, lu.piv, B, X, n, m);
-  sdsge_lu_free(&lu);
-  return SDSGE_LU_SUCCESS;
-}
-
-i64 sdsge_inv(const f64 *SDSGE_RESTRICT A, const i64 n,
-              f64 *SDSGE_RESTRICT Ainv) {
-  f64 *I = (f64 *)malloc(sizeof(f64) * n * n);
-  if (!I) {
-    return SDSGE_LU_ALLOC_FAIL;
-  }
-
-  for (i64 i = 0; i < n; ++i) {
-    for (i64 j = 0; j < n; ++j) {
-      I[i * n + j] = (i == j) ? 1.0 : 0.0;
-    }
-  }
-
-  i64 err = sdsge_solve(A, I, n, n, Ainv);
-  free(I);
-  return err;
 }

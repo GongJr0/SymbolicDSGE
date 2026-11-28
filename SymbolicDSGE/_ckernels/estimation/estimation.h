@@ -73,10 +73,13 @@ typedef struct {
 static inline int sdsge_spec_has_block(const sdsge_cov_spec *sp) {
   return !sp->is_constant && sp->corr_from_block;
 }
+void sdsge_lk_max_dims(const sdsge_cov_spec *qspec, const sdsge_cov_spec *rspec,
+                       i64 *lmax, i64 *kmax);
 
 /* theta -> params resolution tables. base_params and every slot index
- * (scalars' param_slot, cov std_slots/pair_slot) are in calib_params order, so
- * params doubles as the residual/measurement argument vector: no gather. */
+ * (scalars' param_slot, cov std_slots/pair_slot) are in calib_params order,
+ * so params doubles as the residual/measurement argument vector: no gather.
+ */
 typedef struct {
   const f64 *base_params; /* n_par */
   const i64 *param_slot;  /* n_theta */
@@ -93,6 +96,8 @@ typedef struct {
   f64 *params;   /* n_par; calib_params order, residual/meas argument vector */
   f64 *arena;
   i64 *iarena;
+  f64 *work; /* Optimizer and SE/vcov workspace */
+  i64 *iwork;
   i64 bk_violations;
 } sdsge_obj_common;
 
@@ -155,7 +160,6 @@ f64 sdsge_logprior_at(const sdsge_obj_common *SDSGE_RESTRICT base,
 
 /* Status codes for the covariance, reported separately from the optimizer's. */
 #define SDSGE_ESTIMATION_OK 0
-#define SDSGE_ESTIMATION_EALLOC (-1800)
 #define SDSGE_ESTIMATION_EHESSIAN (-1801)
 #define SDSGE_ESTIMATION_ENOTSPD (-1802)
 
@@ -190,7 +194,10 @@ typedef struct {
 /* Minimize the configured likelihood or negative log posterior in place.
  * `ctx` must point to the filter-mode context selected by opt->filter_mode;
  * theta has length n_theta. `has_priors` selects the posterior objective.
- * The caller owns theta, options, and all bound buffers for the call. */
+ * The caller owns theta, options, and all bound buffers for the call.
+ * sdsge_run_estimation_work_size produces the sizers for base.{work, iwork}. */
+arena_size sdsge_run_estimation_work_size(const sdsge_estimation_options *opt,
+                                          i64 n_theta, i64 L, i64 K);
 void sdsge_run_estimation(void *ctx, i64 n_theta, f64 *SDSGE_RESTRICT theta,
                           const sdsge_estimation_options *opt,
                           sdsge_estimation_result *out);

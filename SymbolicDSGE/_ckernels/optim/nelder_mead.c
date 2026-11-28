@@ -1,7 +1,7 @@
 #include "nelder_mead.h"
+#include "../_common/sdsge_common.h"
 
 #include <math.h>   /* fabs, isfinite, INFINITY, NAN */
-#include <stdlib.h> /* malloc, free */
 #include <string.h> /* memcpy */
 
 /* scipy `_status_message` equivalents (scipy/optimize/_optimize.py). */
@@ -59,10 +59,14 @@ static void nm_fill_error(sdsge_optim_result *out, i64 status,
   }
 }
 
+arena_size sdsge_neldermead_arena_size(i64 n) {
+  return make_sizer(n * n + 8 * n + 1, 0);
+}
+
 i64 sdsge_neldermead(sdsge_objective_fn obj, void *obj_ctx, i64 n,
                      f64 *SDSGE_RESTRICT x, const f64 *lo, const f64 *hi,
                      const i64 *nbd, const sdsge_optim_options *opt,
-                     sdsge_optim_result *out) {
+                     f64 *SDSGE_RESTRICT work, sdsge_optim_result *out) {
   if (n < 1) {
     nm_fill_error(out, SDSGE_OPTIM_EINVAL, "ERROR: n must be >= 1");
     return SDSGE_OPTIM_EINVAL;
@@ -82,19 +86,9 @@ i64 sdsge_neldermead(sdsge_objective_fn obj, void *obj_ctx, i64 n,
   const f64 rho = 1.0, chi = 2.0, psi = 0.5, sigma = 0.5;
   const f64 nonzdelt = 0.05, zdelt = 0.00025;
 
-  /* One workspace allocation; the eval loop allocates nothing. Layout:
-   * sim[(N+1)*N] | fsim[N+1] | xbar[N] | xr[N] | xt[N] | lb[N] | ub[N] |
-   * tmprow[N]. */
   const size_t nd = (size_t)N;
-  const size_t total = (size_t)np1 * nd + (size_t)np1 + nd * 6;
-  f64 *buf = (f64 *)malloc(total * sizeof(f64));
-  if (!buf) {
-    nm_fill_error(out, SDSGE_OPTIM_EALLOC,
-                  "ERROR: workspace allocation failed");
-    return SDSGE_OPTIM_EALLOC;
-  }
 
-  f64 *sim = buf;
+  f64 *sim = work;
   f64 *fsim = sim + (size_t)np1 * nd;
   f64 *xbar = fsim + (size_t)np1;
   f64 *xr = xbar + nd;
@@ -328,6 +322,5 @@ i64 sdsge_neldermead(sdsge_objective_fn obj, void *obj_ctx, i64 n,
     out->message = msg;
   }
 
-  free(buf);
   return warnflag;
 }

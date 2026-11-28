@@ -244,6 +244,8 @@ cdef extern from "estimation.h":
         double *params
         double *arena
         int64_t *iarena
+        double *work
+        int64_t *iwork
         int64_t bk_violations
 
     ctypedef struct sdsge_linear_ctx:
@@ -317,9 +319,14 @@ cdef extern from "estimation.h":
     double sdsge_post_extended(const double *x, void *ctx) noexcept nogil
     double sdsge_post_unscented(const double *x, void *ctx) noexcept nogil
 
+    arena_size sdsge_run_estimation_work_size(const sdsge_estimation_options *opt,
+                                              int64_t n_theta, int64_t L, int64_t K
+                                              ) noexcept nogil
     void sdsge_run_estimation(void *ctx, int64_t n_theta, double *theta,
                               const sdsge_estimation_options *opt,
                               sdsge_estimation_result *out) noexcept nogil
+    void sdsge_lk_max_dims(const sdsge_cov_spec *qspec, const sdsge_cov_spec *rspec,
+                           int64_t *lmax, int64_t *kmax) noexcept nogil
 
 cdef extern from "mcmc.h":
     ctypedef struct sdsge_mcmc_options:

@@ -241,7 +241,7 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
   f64 *work = amat + n * n; /* n by nspred: C@gx, then the static RHS */
   f64 *ghu = work + n * nspred;
   f64 *stage = ghu + n * ne;
-  i64 *piv = iarena; /* shared by the z11 pair and the rule's s11 */
+  i64 *piv = iarena; /* shared by the z11 pair, the rule's s11, and amat */
 
   memcpy(a_rot, out->a_real, n * n * sizeof(f64));
   memcpy(b_rot, out->b_real, n * n * sizeof(f64));
@@ -358,9 +358,10 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
         amat[i * nstatic + j] = -b_rot[i * n + ord[j]];
       }
     }
-    if (sdsge_solve(amat, work, nstatic, nspred, ghx) != SDSGE_LU_SUCCESS) {
+    if (sdsge_lu_factor_inplace(amat, piv, nstatic) != SDSGE_LU_SUCCESS) {
       return SDSGE_KLEIN_SOLVE_STATIC_SINGULAR;
     }
+    sdsge_lu_solve(amat, piv, work, ghx, nstatic, nspred);
   }
 
   /* ghu = A_ \ d_rot, with A_ = [B_static | C@gx + B_pred | B_fyd]. Dynare's
@@ -387,10 +388,11 @@ i64 sdsge_klein_from_pencil(const klein_spec *spec, sdsge_solve1 *out,
           -b_rot[i * n + ord[nstatic + nspred + j]];
     }
   }
-  if (sdsge_solve(amat, d_rot, n, ne, ghu) != SDSGE_LU_SUCCESS) {
+  if (sdsge_lu_factor_inplace(amat, piv, n) != SDSGE_LU_SUCCESS) {
     out->stab = SDSGE_KLEIN_STAB_UNSET;
     return SDSGE_KLEIN_SOLVE_SHOCK_SINGULAR;
   }
+  sdsge_lu_solve(amat, piv, d_rot, ghu, n, ne);
 
   /* Scatter decision-rule order back to the canonical layout. Row i is variable
    * ord[i]; column j is state ord[nstatic + j], and the states lead the

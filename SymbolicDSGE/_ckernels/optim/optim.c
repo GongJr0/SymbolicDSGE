@@ -1,9 +1,9 @@
 #include "optim.h"
+#include "../_common/sdsge_common.h"
 #include "lbfgsb.h"
 
 #include <float.h>
 #include <math.h>
-#include <stdlib.h>
 #include <string.h>
 
 /* L-BFGS-B task codes (mirror enum Status in lbfgsb.c). */
@@ -60,9 +60,13 @@ static void sdsge_fd_grad(sdsge_objective_fn obj, void *ctx, i64 n, f64 *x,
   }
 }
 
+arena_size sdsge_lbfgsb_arena_size(i64 n, i64 m) {
+  return make_sizer(2 * m * n + 8 * n + 11 * m * m + 8 * m, 4 * n);
+}
 i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, i64 n,
                  f64 *SDSGE_RESTRICT x, const f64 *lo, const f64 *hi,
                  const i64 *nbd_in, const sdsge_optim_options *opt,
+                 f64 *SDSGE_RESTRICT work, i64 *SDSGE_RESTRICT iwork,
                  sdsge_optim_result *out) {
   const i64 N = n;
   const i64 m = opt->m;
@@ -70,32 +74,14 @@ i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, i64 n,
   const f64 factr = opt->factr;
   const f64 pgtol = opt->pgtol;
 
-  /* Workspace (sizes per scipy's _lbfgsb_py wrapper). One allocation, freed on
-   * return; the reverse-communication loop itself allocates nothing. */
   const size_t wa_len = (size_t)(2 * m * N + 5 * N + 11 * m * m + 8 * m);
 
-  f64 *arena = (f64 *)malloc((wa_len + 3 * N) * sizeof(f64));
-  i64 *iarena = (i64 *)malloc((4 * N) * sizeof(i64));
-  if (!arena || !iarena) {
-    free(arena);
-    free(iarena);
-    if (out) {
-      out->status = SDSGE_OPTIM_EALLOC;
-      out->success = 0;
-      out->message = "ERROR: workspace allocation failed";
-      out->nfev = 0;
-      out->nit = 0;
-      out->fun = NAN;
-    }
-    return SDSGE_OPTIM_EALLOC;
-  }
-
-  f64 *wa = arena;
+  f64 *wa = work;
   f64 *g = wa + wa_len;
   f64 *l = g + N;
   f64 *u = l + N;
 
-  i64 *iwa = iarena;
+  i64 *iwa = iwork;
   i64 *nbd = iwa + 3 * N;
 
   for (i64 i = 0; i < N; ++i) {
@@ -147,7 +133,5 @@ i64 sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, i64 n,
     out->message = sdsge_lbfgsb_message(status);
   }
 
-  free(arena);
-  free(iarena);
   return status;
 }
