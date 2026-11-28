@@ -26,6 +26,20 @@
 #define SDSGE_SOLVE_INFEASIBLE                                                 \
   2 /* the draw has no solution to filter; sentinel, not a BK count */
 
+void sdsge_lk_max_dims(const sdsge_cov_spec *qspec, const sdsge_cov_spec *rspec,
+                       i64 *lmax, i64 *kmax) {
+  *lmax = 0;
+  *kmax = 0;
+  const sdsge_cov_spec *specs[2] = {qspec, rspec};
+  for (int sp = 0; sp < 2; ++sp) {
+    if (!sdsge_spec_has_block(specs[sp])) {
+      continue;
+    }
+    *lmax = max_i64(*lmax, specs[sp]->block_theta_len);
+    *kmax = max_i64(*kmax, specs[sp]->K);
+  }
+}
+
 /* theta -> params fill. params is in calib_params order and is the residual
  * argument vector directly (no gather). Non-estimated slots never move across
  * evals, so they are seeded once here; the per-eval fill touches only the
@@ -535,8 +549,12 @@ i64 sdsge_estimation_cov_factor(sdsge_objective_fn logpost, void *obj_ctx,
 
 /* vcov = L L^T for the factor at `theta`. The buffer is filled with NaN first,
  * so every failure below is a report rather than a half-written answer. */
+static arena_size sdsge_fill_cov_arena_size(i64 d) {
+  return make_sizer(3 * d * d + 4 * d, 0);
+}
 static void sdsge_fill_cov(void *ctx, i64 d, const f64 *SDSGE_RESTRICT theta,
                            const sdsge_estimation_options *opt,
+                           f64 *SDSGE_RESTRICT work,
                            sdsge_estimation_result *out) {
   const size_t nm = (size_t)d * (size_t)d;
   for (size_t i = 0; i < nm; ++i) {
@@ -547,43 +565,37 @@ static void sdsge_fill_cov(void *ctx, i64 d, const f64 *SDSGE_RESTRICT theta,
     return;
   }
 
-  /* The factor, then
-   * sdsge_estimation_cov_factor's documented
-   * scratch. */
-  f64 *scratch = (f64 *)malloc((3 * nm + 4 * (size_t)d) * sizeof(f64));
-  if (scratch == NULL) {
-    out->cov_status = SDSGE_ESTIMATION_EALLOC;
-    return;
-  }
-  f64 *factor = scratch;
-  f64 *work = scratch + nm;
+  f64 *factor = work;
+  f64 *scratch = factor + nm;
 
   const i64 status = sdsge_estimation_cov_factor(
       pos_table[opt->has_priors][opt->filter_mode], ctx, theta, d,
-      opt->cov_fd_step_scale, opt->cov_fd_absolute_floor, factor, work);
+      opt->cov_fd_step_scale, opt->cov_fd_absolute_floor, factor, scratch);
   if (status != SDSGE_ESTIMATION_OK) {
     out->cov_status = status;
-    free(scratch);
     return;
   }
 
   sdsge_matmul_abt(factor, factor, out->vcov, d, d, d);
   out->cov_status = SDSGE_ESTIMATION_OK;
-  free(scratch);
 }
 
 /* Standard errors in the caller's parameter space, from the theta-space
  * covariance. The jacobian of theta -> parameters is block diagonal: a scalar
  * depends on its own theta entry alone and a CPC block on its own run, so no
- * d*d jacobian is ever formed and V's cross terms never reach a diagonal entry.
- * A scalar's row is |dx/dz|, which the transform's own log-jacobian already
- * carries, exact and free; only a block is differenced, over the entries
- * kernel. Filled with NaN first, and a covariance that failed is NaN already,
- * so both it and a negative variance report themselves in place with no status
- * to consult. */
+ * d*d jacobian is ever formed and V's cross terms never reach a diagonal
+ * entry. A scalar's row is |dx/dz|, which the transform's own log-jacobian
+ * already carries, exact and free; only a block is differenced, over the
+ * entries kernel. Filled with NaN first, and a covariance that failed is NaN
+ * already, so both it and a negative variance report themselves in place with
+ * no status to consult. */
+static arena_size sdsge_fill_se_arena_size(i64 L, i64 K) {
+  return make_sizer(2 * L * L + 3 * L + K * K, 0);
+}
 static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
                           const f64 *SDSGE_RESTRICT theta,
                           const f64 *SDSGE_RESTRICT vcov,
+                          f64 *SDSGE_RESTRICT work,
                           f64 *SDSGE_RESTRICT out_se) {
   for (i64 i = 0; i < d; ++i) {
     out_se[i] = NAN;
@@ -608,27 +620,13 @@ static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
     }
   }
 
-  const sdsge_cov_spec *specs[2] = {&b->q.spec, &b->r.spec};
-  i64 lmax = 0;
-  i64 kmax = 0;
-  for (int sp = 0; sp < 2; ++sp) {
-    if (!sdsge_spec_has_block(specs[sp])) {
-      continue;
-    }
-    lmax = max_i64(lmax, specs[sp]->block_theta_len);
-    kmax = max_i64(kmax, specs[sp]->K);
-  }
+  i64 lmax, kmax;
+  sdsge_lk_max_dims(&b->q.spec, &b->r.spec, &lmax, &kmax);
   if (lmax == 0) {
     return;
   }
 
-  const size_t need =
-      (size_t)(2 * lmax * lmax + 3 * lmax + kmax * kmax) * sizeof(f64);
-  f64 *scratch = (f64 *)malloc(need);
-  if (scratch == NULL) {
-    return;
-  }
-  f64 *jac = scratch;            /* L*L: d(corr entries)/dz */
+  f64 *jac = work;               /* L*L: d(corr entries)/dz */
   f64 *jv = jac + lmax * lmax;   /* L*L: jac * V_block */
   f64 *probe = jv + lmax * lmax; /* L: the perturbed z */
   f64 *plus = probe + lmax;      /* L */
@@ -637,10 +635,10 @@ static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
                                     kernel's factor */
 
   /* Central difference of a closed-form algebraic map, so the step is the
-   * first-derivative optimum and not opt->cov_fd_step_scale, which is tuned for
-   * a second derivative of the filter. */
+   * first-derivative optimum and not opt->cov_fd_step_scale, which is tuned
+   * for a second derivative of the filter. */
   const f64 step = cbrt(DBL_EPSILON);
-
+  const sdsge_cov_spec *specs[2] = {&b->q.spec, &b->r.spec};
   for (int sp = 0; sp < 2; ++sp) {
     const sdsge_cov_spec *spec = specs[sp];
     if (!sdsge_spec_has_block(spec)) {
@@ -687,23 +685,37 @@ static void sdsge_fill_se(const sdsge_obj_common *SDSGE_RESTRICT b, i64 d,
       }
     }
   }
-
-  free(scratch);
 }
 
+arena_size sdsge_run_estimation_work_size(const sdsge_estimation_options *opt,
+                                          i64 n_theta, i64 L, i64 K) {
+  arena_size cov = make_sizer(0, 0), se = make_sizer(0, 0),
+             optim = make_sizer(0, 0);
+  if (opt->compute_cov) {
+    cov = sdsge_fill_cov_arena_size(n_theta);
+    se = sdsge_fill_se_arena_size(L, K);
+  }
+  if (opt->method == ESTIMATION_LBFGSB) {
+    optim = sdsge_lbfgsb_arena_size(n_theta, opt->optim.m);
+  } else if (opt->method == ESTIMATION_NELDER_MEAD) {
+    optim = sdsge_neldermead_arena_size(n_theta);
+  }
+  return sdsge_max_arena(sdsge_max_arena(cov, se), optim);
+}
 void sdsge_run_estimation(void *ctx, i64 n_theta, f64 *SDSGE_RESTRICT theta,
                           const sdsge_estimation_options *opt,
                           sdsge_estimation_result *out) {
 
+  sdsge_obj_common *b = (sdsge_obj_common *)ctx;
   const sdsge_objective_fn obj = obj_table[opt->has_priors][opt->filter_mode];
   switch (opt->method) {
   case ESTIMATION_LBFGSB:
     sdsge_lbfgsb(obj, ctx, n_theta, theta, opt->lo, opt->hi, opt->nbd,
-                 &opt->optim, &out->base);
+                 &opt->optim, b->work, b->iwork, &out->base);
     break;
   case ESTIMATION_NELDER_MEAD:
     sdsge_neldermead(obj, ctx, n_theta, theta, opt->lo, opt->hi, opt->nbd,
-                     &opt->optim, &out->base);
+                     &opt->optim, b->work, &out->base);
     break;
   default:
     out->base.status = SDSGE_OPTIM_EINVAL;
@@ -716,14 +728,13 @@ void sdsge_run_estimation(void *ctx, i64 n_theta, f64 *SDSGE_RESTRICT theta,
 
   out->cov_status = SDSGE_ESTIMATION_OK;
   if (opt->compute_cov && out->vcov != NULL) {
-    sdsge_fill_cov(ctx, n_theta, theta, opt, out);
+    sdsge_fill_cov(ctx, n_theta, theta, opt, b->work, out);
     if (out->se != NULL) {
-      sdsge_fill_se((const sdsge_obj_common *)ctx, n_theta, theta, out->vcov,
-                    out->se);
+      sdsge_fill_se(b, n_theta, theta, out->vcov, b->work, out->se);
     }
   }
 
   /* Last, not before the covariance: its probes scatter perturbed params, and
    * callers read the ctx expecting it to sit at the returned theta. */
-  sdsge_fill_at_theta((sdsge_obj_common *)ctx, theta);
+  sdsge_fill_at_theta(b, theta);
 }

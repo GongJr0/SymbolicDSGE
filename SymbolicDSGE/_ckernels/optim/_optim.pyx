@@ -13,6 +13,10 @@ from libc.stdint cimport int64_t
 
 import numpy as np
 
+cdef extern from "../_common/sdsge_common.h":
+    ctypedef struct arena_size:
+        int64_t n_float
+        int64_t n_int
 
 cdef extern from "optim.h":
     ctypedef double (*sdsge_objective_fn)(const double *x, void *ctx) noexcept nogil
@@ -36,17 +40,20 @@ cdef extern from "optim.h":
         int success
         const char *message
 
+    arena_size sdsge_lbfgsb_arena_size(int64_t n, int64_t m) nogil
     int64_t sdsge_lbfgsb(sdsge_objective_fn obj, void *obj_ctx, int64_t n,
                          double *x, const double *lo, const double *hi,
                          const int64_t *nbd, const sdsge_optim_options *opt,
+                         double *work, int64_t *iwork,
                          sdsge_optim_result *out) nogil
 
 
 cdef extern from "nelder_mead.h":
+    arena_size sdsge_neldermead_arena_size(int64_t n) nogil
     int64_t sdsge_neldermead(sdsge_objective_fn obj, void *obj_ctx, int64_t n,
                              double *x, const double *lo, const double *hi,
                              const int64_t *nbd,
-                             const sdsge_optim_options *opt,
+                             const sdsge_optim_options *opt, double *work,
                              sdsge_optim_result *out) nogil
 
 
@@ -159,6 +166,9 @@ def run_lbfgsb(
                 hi[i] = ub
             nbd[i] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
 
+    cdef arena_size wsz = sdsge_lbfgsb_arena_size(n, m)
+    cdef double[::1] work = np.empty(wsz.n_float, dtype=np.float64)
+    cdef int64_t[::1] iwork = np.empty(wsz.n_int, dtype=np.int64)
     cdef sdsge_objective_fn obj = _objective(objective)
 
     cdef sdsge_optim_options opt
@@ -175,7 +185,7 @@ def run_lbfgsb(
 
     with nogil:
         sdsge_lbfgsb(obj, <void *>&ctx, n, &xv[0], &lo[0], &hi[0], nbd_ptr,
-                     &opt, &res)
+                     &opt, &work[0], &iwork[0], &res)
 
     return {
         "x": x,
@@ -232,6 +242,9 @@ def run_neldermead(
                 hi[i] = ub
             nbd[i] = (2 if has_hi else 1) if has_lo else (3 if has_hi else 0)
 
+    cdef arena_size wsz = sdsge_neldermead_arena_size(n)
+    cdef double[::1] work = np.empty(wsz.n_float, dtype=np.float64)
+
     cdef sdsge_objective_fn obj = _objective(objective)
 
     cdef sdsge_optim_options opt
@@ -245,7 +258,7 @@ def run_neldermead(
 
     with nogil:
         sdsge_neldermead(obj, <void *>&ctx, n, &xv[0], &lo[0], &hi[0], nbd_ptr,
-                         &opt, &res)
+                         &opt, &work[0], &res)
 
     return {
         "x": x,

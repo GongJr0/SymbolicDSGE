@@ -16,13 +16,12 @@
 /* Nelder-Mead on a box-bounded objective. `x` is start -> optimum (length n).
  * Bounds follow the L-BFGS-B ABI: lo[i]/hi[i] gated by nbd[i] in
  * {0 none, 1 lower, 2 both, 3 upper}; nbd == NULL means fully unbounded (no
- * clipping at all, matching scipy's bounds=None path). The driver makes one
- * workspace allocation up front (never in the eval loop) and frees it on
- * return; it never longjmps. Returns the exit status (also in out->status).
- * SDSGE_OPTIM_EALLOC on a failed allocation, SDSGE_OPTIM_EINVAL on n < 1. */
+ * clipping at all, matching scipy's bounds=None path). Returns the exit status
+ * (also in out->status). */
+arena_size sdsge_neldermead_arena_size(i64 n);
 i64 sdsge_neldermead(sdsge_objective_fn obj, void *obj_ctx, i64 n,
                      f64 *SDSGE_RESTRICT x, const f64 *lo, const f64 *hi,
                      const i64 *nbd, const sdsge_optim_options *opt,
-                     sdsge_optim_result *out);
+                     f64 *SDSGE_RESTRICT work, sdsge_optim_result *out);
 
 #endif /* SDSGE_OPTIM_NELDER_MEAD_H */

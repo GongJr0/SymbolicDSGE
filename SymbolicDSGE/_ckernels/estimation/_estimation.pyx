@@ -183,8 +183,21 @@ cdef void _alloc_base(sdsge_obj_common *b, object sol_dto, int64_t n_obs,
     b.arena = &ar[0]
     b.iarena = &ia[0]
 
+    # set in _alloc_work
+    b.work = NULL
+    b.iwork = NULL
+
     b.bk_violations = 0
 
+cdef void _alloc_work(sdsge_obj_common *b, const sdsge_estimation_options *opt,
+                      int64_t d, list hold) except *:
+    cdef int64_t lmax, kmax
+    sdsge_lk_max_dims(&b.q.spec, &b.r.spec, &lmax, &kmax)
+    cdef arena_size wsz = sdsge_run_estimation_work_size(opt, d, lmax, kmax)
+    cdef double[::1] w = _held(np.empty(wsz.n_float, np.float64), hold)
+    cdef int64_t[::1] iw = _held(np.empty(wsz.n_int, np.int64), hold)
+    b.work = &w[0]
+    b.iwork = &iw[0]
 
 cdef void _alloc_solve1(sdsge_solve1 *o, object sol_dto, int64_t nd,
                         list hold) except *:
@@ -548,7 +561,6 @@ cdef void _fill_map_options(sdsge_estimation_options *est, list hold,
     est.cov_fd_step_scale = 1.0
     est.cov_fd_absolute_floor = 0.1
 
-
 # --- objective evaluation ----------------------------------------------------
 #
 # `loglik` and `logpost` share `_do_eval` and decide
@@ -647,6 +659,8 @@ def run_estimation(
     est.compute_cov = compute_cov
     est.cov_fd_step_scale = cov_fd_step_scale
     est.cov_fd_absolute_floor = cov_fd_absolute_floor
+
+    _alloc_work(b, &est, d, hold)
 
     vcov = np.empty((d, d), dtype=np.float64)
     se = np.empty(d, dtype=np.float64)
@@ -841,6 +855,7 @@ def run_mcmc(
         # The MAP leg the chain may start from, driven through the same options
         # struct a point estimate uses.
         _fill_map_options(&map_opt, hold, d, filter_mode, map_options)
+        _alloc_work(<sdsge_obj_common*>ctxs, &map_opt, d, hold)
 
         mopt.n_draws = n_draws
         mopt.burn_in = burn_in
