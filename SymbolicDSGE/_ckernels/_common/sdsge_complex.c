@@ -25,7 +25,7 @@ void c128_matmul(const c128 *SDSGE_RESTRICT A, const c128 *SDSGE_RESTRICT B,
 i64 c128_lu_factor_inplace(c128 *SDSGE_RESTRICT A, i64 *SDSGE_RESTRICT pivot,
                            const i64 n) {
   if (!A || !pivot || n <= 0) {
-    return SDSGE_LU_ALLOC_FAIL;
+    return SDSGE_LU_BADARG;
   }
 
   for (i64 k = 0; k < n; ++k) {
